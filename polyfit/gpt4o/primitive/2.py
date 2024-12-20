@@ -1,0 +1,132 @@
+import numpy as np
+import sympy as sp
+import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit
+from scipy.signal import find_peaks
+
+
+# 1. Polynomial fitting function
+def fit_polynomial(timestamps, values, degree=3):
+    """Fits a polynomial of the specified degree to the dataset."""
+    coeffs = np.polyfit(timestamps, values, degree)
+    poly = np.poly1d(coeffs)
+    return poly, coeffs
+
+
+# 2. Feature detection: roots and critical points
+def extract_features(poly):
+    """
+    Extracts roots and critical points (maxima/minima) of the polynomial.
+    Returns symbolic expressions for flexibility.
+    """
+    x = sp.Symbol('x')
+    poly_expr = sp.Poly.from_list(poly.coefficients, x)
+    
+    # Roots
+    roots = sp.solvers.solve(poly_expr, x)
+    
+    # Critical points (first derivative = 0)
+    deriv = sp.diff(poly_expr.as_expr(), x)
+    critical_points = sp.solvers.solve(deriv, x)
+    
+    return roots, critical_points
+
+
+# 3. Local polynomial fitting
+def local_polynomial_fitting(timestamps, values, window_size=10, degree=3):
+    """
+    Applies polynomial fitting locally within a sliding window of the dataset.
+    """
+    num_points = len(timestamps)
+    local_models = []
+    
+    for i in range(0, num_points, window_size):
+        # Select the current window
+        window_t = timestamps[i:i + window_size]
+        window_v = values[i:i + window_size]
+        
+        # Fit polynomial to the window
+        if len(window_t) >= degree + 1:  # Ensure sufficient data points
+            poly, coeffs = fit_polynomial(window_t, window_v, degree)
+            local_models.append((poly, coeffs, window_t))
+    
+    return local_models
+
+
+# 4. Visualization for local fitting
+def plot_local_polynomials(timestamps, values, local_models):
+    """
+    Plots the original data alongside locally fitted polynomials.
+    """
+    plt.scatter(timestamps, values, label="Original Data", alpha=0.6)
+    
+    for poly, coeffs, window_t in local_models:
+        t_fit = np.linspace(min(window_t), max(window_t), 100)
+        plt.plot(t_fit, poly(t_fit), label=f"Local Fit (Window {int(min(window_t))}-{int(max(window_t))})")
+    
+    plt.legend()
+    plt.title("Local Polynomial Fits")
+    plt.xlabel("Timestamps")
+    plt.ylabel("Values")
+    plt.show()
+
+
+# 5. Outlier detection using residuals
+def detect_outliers(timestamps, values, poly, threshold=2.5):
+    """
+    Detects outliers based on residuals from the fitted polynomial.
+    """
+    residuals = np.abs(values - poly(timestamps))
+    mean_residual = np.mean(residuals)
+    std_residual = np.std(residuals)
+    
+    outliers = [
+        (t, v, r) for t, v, r in zip(timestamps, values, residuals)
+        if r > mean_residual + threshold * std_residual
+    ]
+    return outliers
+
+
+# 6. Main workflow
+if __name__ == "__main__":
+    # Example dataset
+    np.random.seed(42)
+    timestamps = np.linspace(0, 10, 100)
+    values = 3 * timestamps**2 - 4 * timestamps + 5 + np.random.normal(0, 10, size=100)
+
+    # Global polynomial fitting
+    degree = 2
+    poly, coeffs = fit_polynomial(timestamps, values, degree)
+    roots, critical_points = extract_features(poly)
+
+    # Local polynomial fitting
+    window_size = 20
+    local_models = local_polynomial_fitting(timestamps, values, window_size=window_size, degree=degree)
+
+    # Outlier detection
+    outliers = detect_outliers(timestamps, values, poly)
+
+    # Visualization
+    plt.figure(figsize=(12, 6))
+    plt.scatter(timestamps, values, label="Original Data", alpha=0.6)
+    plt.plot(timestamps, poly(timestamps), color="red", label="Global Fit")
+    plt.title("Global Polynomial Fit")
+    plt.xlabel("Timestamps")
+    plt.ylabel("Values")
+    plt.legend()
+    plt.show()
+
+    # Plot local polynomial fits
+    plot_local_polynomials(timestamps, values, local_models)
+
+    # Display features and outliers
+    print("Polynomial Coefficients (Global Fit):", coeffs)
+    print("Roots (Global Fit):", roots)
+    print("Critical Points (Global Fit):", critical_points)
+    
+    if outliers:
+        print("\nDetected Outliers:")
+        for t, v, r in outliers:
+            print(f"Timestamp: {t:.2f}, Value: {v:.2f}, Residual: {r:.2f}")
+    else:
+        print("\nNo significant outliers detected.")
