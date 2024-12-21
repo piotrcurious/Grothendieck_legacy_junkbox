@@ -1,0 +1,175 @@
+import numpy as np
+from typing import List, Tuple, Optional, Union
+from dataclasses import dataclass
+from abc import ABC, abstractmethod
+
+# Base Structures for F2 Polynomial Representation
+@dataclass
+class F2Polynomial:
+    """Represents a polynomial over F2 (coefficients in {0,1})"""
+    coefficients: np.ndarray  # Binary coefficients
+    
+    def __post_init__(self):
+        self.coefficients = self.coefficients.astype(bool)
+    
+    def __add__(self, other: 'F2Polynomial') -> 'F2Polynomial':
+        # Addition in F2 is XOR
+        max_len = max(len(self.coefficients), len(other.coefficients))
+        padded_self = np.pad(self.coefficients, (0, max_len - len(self.coefficients)))
+        padded_other = np.pad(other.coefficients, (0, max_len - len(other.coefficients)))
+        return F2Polynomial(padded_self ^ padded_other)
+    
+    def __mul__(self, other: 'F2Polynomial') -> 'F2Polynomial':
+        # Multiplication in F2[x]
+        result_degree = len(self.coefficients) + len(other.coefficients) - 1
+        result = np.zeros(result_degree, dtype=bool)
+        for i, ci in enumerate(self.coefficients):
+            for j, cj in enumerate(other.coefficients):
+                result[i + j] ^= (ci and cj)
+        return F2Polynomial(result)
+
+class SchemeStructure(ABC):
+    """Abstract base class for scheme structures over F2"""
+    @abstractmethod
+    def to_polynomial(self) -> F2Polynomial:
+        """Convert value to F2 polynomial representation"""
+        pass
+    
+    @abstractmethod
+    def from_polynomial(self, poly: F2Polynomial) -> Any:
+        """Convert F2 polynomial back to native type"""
+        pass
+
+class IntegerScheme(SchemeStructure):
+    """Represents integers as schemes over F2"""
+    def __init__(self, value: int, bits: int = 32):
+        self.value = value
+        self.bits = bits
+    
+    def to_polynomial(self) -> F2Polynomial:
+        binary = format(abs(self.value), f'0{self.bits}b')
+        coeffs = np.array([int(b) for b in reversed(binary)], dtype=bool)
+        return F2Polynomial(coeffs)
+    
+    def from_polynomial(self, poly: F2Polynomial) -> int:
+        binary = ''.join(['1' if c else '0' for c in reversed(poly.coefficients)])
+        return int(binary, 2)
+
+class FloatScheme(SchemeStructure):
+    """Represents floating point numbers as schemes over F2"""
+    def __init__(self, value: float):
+        self.value = value
+    
+    def to_polynomial(self) -> F2Polynomial:
+        # Convert IEEE 754 double to binary
+        binary = ''.join(format(b, '08b') for b in struct.pack('!d', self.value))
+        coeffs = np.array([int(b) for b in reversed(binary)], dtype=bool)
+        return F2Polynomial(coeffs)
+    
+    def from_polynomial(self, poly: F2Polynomial) -> float:
+        binary = ''.join(['1' if c else '0' for c in reversed(poly.coefficients)])
+        return struct.unpack('!d', int(binary, 2).to_bytes(8, byteorder='big'))[0]
+
+class PolynomialFeatureExtractor:
+    """Extracts polynomial features while preserving scheme structure"""
+    def __init__(self, degree: int = 2):
+        self.degree = degree
+        self.field_automorphisms: List[Callable] = []
+    
+    def add_field_automorphism(self, auto_fn: Callable):
+        """Add a field automorphism to apply during feature extraction"""
+        self.field_automorphisms.append(auto_fn)
+    
+    def extract_features(self, x: np.ndarray) -> np.ndarray:
+        """Extract polynomial features preserving field structure"""
+        n_samples, n_features = x.shape
+        scheme_polynomials = []
+        
+        # Convert to scheme representation
+        for j in range(n_features):
+            if isinstance(x[0,j], int):
+                schemes = [IntegerScheme(val) for val in x[:,j]]
+            else:
+                schemes = [FloatScheme(val) for val in x[:,j]]
+            polys = [s.to_polynomial() for s in schemes]
+            scheme_polynomials.append(polys)
+        
+        # Generate polynomial features
+        features = []
+        for d in range(1, self.degree + 1):
+            for combo in combinations_with_replacement(range(n_features), d):
+                feature_polys = []
+                for i in range(n_samples):
+                    # Multiply polynomials for each combination
+                    poly = scheme_polynomials[combo[0]][i]
+                    for j in combo[1:]:
+                        poly = poly * scheme_polynomials[j][i]
+                    
+                    # Apply field automorphisms
+                    for auto_fn in self.field_automorphisms:
+                        poly = auto_fn(poly)
+                        
+                    feature_polys.append(poly)
+                
+                # Convert back to numeric values
+                if isinstance(x[0,combo[0]], int):
+                    feature_values = [IntegerScheme(0).from_polynomial(p) for p in feature_polys]
+                else:
+                    feature_values = [FloatScheme(0.0).from_polynomial(p) for p in feature_polys]
+                features.append(feature_values)
+        
+        return np.array(features).T
+
+class TimeSeriesSchemeModel:
+    """Handles time series data while preserving scheme structure"""
+    def __init__(self, feature_extractor: PolynomialFeatureExtractor):
+        self.feature_extractor = feature_extractor
+        self.scaler = None
+    
+    def fit(self, timestamps: np.ndarray, values: np.ndarray):
+        """Fit the model preserving scheme morphisms"""
+        # Convert timestamps to relative time deltas
+        time_deltas = np.diff(timestamps)
+        
+        # Create feature matrix preserving scheme structure
+        X = np.column_stack([time_deltas, values[:-1]])
+        y = values[1:]
+        
+        # Extract polynomial features
+        X_poly = self.feature_extractor.extract_features(X)
+        
+        # Fit using scheme-preserving operations
+        self.scaler = StandardScaler()
+        X_scaled = self.scaler.fit_transform(X_poly)
+        self.model = LinearRegression()
+        self.model.fit(X_scaled, y)
+    
+    def predict(self, timestamps: np.ndarray, values: np.ndarray) -> np.ndarray:
+        """Generate predictions preserving scheme structure"""
+        time_deltas = np.diff(timestamps)
+        X = np.column_stack([time_deltas, values[:-1]])
+        X_poly = self.feature_extractor.extract_features(X)
+        X_scaled = self.scaler.transform(X_poly)
+        return self.model.predict(X_scaled)
+
+# Example Usage
+if __name__ == "__main__":
+    # Create feature extractor with Frobenius automorphism
+    extractor = PolynomialFeatureExtractor(degree=2)
+    def frobenius_auto(poly: F2Polynomial) -> F2Polynomial:
+        # Implements x -> x^2 automorphism
+        squared_coeffs = np.zeros_like(poly.coefficients)
+        squared_coeffs[::2] = poly.coefficients[::2]
+        return F2Polynomial(squared_coeffs)
+    extractor.add_field_automorphism(frobenius_auto)
+    
+    # Create and fit time series model
+    model = TimeSeriesSchemeModel(extractor)
+    
+    # Example time series data
+    timestamps = np.array([1000, 2000, 3000, 4000, 5000])
+    values = np.array([1.5, 2.5, 3.0, 2.8, 3.2])
+    
+    # Fit and predict
+    model.fit(timestamps, values)
+    predictions = model.predict(timestamps, values)
