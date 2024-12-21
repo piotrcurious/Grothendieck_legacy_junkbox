@@ -1,0 +1,207 @@
+import numpy as np
+from typing import Tuple, Optional, Union, Dict
+from dataclasses import dataclass
+from enum import Enum, auto
+import struct
+from abc import ABC, abstractmethod
+
+class BitField:
+    """
+    Represents a number as a polynomial over F2
+    Fundamental building block for all computer arithmetic
+    """
+    def __init__(self, value: int, width: int):
+        self.width = width
+        self.coefficients = self._to_binary_polynomial(value)
+    
+    def _to_binary_polynomial(self, value: int) -> np.ndarray:
+        """Convert value to its binary polynomial representation"""
+        return np.array(
+            [(value >> i) & 1 for i in range(self.width)],
+            dtype=np.uint8
+        )
+    
+    def to_int(self) -> int:
+        """Convert binary polynomial back to integer"""
+        return sum(c << i for i, c in enumerate(self.coefficients))
+    
+    def __repr__(self):
+        terms = []
+        for i, c in enumerate(self.coefficients):
+            if c:
+                if i == 0:
+                    terms.append('1')
+                elif i == 1:
+                    terms.append('x')
+                else:
+                    terms.append(f'x^{i}')
+        return ' + '.join(reversed(terms)) or '0'
+
+class MachineNumber:
+    """
+    Base class for all machine numbers
+    Represents numbers as polynomials over F2 with scheme structure
+    """
+    def __init__(self, value: Union[int, float], dtype: np.dtype):
+        self.dtype = dtype
+        self.scheme = self._create_scheme(value)
+    
+    def _create_scheme(self, value: Union[int, float]) -> Dict[str, BitField]:
+        """Create scheme structure from value"""
+        if np.issubdtype(self.dtype, np.integer):
+            return self._create_integer_scheme(value)
+        else:
+            return self._create_float_scheme(value)
+    
+    def _create_integer_scheme(self, value: int) -> Dict[str, BitField]:
+        """Create scheme for integer types"""
+        width = 8 * self.dtype.itemsize
+        return {
+            'value': BitField(value & ((1 << width) - 1), width)
+        }
+    
+    def _create_float_scheme(self, value: float) -> Dict[str, BitField]:
+        """Create scheme for float types"""
+        # Get bit pattern of float
+        if self.dtype == np.float32:
+            bits = struct.unpack('I', struct.pack('f', value))[0]
+            exp_bits = 8
+            mant_bits = 23
+        else:  # float64
+            bits = struct.unpack('Q', struct.pack('d', value))[0]
+            exp_bits = 11
+            mant_bits = 52
+            
+        # Split into sign, exponent, mantissa
+        sign = BitField(bits >> (exp_bits + mant_bits), 1)
+        exp = BitField((bits >> mant_bits) & ((1 << exp_bits) - 1), exp_bits)
+        mant = BitField(bits & ((1 << mant_bits) - 1), mant_bits)
+        
+        return {
+            'sign': sign,
+            'exponent': exp,
+            'mantissa': mant
+        }
+
+class FieldMorphism:
+    """
+    Represents morphisms between machine number schemes
+    Handles all arithmetic operations as scheme morphisms
+    """
+    @staticmethod
+    def add(x: MachineNumber, y: MachineNumber) -> MachineNumber:
+        if x.dtype != y.dtype:
+            raise ValueError("Types must match for field operations")
+            
+        if np.issubdtype(x.dtype, np.integer):
+            return FieldMorphism._add_integer(x, y)
+        else:
+            return FieldMorphism._add_float(x, y)
+    
+    @staticmethod
+    def _add_integer(x: MachineNumber, y: MachineNumber) -> MachineNumber:
+        """Add integers as polynomials over F2"""
+        result = x.scheme['value'].to_int() + y.scheme['value'].to_int()
+        return MachineNumber(result, x.dtype)
+    
+    @staticmethod
+    def _add_float(x: MachineNumber, y: MachineNumber) -> MachineNumber:
+        """Add floats with proper scheme morphism"""
+        # Convert to bit patterns
+        if x.dtype == np.float32:
+            pack_fmt = 'f'
+            unpack_fmt = 'I'
+        else:
+            pack_fmt = 'd'
+            unpack_fmt = 'Q'
+            
+        x_bits = struct.unpack(unpack_fmt, struct.pack(pack_fmt, 
+                              FieldMorphism._float_from_scheme(x)))[0]
+        y_bits = struct.unpack(unpack_fmt, struct.pack(pack_fmt,
+                              FieldMorphism._float_from_scheme(y)))[0]
+                              
+        # Perform addition and create new scheme
+        result = struct.unpack(pack_fmt, 
+                             struct.pack(unpack_fmt, x_bits + y_bits))[0]
+        return MachineNumber(result, x.dtype)
+    
+    @staticmethod
+    def _float_from_scheme(x: MachineNumber) -> float:
+        """Reconstruct float from scheme components"""
+        sign = (-1) ** x.scheme['sign'].to_int()
+        
+        if x.dtype == np.float32:
+            exp_bias = 127
+        else:
+            exp_bias = 1023
+            
+        exp = x.scheme['exponent'].to_int() - exp_bias
+        mant = 1 + x.scheme['mantissa'].to_int() / (1 << x.scheme['mantissa'].width)
+        
+        return sign * mant * (2.0 ** exp)
+
+class PolynomialFeatureExtractor:
+    """
+    Extract features while preserving field structure
+    Works directly with binary polynomials
+    """
+    def __init__(self, max_degree: int, dtype: np.dtype):
+        self.max_degree = max_degree
+        self.dtype = dtype
+        
+    def extract(self, x: np.ndarray) -> np.ndarray:
+        """Extract features preserving field structure"""
+        if not isinstance(x, np.ndarray):
+            x = np.array(x, dtype=self.dtype)
+            
+        # Convert to machine numbers
+        machine_nums = [MachineNumber(val, self.dtype) for val in x]
+        
+        # Extract polynomial features
+        features = []
+        for degree in range(self.max_degree + 1):
+            feature_vals = []
+            for num in machine_nums:
+                # Compute power through repeated field morphisms
+                result = num
+                for _ in range(degree - 1):
+                    result = FieldMorphism.add(result, num)
+                feature_vals.append(
+                    FieldMorphism._float_from_scheme(result) 
+                    if np.issubdtype(self.dtype, np.floating)
+                    else result.scheme['value'].to_int()
+                )
+            features.append(feature_vals)
+            
+        return np.array(features).T
+
+# Example usage demonstrating field structure preservation
+def demonstrate_field_arithmetic():
+    # Create some machine numbers
+    x = MachineNumber(5, np.int32)
+    y = MachineNumber(3, np.int32)
+    
+    print("Integer as polynomial over F2:")
+    print(f"x = {x.scheme['value']}")
+    print(f"y = {y.scheme['value']}")
+    
+    # Demonstrate addition as field morphism
+    z = FieldMorphism.add(x, y)
+    print(f"\nx + y = {z.scheme['value']}")
+    
+    # Now with floating point
+    fx = MachineNumber(1.5, np.float32)
+    print("\nFloat32 scheme structure:")
+    print(f"sign: {fx.scheme['sign']}")
+    print(f"exponent: {fx.scheme['exponent']}")
+    print(f"mantissa: {fx.scheme['mantissa']}")
+    
+    # Extract polynomial features
+    extractor = PolynomialFeatureExtractor(max_degree=2, dtype=np.float32)
+    x_vals = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+    features = extractor.extract(x_vals)
+    print("\nPolynomial features preserving field structure:")
+    print(features)
+
+if __name__ == "__main__":
+    demonstrate_field_arithmetic()
