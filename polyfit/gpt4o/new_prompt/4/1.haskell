@@ -1,0 +1,276 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FunctionalDependencies #-}
+
+module PolynomialSchemes where
+
+import Data.Bits
+import Data.Word
+import Data.Time.Clock
+import qualified Data.Vector as V
+import Control.Monad (replicateM)
+import Numeric.LinearAlgebra hiding (Vector)
+import qualified Numeric.LinearAlgebra as LA
+
+-- | The base field F2
+data F2 = Zero | One
+  deriving (Eq, Show)
+
+-- | Field operations for F2
+class Field a where
+    zero :: a
+    one :: a
+    add :: a -> a -> a
+    mul :: a -> a -> a
+    inv :: a -> Maybe a  -- Nothing for zero
+
+instance Field F2 where
+    zero = Zero
+    one = One
+    add Zero b = b
+    add b Zero = b
+    add _ _ = Zero
+    mul One b = b
+    mul b One = b
+    mul _ _ = Zero
+    inv One = Just One
+    inv Zero = Nothing
+
+-- | Scheme structure
+data Scheme = Scheme {
+    coordinate_ring :: Ring,
+    prime_spectrum :: [Ideal],
+    structure_sheaf :: Sheaf
+}
+
+-- | Ring structure
+data Ring = Ring {
+    underlying_set :: [F2Poly],
+    addition :: F2Poly -> F2Poly -> F2Poly,
+    multiplication :: F2Poly -> F2Poly -> F2Poly
+}
+
+-- | Ideal in a ring
+data Ideal = Ideal {
+    generators :: [F2Poly],
+    reduction :: F2Poly -> F2Poly  -- Canonical form modulo ideal
+}
+
+-- | Sheaf of rings
+data Sheaf = Sheaf {
+    local_rings :: [Ring],
+    restriction_maps :: [(Int, Int, F2Poly -> F2Poly)],  -- From, To, Map
+    gluing_conditions :: [(Int, Int, F2Poly -> Bool)]    -- Compatibility checks
+}
+
+-- | Enhanced polynomial representation preserving scheme structure
+data F2Poly = F2Poly {
+    coefficients :: V.Vector F2,
+    degree :: Int,
+    scheme_data :: SchemeData
+} deriving (Eq, Show)
+
+-- | Scheme-theoretic data for polynomials
+data SchemeData = SchemeData {
+    base_scheme :: Scheme,
+    local_coordinates :: [(Int, F2Poly)],  -- Index into local_rings and local form
+    compatibility_checked :: Bool
+}
+
+-- | Morphism between schemes
+data SchemeMorphism = SchemeMorphism {
+    source :: Scheme,
+    target :: Scheme,
+    pullback :: F2Poly -> F2Poly,
+    pushforward :: Ideal -> Ideal,
+    compatible :: Bool  -- Verified compatibility with structure sheaves
+}
+
+-- | Create the base scheme Spec(F2)
+specF2 :: Scheme
+specF2 = Scheme {
+    coordinate_ring = Ring {
+        underlying_set = [constPoly Zero, constPoly One],
+        addition = polyAdd,
+        multiplication = polyMult
+    },
+    prime_spectrum = [Ideal {
+        generators = [constPoly Zero],
+        reduction = const (constPoly Zero)
+    }],
+    structure_sheaf = Sheaf {
+        local_rings = [Ring {
+            underlying_set = [constPoly Zero, constPoly One],
+            addition = polyAdd,
+            multiplication = polyMult
+        }],
+        restriction_maps = [],
+        gluing_conditions = []
+    }
+}
+  where
+    constPoly c = F2Poly {
+        coefficients = V.singleton c,
+        degree = 0,
+        scheme_data = SchemeData specF2 [] True
+    }
+
+-- | Create the scheme for computer arithmetic
+computerScheme :: Int -> Scheme
+computerScheme bits = Scheme {
+    coordinate_ring = Ring {
+        underlying_set = generateBasis bits,
+        addition = polyAdd,
+        multiplication = polyMult
+    },
+    prime_spectrum = [
+        Ideal {
+            generators = [modPoly bits],
+            reduction = \p -> snd $ polyDivide p (modPoly bits)
+        }
+    ],
+    structure_sheaf = Sheaf {
+        local_rings = [computerLocalRing bits],
+        restriction_maps = [],
+        gluing_conditions = []
+    }
+}
+  where
+    generateBasis :: Int -> [F2Poly]
+    generateBasis n = [
+        F2Poly {
+            coefficients = V.generate n (\i -> if i == j then One else Zero),
+            degree = j,
+            scheme_data = SchemeData (computerScheme n) [] True
+        } | j <- [0..n-1]
+    ]
+    
+    modPoly :: Int -> F2Poly
+    modPoly n = F2Poly {
+        coefficients = V.generate (n+1) (\i -> if i == n || i == 0 then One else Zero),
+        degree = n,
+        scheme_data = SchemeData (computerScheme n) [] True
+    }
+    
+    computerLocalRing :: Int -> Ring
+    computerLocalRing n = Ring {
+        underlying_set = generateBasis n,
+        addition = polyAdd,
+        multiplication = polyMult
+    }
+
+-- | Enhanced polynomial operations preserving scheme structure
+polyAdd :: F2Poly -> F2Poly -> F2Poly
+polyAdd p1 p2 
+    | not (compatibleSchemes p1 p2) = 
+        error "Polynomials from incompatible schemes"
+    | otherwise = F2Poly {
+        coefficients = V.generate maxDeg coeff,
+        degree = computeDegree maxDeg coeffs,
+        scheme_data = mergeSchemeData p1 p2
+    }
+  where
+    maxDeg = max (degree p1) (degree p2) + 1
+    coeffs = V.generate maxDeg coeff
+    coeff i = add 
+        (if i <= degree p1 then coefficients p1 V.! i else Zero)
+        (if i <= degree p2 then coefficients p2 V.! i else Zero)
+    
+    computeDegree :: Int -> V.Vector F2 -> Int
+    computeDegree n vec = 
+        let lastNonZero = V.findIndex (== One) $ V.reverse vec
+        in maybe (-1) (\i -> n - i - 1) lastNonZero
+
+-- | Check scheme compatibility
+compatibleSchemes :: F2Poly -> F2Poly -> Bool
+compatibleSchemes p1 p2 =
+    base_scheme (scheme_data p1) == base_scheme (scheme_data p2)
+
+-- | Merge scheme data while preserving structure
+mergeSchemeData :: F2Poly -> F2Poly -> SchemeData
+mergeSchemeData p1 p2 = SchemeData {
+    base_scheme = base_scheme (scheme_data p1),
+    local_coordinates = mergeLocalCoords 
+        (local_coordinates $ scheme_data p1) 
+        (local_coordinates $ scheme_data p2),
+    compatibility_checked = compatibility_checked (scheme_data p1) &&
+                          compatibility_checked (scheme_data p2)
+}
+  where
+    mergeLocalCoords :: [(Int, F2Poly)] -> [(Int, F2Poly)] -> [(Int, F2Poly)]
+    mergeLocalCoords l1 l2 = 
+        [(i, polyAdd p q) | (i, p) <- l1, (j, q) <- l2, i == j]
+
+-- | Create a scheme morphism
+makeSchemeMorphism :: Scheme -> Scheme -> (F2Poly -> F2Poly) -> SchemeMorphism
+makeSchemeMorphism src tgt f = SchemeMorphism {
+    source = src,
+    target = tgt,
+    pullback = f,
+    pushforward = \ideal -> Ideal {
+        generators = map f (generators ideal),
+        reduction = f . reduction ideal . inverse f
+    },
+    compatible = verifyCompatibility src tgt f
+}
+  where
+    inverse :: (F2Poly -> F2Poly) -> F2Poly -> F2Poly
+    inverse f p = head [q | q <- underlying_set (coordinate_ring src), f q == p]
+    
+    verifyCompatibility :: Scheme -> Scheme -> (F2Poly -> F2Poly) -> Bool
+    verifyCompatibility s t f =
+        all (\(i, j, cond) -> 
+            all (\p -> cond (f p)) (underlying_set $ coordinate_ring s))
+            (gluing_conditions $ structure_sheaf t)
+
+-- | Feature extraction preserving scheme structure
+extractFeatures :: SchemeMorphism -> [TimePoint] -> V.Vector F2Poly
+extractFeatures morph points = V.fromList [
+    pullback morph (timePointToPoly p) | p <- points
+]
+  where
+    timePointToPoly :: TimePoint -> F2Poly
+    timePointToPoly tp = case value tp of
+        FloatPoint d -> doubleToF2Poly d
+        IntegerPoint w -> toF2Poly w
+
+-- | Model fitting preserving scheme structure
+fitModel :: SchemeMorphism -> V.Vector F2Poly -> V.Vector F2Poly -> SchemeMorphism
+fitModel baseMap input output = 
+    let coeffs = computeCoefficients input output
+        pullbackMap = \p -> applyCoefficients coeffs (pullback baseMap p)
+    in makeSchemeMorphism 
+        (source baseMap) 
+        (target baseMap)
+        pullbackMap
+  where
+    computeCoefficients :: V.Vector F2Poly -> V.Vector F2Poly -> Matrix Double
+    computeCoefficients inp out = 
+        let inMat = LA.matrix (V.length $ V.head input) 
+                [polyToVector p | p <- V.toList inp]
+            outMat = LA.matrix (V.length $ V.head output)
+                [polyToVector p | p <- V.toList out]
+        in inMat <\> outMat
+    
+    polyToVector :: F2Poly -> [Double]
+    polyToVector = V.toList . V.map f2ToDouble . coefficients
+    
+    f2ToDouble :: F2 -> Double
+    f2ToDouble Zero = 0
+    f2ToDouble One = 1
+    
+    applyCoefficients :: Matrix Double -> F2Poly -> F2Poly
+    applyCoefficients coefs p =
+        let vec = LA.vector $ polyToVector p
+            result = coefs #> vec
+        in vectorToF2Poly result (scheme_data p)
+    
+    vectorToF2Poly :: Vector Double -> SchemeData -> F2Poly
+    vectorToF2Poly vec sd = F2Poly {
+        coefficients = V.fromList [if x > 0.5 then One else Zero | x <- LA.toList vec],
+        degree = LA.size vec - 1,
+        scheme_data = sd
+}
