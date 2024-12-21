@@ -380,4 +380,171 @@ void loop() {
                  metrics.noise_estimate,
                  metrics.stability_score);
     
-    delay(100</antArtifact>
+    delay(100);
+    
+    // Add diagnostics every second
+    static unsigned long lastDiagnosticTime = 0;
+    if (timestamp - lastDiagnosticTime >= 1000) {
+        printDiagnostics();
+        lastDiagnosticTime = timestamp;
+    }
+}
+
+// New diagnostic functions
+void printDiagnostics() {
+    auto metrics = svm->getConvergenceMetrics();
+    
+    Serial.println("\n=== System Diagnostics ===");
+    Serial.printf("Short-term Error: %.3f\n", metrics.short_term_error);
+    Serial.printf("Long-term Error: %.3f\n", metrics.long_term_error);
+    Serial.printf("Error Trend: %.3f\n", metrics.error_trend);
+    Serial.printf("Stability Score: %.3f\n", metrics.stability_score);
+    Serial.printf("Noise Estimate: %.3f\n", metrics.noise_estimate);
+    Serial.printf("System State: %s\n", 
+                 metrics.is_converged ? "Converged" : "Adapting");
+    
+    // Add warning messages based on system state
+    if (!metrics.is_converged) {
+        if (metrics.error_trend > 0.5) {
+            Serial.println("WARNING: Rapid error growth detected");
+        }
+        if (metrics.stability_score < 0.3) {
+            Serial.println("WARNING: System stability compromised");
+        }
+        if (metrics.short_term_error > metrics.noise_estimate * 5.0) {
+            Serial.println("WARNING: Prediction error exceeds noise bounds");
+        }
+    }
+    
+    Serial.println("========================\n");
+}
+
+// Add support for data logging to analyze system performance
+class DataLogger {
+private:
+    static const int LOG_BUFFER_SIZE = 100;
+    struct LogEntry {
+        unsigned long timestamp;
+        float actual;
+        float predicted;
+        float noise_estimate;
+        float stability_score;
+        bool converged;
+    };
+    
+    std::vector<LogEntry> logBuffer;
+    
+public:
+    DataLogger() {
+        logBuffer.reserve(LOG_BUFFER_SIZE);
+    }
+    
+    void addEntry(unsigned long timestamp, float actual, float predicted,
+                 const ConvergenceMetrics& metrics) {
+        LogEntry entry = {
+            timestamp,
+            actual,
+            predicted,
+            metrics.noise_estimate,
+            metrics.stability_score,
+            metrics.is_converged
+        };
+        
+        if (logBuffer.size() >= LOG_BUFFER_SIZE) {
+            logBuffer.erase(logBuffer.begin());
+        }
+        logBuffer.push_back(entry);
+    }
+    
+    void printSummary() {
+        if (logBuffer.empty()) return;
+        
+        Serial.println("\n=== Performance Summary ===");
+        
+        // Calculate statistics
+        float avgError = 0;
+        float maxError = 0;
+        int convergenceCount = 0;
+        float avgNoiseEstimate = 0;
+        float avgStabilityScore = 0;
+        
+        for (const auto& entry : logBuffer) {
+            float error = abs(entry.actual - entry.predicted);
+            avgError += error;
+            maxError = max(maxError, error);
+            if (entry.converged) convergenceCount++;
+            avgNoiseEstimate += entry.noise_estimate;
+            avgStabilityScore += entry.stability_score;
+        }
+        
+        avgError /= logBuffer.size();
+        avgNoiseEstimate /= logBuffer.size();
+        avgStabilityScore /= logBuffer.size();
+        
+        Serial.printf("Average Error: %.3f\n", avgError);
+        Serial.printf("Maximum Error: %.3f\n", maxError);
+        Serial.printf("Convergence Rate: %.1f%%\n", 
+                     100.0f * convergenceCount / logBuffer.size());
+        Serial.printf("Average Noise: %.3f\n", avgNoiseEstimate);
+        Serial.printf("Average Stability: %.3f\n", avgStabilityScore);
+        Serial.println("=========================\n");
+    }
+};
+
+// Create global instances
+PolynomialSVM* svm;
+DataLogger* logger;
+
+void setup() {
+    Serial.begin(115200);
+    float adcResolution = 3.3f / (1 << ADC_WIDTH);
+    svm = new PolynomialSVM(adcResolution);
+    logger = new DataLogger();
+    
+    // Configure ADC for best resolution
+    analogReadResolution(ADC_WIDTH);
+    analogSetAttenuation(ADC_11db);  // Full 0-3.3V range
+    
+    Serial.println("System initialized");
+    Serial.printf("ADC Resolution: %.3f V\n", adcResolution);
+    Serial.println("Starting data collection...\n");
+}
+
+void loop() {
+    int rawValue = analogRead(36);
+    float voltage = (float)rawValue * (3.3f / (1 << ADC_WIDTH));
+    unsigned long timestamp = millis();
+    
+    svm->addDataPoint(timestamp, voltage);
+    
+    unsigned long futureTime = timestamp + 1000;
+    float prediction = svm->predict(futureTime);
+    
+    float lower, upper;
+    svm->getPredictionInterval(futureTime, lower, upper);
+    
+    auto metrics = svm->getConvergenceMetrics();
+    
+    // Log data
+    logger->addEntry(timestamp, voltage, prediction, metrics);
+    
+    // Basic status output
+    Serial.printf("Time: %lu, Value: %.3f, Pred: %.3f (%.3f - %.3f)\n", 
+                 timestamp, voltage, prediction, lower, upper);
+    
+    // Periodic detailed diagnostics
+    static unsigned long lastDiagnosticTime = 0;
+    if (timestamp - lastDiagnosticTime >= 5000) {  // Every 5 seconds
+        printDiagnostics();
+        logger->printSummary();
+        lastDiagnosticTime = timestamp;
+    }
+    
+    // Add warning for significant prediction deviation
+    if (abs(voltage - prediction) > metrics.noise_estimate * 3.0) {
+        Serial.printf("WARNING: Significant deviation detected: %.3f > %.3f\n",
+                     abs(voltage - prediction), metrics.noise_estimate * 3.0);
+    }
+    
+    delay(100);
+}
