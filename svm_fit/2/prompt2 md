@@ -1,0 +1,48 @@
+Here's the refined prompt incorporating your detailed requirements:
+
+
+---
+
+Prompt:
+Create an ESP32 Arduino code that fits a polynomial to incoming data in timestamp/value format, dynamically adjusts the polynomial degree to detect significant divergence in the data, and predicts the system's future evolution. The system should:
+
+1. Fit polynomials using the least squares method.
+
+
+2. Implement a Support Vector Machine (SVM)-based model where:
+
+The candidate polynomial divides the data into two feature sets (data points above and below the polynomial).
+
+The quality of the division is analyzed iteratively to refine the polynomial for optimal separation.
+
+Boundary support vectors are used for higher-precision evaluation compared to data points.
+
+
+
+3. Continuously monitor residuals and division quality to infer necessary polynomial adjustments.
+
+
+4. Dynamically increase the polynomial degree if the quality of fit significantly deteriorates, up to a predefined maximum degree.
+
+
+5. Handle incoming data points in real time, refining the polynomial and division iteratively.
+
+
+6. Predict future values based on the refined polynomial model.
+
+
+
+Ensure the system is modular to facilitate enhancements, including:
+
+Advanced SVM-based division quality analysis.
+
+Dynamic adjustment strategies for refining candidate polynomials.
+
+Efficient logging and reporting mechanisms for residuals, feature set distributions, and polynomial updates.
+
+
+
+---
+
+Let me know if you’d like any additional adjustments or expansions!
+
