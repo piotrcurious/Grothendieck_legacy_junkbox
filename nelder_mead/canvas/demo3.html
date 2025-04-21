@@ -1,0 +1,1043 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive 2D Randomized Chebyshev Terrain Simulation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column; /* Stack children vertically */
+            align-items: center; /* Center children horizontally */
+            background-color: #f0f0f0;
+            font-family: sans-serif;
+            padding: 10px; /* Reduced overall padding */
+            box-sizing: border-box; /* Include padding in body's total width/height */
+            position: relative;
+        }
+        canvas {
+            border: 1px solid #ccc;
+            background-color: #e0e0e0; /* Lighter background for 3D feel */
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            touch-action: none; /* Prevent default touch actions like scrolling/zooming */
+            margin-top: 10px; /* Space above canvas */
+            margin-bottom: 10px; /* Space below canvas */
+        }
+        .controls {
+            margin-top: 10px; /* Space above controls */
+            margin-bottom: 10px; /* Space below controls */
+            display: flex;
+            gap: 10px;
+            position: relative;
+            z-index: 5;
+        }
+        button {
+            padding: 4px 8px; /* Smaller buttons */
+            font-size: 0.8rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+         .info-box {
+            /* Positioned below the canvas and controls in the HTML flow */
+            position: relative; /* Changed from absolute */
+            margin-top: 10px; /* Space above info box */
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 0.9rem;
+            z-index: 1; /* Lower z-index as it's in flow now */
+            max-width: 800px; /* Max width similar to canvas */
+            width: 100%; /* Allow it to take full width if needed */
+            box-sizing: border-box; /* Include padding in width */
+         }
+         .info-box span {
+             font-weight: bold;
+         }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <div class="controls">
+        <button id="startButton">Start Simulation</button>
+        <button id="stopButton" disabled>Stop Simulation</button>
+        <button id="resetButton">Reset Simulation</button>
+    </div>
+
+    <canvas id="terrainCanvas" width="800" height="600"></canvas>
+
+    <div class="info-box">
+        Drop State: <span id="dropState">Waiting...</span><br>
+        Optimizing Drop Index: <span id="optimizingDropIndex">-</span><br>
+        Instructions: One finger drag to rotate, Two finger drag to pan/zoom.<br>
+        Touch Info: <span id="touchInfo">No touch</span><br>
+        View Angles: X: <span id="viewAngleX">0.00</span>, Z: <span id="viewAngleZ">0.00</span><br>
+        Scale: <span id="scaleValue">0.00</span><br>
+        Pan: (<span id="panX">0.00</span>, <span id="panY">0.00</span>)
+    </div>
+
+    <script>
+        const canvas = document.getElementById('terrainCanvas');
+        const ctx = canvas.getContext('2d');
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const resetButton = document.getElementById('resetButton');
+        const dropStateSpan = document.getElementById('dropState');
+        const optimizingDropIndexSpan = document.getElementById('optimizingDropIndex');
+        const touchInfoSpan = document.getElementById('touchInfo'); // Span for touch info
+        const viewAngleXSpan = document.getElementById('viewAngleX');
+        const viewAngleZSpan = document.getElementById('viewAngleZ');
+        const scaleValueSpan = document.getElementById('scaleValue');
+        const panXSpan = document.getElementById('panX'); // Span for pan X
+        const panYSpan = document.getElementById('panY'); // Span for pan Y
+
+
+        // --- Simulation Parameters ---
+        const numDrops = 50; // Number of water drops
+        const terrainGridSize = 80; // Grid size for terrain heightmap
+        // Parameters for Randomized Chebyshev terrain generation
+        const numChebyshevTerms = 5; // Number of random Chebyshev terms to sum
+        const maxChebyshevDegreeN = 8; // Maximum degree for Chebyshev polynomial in X
+        const maxChebyshevDegreeM = 8; // Maximum degree for Chebyshev polynomial in Y
+        const terrainAmplitude = 1.0; // Overall amplitude scaling for the terrain
+        const terrainOffset = 0.2; // Minimum z-value for the terrain
+
+        const dropSpeed = 0.01; // Speed of falling drops (in z direction)
+        const slideSpeed = 0.005; // Speed of sliding drops (in x, y plane)
+
+
+        // Nelder-Mead Parameters (for 2D)
+        const nm_tolerance = 1e-4; // Tolerance for convergence
+        const nm_maxIterations = 200; // Maximum iterations for Nelder-Mead
+        // Nelder-Mead coefficients (standard values)
+        const nm_alpha = 1.0; // Reflection
+        const nm_gamma = 2.0; // Expansion
+        const nm_rho = 0.5;   // Contraction
+        const nm_sigma = 0.5; // Shrink
+
+        let animationFrameId = null;
+        let terrain = []; // 2D array for heightmap
+        let drops = [];
+
+        // --- 3D Navigation Variables ---
+        // These variables are initialized once when the script loads and persist across resets
+        let currentViewAngleX = Math.PI / 6; // Initial angle around X axis (approx 30 deg)
+        let currentViewAngleZ = Math.PI / 4; // Initial angle around Z axis (45 deg)
+        let currentScale = 200; // Initial scaling factor for projection
+        let panX = 0; // Pan offset in screen pixels
+        let panY = 0; // Pan offset in screen pixels
+
+
+        // Touch Navigation Variables
+        let lastTouch1X = null;
+        let lastTouch1Y = null;
+        let lastTouch2X = null;
+        let lastTouch2Y = null;
+        let initialPinchDistance = null;
+        let lastCentroidX = null; // For panning
+        let lastCentroidY = null; // For panning
+
+
+        // Navigation Tuning Parameters
+        const rotationSpeed = 0.005; // Adjusted rotation speed
+        const zoomSensitivity = 0.02; // Adjusted zoom sensitivity
+        const panSpeed = 0.5; // Speed of panning
+        const smoothingFactor = 0.5; // Factor to smooth touch movement deltas
+        const maxTiltAngle = 20 * Math.PI / 180; // Limit vertical tilt to +/- 20 degrees
+
+
+        let frameCount = 0; // Counter for visual animation heartbeat
+
+        // --- Chebyshev Polynomial Function (First Kind) ---
+        // Calculates T_n(x) using the iterative definition.
+        // x is expected in the range [-1, 1].
+        function getChebyshevValue(x, n) {
+            if (n === 0) {
+                return 1;
+            }
+            if (n === 1) {
+                return x;
+            }
+            // Clamp x to [-1, 1] to prevent issues with values outside the domain
+            const clampedX = Math.max(-1, Math.min(1, x));
+
+            let t_n_minus_2 = 1; // T_0(x)
+            let t_n_minus_1 = clampedX; // T_1(x)
+            let t_n = 0;
+
+            for (let i = 2; i <= n; i++) {
+                t_n = 2 * clampedX * t_n_minus_1 - t_n_minus_2;
+                t_n_minus_2 = t_n_minus_1;
+                t_n_minus_1 = t_n;
+            }
+            return t_n;
+        }
+
+
+        // --- Terrain Generation (Randomized Sum of Chebyshev Polynomials) ---
+        function generateTerrain2D(size, numTerms, maxDegreeN, maxDegreeM, overallAmplitude) {
+            const heightmap = [];
+            const terms = []; // Store random terms (degrees and weights)
+
+            // Generate random terms once
+            for(let k = 0; k < numTerms; k++) {
+                const degreeN = Math.floor(Math.random() * (maxDegreeN + 1));
+                const degreeM = Math.floor(Math.random() * (maxDegreeM + 1));
+                const weight = (Math.random() * 2 - 1); // Random weight between -1 and 1
+                terms.push({ degreeN, degreeM, weight });
+            }
+
+
+            let minZ = Infinity;
+
+            for (let i = 0; i < size; i++) {
+                heightmap[i] = [];
+                for (let j = 0; j < size; j++) {
+                    // Normalize grid coordinates to [0, 1]
+                    const x_norm = i / (size - 1);
+                    const y_norm = j / (size - 1);
+
+                    // Map [0, 1] to [-1, 1] for Chebyshev input
+                    const x_mapped = 2 * x_norm - 1;
+                    const y_mapped = 2 * y_norm - 1;
+
+                    let z = 0;
+                    // Sum the contributions from each random Chebyshev term
+                    for(const term of terms) {
+                         const chebyshevX = getChebyshevValue(x_mapped, term.degreeN);
+                         const chebyshevY = getChebyshevValue(y_mapped, term.degreeM);
+                         z += term.weight * chebyshevX * chebyshevY;
+                    }
+
+
+                    // Add some slight noise (optional)
+                    // z += (Math.random() - 0.5) * overallAmplitude * 0.05;
+
+
+                    heightmap[i][j] = z;
+                    if (z < minZ) {
+                        minZ = z;
+                    }
+                }
+            }
+
+             // Apply offset and overall amplitude scaling
+            const offset = terrainOffset - minZ;
+             for (let i = 0; i < size; i++) {
+                for (let j = 0; j < size; j++) {
+                    heightmap[i][j] = (heightmap[i][j] + offset) * overallAmplitude;
+                }
+             }
+
+
+            return heightmap;
+        }
+
+        // --- Get Terrain Height at (x, y) with Interpolation ---
+        // x, y are expected to be in the range [0, 1]
+        function getTerrainHeight(x, y) {
+            // Use the full interpolation logic
+            // Clamp x, y to the valid range [0, 1]
+            const clampedX = Math.max(0, Math.min(1, x));
+            const clampedY = Math.max(0, Math.min(1, y));
+
+            // Scale to grid coordinates
+            const gridX = clampedX * (terrainGridSize - 1);
+            const gridY = clampedY * (terrainGridSize - 1);
+
+            // Get the indices of the four surrounding grid points
+            const x1 = Math.floor(gridX);
+            const y1 = Math.floor(gridY);
+            const x2 = Math.ceil(gridX);
+            const y2 = Math.ceil(gridY);
+
+            // Handle edge case where x or y is exactly 1
+            const safeX1 = Math.min(x1, terrainGridSize - 1);
+            const safeY1 = Math.min(y1, terrainGridSize - 1);
+            const safeX2 = Math.min(x2, terrainGridSize - 1);
+            const safeY2 = Math.min(y2, terrainGridSize - 1);
+
+
+            // Get the height values at the four corners
+             // Added checks for terrain array existence and index validity
+            if (!terrain || !terrain[safeX1] || terrain[safeX1][safeY1] === undefined ||
+                !terrain[safeX2] || terrain[safeX2][safeY1] === undefined ||
+                !terrain[safeX1] || terrain[safeX1][safeY2] === undefined ||
+                !terrain[safeX2] || terrain[safeX2][safeY2] === undefined) {
+                 console.error("Error accessing terrain data in getTerrainHeight at indices:", safeX1, safeY1, safeX2, safeY2);
+                 return 0; // Return a safe default height
+            }
+
+
+            const z11 = terrain[safeX1][safeY1];
+            const z21 = terrain[safeX2][safeY1];
+            const z12 = terrain[safeX1][safeY2];
+            const z22 = terrain[safeX2][safeY2];
+
+            // Perform bilinear interpolation
+            const alpha = gridX - x1; // x interpolation factor
+            const beta = gridY - y1; // y interpolation factor
+
+             // Handle case where x1 === x2 or y1 === y2 (on grid lines)
+            if (x1 === x2 && y1 === y2) return terrain[x1][y1];
+            if (x1 === x2) return z11 * (1 - beta) + z12 * beta;
+            if (y1 === y2) return z11 * (1 - alpha) + z21 * alpha;
+
+
+            const z1 = z11 * (1 - alpha) + z21 * alpha; // Interpolate along x at y1
+            const z2 = z12 * (1 - alpha) + z22 * alpha; // Interpolate along x at y2
+
+            const z = z1 * (1 - beta) + z2 * beta; // Interpolate along y
+
+            return z;
+        }
+
+
+        // --- 2D Nelder-Mead Optimization ---
+        // Finds a local minimum of the objective function using the Nelder-Mead method in 2D.
+        // Records the simplex points visited during the search.
+        // objectiveFunc: The function to minimize (takes [x, y], returns z)
+        // initialGuess: The starting [x, y] value
+        // options: { tolerance, maxIterations, alpha, gamma, rho, sigma }
+        // Returns { x: minimum_x, y: minimum_y, z: minimum_z, simplexPath: [[p1, p2, p3], ...] }
+        function nelderMead2D(objectiveFunc, initialGuess, options) {
+             const tol = options.tolerance || 1e-4;
+            const maxIter = options.maxIterations || 200;
+            const alpha = options.alpha || 1.0; // Reflection
+            const gamma = options.gamma || 2.0; // Expansion
+            const rho = options.rho || 0.5;   // Contraction
+            const sigma = options.sigma || 0.5; // Shrink
+
+
+            const simplexPath = []; // Array to store simplex states [{x, y, z}, {x, y, z}, {x, y, z}] at each step
+
+            // Initialize simplex (3 points in 2D)
+            // Start with the initial guess and two slightly perturbed points
+            let p1 = [...initialGuess]; // [x, y]
+            // Perturb slightly, ensuring points are distinct and within bounds
+            let p2 = [initialGuess[0] + (initialGuess[0] > 0.9 ? -0.01 : 0.01), initialGuess[1]];
+            let p3 = [initialGuess[0], initialGuess[1] + (initialGuess[1] > 0.9 ? -0.01 : 0.01)];
+
+             // Ensure initial points are within bounds [0, 1] after perturbation
+            p1[0] = Math.max(0, Math.min(1, p1[0])); p1[1] = Math.max(0, Math.min(1, p1[1]));
+            p2[0] = Math.max(0, Math.min(1, p2[0])); p2[1] = Math.max(0, Math.min(1, p2[1]));
+            p3[0] = Math.max(0, Math.min(1, p3[0])); p3[1] = Math.max(0, Math.min(1, p3[1]));
+
+
+            let f1 = objectiveFunc(p1);
+            let f2 = objectiveFunc(p2);
+            let f3 = objectiveFunc(p3);
+
+             // Store initial simplex with Z values
+            simplexPath.push([
+                {x: p1[0], y: p1[1], z: f1},
+                {x: p2[0], y: p2[1], z: f2},
+                {x: p3[0], y: p3[1], z: f3}
+            ]);
+
+
+            // Sort points by function value (f1 <= f2 <= f3)
+            let points = [{p: p1, f: f1}, {p: p2, f: f2}, {p: p3, f: f3}];
+            points.sort((a, b) => a.f - b.f);
+
+            p1 = points[0].p; f1 = points[0].f; // Best point
+            p2 = points[1].p; f2 = points[1].f; // Second best
+            p3 = points[2].p; f3 = points[2].f; // Worst point
+
+
+            for (let iter = 0; iter < maxIter; iter++) {
+                // Check convergence (size of the simplex)
+                // Using average edge length squared as a metric
+                const edge12_sq = Math.pow(p2[0] - p1[0], 2) + Math.pow(p2[1] - p1[1], 2);
+                const edge13_sq = Math.pow(p3[0] - p1[0], 2) + Math.pow(p3[1] - p1[1], 2);
+                const edge23_sq = Math.pow(p3[0] - p2[0], 2) + Math.pow(p3[1] - p2[1], 2);
+                const avg_edge_length = Math.sqrt((edge12_sq + edge13_sq + edge23_sq) / 3);
+
+
+                if (avg_edge_length < tol) {
+                    break; // Converged
+                }
+
+                // Centroid of the best n points (p1 and p2 in 2D)
+                const pc = [(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2];
+
+                // Reflection
+                const pr = [pc[0] + alpha * (pc[0] - p3[0]), pc[1] + alpha * (pc[1] - p3[1])];
+                 // Clamp reflected point to [0, 1] domain
+                pr[0] = Math.max(0, Math.min(1, pr[0]));
+                pr[1] = Math.max(0, Math.min(1, pr[1]));
+                const fr = objectiveFunc(pr);
+
+                 // Record reflected point (optional, can add to path if needed)
+                // simplexPath.push([p1, p2, pr].map(p => ({x: p[0], y: p[1], z: objectiveFunc(p)})));
+
+
+                if (fr < f1) {
+                    // Expansion
+                    const pe = [pc[0] + gamma * (pr[0] - pc[0]), pc[1] + gamma * (pr[1] - pc[1])];
+                     // Clamp expanded point to [0, 1] domain
+                    pe[0] = Math.max(0, Math.min(1, pe[0]));
+                    pe[1] = Math.max(0, Math.min(1, pe[1]));
+                    const fe = objectiveFunc(pe);
+
+                    if (fe < fr) {
+                        // Replace worst point (p3) with expanded point (pe)
+                        p3 = pe; f3 = fe;
+                    } else {
+                        // Replace worst point (p3) with reflected point (pr)
+                        p3 = pr; f3 = fr;
+                    }
+                } else if (fr < f2) {
+                    // Reflection is better than second worst but not best
+                    // Replace worst point (p3) with reflected point (pr)
+                    p3 = pr; f3 = fr;
+                } else {
+                    // Contraction
+                    if (fr < f3) { // Outside contraction
+                        const poc = [pc[0] + rho * (pr[0] - pc[0]), pc[1] + rho * (pr[1] - pc[1])];
+                         // Clamp outside contraction point to [0, 1] domain
+                        poc[0] = Math.max(0, Math.min(1, poc[0]));
+                        poc[1] = Math.max(0, Math.min(1, poc[1]));
+                        const foc = objectiveFunc(poc);
+
+                        if (foc < fr) {
+                            // Replace worst point (p3) with outside contraction point (poc)
+                            p3 = poc; f3 = foc;
+                        } else {
+                            // Shrink
+                            p2 = [p1[0] + sigma * (p2[0] - p1[0]), p1[1] + sigma * (p2[1] - p1[1])];
+                            p3 = [p1[0] + sigma * (p3[0] - p1[0]), p1[1] + sigma * (p3[1] - p1[1])];
+                             // Clamp shrunk points
+                            p2[0] = Math.max(0, Math.min(1, p2[0])); p2[1] = Math.max(0, Math.min(1, p2[1]));
+                            p3[0] = Math.max(0, Math.min(1, p3[0])); p3[1] = Math.max(0, Math.min(1, p3[1]));
+                            f2 = objectiveFunc(p2);
+                            f3 = objectiveFunc(p3);
+                        }
+                    } else { // Inside contraction
+                         const pic = [pc[0] + rho * (p3[0] - pc[0]), pc[1] + rho * (p3[1] - pc[1])];
+                          // Clamp inside contraction point to [0, 1] domain
+                        pic[0] = Math.max(0, Math.min(1, pic[0]));
+                        pic[1] = Math.max(0, Math.min(1, pic[1]));
+                        const fic = objectiveFunc(pic);
+
+                         if (fic < f3) {
+                             // Replace worst point (p3) with inside contraction point (pic)
+                             p3 = pic; f3 = fic;
+                         } else {
+                             // Shrink
+                             p2 = [p1[0] + sigma * (p2[0] - p1[0]), p1[1] + sigma * (p2[1] - p1[1])];
+                             p3 = [p1[0] + sigma * (p3[0] - p1[0]), p3[1] + sigma * (p3[1] - p1[1])];
+                             // Clamp shrunk points
+                            p2[0] = Math.max(0, Math.min(1, p2[0])); p2[1] = Math.max(0, Math.min(1, p2[1]));
+                            p3[0] = Math.max(0, Math.min(1, p3[0])); p3[1] = Math.max(0, Math.min(1, p3[1]));
+                             f2 = objectiveFunc(p2);
+                             f3 = objectiveFunc(p3);
+                         }
+                    }
+                }
+
+                // Re-sort points after the step
+                points = [{p: p1, f: f1}, {p: p2, f: f2}, {p: p3, f: f3}];
+                points.sort((a, b) => a.f - b.f);
+
+                p1 = points[0].p; f1 = points[0].f;
+                p2 = points[1].p; f2 = points[1].f;
+                p3 = points[2].p; f3 = points[2].f;
+
+                 // Store current simplex state with Z values
+                simplexPath.push([
+                     {x: p1[0], y: p1[1], z: f1},
+                     {x: p2[0], y: p2[1], z: f2},
+                     {x: p3[0], y: p3[1], z: f3}
+                ]);
+            }
+
+            // Return the best point and the path of simplex states
+            return { x: p1[0], y: p1[1], z: f1, simplexPath: simplexPath };
+        }
+
+
+        // --- 3D to 2D Projection (Isometric) ---
+        // Projects a 3D point (x, y, z) onto a 2D canvas coordinate (screenX, screenY)
+        // x, y are expected in [0, 1], z is terrain height
+        function project3Dto2D(x, y, z) {
+            // Center the terrain in the [0, 1] range before scaling/rotating
+            const centeredX = x - 0.5;
+            const centeredY = y - 0.5;
+
+            // Apply rotation around X axis (using currentViewAngleX)
+            const rotatedY = centeredY * Math.cos(currentViewAngleX) - z * Math.sin(currentViewAngleX);
+            const rotatedZ = centeredY * Math.sin(currentViewAngleX) + z * Math.cos(currentViewAngleX);
+
+            // Apply rotation around Z axis (using currentViewAngleZ)
+            const finalX = centeredX * Math.cos(currentViewAngleZ) - rotatedY * Math.sin(currentViewAngleZ);
+            const finalY = centeredX * Math.sin(currentViewAngleZ) + rotatedY * Math.cos(currentViewAngleZ);
+            const finalZ = rotatedZ; // Z is not used for screen position in isometric, but kept for depth sorting if needed
+
+            // Scale and translate to canvas coordinates (using currentScale)
+            let screenX = canvas.width / 2 + finalX * currentScale;
+            // Invert Y axis for screen coordinates (canvas y increases downwards)
+            // Add a vertical offset to position the terrain nicely
+            let screenY = canvas.height / 2 - finalY * currentScale + 100; // Vertical offset
+
+            // Apply pan offset
+            screenX += panX;
+            screenY += panY;
+
+
+            // Return projected coordinates and the final Z for potential depth sorting
+            return { x: screenX, y: screenY, z: finalZ };
+        }
+
+
+        // --- Initialize Simulation ---
+        function initializeSimulation() {
+            // Use Randomized Chebyshev parameters for generation
+            terrain = generateTerrain2D(terrainGridSize, numChebyshevTerms, maxChebyshevDegreeN, maxChebyshevDegreeM, terrainAmplitude);
+
+            // Initialize drops
+            drops = [];
+            // Find max Z in the generated terrain for starting height
+            let maxZ = -Infinity; // Initialize with negative infinity
+             for (let i = 0; i < terrainGridSize; i++) {
+                for (let j = 0; j < terrainGridSize; j++) {
+                    // Added checks for terrain array existence and index validity
+                    if (terrain[i] && terrain[i][j] !== undefined && terrain[i][j] > maxZ) {
+                        maxZ = terrain[i][j];
+                    }
+                }
+             }
+             // If maxZ is still -Infinity (e.g., empty terrain), use a default startZ
+            const startZ = (maxZ === -Infinity) ? 1.0 : maxZ + 0.5;
+
+
+            for (let i = 0; i < numDrops; i++) {
+                drops.push({
+                    id: i, // Add an ID for tracking
+                    x: Math.random(), // Random x between 0 and 1
+                    y: Math.random(), // Random y between 0 and 1
+                    z: startZ,
+                    state: 'falling', // 'falling', 'optimizing', 'sliding', 'settled'
+                    targetX: null, // Will store the minimum found by Nelder-Mead
+                    targetY: null,
+                    targetZ: null,
+                    nmSimplexPath: [], // Array to store simplex states
+                    nmPathStep: 0 // Step index for animating the simplex path
+                });
+            }
+             // Removed lines that reset navigation variables
+             updateInfoBox(); // Update info box on reset
+        }
+
+        // --- Drawing Functions ---
+
+        function drawTerrain() {
+            // Use the full terrain mesh drawing
+            ctx.strokeStyle = '#999'; // Terrain line color
+            ctx.lineWidth = 0.5;
+
+            // Draw grid lines along X
+            for (let i = 0; i < terrainGridSize; i++) {
+                ctx.beginPath();
+                const startX = i / (terrainGridSize - 1);
+                const startY = 0;
+                // Use getTerrainHeight for Z - ensure it's called with valid [0, 1] range
+                let startZ = getTerrainHeight(startX, startY);
+                let projected = project3Dto2D(startX, startY, startZ);
+                ctx.moveTo(projected.x, projected.y);
+
+                for (let j = 1; j < terrainGridSize; j++) {
+                    const currentX = i / (terrainGridSize - 1);
+                    const currentY = j / (terrainGridSize - 1);
+                     // Use getTerrainHeight for Z - ensure it's called with valid [0, 1] range
+                    let currentZ = getTerrainHeight(currentX, currentY);
+                    projected = project3Dto2D(currentX, currentY, currentZ);
+                    ctx.lineTo(projected.x, projected.y);
+                }
+                ctx.stroke();
+            }
+
+            // Draw grid lines along Y
+             for (let j = 0; j < terrainGridSize; j++) {
+                ctx.beginPath();
+                const startX = 0;
+                const startY = j / (terrainGridSize - 1);
+                 // Use getTerrainHeight for Z - ensure it's called with valid [0, 1] range
+                let startZ = getTerrainHeight(startX, startY);
+                let projected = project3Dto2D(startX, startY, startZ);
+                ctx.moveTo(projected.x, projected.y);
+
+                for (let i = 1; i < terrainGridSize; i++) {
+                    const currentX = i / (terrainGridSize - 1);
+                    const currentY = j / (terrainGridSize - 1);
+                     // Use getTerrainHeight for Z - ensure it's called with valid [0, 1] range
+                    let currentZ = getTerrainHeight(currentX, currentY);
+                    projected = project3Dto2D(currentX, currentY, currentZ);
+                    ctx.lineTo(projected.x, projected.y);
+                }
+                ctx.stroke();
+            }
+        }
+
+         function drawDrops() {
+            // Sort drops by projected Z for correct drawing order (drops further away drawn first)
+            const sortedDrops = [...drops].sort((a, b) => {
+                 const projA = project3Dto2D(a.x, a.y, a.z);
+                 const projB = project3Dto2D(b.x, b.y, b.z);
+                 return projA.z - projB.z; // Sort by projected Z
+            });
+
+            sortedDrops.forEach(drop => {
+                const projected = project3Dto2D(drop.x, drop.y, drop.z);
+
+                // Draw Nelder-Mead simplex path if available and drop is sliding/settled
+                if ((drop.state === 'sliding' || drop.state === 'settled') && drop.nmSimplexPath && drop.nmSimplexPath.length > 0) {
+                     ctx.strokeStyle = 'rgba(0, 128, 0, 0.5)'; // Semi-transparent green for simplex lines
+                     ctx.lineWidth = 1;
+                     const stepsToDraw = drop.state === 'sliding' ? drop.nmPathStep : drop.nmSimplexPath.length; // Draw up to current step while sliding, all when settled
+
+                     for (let i = 0; i < stepsToDraw; i++) {
+                         const simplex = drop.nmSimplexPath[i]; // Get the simplex points for this step
+
+                         // Project simplex points
+                         const p1_proj = project3Dto2D(simplex[0].x, simplex[0].y, simplex[0].z);
+                         const p2_proj = project3Dto2D(simplex[1].x, simplex[1].y, simplex[1].z);
+                         const p3_proj = project3Dto2D(simplex[2].x, simplex[2].y, simplex[2].z);
+
+                         // Draw the simplex triangle
+                         ctx.beginPath();
+                         ctx.moveTo(p1_proj.x, p1_proj.y);
+                         ctx.lineTo(p2_proj.x, p2_proj.y);
+                         ctx.lineTo(p3_proj.x, p3_proj.y);
+                         ctx.closePath(); // Close the triangle
+                         ctx.stroke();
+
+                          // Draw simplex points as dots
+                         ctx.fillStyle = 'rgba(0, 128, 0, 0.8)'; // Opaque green for points
+                         [p1_proj, p2_proj, p3_proj].forEach(p => {
+                             ctx.beginPath();
+                             ctx.arc(p.x, p.y, 2, 0, Math.PI * 2); // Draw a smaller circle for simplex point
+                             ctx.fill();
+                         });
+                     }
+                }
+
+
+                // Draw the main drop circle
+                ctx.beginPath();
+                ctx.arc(projected.x, projected.y, 4, 0, Math.PI * 2); // Draw a circle for the drop
+
+                // Set color based on state
+                let color = 'blue'; // Falling or Sliding
+                if (drop.state === 'settled') {
+                    color = 'red'; // Settled
+                } else if (drop.state === 'optimizing') {
+                    color = 'purple'; // Optimizing (briefly)
+                }
+                ctx.fillStyle = color;
+                ctx.fill();
+
+            });
+        }
+
+        function draw() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw terrain and drops
+            drawTerrain();
+            drawDrops();
+
+            // --- Visual Animation Heartbeat ---
+            // Change canvas border color slightly each frame to show animation is running
+            const hue = (frameCount * 5) % 360; // Cycle through hues faster
+            canvas.style.borderColor = `hsl(${hue}, 70%, 50%)`;
+            frameCount++; // Increment frame counter
+        }
+
+         // --- Update Info Box ---
+        function updateInfoBox() {
+            const optimizingDrop = drops.find(d => d.state === 'optimizing');
+            if (optimizingDrop) {
+                dropStateSpan.textContent = 'Optimizing (Nelder-Mead)';
+                optimizingDropIndexSpan.textContent = optimizingDrop.id;
+            } else {
+                 const slidingDrop = drops.find(d => d.state === 'sliding');
+                 const fallingDrop = drops.find(d => d.state === 'falling');
+                 // Check if all drops are settled
+                 const allSettled = drops.length > 0 && drops.every(d => d.state === 'settled');
+
+                 if (fallingDrop) {
+                     dropStateSpan.textContent = 'Falling';
+                 } else if (slidingDrop) {
+                     dropStateSpan.textContent = 'Sliding';
+                 } else if (allSettled) {
+                     dropStateSpan.textContent = 'All Settled';
+                 }
+                 else {
+                     // Default state if none of the above (e.g., before start)
+                     dropStateSpan.textContent = 'Idle';
+                 }
+
+
+                 optimizingDropIndexSpan.textContent = '-';
+            }
+             // Update view info in the info box
+            if (viewAngleXSpan) viewAngleXSpan.textContent = currentViewAngleX.toFixed(2);
+            if (viewAngleZSpan) viewAngleZSpan.textContent = currentViewAngleZ.toFixed(2);
+            if (scaleValueSpan) scaleValueSpan.textContent = currentScale.toFixed(2);
+            if (panXSpan) panXSpan.textContent = panX.toFixed(1);
+            if (panYSpan) panYSpan.textContent = panY.toFixed(1);
+        }
+
+
+        // --- Animation Loop ---
+        function update() {
+             let optimizingDropFound = false; // Flag to optimize only one drop per frame
+
+            drops.forEach(drop => {
+                switch (drop.state) {
+                    case 'falling':
+                        drop.z -= dropSpeed;
+                        const groundZ = getTerrainHeight(drop.x, drop.y);
+                        if (drop.z <= groundZ) {
+                            drop.z = groundZ;
+                             // Clamp x, y to [0, 1] just in case they somehow drifted
+                            drop.x = Math.max(0, Math.min(1, drop.x));
+                            drop.y = Math.max(0, Math.min(1, drop.y));
+                            drop.state = 'optimizing'; // Transition to optimizing state
+                            // Nelder-Mead will run in the next update cycle for this drop
+                        }
+                        break;
+
+                    case 'optimizing':
+                         if (!optimizingDropFound) { // Only optimize one drop per frame for visualization clarity
+                            optimizingDropFound = true; // Mark that we are optimizing a drop this frame
+
+                            // Run 2D Nelder-Mead to find the minimum and get the simplex path
+                            const result = nelderMead2D(
+                                (p) => getTerrainHeight(p[0], p[1]), // Objective function takes [x, y]
+                                [drop.x, drop.y], // Initial guess is the drop's landing [x, y]
+                                {
+                                    tolerance: nm_tolerance,
+                                    maxIterations: nm_maxIterations,
+                                    alpha: nm_alpha,
+                                    gamma: nm_gamma,
+                                    rho: nm_rho,
+                                    sigma: nm_sigma
+                                }
+                            );
+
+                            drop.targetX = result.x;
+                            drop.targetY = result.y;
+                            drop.targetZ = result.z; // Store target Z as well
+                            drop.nmSimplexPath = result.simplexPath; // Store the simplex path steps
+                            drop.nmPathStep = 0; // Reset path step index for drawing animation
+                            drop.state = 'sliding'; // Transition to sliding state
+                        }
+                        // If another drop is already optimizing this frame, this one waits until next frame
+                        break;
+
+                    case 'sliding':
+                        // Animate drawing the NM simplex path steps
+                        if (drop.nmPathStep < drop.nmSimplexPath.length) {
+                            drop.nmPathStep++;
+                        }
+
+                        const dx = drop.targetX - drop.x;
+                        const dy = drop.targetY - drop.y;
+                        const distance2D = Math.sqrt(dx * dx + dy * dy); // 2D distance in x-y plane
+
+                        if (distance2D < 0.005) { // Use a small threshold for snapping in x-y plane
+                             drop.x = drop.targetX;
+                             drop.y = drop.targetY;
+                             drop.z = drop.targetZ; // Snap to target Z as well
+                             drop.state = 'settled'; // Drop has settled at the target
+                        } else {
+                            // Move towards the target in the x-y plane
+                            // Avoid division by zero if distance is zero (shouldn't happen with threshold but good practice)
+                            const moveX = (distance2D === 0) ? 0 : (dx / distance2D) * slideSpeed;
+                            const moveY = (distance2D === 0) ? 0 : (dy / distance2D) * slideSpeed;
+
+
+                            drop.x += moveX;
+                            drop.y += moveY;
+
+                            // Clamp x, y to [0, 1]
+                            drop.x = Math.max(0, Math.min(1, drop.x));
+                            drop.y = Math.max(0, Math.min(1, drop.y));
+
+                            // Update z to stay on the landscape at the new (x, y) position
+                            drop.z = getTerrainHeight(drop.x, drop.y);
+                        }
+                        break;
+
+                    case 'settled':
+                        // Drop is settled, do nothing
+                        break;
+                }
+            });
+
+             updateInfoBox(); // Update info box after processing drops
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        // --- Event Listeners ---
+        startButton.addEventListener('click', () => {
+            if (!animationFrameId) { // Only start if not already running
+                initializeSimulation(); // Generate new terrain and drops
+                gameLoop();
+                startButton.disabled = true;
+                stopButton.disabled = false;
+            }
+        });
+
+        stopButton.addEventListener('click', () => {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+            startButton.disabled = false;
+            stopButton.disabled = true;
+             updateInfoBox(); // Update info box on stop
+        });
+
+        resetButton.addEventListener('click', () => {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+            initializeSimulation(); // Generate new terrain and drops
+            draw(); // Draw the initial state
+            startButton.disabled = false;
+            stopButton.disabled = true;
+        });
+
+        // --- Touch Navigation Event Listeners ---
+        canvas.addEventListener('touchstart', (event) => {
+            event.preventDefault(); // Prevent default touch behaviors like scrolling/zooming
+
+            if (event.touches.length === 1) {
+                // Single touch for rotation
+                lastTouch1X = event.touches[0].clientX;
+                lastTouch1Y = event.touches[0].clientY;
+                lastCentroidX = null; // Reset centroid tracking for single touch
+                lastCentroidY = null;
+                initialPinchDistance = null; // Reset pinch tracking
+                touchInfoSpan.textContent = 'Single touch (Rotate)';
+            } else if (event.touches.length === 2) {
+                // Two touches for combined pan and zoom
+                lastTouch1X = event.touches[0].clientX;
+                lastTouch1Y = event.touches[0].clientY;
+                lastTouch2X = event.touches[1].clientX;
+                lastTouch2Y = event.touches[1].clientY;
+                lastCentroidX = (lastTouch1X + lastTouch2X) / 2; // Record initial centroid
+                lastCentroidY = (lastTouch1Y + lastTouch2Y) / 2;
+                initialPinchDistance = Math.sqrt( // Record initial pinch distance
+                    Math.pow(lastTouch2X - lastTouch1X, 2) + Math.pow(lastTouch2Y - lastTouch1Y, 2)
+                );
+                 touchInfoSpan.textContent = 'Two touches (Pan/Zoom)';
+            } else {
+                 // Reset all touch tracking for unhandled touches
+                 lastTouch1X = null; lastTouch1Y = null;
+                 lastTouch2X = null; lastTouch2Y = null;
+                 lastCentroidX = null; lastCentroidY = null;
+                 initialPinchDistance = null;
+                 touchInfoSpan.textContent = `Unhandled touches (${event.touches.length})`;
+            }
+        });
+
+        canvas.addEventListener('touchmove', (event) => {
+            event.preventDefault(); // Prevent default touch behaviors
+
+            if (event.touches.length === 1 && lastTouch1X !== null) {
+                // Single touch for rotation
+                const touchX = event.touches[0].clientX;
+                const touchY = event.touches[0].clientY;
+
+                const deltaX = touchX - lastTouch1X;
+                const deltaY = touchY - lastTouch1Y;
+
+                // Apply smoothing factor to deltas
+                const smoothedDeltaX = deltaX * smoothingFactor;
+                const smoothedDeltaY = deltaY * smoothingFactor;
+
+
+                // Update view angles based on smoothed touch movement
+                currentViewAngleZ += smoothedDeltaX * rotationSpeed;
+                currentViewAngleX += smoothedDeltaY * rotationSpeed;
+
+                // Clamp viewAngleX to limit vertical tilt
+                currentViewAngleX = Math.max(-maxTiltAngle, Math.min(maxTiltAngle, currentViewAngleX));
+
+                lastTouch1X = touchX;
+                lastTouch1Y = touchY;
+
+                 touchInfoSpan.textContent = `Rotate: (${deltaX.toFixed(1)}, ${deltaY.toFixed(1)})`;
+
+
+            } else if (event.touches.length === 2 && lastCentroidX !== null) {
+                // Two touches for combined pan and zoom
+                const touch1X = event.touches[0].clientX;
+                const touch1Y = event.touches[0].clientY;
+                const touch2X = event.touches[1].clientX;
+                const touch2Y = event.touches[1].clientY;
+
+                // Calculate current centroid
+                const currentCentroidX = (touch1X + touch2X) / 2;
+                const currentCentroidY = (touch1Y + touch2Y) / 2;
+
+                // Calculate centroid delta for panning
+                const panDeltaX = currentCentroidX - lastCentroidX;
+                const panDeltaY = currentCentroidY - lastCentroidY;
+
+                // Update pan offset
+                panX += panDeltaX * panSpeed;
+                panY += panDeltaY * panSpeed;
+
+                // Calculate current pinch distance
+                const currentPinchDistance = Math.sqrt(
+                    Math.pow(touch2X - touch1X, 2) + Math.pow(touch2Y - touch1Y, 2)
+                );
+
+                // Calculate pinch delta for zooming
+                if (initialPinchDistance !== null && initialPinchDistance > 0) {
+                    const pinchScaleFactor = currentPinchDistance / initialPinchDistance;
+
+                    // Apply zoom based on the change in pinch distance
+                    currentScale = currentScale * (1 + (pinchScaleFactor - 1) * zoomSensitivity);
+
+
+                    // Clamp scale to a reasonable range
+                    currentScale = Math.max(50, Math.min(500, currentScale)); // Min scale 50, Max scale 500
+                }
+
+                // Update last touch positions and centroid for the next move event
+                lastTouch1X = touch1X;
+                lastTouch1Y = touch1Y;
+                lastTouch2X = touch2X;
+                lastTouch2Y = touch2Y;
+                lastCentroidX = currentCentroidX;
+                lastCentroidY = currentCentroidY;
+                initialPinchDistance = currentPinchDistance; // Update initial pinch distance for continuous zoom
+
+
+                // Add pan clamping after updating panX, panY
+                // Simple clamping: limit panX and panY based on canvas dimensions and scale
+                // The limits should be dynamic based on how much of the graph is visible
+                const graphWidth = (terrainGridSize - 1) * currentScale; // Approximate projected width
+                const graphHeight = (terrainGridSize - 1) * currentScale; // Approximate projected height
+
+                // Allow panning up to half the canvas size plus a fraction of graph size from the center
+                const panLimitX = (canvas.width / 2) + (graphWidth / 4); // Example limit
+                const panLimitY = (canvas.height / 2) + (graphHeight / 4); // Example limit
+
+
+                panX = Math.max(-panLimitX, Math.min(panLimitX, panX));
+                panY = Math.max(-panLimitY, Math.min(panLimitY, panY));
+
+
+                 touchInfoSpan.textContent = `Pan/Zoom: Scale=${currentScale.toFixed(1)}`;
+
+
+            } else {
+                 // If touch count changes unexpectedly, reset tracking
+                 lastTouch1X = null; lastTouch1Y = null;
+                 lastTouch2X = null; lastTouch2Y = null;
+                 lastCentroidX = null; lastCentroidY = null;
+                 initialPinchDistance = null;
+                 touchInfoSpan.textContent = `Tracking reset (${event.touches.length} touches)`;
+            }
+
+
+             // Redraw the scene with the new view parameters
+             // Update info box immediately on touch move for feedback
+             updateInfoBox();
+             // Only redraw manually if simulation is stopped. If running, RAF handles it.
+             if (!animationFrameId) {
+                 draw();
+            }
+        });
+
+        canvas.addEventListener('touchend', (event) => {
+            event.preventDefault(); // Prevent default touch behaviors
+
+            // Reset touch state if no touches remain
+            if (event.touches.length === 0) {
+                lastTouch1X = null; lastTouch1Y = null;
+                lastTouch2X = null; lastTouch2Y = null;
+                lastCentroidX = null; lastCentroidY = null;
+                initialPinchDistance = null;
+                touchInfoSpan.textContent = 'No touch';
+            } else {
+                 // If some touches remain, update tracking for those touches
+                 // This is important for handling multi-touch where one finger is lifted
+                 if (event.touches.length === 1) {
+                     lastTouch1X = event.touches[0].clientX;
+                     lastTouch1Y = event.touches[0].clientY;
+                     lastTouch2X = null; lastTouch2Y = null; // Clear second touch if it was lifted
+                     lastCentroidX = null; lastCentroidY = null; // Clear centroid tracking
+                     initialPinchDistance = null; // Clear pinch tracking
+                     touchInfoSpan.textContent = 'Single touch remaining (Rotate)';
+                 }
+                 // If more than 2 touches were active and now only 2 remain, re-initialize 2-finger tracking
+                 // This case is more complex and might require more sophisticated state management
+                 // For simplicity, we'll reset if the touch count isn't 0 or 1 after touchend
+                 if (event.touches.length > 1) {
+                      lastTouch1X = event.touches[0].clientX;
+                      lastTouch1Y = event.touches[0].clientY;
+                      lastTouch2X = event.touches[1].clientX;
+                      lastTouch2Y = event.touches[1].clientY;
+                      lastCentroidX = (lastTouch1X + lastTouch2X) / 2;
+                      lastCentroidY = (lastTouch1Y + lastTouch2Y) / 2;
+                      initialPinchDistance = Math.sqrt(
+                         Math.pow(lastTouch2X - lastTouch1X, 2) + Math.pow(lastTouch2Y - lastTouch1Y, 2)
+                      );
+                      touchInfoSpan.textContent = 'Two touches remaining (Pan/Zoom)';
+                 }
+            }
+
+
+             // Redraw one last time after touch ends if simulation is stopped
+             if (!animationFrameId) {
+                 draw();
+             }
+        });
+
+         canvas.addEventListener('touchcancel', (event) => {
+            event.preventDefault(); // Prevent default touch behaviors
+
+            // Reset all touch state on cancel
+            lastTouch1X = null; lastTouch1Y = null;
+            lastTouch2X = null; lastTouch2Y = null;
+            lastCentroidX = null; lastCentroidY = null;
+            initialPinchDistance = null;
+            touchInfoSpan.textContent = 'Touch cancelled';
+
+             // Redraw one last time after touch is cancelled if simulation is stopped
+             if (!animationFrameId) {
+                 draw();
+             }
+        });
+
+
+        // Initial setup
+        initializeSimulation();
+        draw(); // Draw the initial state
+        updateInfoBox(); // Initial info box update
+    </script>
+</body>
+</html>
