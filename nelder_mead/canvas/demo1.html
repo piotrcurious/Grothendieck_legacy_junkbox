@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Chebyshev Landscape</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background-color: #f0f0f0;
+            font-family: sans-serif;
+            padding: 20px;
+        }
+        canvas {
+            border: 1px solid #ccc;
+            background-color: #fff;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            touch-action: none; /* Prevent default touch actions */
+        }
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            font-size: 1rem;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <h1 class="text-2xl font-bold mb-4">Interactive Chebyshev Landscape Simulation</h1>
+
+    <canvas id="landscapeCanvas" width="800" height="400"></canvas>
+
+    <div class="controls">
+        <button id="startButton">Start Simulation</button>
+        <button id="stopButton" disabled>Stop Simulation</button>
+        <button id="resetButton">Reset Simulation</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('landscapeCanvas');
+        const ctx = canvas.getContext('2d');
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const resetButton = document.getElementById('resetButton');
+
+        // --- Simulation Parameters ---
+        const numDrops = 50; // Number of water drops
+        const numCoeffs = 10; // Number of Chebyshev coefficients
+        const landscapePoints = 500; // Resolution of the landscape curve
+        const dropSpeed = 0.005; // Speed of falling drops
+        const slideSpeed = 0.005; // Speed of sliding drops (adjusted slightly)
+        const landscapeOffset = 0.05; // Minimum y-value for the landscape
+        const slopeCheckDelta = 0.001; // Small delta for approximating slope
+        const convergenceThreshold = 0.002; // Slope threshold to consider drop settled
+
+        let animationFrameId = null;
+        let drops = [];
+        let landscape = [];
+        let landscapeMinY = 0; // To store the minimum y value of the generated landscape
+
+        // --- Chebyshev Polynomial Function ---
+        // Calculates the nth Chebyshev polynomial of the first kind T_n(x)
+        // using the recurrence relation: T_n(x) = 2xT_{n-1}(x) - T_{n-2}(x)
+        // T_0(x) = 1, T_1(x) = x
+        function chebyshev(n, x) {
+            if (n === 0) return 1;
+            if (n === 1) return x;
+
+            let t0 = 1;
+            let t1 = x;
+            for (let i = 2; i <= n; i++) {
+                let tn = 2 * x * t1 - t0;
+                t0 = t1;
+                t1 = tn;
+            }
+            return t1;
+        }
+
+        // --- Generate Chebyshev Landscape ---
+        function generateLandscape(coeffs) {
+            const landscapeData = [];
+            let minY = Infinity;
+            for (let i = 0; i <= landscapePoints; i++) {
+                const x = i / landscapePoints; // x from 0 to 1
+                let y = 0;
+                // Calculate y using the sum of Chebyshev polynomials with coefficients
+                for (let j = 0; j < coeffs.length; j++) {
+                    // Map x from [0, 1] to [-1, 1] for the standard Chebyshev domain
+                    const mappedX = 2 * x - 1;
+                    y += coeffs[j] * chebyshev(j, mappedX);
+                }
+                landscapeData.push({ x: x, y: y });
+                if (y < minY) {
+                    minY = y;
+                }
+            }
+            // Store the minimum y before offsetting
+            landscapeMinY = minY;
+
+            // Apply offset to shift the landscape up
+            const offset = landscapeOffset - landscapeMinY;
+            for(let i = 0; i < landscapeData.length; i++) {
+                landscapeData[i].y += offset;
+            }
+
+            return landscapeData;
+        }
+
+        // --- Get Landscape Height at X ---
+        // Finds the y-value on the landscape for a given x using linear interpolation
+        function getLandscapeHeight(x) {
+            // Clamp x to the landscape domain [0, 1]
+            const clampedX = Math.max(0, Math.min(1, x));
+            // Calculate the index in the landscape array
+            const index = clampedX * landscapePoints;
+            const index1 = Math.floor(index);
+            const index2 = Math.ceil(index);
+
+            if (index1 === index2) {
+                return landscape[index1].y;
+            } else {
+                // Linear interpolation between two points
+                const p1 = landscape[index1];
+                const p2 = landscape[index2];
+                // Avoid division by zero if points are identical
+                if (p2.x === p1.x) return p1.y;
+                const alpha = (clampedX - p1.x) / (p2.x - p1.x);
+                return p1.y + alpha * (p2.y - p1.y);
+            }
+        }
+
+         // --- Approximate Landscape Slope at X ---
+         // Approximates the slope of the landscape at a given x using a small delta
+        function getLandscapeSlope(x) {
+            // Check points slightly to the left and right
+            const x_left = Math.max(0, x - slopeCheckDelta);
+            const x_right = Math.min(1, x + slopeCheckDelta);
+
+            const y_left = getLandscapeHeight(x_left);
+            const y_right = getLandscapeHeight(x_right);
+
+            // Calculate the difference in x (handle edge cases where x_left/x_right are clamped)
+            const dx = x_right - x_left;
+
+            if (dx === 0) return 0; // Flat if delta movement is impossible (at edges)
+
+            const dy = y_right - y_left;
+
+            return dy / dx; // Rise over run
+        }
+
+
+        // --- Initialize Simulation ---
+        function initializeSimulation() {
+            // Generate random coefficients
+            const coeffs = Array.from({ length: numCoeffs }, () => (Math.random() - 0.5) * 0.6);
+            landscape = generateLandscape(coeffs);
+
+            // Initialize drops
+            drops = [];
+            // Start drops at a y position slightly above the maximum possible landscape height
+            const maxY = Math.max(...landscape.map(p => p.y));
+            const startY = maxY + 0.2; // Start 0.2 units above the highest point
+            for (let i = 0; i < numDrops; i++) {
+                drops.push({
+                    x: Math.random(), // Random x between 0 and 1
+                    y: startY,
+                    reachedLand: false,
+                    // No need for a fixed targetX/Y anymore
+                    isSettled: false // New flag to indicate if the drop has stopped sliding
+                });
+            }
+        }
+
+        // --- Drawing Functions ---
+
+        function drawLandscape() {
+            ctx.beginPath();
+            // Scale points to canvas size
+            ctx.moveTo(landscape[0].x * canvas.width, canvas.height - landscape[0].y * canvas.height);
+            for (let i = 1; i < landscape.length; i++) {
+                ctx.lineTo(landscape[i].x * canvas.width, canvas.height - landscape[i].y * canvas.height);
+            }
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        function drawDrops() {
+            drops.forEach(drop => {
+                const displayX = drop.x * canvas.width;
+                const displayY = canvas.height - drop.y * canvas.height;
+
+                ctx.beginPath();
+                ctx.arc(displayX, displayY, 3, 0, Math.PI * 2); // Draw a circle for the drop
+
+                // Change color if settled
+                ctx.fillStyle = drop.isSettled ? 'red' : 'blue';
+                ctx.fill();
+            });
+        }
+
+        function draw() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw landscape and drops
+            drawLandscape();
+            drawDrops();
+        }
+
+        // --- Animation Loop ---
+        function update() {
+            drops.forEach(drop => {
+                if (!drop.reachedLand) {
+                    // Drop is falling
+                    drop.y -= dropSpeed;
+
+                    const groundY = getLandscapeHeight(drop.x);
+
+                    if (drop.y <= groundY) {
+                        // Drop has landed
+                        drop.y = groundY;
+                        drop.reachedLand = true;
+                        drop.isSettled = false; // Not settled yet, just landed
+                    }
+                } else if (!drop.isSettled) {
+                    // Drop has landed and is sliding downhill
+                    const slope = getLandscapeSlope(drop.x);
+
+                    // Check if the slope is close to zero
+                    if (Math.abs(slope) < convergenceThreshold) {
+                        drop.isSettled = true; // Drop has settled in a local minimum
+                    } else {
+                        // Move horizontally in the direction opposite to the slope
+                        // If slope > 0, move left (decrease x)
+                        // If slope < 0, move right (increase x)
+                        const moveDirection = -Math.sign(slope); // -1 for positive slope, 1 for negative slope
+                        drop.x += moveDirection * slideSpeed;
+
+                        // Clamp x to [0, 1]
+                        drop.x = Math.max(0, Math.min(1, drop.x));
+
+                        // Update y to stay on the landscape at the new x position
+                        drop.y = getLandscapeHeight(drop.x);
+                    }
+                }
+                // If drop.isSettled is true, it doesn't move
+            });
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        // --- Event Listeners ---
+        startButton.addEventListener('click', () => {
+            if (!animationFrameId) { // Only start if not already running
+                initializeSimulation(); // Generate new landscape and drops
+                gameLoop();
+                startButton.disabled = true;
+                stopButton.disabled = false;
+            }
+        });
+
+        stopButton.addEventListener('click', () => {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+            startButton.disabled = false;
+            stopButton.disabled = true;
+        });
+
+        resetButton.addEventListener('click', () => {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+            initializeSimulation(); // Generate new landscape and drops
+            draw(); // Draw the initial state
+            startButton.disabled = false;
+            stopButton.disabled = true;
+        });
+
+        // Initial setup
+        initializeSimulation();
+        draw(); // Draw the initial state
+
+    </script>
+</body>
+</html>
