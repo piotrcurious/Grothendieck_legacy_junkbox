@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Chebyshev Landscape</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background-color: #f0f0f0;
+            font-family: sans-serif;
+            padding: 20px;
+        }
+        canvas {
+            border: 1px solid #ccc;
+            background-color: #fff;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            touch-action: none; /* Prevent default touch actions */
+        }
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            font-size: 1rem;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .info-box {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <h1 class="text-2xl font-bold mb-4">Interactive Chebyshev Landscape Simulation (Nelder-Mead Visualization)</h1>
+
+    <canvas id="landscapeCanvas" width="800" height="400"></canvas>
+
+    <div class="controls">
+        <button id="startButton">Start Simulation</button>
+        <button id="stopButton" disabled>Stop Simulation</button>
+        <button id="resetButton">Reset Simulation</button>
+    </div>
+
+    <div class="info-box">
+        Drop State: <span id="dropState">Waiting...</span><br>
+        Optimizing Drop Index: <span id="optimizingDropIndex">-</span>
+    </div>
+
+
+    <script>
+        const canvas = document.getElementById('landscapeCanvas');
+        const ctx = canvas.getContext('2d');
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const resetButton = document.getElementById('resetButton');
+        const dropStateSpan = document.getElementById('dropState');
+        const optimizingDropIndexSpan = document.getElementById('optimizingDropIndex');
+
+
+        // --- Simulation Parameters ---
+        const numDrops = 50; // Number of water drops
+        const numCoeffs = 10; // Number of Chebyshev coefficients
+        const landscapePoints = 500; // Resolution of the landscape curve
+        const dropSpeed = 0.005; // Speed of falling drops
+        const slideSpeed = 0.01; // Speed of sliding drops
+        const landscapeOffset = 0.05; // Minimum y-value for the landscape
+
+        // Nelder-Mead Parameters (for 1D)
+        const nm_tolerance = 1e-4; // Tolerance for convergence
+        const nm_maxIterations = 100; // Maximum iterations for Nelder-Mead
+        // Nelder-Mead coefficients (standard values)
+        const nm_alpha = 1.0; // Reflection
+        const nm_gamma = 2.0; // Expansion
+        const nm_rho = 0.5;   // Contraction
+        const nm_sigma = 0.5; // Shrink
+
+        let animationFrameId = null;
+        let drops = [];
+        let landscape = [];
+        let landscapeMinY = 0; // To store the minimum y value of the generated landscape
+
+        // --- Chebyshev Polynomial Function ---
+        // Calculates the nth Chebyshev polynomial of the first kind T_n(x)
+        // using the recurrence relation: T_n(x) = 2xT_{n-1}(x) - T_{n-2}(x)
+        // T_0(x) = 1, T_1(x) = x
+        function chebyshev(n, x) {
+            if (n === 0) return 1;
+            if (n === 1) return x;
+
+            let t0 = 1;
+            let t1 = x;
+            for (let i = 2; i <= n; i++) {
+                let tn = 2 * x * t1 - t0;
+                t0 = t1;
+                t1 = tn;
+            }
+            return t1;
+        }
+
+        // --- Generate Chebyshev Landscape ---
+        function generateLandscape(coeffs) {
+            const landscapeData = [];
+            let minY = Infinity;
+            for (let i = 0; i <= landscapePoints; i++) {
+                const x = i / landscapePoints; // x from 0 to 1
+                let y = 0;
+                // Calculate y using the sum of Chebyshev polynomials with coefficients
+                for (let j = 0; j < coeffs.length; j++) {
+                    // Map x from [0, 1] to [-1, 1] for the standard Chebyshev domain
+                    const mappedX = 2 * x - 1;
+                    y += coeffs[j] * chebyshev(j, mappedX);
+                }
+                landscapeData.push({ x: x, y: y });
+                if (y < minY) {
+                    minY = y;
+                }
+            }
+            // Store the minimum y before offsetting
+            landscapeMinY = minY;
+
+            // Apply offset to shift the landscape up
+            const offset = landscapeOffset - landscapeMinY;
+            for(let i = 0; i < landscapeData.length; i++) {
+                landscapeData[i].y += offset;
+            }
+
+            return landscapeData;
+        }
+
+        // --- Get Landscape Height at X ---
+        // Finds the y-value on the landscape for a given x using linear interpolation
+        // This serves as the objective function for Nelder-Mead
+        function getLandscapeHeight(x) {
+            // Clamp x to the landscape domain [0, 1]
+            const clampedX = Math.max(0, Math.min(1, x));
+            // Calculate the index in the landscape array
+            const index = clampedX * landscapePoints;
+            const index1 = Math.floor(index);
+            const index2 = Math.ceil(index);
+
+            if (index1 === index2) {
+                return landscape[index1].y;
+            } else {
+                // Linear interpolation between two points
+                const p1 = landscape[index1];
+                const p2 = landscape[index2];
+                 // Avoid division by zero if points are identical
+                if (p2.x === p1.x) return p1.y;
+                const alpha = (clampedX - p1.x) / (p2.x - p1.x);
+                return p1.y + alpha * (p2.y - p1.y);
+            }
+        }
+
+        // --- 1D Nelder-Mead Optimization ---
+        // Finds a local minimum of the objective function using the Nelder-Mead method in 1D.
+        // Records the points visited during the search.
+        // objectiveFunc: The function to minimize (takes x, returns y)
+        // initialGuess: The starting x value
+        // options: { tolerance, maxIterations, alpha, gamma, rho, sigma }
+        // Returns { x: minimum_x, y: minimum_y, path: [{x, y}, ...] }
+        function nelderMead1D(objectiveFunc, initialGuess, options) {
+            const tol = options.tolerance || 1e-4;
+            const maxIter = options.maxIterations || 100;
+            const alpha = options.alpha || 1.0; // Reflection
+            const gamma = options.gamma || 2.0; // Expansion
+            const rho = options.rho || 0.5;   // Contraction
+            const sigma = options.sigma || 0.5; // Shrink
+
+            const path = []; // Array to store visited points
+
+            // Initialize simplex (2 points in 1D)
+            // Start with the initial guess and a slightly perturbed point
+            let p1 = initialGuess;
+            let p2 = initialGuess + (initialGuess === 0 ? 0.01 : initialGuess * 0.01); // Perturb slightly
+
+            // Ensure points are within bounds [0, 1]
+            p1 = Math.max(0, Math.min(1, p1));
+            p2 = Math.max(0, Math.min(1, p2));
+
+            let f1 = objectiveFunc(p1);
+            let f2 = objectiveFunc(p2);
+
+            // Store initial simplex points
+            path.push({x: p1, y: f1});
+            path.push({x: p2, y: f2});
+
+            // Sort points so p1 is the best (lowest function value)
+            if (f1 > f2) {
+                [p1, p2] = [p2, p1]; // Swap points
+                [f1, f2] = [f2, f1]; // Swap function values
+            }
+
+            for (let iter = 0; iter < maxIter; iter++) {
+                // Check convergence
+                if (Math.abs(p1 - p2) < tol) {
+                    break; // Converged
+                }
+
+                // Centroid (midpoint in 1D)
+                const pc = p1; // In 1D, the centroid of a 2-point simplex is just the best point
+
+                // Reflection
+                const pr = pc + alpha * (pc - p2); // Reflect p2 across pc
+                const fr = objectiveFunc(pr);
+                path.push({x: pr, y: fr}); // Record reflected point
+
+                if (fr < f1) {
+                    // Expansion
+                    const pe = pc + gamma * (pr - pc);
+                    const fe = objectiveFunc(pe);
+                    path.push({x: pe, y: fe}); // Record expanded point
+
+                    if (fe < fr) {
+                        p2 = pe; // Expansion is better
+                        f2 = fe;
+                    } else {
+                        p2 = pr; // Reflection is better
+                        f2 = fr;
+                    }
+                } else if (fr < f2) {
+                    // Reflection is between p1 and p2
+                    p2 = pr;
+                    f2 = fr;
+                } else {
+                    // Contraction
+                    if (fr < f2) { // Outside contraction
+                        const poc = pc + rho * (pr - pc);
+                        const foc = objectiveFunc(poc);
+                         path.push({x: poc, y: foc}); // Record outside contraction point
+
+                        if (foc < fr) {
+                            p2 = poc;
+                            f2 = foc;
+                        } else {
+                            // Shrink
+                            const p2_old = p2; // Store old p2 before shrink
+                            p2 = p1 + sigma * (p2 - p1);
+                            f2 = objectiveFunc(p2);
+                             path.push({x: p2, y: f2}); // Record shrink point
+                        }
+                    } else { // Inside contraction
+                         const pic = pc + rho * (p2 - pc); // Contract p2 towards pc
+                         const fic = objectiveFunc(pic);
+                         path.push({x: pic, y: fic}); // Record inside contraction point
+
+                         if (fic < f2) {
+                             p2 = pic;
+                             f2 = fic;
+                         } else {
+                             // Shrink
+                             const p2_old = p2; // Store old p2 before shrink
+                             p2 = p1 + sigma * (p2 - p1);
+                             f2 = objectiveFunc(p2);
+                             path.push({x: p2, y: f2}); // Record shrink point
+                         }
+                    }
+                }
+
+                 // Ensure p1 is still the best after updates
+                 if (f1 > f2) {
+                    [p1, p2] = [p2, p1]; // Swap points
+                    [f1, f2] = [f2, f1]; // Swap function values
+                }
+            }
+
+            return { x: p1, y: f1, path: path }; // Return the best point found and the path
+        }
+
+
+        // --- Initialize Simulation ---
+        function initializeSimulation() {
+            // Generate random coefficients
+            const coeffs = Array.from({ length: numCoeffs }, () => (Math.random() - 0.5) * 0.6);
+            landscape = generateLandscape(coeffs);
+
+            // Initialize drops
+            drops = [];
+            // Start drops at a y position slightly above the maximum possible landscape height
+            const maxY = Math.max(...landscape.map(p => p.y));
+            const startY = maxY + 0.2; // Start 0.2 units above the highest point
+            for (let i = 0; i < numDrops; i++) {
+                drops.push({
+                    id: i, // Add an ID for tracking
+                    x: Math.random(), // Random x between 0 and 1
+                    y: startY,
+                    state: 'falling', // 'falling', 'optimizing', 'sliding', 'settled'
+                    targetX: null, // Will store the minimum found by Nelder-Mead
+                    targetY: null,
+                    nmPath: [], // Array to store points visited by Nelder-Mead
+                    nmPathIndex: 0 // Index to animate drawing the path points
+                });
+            }
+             updateInfoBox(); // Update info box on reset
+        }
+
+        // --- Drawing Functions ---
+
+        function drawLandscape() {
+            ctx.beginPath();
+            // Scale points to canvas size
+            ctx.moveTo(landscape[0].x * canvas.width, canvas.height - landscape[0].y * canvas.height);
+            for (let i = 1; i < landscape.length; i++) {
+                ctx.lineTo(landscape[i].x * canvas.width, canvas.height - landscape[i].y * canvas.height);
+            }
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        function drawDrops() {
+            drops.forEach(drop => {
+                const displayX = drop.x * canvas.width;
+                const displayY = canvas.height - drop.y * canvas.height;
+
+                ctx.beginPath();
+                ctx.arc(displayX, displayY, 3, 0, Math.PI * 2); // Draw a circle for the drop
+
+                // Set color based on state
+                let color = 'blue'; // Falling or Sliding
+                if (drop.state === 'settled') {
+                    color = 'red'; // Settled
+                } else if (drop.state === 'optimizing') {
+                    color = 'purple'; // Optimizing (briefly)
+                }
+                ctx.fillStyle = color;
+                ctx.fill();
+
+                 // Draw Nelder-Mead path points if available and drop is sliding/settled
+                if ((drop.state === 'sliding' || drop.state === 'settled') && drop.nmPath && drop.nmPath.length > 0) {
+                    ctx.fillStyle = 'rgba(0, 128, 0, 0.5)'; // Semi-transparent green for path points
+                    const pointsToDraw = drop.state === 'sliding' ? drop.nmPathIndex : drop.nmPath.length; // Draw up to current index while sliding, all when settled
+
+                    for (let i = 0; i < pointsToDraw; i++) {
+                         const pathPoint = drop.nmPath[i];
+                         const pathDisplayX = pathPoint.x * canvas.width;
+                         const pathDisplayY = canvas.height - pathPoint.y * canvas.height;
+                         ctx.beginPath();
+                         ctx.arc(pathDisplayX, pathDisplayY, 2, 0, Math.PI * 2); // Draw a smaller circle for path point
+                         ctx.fill();
+                    }
+                }
+            });
+        }
+
+        function draw() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw landscape and drops
+            drawLandscape();
+            drawDrops();
+        }
+
+        // --- Update Info Box ---
+        function updateInfoBox() {
+            const optimizingDrop = drops.find(d => d.state === 'optimizing');
+            if (optimizingDrop) {
+                dropStateSpan.textContent = 'Optimizing (Nelder-Mead)';
+                optimizingDropIndexSpan.textContent = optimizingDrop.id;
+            } else {
+                 const slidingDrop = drops.find(d => d.state === 'sliding');
+                 const fallingDrop = drops.find(d => d.state === 'falling');
+                 if (fallingDrop) {
+                     dropStateSpan.textContent = 'Falling';
+                 } else if (slidingDrop) {
+                     dropStateSpan.textContent = 'Sliding';
+                 } else {
+                     dropStateSpan.textContent = 'Settled';
+                 }
+                 optimizingDropIndexSpan.textContent = '-';
+            }
+        }
+
+
+        // --- Animation Loop ---
+        function update() {
+            let optimizingDropFound = false;
+
+            drops.forEach(drop => {
+                switch (drop.state) {
+                    case 'falling':
+                        drop.y -= dropSpeed;
+                        const groundY = getLandscapeHeight(drop.x);
+                        if (drop.y <= groundY) {
+                            drop.y = groundY;
+                            drop.state = 'optimizing'; // Transition to optimizing state
+                            // Nelder-Mead will run in the next update cycle for this drop
+                        }
+                        break;
+
+                    case 'optimizing':
+                         if (!optimizingDropFound) { // Only optimize one drop per frame for visualization clarity
+                            optimizingDropFound = true; // Mark that we are optimizing a drop this frame
+                            // Run Nelder-Mead to find the minimum and get the path
+                            const result = nelderMead1D(getLandscapeHeight, drop.x, {
+                                tolerance: nm_tolerance,
+                                maxIterations: nm_maxIterations,
+                                alpha: nm_alpha,
+                                gamma: nm_gamma,
+                                rho: nm_rho,
+                                sigma: nm_sigma
+                            });
+
+                            drop.targetX = result.x;
+                            drop.targetY = result.y;
+                            drop.nmPath = result.path; // Store the path
+                            drop.nmPathIndex = 0; // Reset path index for drawing animation
+                            drop.state = 'sliding'; // Transition to sliding state
+                        }
+                        // If another drop is already optimizing this frame, this one waits until next frame
+                        break;
+
+                    case 'sliding':
+                        // Animate drawing the NM path points
+                        if (drop.nmPathIndex < drop.nmPath.length) {
+                            drop.nmPathIndex++;
+                        }
+
+                        const dx = drop.targetX - drop.x;
+                        const dy = drop.targetY - drop.y;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+
+                        if (distance < 0.005) { // Use a small threshold for snapping
+                             drop.x = drop.targetX;
+                             drop.y = drop.targetY;
+                             drop.state = 'settled'; // Drop has settled at the target
+                        } else {
+                            // Move towards the target
+                            const moveX = (dx / distance) * slideSpeed;
+                            drop.x += moveX;
+
+                            // Clamp x to [0, 1]
+                            drop.x = Math.max(0, Math.min(1, drop.x));
+
+                            // Update y to stay on the landscape at the new x position
+                            drop.y = getLandscapeHeight(drop.x);
+                        }
+                        break;
+
+                    case 'settled':
+                        // Drop is settled, do nothing
+                        break;
+                }
+            });
+
+            updateInfoBox(); // Update info box after processing drops
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        // --- Event Listeners ---
+        startButton.addEventListener('click', () => {
+            if (!animationFrameId) { // Only start if not already running
+                initializeSimulation(); // Generate new landscape and drops
+                gameLoop();
+                startButton.disabled = true;
+                stopButton.disabled = false;
+            }
+        });
+
+        stopButton.addEventListener('click', () => {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+            startButton.disabled = false;
+            stopButton.disabled = true;
+            updateInfoBox(); // Update info box on stop
+        });
+
+        resetButton.addEventListener('click', () => {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+            initializeSimulation(); // Generate new landscape and drops
+            draw(); // Draw the initial state
+            startButton.disabled = false;
+            stopButton.disabled = true;
+        });
+
+        // Initial setup
+        initializeSimulation();
+        draw(); // Draw the initial state
+
+    </script>
+</body>
+</html>
