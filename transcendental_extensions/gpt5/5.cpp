@@ -373,4 +373,120 @@ std::vector<Rule> defaultRules() {
 
     // 6) x * 1 -> x
     ExprPtr pat_mul1a = B(NodeKind::MUL, V("?x"), C(1,0,"1"));
-    ExprPtr pat_mul1b = B(NodeKind::MUL, C(1,0_
+    ExprPtr pat_mul1b = B(NodeKind::MUL, C(1,0,"1"), V("?x"));
+    rules.emplace_back(pat_mul1a, V("?x"));
+    rules.emplace_back(pat_mul1b, V("?x"));
+
+    // 7) x + 0 -> x  and 0 + x -> x
+    ExprPtr pat_add0a = B(NodeKind::ADD, V("?x"), C(0,0,"0"));
+    ExprPtr pat_add0b = B(NodeKind::ADD, C(0,0,"0"), V("?x"));
+    rules.emplace_back(pat_add0a, V("?x"));
+    rules.emplace_back(pat_add0b, V("?x"));
+
+    // 8) constant folding for binary ops: we will implement these as pattern -> special replacement marker
+    // We'll capture generic binary nodes and apply constant folding in a post-processing pass.
+    // To keep simple, we don't add a pattern here.
+
+    // 9) pow(e, log(?x)) -> ?x   (e ^ log(x) -> x)
+    ExprPtr pat_pow_e_log = B(NodeKind::POW, E(), U("log", V("?x")));
+    ExprPtr repl_pow_e_log = V("?x");
+    rules.emplace_back(pat_pow_e_log, repl_pow_e_log);
+
+    // Other rules can be appended similarly...
+    return rules;
+}
+
+// Apply constant folding across the tree
+ExprPtr constantFoldingWalk(const ExprPtr& node) {
+    if (!node) return node;
+    if (node->kind == NodeKind::CONST || node->kind == NodeKind::VAR) return node;
+    if (node->kind == NodeKind::UNARY) {
+        ExprPtr L = constantFoldingWalk(node->left);
+        // if L is CONST -> evaluate function if known
+        if (L->kind==NodeKind::CONST) {
+            cplx val = L->value;
+            if (!L->label.empty()) labelToValue(L->label, val);
+            auto it = morphisms().find(node->label);
+            if (it != morphisms().end()) {
+                cplx res = it->second(val);
+                return Expr::Const(res, "");
+            }
+        }
+        return Expr::Unary(node->label, L);
+    } else {
+        ExprPtr L = constantFoldingWalk(node->left);
+        ExprPtr R = constantFoldingWalk(node->right);
+        ExprPtr rebuilt = Expr::Binary(node->kind, L, R);
+        ExprPtr folded = tryConstantFoldBinary(rebuilt);
+        return folded;
+    }
+}
+
+// Helper to run rewrite rules then constant-fold and repeat until fixed point
+ExprPtr simplify(const ExprPtr& root, const std::vector<Rule>& rules, int maxIter=50) {
+    ExprPtr cur = root;
+    for (int i=0;i<maxIter;++i) {
+        ExprPtr next = rewriteFixedPoint(cur, rules, 1);
+        // after rewriting apply constant folding across tree
+        next = constantFoldingWalk(next);
+        if (toString(next) == toString(cur)) break;
+        cur = next;
+    }
+    return cur;
+}
+
+// ---------------- Example usage ----------------
+int main() {
+    auto rules = defaultRules();
+
+    // Example A: Euler: exp(i * π) -> -1
+    ExprPtr euler = U("exp", B(NodeKind::MUL, I(), PI()));
+    std::cout << "Original Euler:   " << toString(euler) << "\n";
+    ExprPtr simple_euler = simplify(euler, rules);
+    std::cout << "Simplified Euler: " << toString(simple_euler) << "\n";
+    try { std::cout << "Numeric: " << toString(Expr::Const(evaluateNumeric(simple_euler), "")) << "\n"; } catch (...) {}
+
+    std::cout << "\n";
+
+    // Example B: log(exp(x)) -> x
+    ExprPtr x = V("x");
+    ExprPtr logexp = U("log", U("exp", x));
+    std::cout << "Original log(exp(x)): " << toString(logexp) << "\n";
+    std::cout << "After rewrite:         " << toString(simplify(logexp, rules)) << "\n\n";
+
+    // Example C: exp(log(e ^ log(y)))  -> should reduce to y (through pow and exp/log rules)
+    ExprPtr y = V("y");
+    ExprPtr logy = U("log", y);
+    ExprPtr pow_e_logy = B(NodeKind::POW, E(), logy);            // e ^ log(y)
+    ExprPtr wrapped = U("exp", U("log", pow_e_logy));             // exp(log(e^log(y)))
+    std::cout << "Original complicated: " << toString(wrapped) << "\n";
+    ExprPtr simplifiedWrapped = simplify(wrapped, rules);
+    std::cout << "Simplified complicated: " << toString(simplifiedWrapped) << "\n\n";
+
+    // Example D: algebraic cleanups: (π + e) * 1 -> (π + e)
+    ExprPtr sum_pi_e = B(NodeKind::ADD, PI(), E());
+    ExprPtr times_one = B(NodeKind::MUL, sum_pi_e, ONE());
+    std::cout << "Original times_one: " << toString(times_one) << "\n";
+    ExprPtr s_times_one = simplify(times_one, rules);
+    std::cout << "Simplified times_one: " << toString(s_times_one) << "\n";
+    try {
+        cplx v = evaluateNumeric(s_times_one);
+        std::cout << "Numeric value approx: (" << v.real() << (v.imag()>=0?"+":"") << v.imag() << "i)\n";
+    } catch (const std::exception& ex) {
+        std::cout << "Numeric eval failed: " << ex.what() << "\n";
+    }
+
+    std::cout << "\n";
+
+    // Example E: sin(0) -> 0
+    ExprPtr sin0 = U("sin", ZERO());
+    std::cout << "sin(0) -> " << toString(simplify(sin0, rules)) << "\n";
+
+    // You can append rules:
+    // e.g. add rule: cos(π) -> -1  -> pattern U("cos", PI()) -> Const(-1)
+    rules.emplace_back(U("cos", PI()), C(-1,0,"-1"));
+    ExprPtr cospi = U("cos", PI());
+    std::cout << "cos(pi) original: " << toString(cospi) << " -> " << toString(simplify(cospi, rules)) << "\n";
+
+    return 0;
+}
