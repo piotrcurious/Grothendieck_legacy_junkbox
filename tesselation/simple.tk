@@ -1,0 +1,376 @@
+#!/usr/bin/env wish
+#
+# tessellate_cyclotomic.tcl
+# Tcl/Tk demo: tessellation using cyclotomic polynomials and algebraic integer lattices
+#
+# Author: ChatGPT (example)
+# Usage: run with `wish tessellate_cyclotomic.tcl`
+#
+
+package require Tk
+
+# -------------------------
+# Utility: polynomial helpers
+# Polynomials represented as lists of coefficients: c0 c1 c2 ... (degree = length-1)
+# -------------------------
+
+proc poly_make_xpow {n} {
+    # returns x^n - 1
+    set coeffs [list]
+    for {set i 0} {$i <= $n} {incr i} {
+        lappend coeffs 0
+    }
+    # coeff of x^n = 1
+    set coeffs [lreplace $coeffs $n $n 1]
+    # coeff of x^0 = -1
+    set coeffs [lreplace $coeffs 0 0 -1]
+    return $coeffs
+}
+
+proc poly_trim {p} {
+    # remove trailing zeros (high-degree 0s)
+    set deg [expr {[llength $p] - 1}]
+    while {$deg > 0 && [lindex $p $deg] == 0} {
+        set p [lrange $p 0 [expr {$deg-1}]]
+        incr deg -1
+    }
+    return $p
+}
+
+proc poly_mul {a b} {
+    set la [llength $a]
+    set lb [llength $b]
+    set res [list]
+    for {set i 0} {$i < $la + $lb - 1} {incr i} { lappend res 0 }
+    for {set i 0} {$i < $la} {incr i} {
+        for {set j 0} {$j < $lb} {incr j} {
+            set ai [lindex $a $i]
+            set bj [lindex $b $j]
+            set idx [expr {$i + $j}]
+            set old [lindex $res $idx]
+            set new [expr {$old + $ai * $bj}]
+            set res [lreplace $res $idx $idx $new]
+        }
+    }
+    return [poly_trim $res]
+}
+
+proc poly_divide_exact {num den} {
+    # Long division; assumes exact division (no remainder)
+    # returns quotient list
+    set num [poly_trim $num]
+    set den [poly_trim $den]
+    set dn [llength $den]
+    set nn [llength $num]
+    if {$dn == 0} { error "division by zero polynomial" }
+    set res [list]
+    # make a copy of numerator (mutable)
+    set rem [list]
+    foreach c $num { lappend rem $c }
+    set deg_num [expr {[llength $rem] - 1}]
+    set deg_den [expr {$dn - 1}]
+    while {$deg_num >= $deg_den} {
+        set lead_num [lindex $rem $deg_num]
+        set lead_den [lindex $den $deg_den]
+        set qcoeff [expr {$lead_num / $lead_den}]
+        # place qcoeff at position deg_num - deg_den
+        set pos [expr {$deg_num - $deg_den}]
+        # ensure res has enough length
+        while {[llength $res] <= $pos} { lappend res 0 }
+        set res [lreplace $res $pos $pos $qcoeff]
+        # subtract qcoeff * den * x^pos from rem
+        for {set i 0} {$i < $dn} {incr i} {
+            set idx [expr {$i + $pos}]
+            set dcoeff [lindex $den $i]
+            set cur [lindex $rem $idx]
+            set new [expr {$cur - $qcoeff * $dcoeff}]
+            set rem [lreplace $rem $idx $idx $new]
+        }
+        set rem [poly_trim $rem]
+        set deg_num [expr {[llength $rem] - 1}]
+    }
+    # ensure remainder is zero
+    if {[llength $rem] > 1 || ([llength $rem]==1 && [lindex $rem 0] != 0)} {
+        error "polynomial division left non-zero remainder: remainder $rem"
+    }
+    # res currently sparse (lowest index = x^0). But we appended qcoeff by index; ensure full length
+    set res_len [expr {$deg_num - $deg_den + 1}]
+    # better: rebuild quotient of proper length (based on highest pos in res)
+    set maxpos -1
+    for {set i 0} {$i < [llength $res]} {incr i} {
+        if {[lindex $res $i] != 0} { set maxpos $i }
+    }
+    if {$maxpos == -1} { return [list 0] }
+    return $res
+}
+
+proc poly_to_string {p} {
+    set deg [expr {[llength $p] - 1}]
+    set parts {}
+    for {set i $deg} {$i >= 0} {incr i -1} {
+        set c [lindex $p $i]
+        if {$c == 0} continue
+        if {$i == 0} {
+            lappend parts [format "%d" $c]
+        } elseif {$i == 1} {
+            if {$c == 1} { lappend parts "x" } elseif {$c == -1} { lappend parts "-x" } else { lappend parts [format "%d*x" $c] }
+        } else {
+            if {$c == 1} { lappend parts "x^$i" } elseif {$c == -1} { lappend parts "-x^$i" } else { lappend parts [format "%d*x^%d" $c $i] }
+        }
+    }
+    return [join $parts " + "]
+}
+
+# -------------------------
+# Cyclotomic polynomial via recursive division:
+# Phi_1(x) = x-1
+# For n>1: Phi_n(x) = (x^n - 1) / prod_{d|n, d<n} Phi_d(x)
+# -------------------------
+proc divisors {n} {
+    set ds {}
+    for {set d 1} {$d <= $n} {incr d} {
+        if {$n % $d == 0} { lappend ds $d }
+    }
+    return $ds
+}
+
+# memoization table for computed phis
+array set PHI {}
+
+proc compute_phi {n} {
+    if {[info exists PHI($n)]} { return $PHI($n) }
+    if {$n == 1} {
+        set phi [list -1 1] ;# x - 1  => coefficients: [-1,1]
+        set PHI($n) $phi
+        return $phi
+    }
+    # x^n - 1
+    set poly [poly_make_xpow $n]
+    # divide by all Phi_d for proper divisors
+    foreach d [divisors $n] {
+        if {$d == $n} continue
+        set pd [compute_phi $d]
+        set poly [poly_divide_exact $poly $pd]
+    }
+    set PHI($n) $poly
+    return $poly
+}
+
+# -------------------------
+# Complex arithmetic helper (use lists {re im})
+# -------------------------
+proc c_new {re im} { list $re $im }
+proc cre {c} { lindex $c 0 }
+proc cim {c} { lindex $c 1 }
+proc c_add {a b} { list [expr {[cre $a] + [cre $b]}] [expr {[cim $a] + [cim $b]}] }
+proc c_sub {a b} { list [expr {[cre $a] - [cre $b]}] [expr {[cim $a] - [cim $b]}] }
+proc c_mul {a b} {
+    set ar [cre $a]; set ai [cim $a]
+    set br [cre $b]; set bi [cim $b]
+    return [list [expr {$ar*$br - $ai*$bi}] [expr {$ar*$bi + $ai*$br}]]
+}
+proc c_scale {a s} { list [expr {[cre $a] * $s}] [expr {[cim $a] * $s}] }
+proc c_abs {a} { expr {sqrt(([cre $a]*[cre $a])+([cim $a]*[cim $a]))} }
+proc c_rot_angle {theta} { list [expr {cos($theta)}] [expr {sin($theta)}] }
+proc c_to_pair {a} { list [format %.6f [cre $a]] [format %.6f [cim $a]] }
+
+# -------------------------
+# Lattice generators
+# - Z lattice: a + b i*0  (just real integer steps -> square grid)
+# - Gaussian integers: a + b*i  -> square lattice
+# - Eisenstein integers: a + b*omega, omega = e^{2π i / 3} = -1/2 + i*sqrt(3)/2 -> hex lattice
+# -------------------------
+proc lattice_point {type a b} {
+    if {$type == "Z"} {
+        return [list [expr {$a}] 0.0] ;# real coordinate only (use square)
+    } elseif {$type == "Gaussian"} {
+        return [c_new $a $b]
+    } elseif {$type == "Eisenstein"} {
+        # omega = -1/2 + i * sqrt(3)/2
+        set omega [c_new -0.5 [expr {sqrt(3.0)/2.0}]]
+        set ac [c_scale $omega $a]
+        set bc [c_scale $omega 0] ;# not used; compute as a + b*omega: but easier do a + b*omega2? Better to use a + b*omega
+        # compute a + b*omega
+        set aC [c_new $a 0]
+        set bomega [c_scale $omega $b]
+        return [c_add $aC $bomega]
+    }
+}
+
+# For Z (integer) lattice we will map a,b -> (a*step, b*step) straightforwardly
+proc lattice_xy {type a b step} {
+    if {$type == "Z"} {
+        return [list [expr {$a * $step}] [expr {$b * $step}]]
+    } elseif {$type == "Gaussian"} {
+        set c [lindex [lindex [list [c_new $a $b]] 0] 0] ;# workaround? simpler compute a + b*i:
+        set x [expr {$a * $step}]
+        set y [expr {$b * $step}]
+        return [list $x $y]
+    } elseif {$type == "Eisenstein"} {
+        # point = a + b*omega
+        set omega_re -0.5
+        set omega_im [expr {sqrt(3.0)/2.0}]
+        set x [expr {($a + $b * $omega_re) * $step}]
+        set y [expr {($b * $omega_im) * $step}]
+        return [list $x $y]
+    }
+}
+
+# -------------------------
+# GUI + drawing
+# -------------------------
+wm title . "Cyclotomic Tessellation demo"
+
+frame .controls -padx 6 -pady 6
+pack .controls -side top -fill x
+
+# controls
+label .controls.lbl -text "Choose n (polygon sides / cyclotomic index):"
+pack .controls.lbl -side left
+
+set N_var 6
+optionmenu .controls.nopt N_var {3 4 6 5 8 12} -width 4
+pack .controls.nopt -side left -padx 4
+
+label .controls.lbl2 -text "Lattice:"
+pack .controls.lbl2 -side left -padx 8
+set lattice_var "Eisenstein"
+optionmenu .controls.lattice lattice_var {Gaussian Eisenstein Z} -width 12
+pack .controls.lattice -side left -padx 4
+
+label .controls.lbl3 -text "Tile radius:"
+pack .controls.lbl3 -side left -padx 8
+set radius_var 20
+entry .controls.rent -textvariable radius_var -width 6
+pack .controls.rent -side left
+
+label .controls.lbl4 -text "Extent (tiles each axis):"
+pack .controls.lbl4 -side left -padx 8
+set extent_var 7
+entry .controls.ext -textvariable extent_var -width 4
+pack .controls.ext -side left
+
+button .controls.draw -text "Draw Tessellation" -command { draw_tessellation } 
+pack .controls.draw -side right -padx 6
+
+# canvas for drawing
+canvas .c -width 740 -height 520 -bg white -bd 2 -relief sunken
+pack .c -side top -padx 6 -pady 6
+
+# text widget show cyclotomic polynomial
+label .p_lbl -text "Cyclotomic polynomial Φ_n(x):"
+pack .p_lbl -side top -anchor w -padx 6
+text .p_text -height 4 -width 120 -wrap word
+pack .p_text -padx 6 -pady 2 -fill x
+.p_text configure -state disabled
+
+# helper: map complex plane coords to canvas coords
+proc to_canvas {x y} {
+    # canvas center
+    set W [expr {[winfo width .c]}]
+    set H [expr {[winfo height .c]}]
+    set cx [expr {$W / 2.0}]
+    set cy [expr {$H / 2.0}]
+    # y is up positive; canvas y grows down, so invert
+    set sx [expr {$cx + $x}]
+    set sy [expr {$cy - $y}]
+    return [list $sx $sy]
+}
+
+# compute a regular n-gon polygon (list of canvas coordinates) centered at (cx,cy) given radius and rotation
+proc regular_ngon_coords {n cx cy radius rot_deg} {
+    set coords {}
+    set rot [expr {($rot_deg * acos(-1)) / 180.0}]
+    for {set k 0} {$k < $n} {incr k} {
+        set theta [expr {2.0 * acos(-1) * $k / $n + $rot}]
+        set x [expr {$cx + $radius * cos($theta)}]
+        set y [expr {$cy + $radius * sin($theta)}]
+        # convert to canvas
+        set p [to_canvas $x $y]
+        lappend coords [lindex $p 0] [lindex $p 1]
+    }
+    return $coords
+}
+
+# main draw function
+proc draw_tessellation {} {
+    global N_var lattice_var radius_var extent_var
+    # clear canvas
+    .c delete all
+    set n $::N_var
+    set lattice $::lattice_var
+    set radius [expr {double($::radius_var)}]
+    set extent [expr {int($::extent_var)}]
+
+    # compute cyclotomic polynomial and show it
+    set phi [compute_phi $n]
+    set phi_str [poly_to_string $phi]
+    .p_text configure -state normal
+    .p_text delete 1.0 end
+    .p_text insert end [format "n = %d\nΦ_%d(x) = %s\n" $n $n $phi_str]
+    .p_text insert end "\nPrimitive root of unity: e^{2π i / n} = cos(2π/n) + i sin(2π/n)\n"
+    .p_text configure -state disabled
+
+    # central reference: show axes
+    set W [expr {[winfo width .c]}]
+    set H [expr {[winfo height .c]}]
+    .c create line 0 [expr {$H/2}] $W [expr {$H/2}] -fill black -stipple {}
+    .c create line [expr {$W/2}] 0 [expr {$W/2}] $H -fill black -stipple {}
+
+    # step (lattice spacing) choose based on radius
+    set step [expr {$radius * 2.2}]
+
+    # iterate over integer coordinates for lattice
+    for {set a -$extent} {$a <= $extent} {incr a} {
+        for {set b -$extent} {$b <= $extent} {incr b} {
+            # get lattice coords
+            set xy [lindex [lattice_xy $lattice $a $b $step] 0]
+            # lattice_xy returns list {x y}
+            set x [lindex [lattice_xy $lattice $a $b $step] 0]
+            set y [lindex [lattice_xy $lattice $a $b $step] 1]
+            # draw polygon with small rotation so polygons pack well
+            set coords [regular_ngon_coords $n $x $y $radius [expr {0}]]
+            # color by parity or a,b combination
+            set colindex [expr {($a + 2*$b) % 6}]
+            set cols {#f0a #a0d #8fb #fab #ada #9cf}
+            set col [lindex $cols [expr {abs($colindex)}]]
+            .c create polygon $coords -outline black -fill $col -width 1
+        }
+    }
+
+    # draw a circle at origin and annotate
+    set origin [to_canvas 0 0]
+    .c create oval [expr {[lindex $origin 0]-3}] [expr {[lindex $origin 1]-3}] [expr {[lindex $origin 0]+3}] [expr {[lindex $origin 1]+3}] -fill black
+    .c create text [expr {[lindex $origin 0]+12}] [expr {[lindex $origin 1]-12}] -text "origin" -anchor nw
+    # note: for Eisenstein lattice, show fundamental parallelogram
+    if {$lattice == "Eisenstein"} {
+        # show basis vectors for Eisenstein: 1 and omega
+        set omega_re -0.5
+        set omega_im [expr {sqrt(3.0)/2.0}]
+        set p1 [to_canvas [expr {1.0 * $step}] 0]
+        set p2 [to_canvas [expr {$omega_re * $step}] [expr {$omega_im * $step}]]
+        .c create line [lindex $origin 0] [lindex $origin 1] [lindex $p1 0] [lindex $p1 1] -fill black -width 2 -arrow last
+        .c create text [expr {[lindex $p1 0]+6}] [expr {[lindex $p1 1]-6}] -text "1" -anchor nw
+        .c create line [lindex $origin 0] [lindex $origin 1] [lindex $p2 0] [lindex $p2 1] -fill black -width 2 -arrow last
+        .c create text [expr {[lindex $p2 0]+6}] [expr {[lindex $p2 1]-6}] -text "ω" -anchor nw
+    } elseif {$lattice == "Gaussian"} {
+        set p1 [to_canvas [expr {1.0 * $step}] 0]
+        set p2 [to_canvas 0 [expr {1.0 * $step}]]
+        .c create line [lindex $origin 0] [lindex $origin 1] [lindex $p1 0] [lindex $p1 1] -fill black -width 2 -arrow last
+        .c create text [expr {[lindex $p1 0]+6}] [expr {[lindex $p1 1]-6}] -text "1" -anchor nw
+        .c create line [lindex $origin 0] [lindex $origin 1] [lindex $p2 0] [lindex $p2 1] -fill black -width 2 -arrow last
+        .c create text [expr {[lindex $p2 0]+6}] [expr {[lindex $p2 1]-6}] -text "i" -anchor nw
+    } else {
+        set p1 [to_canvas [expr {1.0 * $step}] 0]
+        set p2 [to_canvas 0 [expr {1.0 * $step}]]
+        .c create line [lindex $origin 0] [lindex $origin 1] [lindex $p1 0] [lindex $p1 1] -fill black -width 2 -arrow last
+        .c create text [expr {[lindex $p1 0]+6}] [expr {[lindex $p1 1]-6}] -text "1" -anchor nw
+        .c create line [lindex $origin 0] [lindex $origin 1] [lindex $p2 0] [lindex $p2 1] -fill black -width 2 -arrow last
+        .c create text [expr {[lindex $p2 0]+6}] [expr {[lindex $p2 1]-6}] -text "1 (y)" -anchor nw
+    }
+}
+
+# initial draw
+after 100 { draw_tessellation }
+
+# end of file
