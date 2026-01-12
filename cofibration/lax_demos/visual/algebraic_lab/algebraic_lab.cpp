@@ -5,6 +5,7 @@
 #include <FL/Fl_Value_Slider.H>
 #include <FL/Fl_Choice.H>
 #include <FL/Fl_Button.H>
+#include <FL/Fl_Check_Button.H>
 #include <FL/gl.h>
 #include <GL/glu.h>
 
