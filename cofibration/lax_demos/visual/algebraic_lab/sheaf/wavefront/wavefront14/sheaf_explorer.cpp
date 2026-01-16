@@ -1,0 +1,276 @@
+#include <FL/Fl.H>
+#include <FL/Fl_Double_Window.H>
+#include <FL/Fl_Gl_Window.H>
+#include <FL/Fl_Value_Slider.H>
+#include <FL/Fl_Check_Button.H>
+#include <FL/Fl_Button.H>
+#include <FL/Fl_Box.H>
+#include <FL/Fl_Group.H>
+#include <FL/gl.h>
+#include <GL/glu.h>
+
+#include <cmath>
+#include <vector>
+#include <complex>
+
+static constexpr float PI = 3.14159265359f;
+using Complex = std::complex<double>;
+
+// -----------------------------------------------------------------------------
+// Rigorous Density Matrix Dynamics (NaCl Lattice + Lindblad Bath)
+// -----------------------------------------------------------------------------
+struct QuantumSystem {
+    static const int N = 64; 
+    double L = 25.0;         
+    double dx = L / N;
+    double dk = 2.0 * PI / L;
+    
+    std::vector<std::vector<Complex>> rho_initial;
+    std::vector<std::vector<Complex>> rho;
+
+    void initialize(double x0, double p0, double sigma) {
+        rho_initial.assign(N, std::vector<Complex>(N, 0.0));
+        std::vector<Complex> psi(N);
+        for(int i=0; i<N; ++i) {
+            double x = -L/2.0 + i*dx;
+            double phase = p0 * x;
+            double env = exp(-pow(x-x0,2)/(4.0*sigma*sigma));
+            psi[i] = Complex(env * cos(phase), env * sin(phase));
+        }
+        for(int i=0; i<N; i++)
+            for(int j=0; j<N; j++)
+                rho_initial[i][j] = psi[i] * std::conj(psi[j]);
+        
+        rho = rho_initial;
+    }
+
+    QuantumSystem() {
+        initialize(-5.0, 2.5, 1.5);
+    }
+};
+
+class NumericalLvNSolver {
+public:
+    void step(QuantumSystem& s, double dt, double m_eff, double V_latt, double gamma) {
+        int N = s.N;
+        std::vector<std::vector<Complex>> d_rho(N, std::vector<Complex>(N, 0.0));
+
+        for(int i=0; i<N; i++) {
+            for(int j=0; j<N; j++) {
+                double xi = -s.L/2.0 + i*s.dx;
+                double xj = -s.L/2.0 + j*s.dx;
+                
+                double Vi = V_latt * cos(2.0 * PI * xi / 5.64); 
+                double Vj = V_latt * cos(2.0 * PI * xj / 5.64);
+
+                int im = (i-1+N)%N, ip = (i+1)%N;
+                int jm = (j-1+N)%N, jp = (j+1)%N;
+                
+                Complex kin_i = -(s.rho[ip][j] - 2.0*s.rho[i][j] + s.rho[im][j]) / (2.0 * m_eff * s.dx * s.dx);
+                Complex kin_j = (s.rho[i][jp] - 2.0*s.rho[i][j] + s.rho[i][jm]) / (2.0 * m_eff * s.dx * s.dx);
+                
+                d_rho[i][j] = -Complex(0, 1) * (kin_i + kin_j + (Vi - Vj) * s.rho[i][j]);
+                
+                if (i != j) {
+                    d_rho[i][j] -= gamma * pow(xi - xj, 2) * s.rho[i][j];
+                }
+            }
+        }
+
+        for(int i=0; i<N; i++)
+            for(int j=0; j<N; j++)
+                s.rho[i][j] += d_rho[i][j] * dt;
+    }
+
+    double get_wigner(const QuantumSystem& s, int x_idx, double p) {
+        Complex sum = 0;
+        int N = s.N;
+        for(int dy = -N/2; dy < N/2; dy++) {
+            int i1 = (x_idx + dy + N) % N;
+            int i2 = (x_idx - dy + N) % N;
+            double y = dy * s.dx;
+            sum += s.rho[i1][i2] * std::polar(1.0, -2.0 * p * y);
+        }
+        return sum.real() / N;
+    }
+};
+
+// -----------------------------------------------------------------------------
+// UI and View
+// -----------------------------------------------------------------------------
+class PhysicalWignerView : public Fl_Gl_Window {
+public:
+    QuantumSystem sys;
+    NumericalLvNSolver solver;
+    float rotX = 30, rotY = -40;
+    
+    // Physics State
+    float gamma = 0.02f, V0 = 1.5f, m = 0.5f;
+    float currentTime = 0.0f;
+    float prevTime = 0.0f;
+    
+    // Light Source Hyperparameters
+    float source_p0 = 2.5f;   // Central momentum
+    float source_sigma = 1.5f; // Packet width
+    float source_x0 = -5.0f;   // Start position
+
+    bool running = false;
+
+    PhysicalWignerView(int x, int y, int w, int h) : Fl_Gl_Window(x,y,w,h) {}
+
+    void reset_simulation() {
+        sys.initialize(source_x0, source_p0, source_sigma);
+        currentTime = 0.0f;
+        prevTime = 0.0f;
+        redraw();
+    }
+
+    void draw() override {
+        if (!valid()) {
+            glViewport(0, 0, w(), h());
+            glEnable(GL_DEPTH_TEST);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        }
+        glClearColor(0.005f, 0.005f, 0.015f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        glMatrixMode(GL_PROJECTION); glLoadIdentity();
+        gluPerspective(45, (float)w()/h(), 1, 1000);
+        glMatrixMode(GL_MODELVIEW); glLoadIdentity();
+        gluLookAt(115, 85, 135, 0, 0, 0, 0, 1, 0);
+        glRotatef(rotX, 1, 0, 0); glRotatef(rotY, 0, 1, 0);
+
+        if(running) {
+            currentTime += 0.05f;
+            solver.step(sys, 0.05, m, V0, gamma);
+            prevTime = currentTime;
+        } else {
+            if (std::abs(currentTime - prevTime) > 0.01f) {
+                sys.rho = sys.rho_initial;
+                double t = 0;
+                while(t < currentTime) {
+                    solver.step(sys, 0.05, m, V0, gamma);
+                    t += 0.05;
+                }
+                prevTime = currentTime;
+            }
+        }
+
+        glBegin(GL_LINES);
+        glColor4f(0.2f, 0.3f, 0.5f, 0.4f);
+        for(float i=-60; i<=60; i+=20) {
+            glVertex3f(i, 0, -60); glVertex3f(i, 0, 60);
+            glVertex3f(-60, 0, i); glVertex3f(60, 0, i);
+        }
+        glEnd();
+
+        int N = sys.N;
+        for(int i=0; i<N-1; i++) {
+            glBegin(GL_TRIANGLE_STRIP);
+            for(int j=0; j<N; j++) {
+                double p = (j - N/2) * sys.dk;
+                double w1 = solver.get_wigner(sys, i, p);
+                double w2 = solver.get_wigner(sys, i+1, p);
+                
+                auto color = [](double w) {
+                    if(w > 0) glColor4f(0.3f, 0.7f, 1.0f, (float)w*12.0f);
+                    else glColor4f(1.0f, 0.2f, 0.3f, (float)fabs(w)*12.0f);
+                };
+
+                color(w1); glVertex3f((i-N/2)*2.8f, (float)w1*110.0f, (float)p*25.0f);
+                color(w2); glVertex3f((i+1-N/2)*2.8f, (float)w2*110.0f, (float)p*25.0f);
+            }
+            glEnd();
+        }
+    }
+
+    int handle(int e) override {
+        static int lx, ly;
+        if(e == FL_PUSH) { lx = Fl::event_x(); ly = Fl::event_y(); return 1; }
+        if(e == FL_DRAG) {
+            rotY += (Fl::event_x()-lx); rotX += (Fl::event_y()-ly);
+            lx = Fl::event_x(); ly = Fl::event_y(); redraw(); return 1;
+        }
+        return Fl_Gl_Window::handle(e);
+    }
+};
+
+struct AppContext {
+    PhysicalWignerView* view;
+    Fl_Value_Slider* timeSlider;
+};
+
+int main() {
+    Fl_Double_Window* win = new Fl_Double_Window(1400, 900, "Rigorous NaCl Master Equation Solver v2.1");
+    PhysicalWignerView* view = new PhysicalWignerView(350, 0, 1050, 900);
+    
+    Fl_Group* ui = new Fl_Group(0, 0, 350, 900);
+    ui->box(FL_FLAT_BOX); ui->color(fl_rgb_color(12, 12, 22));
+
+    Fl_Box* title = new Fl_Box(20, 15, 310, 30, "SYSTEM DYNAMICS");
+    title->labelcolor(FL_WHITE); title->labelfont(FL_BOLD);
+
+    int y = 60;
+    auto create_slider = [&](const char* l, float min, float max, float def, float* v) {
+        auto s = new Fl_Value_Slider(20, y, 310, 20, l);
+        s->type(FL_HOR_NICE_SLIDER); s->bounds(min, max); s->value(def);
+        s->labelcolor(FL_WHITE); s->align(FL_ALIGN_TOP_LEFT); s->labelsize(12);
+        s->callback([](Fl_Widget* w, void* d){ 
+            *(float*)d = (float)((Fl_Value_Slider*)w)->value(); 
+        }, v);
+        y += 55;
+        return s;
+    };
+
+    Fl_Value_Slider* time_sld = create_slider("Evolution Time (τ)", 0.0f, 25.0f, 0.0f, &view->currentTime);
+    create_slider("Lattice Potential (V0)", 0.0f, 10.0f, 1.5f, &view->V0);
+    create_slider("Phonon Coupling (γ)", 0.0f, 0.5f, 0.02f, &view->gamma);
+    create_slider("Effective Mass (m*)", 0.1f, 5.0f, 0.5f, &view->m);
+
+    y += 10;
+    Fl_Box* stitle = new Fl_Box(20, y, 310, 30, "LIGHT SOURCE (PACKET)");
+    stitle->labelcolor(fl_rgb_color(150, 160, 200)); stitle->labelfont(FL_BOLD);
+    y += 40;
+
+    create_slider("Source Momentum (p0)", -5.0f, 5.0f, 2.5f, &view->source_p0);
+    create_slider("Packet Width (σ)", 0.5f, 5.0f, 1.5f, &view->source_sigma);
+    create_slider("Start Position (x0)", -10.0f, 10.0f, -5.0f, &view->source_x0);
+
+    auto btn_play = new Fl_Check_Button(20, y, 200, 25, "Live Simulation");
+    btn_play->labelcolor(FL_WHITE);
+    btn_play->callback([](Fl_Widget* w, void* d){ ((PhysicalWignerView*)d)->running = ((Fl_Check_Button*)w)->value(); }, view);
+    y += 40;
+
+    auto btn_reset = new Fl_Button(20, y, 150, 35, "Re-Init Source");
+    btn_reset->color(fl_rgb_color(40, 60, 100)); btn_reset->labelcolor(FL_WHITE);
+    btn_reset->callback([](Fl_Widget* w, void* d){ ((PhysicalWignerView*)d)->reset_simulation(); }, view);
+
+    auto btn_restart = new Fl_Button(180, y, 150, 35, "Restart τ=0");
+    btn_restart->color(fl_rgb_color(60, 40, 40)); btn_restart->labelcolor(FL_WHITE);
+    btn_restart->callback([](Fl_Widget* w, void* d){ 
+        PhysicalWignerView* v = (PhysicalWignerView*)d;
+        v->currentTime = 0;
+        v->sys.rho = v->sys.rho_initial;
+    }, view);
+
+    ui->end();
+
+    static AppContext ctx = { view, time_sld };
+    Fl::add_idle([](void* d){ 
+        AppContext* c = (AppContext*)d;
+        c->view->redraw();
+        if (c->view->running) {
+            c->timeSlider->value(c->view->currentTime);
+            // Clamp current time to slider max
+            if (c->view->currentTime >= c->timeSlider->maximum()) {
+                c->view->running = false;
+                // Update checkbox visually if possible, but simplicity first
+            }
+        }
+    }, &ctx);
+
+    win->resizable(view);
+    win->show();
+    return Fl::run();
+}

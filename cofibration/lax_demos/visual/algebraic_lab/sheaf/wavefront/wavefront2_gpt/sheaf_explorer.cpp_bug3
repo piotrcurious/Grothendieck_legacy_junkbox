@@ -1,0 +1,317 @@
+/*
+Sheaf Explorer — Consolidated, corrected version
+Single-file FLTK + OpenGL demo illustrating several sheaf/étale visualizations.
+This file replaces earlier drafts and fixes scoping and string literal issues.
+Compile with: g++ -std=c++17 sheaf_explorer.cpp -o sheaf_explorer -lfltk -lGL -lGLU
+*/
+
+#include <FL/Fl.H>
+#include <FL/Fl_Double_Window.H>
+#include <FL/Fl_Gl_Window.H>
+#include <FL/Fl_Choice.H>
+#include <FL/Fl_Value_Slider.H>
+#include <FL/Fl_Check_Button.H>
+#include <FL/Fl_Box.H>
+#include <FL/Fl_Group.H>
+#include <FL/gl.h>
+#include <GL/glu.h>
+
+#include <cmath>
+#include <vector>
+#include <memory>
+#include <complex>
+#include <string>
+#include <sstream>
+#include <algorithm>
+#include <iomanip>
+
+static constexpr double PI = 3.14159265358979323846;
+
+static inline double clampd(double x, double a, double b) { return x < a ? a : (x > b ? b : x); }
+static void hsv_to_rgb(double h, double s, double v, float &r, float &g, float &b) {
+    h = fmod(h, 1.0);
+    if (h < 0) h += 1.0;
+    int i = int(h * 6.0);
+    double f = h * 6.0 - i;
+    double p = v * (1.0 - s);
+    double q = v * (1.0 - s * f);
+    double t = v * (1.0 - s * (1.0 - f));
+    switch(i % 6) {
+        case 0: r = (float)v; g = (float)t; b = (float)p; break;
+        case 1: r = (float)q; g = (float)v; b = (float)p; break;
+        case 2: r = (float)p; g = (float)v; b = (float)t; break;
+        case 3: r = (float)p; g = (float)q; b = (float)v; break;
+        case 4: r = (float)t; g = (float)p; b = (float)v; break;
+        case 5: r = (float)v; g = (float)p; b = (float)q; break;
+    }
+}
+static void color_by_arg(const std::complex<double>& z, float alpha=1.0f) {
+    double arg = std::arg(z);
+    double hue = (arg + PI) / (2.0 * PI);
+    float r,g,b; hsv_to_rgb(hue, 0.9, 0.9, r,g,b);
+    glColor4f(r,g,b, alpha);
+}
+static void color_by_mod(const std::complex<double>& z, double minm, double maxm, float alpha=1.0f) {
+    double m = std::abs(z);
+    if (!std::isfinite(m) || m <= 0.0) { glColor4f(0.6f, 0.0f, 0.0f, alpha); return; }
+    double logm = log(m);
+    double t = (logm - minm) / (maxm - minm);
+    t = clampd(t, 0.0, 1.0);
+    float r,g,b; hsv_to_rgb(0.65 - 0.65*t, 0.85, 0.95, r,g,b);
+    glColor4f(r,g,b, alpha);
+}
+
+// ---------------- App State ----------------
+struct StalkParams { double alpha=1.0, beta=0.5, morph=0.0; };
+class SheafStrategy;
+struct AppState {
+    double rotX=20.0, rotY=-35.0;
+    int baseDim = 1; // 1 or 2
+    double u_pos = PI, u_width = PI/2.0;
+    double v_pos = PI, v_width = PI/2.0;
+    double section_val = 0.0;
+    StalkParams params;
+    SheafStrategy* current = nullptr;
+    bool showEtale = true;
+    bool showDifferentials = true;
+    bool animate = false;
+    double anim_t = 0.0;
+    int active_sheet = 0;
+    enum ColorMode { BY_ARG, BY_MOD, BY_HEIGHT } colorMode = BY_ARG;
+    int glyphMode = 0;
+};
+
+// ------------- Strategy base -----------------
+class SheafStrategy {
+public:
+    virtual ~SheafStrategy() {}
+    virtual void getPoint(double u, double v, double val, int sheet, double out[3], const StalkParams& p) = 0;
+    virtual void getTangent(double u, double v, double val, int sheet, double out[3], const StalkParams& p) {
+        double du = 1e-3 + 1e-3*fabs(p.alpha);
+        double p1[3], p2[3];
+        getPoint(u-du, v, val, sheet, p1, p);
+        getPoint(u+du, v, val, sheet, p2, p);
+        for(int i=0;i<3;i++) out[i] = (p2[i]-p1[i])/(2.0*du);
+    }
+    virtual double getMinVal() const { return -2.0; }
+    virtual double getMaxVal() const { return 2.0; }
+    virtual const char* getName() const = 0;
+    virtual const char* getDesc() const = 0;
+    virtual const char* getParamALabel() const { return "Alpha"; }
+    virtual const char* getParamBLabel() const { return "Beta"; }
+    virtual bool isMultiSheeted() const { return false; }
+    virtual int sheetsCount() const { return 1; }
+    virtual std::complex<double> evaluateComplex(double u, double v, double val, int sheet, const StalkParams& p) const { return std::complex<double>(0.0,0.0); }
+};
+
+// -------- Cantor Sheaf (robust, non-recursive) --------
+class CantorSheaf : public SheafStrategy {
+    double cantor_fn(double x, int depth) const {
+        if (!(x >= 0.0 && x <= 1.0)) { x = fmod(x, 1.0); if (x<0) x += 1.0; }
+        double res = 0.0, scale = 0.5;
+        for (int i=0;i<depth;i++) {
+            double xd = x * 3.0; int d = (int)floor(xd); x = xd - d;
+            if (d==1) return res + 0.5*scale;
+            int bit = d/2; res += bit * scale; scale *= 0.5;
+        }
+        res += x * scale; return res;
+    }
+public:
+    const char* getName() const override { return "Cantor-Lebesgue Sheaf"; }
+    const char* getDesc() const override { return "1D fractal singular support example."; }
+    void getPoint(double u, double v, double val, int sheet, double out[3], const StalkParams& p) override {
+        double r = 4.5;
+        double x = fmod(u / (2.0 * PI), 1.0); if (x<0) x+=1.0;
+        int depth = std::max(1, int(std::round(p.alpha * 6.0)));
+        double h = (cantor_fn(x, depth) - 0.5) * 4.0;
+        out[0] = r * cos(u);
+        out[1] = h + val * p.beta;
+        out[2] = r * sin(u);
+    }
+    std::complex<double> evaluateComplex(double u, double v, double val, int sheet, const StalkParams& p) const override {
+        double x = fmod(u / (2.0 * PI), 1.0); if (x<0) x+=1.0;
+        int depth = std::max(1, int(std::round(p.alpha * 6.0)));
+        double h = (cantor_fn(x, depth) - 0.5) * 4.0;
+        return std::complex<double>(h + val * p.beta, 0.0);
+    }
+};
+
+// -------- Optical Vortex Sheaf (phase singularities) -------
+class OpticalVortexSheaf : public SheafStrategy {
+public:
+    const char* getName() const override { return "Optical Vortex Sheaf"; }
+    const char* getDesc() const override { return "Phase singularities & vortex lines; multi-valued phase."; }
+    void getPoint(double u, double v, double val, int sheet, double out[3], const StalkParams& p) override {
+        double R = 4.5;
+        double angle = u; double radius = 0.5 + 0.3 * (1.0 + 0.5*sin(v));
+        int q = std::max(1, 1 + sheet);
+        std::complex<double> z = std::polar(radius, angle);
+        std::complex<double> field = std::pow(z, q) * std::exp(-radius*radius/(0.9*0.9));
+        out[0] = R * cos(angle) + 0.6 * std::real(field);
+        out[1] = std::arg(field);
+        out[2] = R * sin(angle) + 0.6 * std::imag(field);
+    }
+    std::complex<double> evaluateComplex(double u,double v,double val,int sheet,const StalkParams& p) const override {
+        double angle = u; double radius = 0.5 + 0.3 * (1.0 + 0.5*sin(v)); int q = std::max(1,1+sheet);
+        std::complex<double> z = std::polar(radius, angle);
+        return std::pow(z, q) * std::exp(-radius*radius/(0.9*0.9));
+    }
+    bool isMultiSheeted() const override { return true; }
+    int sheetsCount() const override { return 4; }
+};
+
+// -------- Simple Caustic Sheaf (stationary phase approx) --------
+class CausticSheaf : public SheafStrategy {
+public:
+    const char* getName() const override { return "Caustic / Catastrophe Sheaf"; }
+    const char* getDesc() const override { return "Envelope / cusp-like intensity singularities from ray families."; }
+    void getPoint(double u, double v, double val, int sheet, double out[3], const StalkParams& p) override {
+        double R = 4.5;
+        double upar = (u - PI) * 0.5 * p.alpha;
+        double vpar = (v - PI) * 0.5 * p.beta;
+        double t = 0.0;
+        for(int k=0;k<20;k++){ double f = 4*t*t*t + 2*upar*t + vpar; double df = 12*t*t + 2*upar; if (fabs(df)<1e-8) break; double dt = -f/df; if (!isfinite(dt)) break; t += dt; if (fabs(dt)<1e-9) break; }
+        double phase = t*t*t*t + upar*t*t + vpar*t + p.morph;
+        double amp = 1.0/(1.0 + fabs(4*t*t*t + 2*upar*t + vpar));
+        out[0] = R * cos(u) + 0.6 * amp * cos(phase);
+        out[1] = amp * 3.0;
+        out[2] = R * sin(u) + 0.6 * amp * sin(phase);
+    }
+    std::complex<double> evaluateComplex(double u,double v,double val,int sheet,const StalkParams& p) const override {
+        double upar = (u - PI) * 0.5 * p.alpha; double vpar = (v - PI) * 0.5 * p.beta;
+        double t = 0.0; for(int k=0;k<20;k++){ double f = 4*t*t*t + 2*upar*t + vpar; double df = 12*t*t + 2*upar; if (fabs(df)<1e-8) break; double dt = -f/df; if (!isfinite(dt)) break; t += dt; if (fabs(dt)<1e-9) break; }
+        double phase = t*t*t*t + upar*t*t + vpar*t; double amp = 1.0/(1.0 + fabs(4*t*t*t + 2*upar*t + vpar));
+        return std::polar(amp, phase);
+    }
+};
+
+// ------- Fiber Mode Sheaf (approx LP modes using J0 fallback) -------
+static double J0_approx(double x) { if (fabs(x) < 1e-6) return 1.0; return sin(x)/x; }
+class FiberModeSheaf : public SheafStrategy {
+public:
+    const char* getName() const override { return "Fiber Mode Sheaf (LP modes)"; }
+    const char* getDesc() const override { return "Approximates transverse fiber modes; nodal structure in stalks."; }
+    void getPoint(double u,double v,double val,int sheet,double out[3],const StalkParams& p) override {
+        double R = 4.5; double phi = u; double r = 0.4 + val * p.beta;
+        int l = std::max(0, sheet % 4); int m = 1 + (sheet / 4);
+        double arg = 2.405 * m * r; double radial = J0_approx(arg);
+        std::complex<double> field = std::polar(radial, (double)l * phi);
+        out[0] = R * cos(phi) + 0.4 * std::real(field);
+        out[1] = std::abs(field);
+        out[2] = R * sin(phi) + 0.4 * std::imag(field);
+    }
+    std::complex<double> evaluateComplex(double u,double v,double val,int sheet,const StalkParams& p) const override {
+        double phi = u; double r = 0.4 + val * p.beta; int l = std::max(0, sheet % 4); int m = 1 + (sheet / 4);
+        double arg = 2.405 * m * r; double radial = J0_approx(arg); return std::polar(radial, (double)l * phi);
+    }
+    bool isMultiSheeted() const override { return true; }
+    int sheetsCount() const override { return 12; }
+};
+
+// ------------- UI Context & View ----------------
+struct UIContext { AppState* state; Fl_Box* desc_box=nullptr; Fl_Value_Slider* s_u_pos=nullptr; Fl_Value_Slider* s_v_pos=nullptr; Fl_Value_Slider* s_alpha=nullptr; Fl_Value_Slider* s_beta=nullptr; Fl_Choice* menu=nullptr; std::vector<std::unique_ptr<SheafStrategy>> strategies; UIContext(AppState* s):state(s){ strategies.push_back(std::make_unique<OpticalVortexSheaf>()); strategies.push_back(std::make_unique<CausticSheaf>()); strategies.push_back(std::make_unique<FiberModeSheaf>()); strategies.push_back(std::make_unique<CantorSheaf>()); state->current = strategies[0].get(); }};
+
+class SheafView : public Fl_Gl_Window {
+    AppState* state; UIContext* ctx;
+public:
+    SheafView(int x,int y,int w,int h,AppState* s,UIContext* c):Fl_Gl_Window(x,y,w,h),state(s),ctx(c){}
+    void draw() override {
+        if (!valid()){ glViewport(0,0,w(),h()); glEnable(GL_DEPTH_TEST); glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); }
+        glClearColor(0.01f,0.01f,0.015f,1.0f); glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+        glMatrixMode(GL_PROJECTION); glLoadIdentity(); gluPerspective(45.0,(double)w()/(double)h(),0.1,200.0);
+        glMatrixMode(GL_MODELVIEW); glLoadIdentity(); gluLookAt(0.0,12.0,32.0,0.0,0.0,0.0,0.0,1.0,0.0);
+        glRotated(state->rotX,1.0,0.0,0.0); glRotated(state->rotY,0.0,1.0,0.0);
+        if(!state->current) return;
+        // base
+        if(state->baseDim==1){ glColor4f(0.6f,0.6f,0.7f,0.35f); glBegin(GL_LINE_LOOP); for(int i=0;i<360;i++) glVertex3d(4.5*cos(2*PI*i/360.0), -6.0, 4.5*sin(2*PI*i/360.0)); glEnd(); }
+        else { glColor4f(0.5f,0.5f,0.6f,0.25f); for(int uu=0;uu<24;uu++){ glBegin(GL_LINE_STRIP); for(int vv=0;vv<48;vv++){ double u=2*PI*uu/24.0; double v=2*PI*vv/48.0; double bx=3.5*cos(u)*(1.0+0.15*cos(v)); double by=-6.0+0.2*sin(v); double bz=3.5*sin(u)*(1.0+0.15*cos(v)); glVertex3d(bx,by,bz);} glEnd(); }}
+        if(state->showEtale){ int u_steps=(state->baseDim==1?200:80); int v_steps=(state->baseDim==1?12:40); double umin=0.0,umax=2*PI,vmin=0.0,vmax=(state->baseDim==1?0.0:2*PI);
+            for(int i=0;i<u_steps;i++){ double u1=umin+(umax-umin)*i/(double)u_steps; double u2=umin+(umax-umin)*(i+1)/(double)u_steps; glBegin(GL_QUAD_STRIP);
+                for(int j=0;j<=v_steps;j++){ double v=(state->baseDim==1?0.0:vmin+(vmax-vmin)*j/(double)v_steps);
+                    for(int k=0;k<=6;k++){ double val=state->current->getMinVal() + (state->current->getMaxVal()-state->current->getMinVal())*k/6.0;
+                        double pA[3], pB[3]; state->current->getPoint(u1,v,val,state->active_sheet,pA,state->params); state->current->getPoint(u2,v,val,state->active_sheet,pB,state->params);
+                        std::complex<double> cA = state->current->evaluateComplex(u1,v,val,state->active_sheet,state->params);
+                        if (!std::isfinite(std::real(cA)) || !std::isfinite(std::imag(cA))) cA = std::complex<double>(0.0,0.0);
+                        if(state->colorMode==AppState::BY_ARG) color_by_arg(cA,0.12f); else if(state->colorMode==AppState::BY_MOD) color_by_mod(cA,-5.0,5.0,0.12f); else glColor4f(0.2f,0.5f,0.9f,0.12f);
+                        if(std::isfinite(pA[0])&&std::isfinite(pA[1])&&std::isfinite(pA[2])) glVertex3dv(pA);
+                        std::complex<double> cB = state->current->evaluateComplex(u2,v,val,state->active_sheet,state->params);
+                        if (!std::isfinite(std::real(cB)) || !std::isfinite(std::imag(cB))) cB = std::complex<double>(0.0,0.0);
+                        if(state->colorMode==AppState::BY_ARG) color_by_arg(cB,0.12f); else if(state->colorMode==AppState::BY_MOD) color_by_mod(cB,-5.0,5.0,0.12f); else glColor4f(0.2f,0.5f,0.9f,0.12f);
+                        if(std::isfinite(pB[0])&&std::isfinite(pB[1])&&std::isfinite(pB[2])) glVertex3dv(pB);
+                    }
+                }
+                glEnd();
+            }
+        }
+        // section highlight
+        if(state->baseDim==1){ double start=state->u_pos-state->u_width/2.0, end=state->u_pos+state->u_width/2.0; glLineWidth(3.0f); glBegin(GL_LINE_STRIP);
+            for(int i=0;i<=400;i++){ double u=start+(end-start)*i/400.0; double p[3]; state->current->getPoint(u,0.0,state->section_val,state->active_sheet,p,state->params);
+                std::complex<double> cv = state->current->evaluateComplex(u,0.0,state->section_val,state->active_sheet,state->params);
+                if (!std::isfinite(std::real(cv))||!std::isfinite(std::imag(cv))) cv = std::complex<double>(0.0,0.0);
+                if(state->colorMode==AppState::BY_ARG) color_by_arg(cv,1.0f); else if(state->colorMode==AppState::BY_MOD) color_by_mod(cv,-5.0,5.0,1.0f); else glColor3f(1.0f,0.25f,0.25f);
+                if(std::isfinite(p[0])&&std::isfinite(p[1])&&std::isfinite(p[2])) glVertex3dv(p);
+            }
+            glEnd(); glLineWidth(1.0f);
+            if(state->glyphMode!=0){ for(int i=0;i<=40;i++){ double u=start+(end-start)*i/40.0; double p[3]; state->current->getPoint(u,0.0,state->section_val,state->active_sheet,p,state->params);
+                        std::complex<double> cv = state->current->evaluateComplex(u,0.0,state->section_val,state->active_sheet,state->params);
+                        if (!std::isfinite(std::real(cv))||!std::isfinite(std::imag(cv))) cv = std::complex<double>(0.0,0.0);
+                        float mag = (float)std::min(1.0,std::abs(cv));
+                        if(state->glyphMode==1){ double tan[3]; state->current->getTangent(u,0.0,state->section_val,state->active_sheet,tan,state->params); double nx=-tan[2], nz=tan[0]; double norm=sqrt(nx*nx+nz*nz); if(norm>1e-9){ nx/=norm; nz/=norm; } glBegin(GL_LINES); glColor3f(1.0f,1.0f,0.2f); glVertex3d(p[0],p[1],p[2]); glVertex3d(p[0]+0.5*mag*nx,p[1],p[2]+0.5*mag*nz); glEnd(); }
+                        else{ int steps=10; glBegin(GL_TRIANGLE_FAN); color_by_mod(cv,-5.0,5.0,1.0f); glVertex3d(p[0],p[1],p[2]); for(int s=0;s<=steps;s++){ double a=2*PI*s/steps; glVertex3d(p[0]+0.15*mag*cos(a), p[1]+0.02*mag, p[2]+0.15*mag*sin(a)); } glEnd(); }
+            } }
+        } else {
+            int ures=64, vres=64; double umin=state->u_pos-state->u_width/2.0, umax=state->u_pos+state->u_width/2.0;
+            double vmin=state->v_pos-state->v_width/2.0, vmax=state->v_pos+state->v_width/2.0;
+            for(int i=0;i<ures;i++){ double u1=umin+(umax-umin)*i/ures; double u2=umin+(umax-umin)*(i+1)/ures; glBegin(GL_TRIANGLE_STRIP);
+                    for(int j=0;j<=vres;j++){ double v=vmin+(vmax-vmin)*j/vres; double pA[3], pB[3]; state->current->getPoint(u1,v,state->section_val,state->active_sheet,pA,state->params); state->current->getPoint(u2,v,state->section_val,state->active_sheet,pB,state->params); std::complex<double> c1 = state->current->evaluateComplex(u1,v,state->section_val,state->active_sheet,state->params); if (!std::isfinite(std::real(c1))||!std::isfinite(std::imag(c1))) c1 = std::complex<double>(0.0,0.0); if(state->colorMode==AppState::BY_ARG) color_by_arg(c1,1.0f); else if(state->colorMode==AppState::BY_MOD) color_by_mod(c1,-5.0,5.0,1.0f); else glColor3f(0.3f,0.6f,0.9f); if(std::isfinite(pA[0])&&std::isfinite(pA[1])&&std::isfinite(pA[2])) glVertex3dv(pA); if(state->colorMode==AppState::BY_ARG) color_by_arg(c1,1.0f); else if(state->colorMode==AppState::BY_MOD) color_by_mod(c1,-5.0,5.0,1.0f); else glColor3f(0.3f,0.6f,0.9f); if(std::isfinite(pB[0])&&std::isfinite(pB[1])&&std::isfinite(pB[2])) glVertex3dv(pB); }
+                glEnd(); }
+        }
+    }
+    int handle(int e) override { static int lx,ly; if(e==FL_PUSH){ lx=Fl::event_x(); ly=Fl::event_y(); return 1;} if(e==FL_DRAG){ state->rotY += (double)(Fl::event_x()-lx)*0.4; state->rotX += (double)(Fl::event_y()-ly)*0.4; lx=Fl::event_x(); ly=Fl::event_y(); redraw(); return 1;} if(e==FL_MOUSEWHEEL){ double d=Fl::event_dy(); state->u_width *= (1.0+0.05*d); redraw(); return 1;} return Fl_Gl_Window::handle(e); }
+};
+
+// ---------------- Main -----------------
+int main(){
+    static AppState g_state;
+    Fl_Double_Window* win = new Fl_Double_Window(1280,850,"Sheaf Explorer — Consolidated");
+    static UIContext ctx(&g_state);
+
+    int sw = 320;
+    Fl_Group* sidebar = new Fl_Group(0,0,sw,850); sidebar->box(FL_FLAT_BOX); sidebar->color(fl_rgb_color(20,20,25));
+    Fl_Box* head = new Fl_Box(15,20,sw-30,30,"SHEAF TOPOLOGY"); head->labelcolor(FL_WHITE); head->labelfont(FL_BOLD); head->labelsize(18);
+
+    ctx.menu = new Fl_Choice(20,80,sw-40,30,"Instance"); ctx.menu->align(FL_ALIGN_TOP_LEFT); ctx.menu->labelcolor(FL_WHITE);
+    for (auto &s : ctx.strategies) ctx.menu->add(s->getName()); ctx.menu->value(0);
+    ctx.desc_box = new Fl_Box(20,125,sw-40,100, ctx.strategies[0]->getDesc()); ctx.desc_box->box(FL_BORDER_FRAME); ctx.desc_box->color(fl_rgb_color(35,35,40)); ctx.desc_box->labelcolor(fl_rgb_color(200,200,230)); ctx.desc_box->align(FL_ALIGN_WRAP|FL_ALIGN_INSIDE|FL_ALIGN_LEFT);
+
+    int y=260; auto create_s=[&](const char* lbl,double minv,double maxv,double curv){ auto s=new Fl_Value_Slider(20,y+20,sw-40,20,lbl); s->type(FL_HOR_NICE_SLIDER); s->bounds(minv,maxv); s->value(curv); s->labelcolor(FL_WHITE); s->labelsize(12); s->align(FL_ALIGN_TOP_LEFT); y+=65; return s; };
+    ctx.s_u_pos = create_s("Base u (theta)",0.0,2*PI,PI); auto s_width = create_s("Section Domain U",0.05,2*PI,PI/2); auto s_val = create_s("Section Value",-1.5,1.5,0.0);
+    y+=10; Fl_Box* sep = new Fl_Box(20,y,sw-40,1); sep->box(FL_FLAT_BOX); sep->color(FL_DARK3); y+=20;
+    ctx.s_alpha = create_s("Alpha",0.01,10.0,1.0); ctx.s_beta = create_s("Beta",0.001,3.0,0.5); auto s_morph = create_s("Morph",-3.0,3.0,0.0);
+    auto b_mesh = new Fl_Check_Button(20,y,140,25,"Show Etale"); b_mesh->labelcolor(FL_WHITE); b_mesh->value(1); auto b_diff = new Fl_Check_Button(170,y,140,25,"Show Tangents"); b_diff->labelcolor(FL_WHITE); b_diff->value(1); y+=40;
+    auto b_anim = new Fl_Check_Button(20,y,200,25,"Animate Base"); b_anim->labelcolor(FL_WHITE); b_anim->value(0); y+=30;
+    Fl_Choice* base_choice = new Fl_Choice(20,y,sw-40,25,"Base"); base_choice->add("1: Circle S^1"); base_choice->add("2: Torus / 2D patch"); base_choice->value(0); base_choice->labelcolor(FL_WHITE); y+=35;
+    Fl_Choice* color_choice = new Fl_Choice(20,y,sw-40,25,"Coloring"); color_choice->add("Argument"); color_choice->add("Log-modulus"); color_choice->add("Height"); color_choice->value(0); color_choice->labelcolor(FL_WHITE); y+=35;
+    Fl_Choice* glyph_choice = new Fl_Choice(20,y,sw-40,25,"Glyph"); glyph_choice->add("None"); glyph_choice->add("Arrow"); glyph_choice->add("Disc"); glyph_choice->value(0); glyph_choice->labelcolor(FL_WHITE); y+=35;
+    Fl_Box* help = new Fl_Box(20,y,sw-40,120,"Notes:\n- Switch base to 2D to explore sections over open sets.\n- Optical examples: vortices, caustics, fiber modes.\nControls: drag to rotate, wheel to change section width."); help->labelcolor(fl_rgb_color(200,200,230)); help->align(FL_ALIGN_WRAP|FL_ALIGN_INSIDE|FL_ALIGN_LEFT);
+    sidebar->end();
+
+    SheafView* view = new SheafView(sw,0,1280-sw,850,&g_state,&ctx);
+
+    ctx.menu->callback([](Fl_Widget* w, void* d){ UIContext* c=(UIContext*)d; int idx = ((Fl_Choice*)w)->value(); if (idx < 0 || idx >= (int)c->strategies.size()) return; c->state->current = c->strategies[idx].get(); c->desc_box->label(c->state->current->getDesc()); }, &ctx);
+    ctx.s_u_pos->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->u_pos = (double)((Fl_Value_Slider*)w)->value(); }, &g_state);
+    s_width->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->u_width = (double)((Fl_Value_Slider*)w)->value(); }, &g_state);
+    s_val->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->section_val = (double)((Fl_Value_Slider*)w)->value(); }, &g_state);
+    ctx.s_alpha->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->params.alpha = (double)((Fl_Value_Slider*)w)->value(); }, &g_state);
+    ctx.s_beta->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->params.beta = (double)((Fl_Value_Slider*)w)->value(); }, &g_state);
+    s_morph->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->params.morph = (double)((Fl_Value_Slider*)w)->value(); }, &g_state);
+    b_mesh->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->showEtale = ((Fl_Check_Button*)w)->value(); }, &g_state);
+    b_diff->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->showDifferentials = ((Fl_Check_Button*)w)->value(); }, &g_state);
+    b_anim->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->animate = ((Fl_Check_Button*)w)->value(); }, &g_state);
+    base_choice->callback([](Fl_Widget* w, void* s){ int v = ((Fl_Choice*)w)->value(); ((AppState*)s)->baseDim = (v==0?1:2); }, &g_state);
+    color_choice->callback([](Fl_Widget* w, void* s){ int v = ((Fl_Choice*)w)->value(); ((AppState*)s)->colorMode = (AppState::ColorMode)v; }, &g_state);
+    glyph_choice->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->glyphMode = ((Fl_Choice*)w)->value(); }, &g_state);
+
+    Fl::add_idle([](void* v){ SheafView* sv=(SheafView*)v; if(g_state.animate){ g_state.anim_t += 0.02; g_state.u_pos = PI + sin(g_state.anim_t) * 1.0 * PI; ctx.s_u_pos->value(g_state.u_pos); } sv->redraw(); }, view);
+
+    win->resizable(view); win->show(); return Fl::run(); }

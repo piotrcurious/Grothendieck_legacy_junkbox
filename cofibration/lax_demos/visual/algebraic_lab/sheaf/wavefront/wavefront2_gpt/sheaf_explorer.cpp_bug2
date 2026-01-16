@@ -1,0 +1,476 @@
+/*
+Grothendieck Etale Laboratory — Higher-dimensional Extension
+---------------------------------------------------------
+This file extends the previous visual laboratory to support:
+ - base manifolds of dimension 1 (S1) and 2 (Torus / Disc patch)
+ - vector-valued / complex-valued stalks (multi-dimensional fibers)
+ - projection & glyph visualizations to show higher-dimensional stalks
+ - optical-inspired sheaf examples: Optical Vortex (phase singularities),
+   Caustic / Catastrophe optics (envelopes), and Fiber Mode (LP modes)
+ - UI controls for base-dimension, projection, sheet selection, and glyph mode
+
+Mathematical intention:
+ - Demonstrate how etale spaces / sheaves generalize when the base has
+   higher dimension (sections over open sets, local triviality, branch loci,
+   and singular supports).
+ - Use optical motifs as physically intuitive examples where phase / amplitude
+   and multi-valuedness naturally appear.
+
+Compile with:
+  g++ -std=c++17 grothendieck_sheaf_higherdim.cpp -o sheaf_hd -lfltk -lGL -lGLU
+
+*/
+
+#include <FL/Fl.H>
+#include <FL/Fl_Double_Window.H>
+#include <FL/Fl_Gl_Window.H>
+#include <FL/Fl_Choice.H>
+#include <FL/Fl_Value_Slider.H>
+#include <FL/Fl_Check_Button.H>
+#include <FL/Fl_Box.H>
+#include <FL/Fl_Group.H>
+#include <FL/Fl_Button.H>
+#include <FL/gl.h>
+#include <GL/glu.h>
+
+#include <cmath>
+#include <vector>
+#include <memory>
+#include <complex>
+#include <string>
+#include <sstream>
+#include <algorithm>
+#include <iomanip>
+
+static constexpr double PI = 3.14159265358979323846;
+
+// ----------------- utility math/color helpers --------------------------------
+static inline double clamp(double x, double a, double b) { return x < a ? a : (x > b ? b : x); }
+static void hsv_to_rgb(double h, double s, double v, float &r, float &g, float &b) {
+    h = fmod(h, 1.0);
+    if (h < 0) h += 1.0;
+    int i = int(h * 6.0);
+    double f = h * 6.0 - i;
+    double p = v * (1.0 - s);
+    double q = v * (1.0 - s * f);
+    double t = v * (1.0 - s * (1.0 - f));
+    switch(i % 6) {
+        case 0: r = (float)v; g = (float)t; b = (float)p; break;
+        case 1: r = (float)q; g = (float)v; b = (float)p; break;
+        case 2: r = (float)p; g = (float)v; b = (float)t; break;
+        case 3: r = (float)p; g = (float)q; b = (float)v; break;
+        case 4: r = (float)t; g = (float)p; b = (float)v; break;
+        case 5: r = (float)v; g = (float)p; b = (float)q; break;
+    }
+}
+static void color_by_arg(const std::complex<double>& z, float alpha=1.0f) {
+    double arg = std::arg(z);
+    double hue = (arg + PI) / (2.0 * PI);
+    float r,g,b; hsv_to_rgb(hue, 0.9, 0.9, r,g,b);
+    glColor4f(r,g,b, alpha);
+}
+static void color_by_mod(const std::complex<double>& z, double minm, double maxm, float alpha=1.0f) {
+    double m = std::abs(z);
+    if (!std::isfinite(m)) { glColor4f(0.6f, 0.0f, 0.0f, alpha); return; }
+    double logm = (m<=0? minm : log(m));
+    double t = (logm - minm) / (maxm - minm);
+    t = clamp(t, 0.0, 1.0);
+    float r,g,b; hsv_to_rgb(0.65 - 0.65*t, 0.85, 0.95, r,g,b);
+    glColor4f(r,g,b, alpha);
+}
+
+// ----------------- App state -------------------------------------------------
+struct StalkParams { double alpha=1.0, beta=0.5, morph=0.0; };
+class SheafStrategy;
+struct AppState {
+    double rotX=20.0, rotY=-35.0;
+    // base coordinates: when baseDim==1 we use u_pos/u_width as before
+    // when baseDim==2 we use (u_pos,v_pos,u_width,v_width) as a rectangular patch
+    int baseDim = 1; // 1 or 2
+    double u_pos = PI, u_width = PI/2.0;
+    double v_pos = PI, v_width = PI/2.0;
+    double section_val = 0.0;
+    StalkParams params;
+    SheafStrategy* current = nullptr;
+    bool showEtale = true;
+    bool showDifferentials = true;
+    bool animate = false;
+    double anim_t = 0.0;
+    int active_sheet = 0;
+    enum ColorMode { BY_ARG, BY_MOD, BY_HEIGHT } colorMode = BY_ARG;
+    bool normalize_mod = true;
+    // projection & glyph mode to represent higher-dimensional stalks
+    int glyphMode = 0; // 0: none, 1: vector arrow, 2: small surface patch
+};
+
+// ----------------- Sheaf base class -----------------------------------------
+class SheafStrategy {
+public:
+    virtual ~SheafStrategy() {}
+    // For baseDim==1: use (u, val, sheet)
+    // For baseDim==2: use (u,v, val, sheet) -> we will pass v==0 if unused
+    virtual void getPoint(double u, double v, double val, int sheet, double out[3], const StalkParams& p) = 0;
+    virtual void getTangent(double u, double v, double val, int sheet, double out[3], const StalkParams& p) {
+        double du = 1e-3 + 1e-3*fabs(p.alpha);
+        double p1[3], p2[3];
+        getPoint(u-du, v, val, sheet, p1, p);
+        getPoint(u+du, v, val, sheet, p2, p);
+        for(int i=0;i<3;i++) out[i] = (p2[i]-p1[i])/(2.0*du);
+    }
+    virtual double getMinVal() const { return -2.0; }
+    virtual double getMaxVal() const { return 2.0; }
+    virtual const char* getName() const = 0;
+    virtual const char* getDesc() const = 0;
+    virtual const char* getParamALabel() const { return "Alpha"; }
+    virtual const char* getParamBLabel() const { return "Beta"; }
+    virtual bool isMultiSheeted() const { return false; }
+    virtual int sheetsCount() const { return 1; }
+    virtual std::complex<double> evaluateComplex(double u, double v, double val, int sheet, const StalkParams& p) const { return std::complex<double>(0.0,0.0); }
+};
+
+// ----------------- Optical-inspired & higher-dim strategies -----------------
+
+// 1) Optical Vortex Sheaf
+//   - Base: 2D patch representing transverse plane (x,y) around beam axis
+//   - Stalk: complex field value; zeros of the field are phase singularities
+class OpticalVortexSheaf : public SheafStrategy {
+public:
+    const char* getName() const override { return "Optical Vortex Sheaf"; }
+    const char* getDesc() const override { return "Phase singularities & vortex lines; demonstrates multi-valued phase and topological charge."; }
+    void getPoint(double u, double v, double val, int sheet, double out[3], const StalkParams& p) override {
+        // interpret u,v in [0,2pi] as polar coordinates on a disk for visual convenience
+        double R = 4.5;
+        double r = 0.8 + (val * p.beta);
+        // polar coords mapped from u,v; when baseDim==1, v==0 and we interpret u as angle
+        double angle = u;
+        double radius = (p.alpha*0.3 + 0.2) * (1.0 + 0.5*sin(v));
+        // create vortex of topological charge q (use sheet as q)
+        int q = std::max(1, 1 + sheet);
+        std::complex<double> z = std::polar(radius, angle);
+        // vortex field ~ (x+iy)^q * exp(-r^2/w^2) with gaussian envelope
+        double w0 = 0.9 + 0.2 * p.morph;
+        std::complex<double> field = std::pow(std::complex<double>(radius*cos(angle), radius*sin(angle)), q) * std::exp(-radius*radius/(w0*w0));
+        // embed: base ring + height = phase, radial displacement ~ amplitude
+        out[0] = R * cos(angle) + 0.6 * std::real(field);
+        out[1] = std::arg(field); // phase as height (phase singularities cause discontinuity)
+        out[2] = R * sin(angle) + 0.6 * std::imag(field);
+    }
+    std::complex<double> evaluateComplex(double u, double v, double val, int sheet, const StalkParams& p) const override {
+        double angle = u; double radius = (p.alpha*0.3 + 0.2) * (1.0 + 0.5*sin(v));
+        int q = std::max(1, 1 + sheet);
+        double w0 = 0.9 + 0.2 * p.morph;
+        std::complex<double> field = std::pow(std::complex<double>(radius*cos(angle), radius*sin(angle)), q) * std::exp(-radius*radius/(w0*w0));
+        return field;
+    }
+    bool isMultiSheeted() const override { return true; }
+    int sheetsCount() const override { return 4; } // different charges
+};
+
+// 2) Caustic Sheaf (Catastrophe optics inspired)
+//    - Base: 2D control parameter space for a family of rays
+//    - Stalk: intensity / phase of the envelope (caustic) -> singular support along envelopes
+class CausticSheaf : public SheafStrategy {
+public:
+    const char* getName() const override { return "Caustic / Catastrophe Sheaf"; }
+    const char* getDesc() const override { return "Shows envelopes and intensity catastrophes (fold, cusp) as local singularities of ray families."; }
+    void getPoint(double u, double v, double val, int sheet, double out[3], const StalkParams& p) override {
+        // treat (u,v) as control parameters for a family of rays parameterized by t
+        double R = 4.5;
+        // simple fold/cusp model: phase function Phi(t; u,v) = t^4 + u t^2 + v t
+        // stationary points satisfy dPhi/dt = 4 t^3 + 2 u t + v = 0
+        // we compute the stationary phase contributions and envelope amplitude
+        double upar = (u - PI) * 0.5 * p.alpha;
+        double vpar = (v - PI) * 0.5 * p.beta;
+        // find a real stationary point nearest zero (simple Newton iteration)
+        double t = 0.0;
+        for(int k=0;k<20;k++){
+            double f = 4*t*t*t + 2*upar*t + vpar;
+            double df = 12*t*t + 2*upar;
+            if (fabs(df) < 1e-6) break;
+            double dt = -f/df; if (!std::isfinite(dt)) break;
+            t += dt; if (fabs(dt) < 1e-8) break;
+        }
+        double phase = t*t*t*t + upar*t*t + vpar*t + p.morph;
+        double amp = 1.0 / (1.0 + fabs(4*t*t*t + 2*upar*t + vpar)); // heuristic
+        out[0] = R * cos(u) + 0.6 * amp * cos(phase);
+        out[1] = amp * 3.0; // intensity scale
+        out[2] = R * sin(u) + 0.6 * amp * sin(phase);
+    }
+    std::complex<double> evaluateComplex(double u, double v, double val, int sheet, const StalkParams& p) const override {
+        // provide a complex number combining amplitude & phase
+        double upar = (u - PI) * 0.5 * p.alpha;
+        double vpar = (v - PI) * 0.5 * p.beta;
+        double t = 0.0;
+        for(int k=0;k<20;k++){
+            double f = 4*t*t*t + 2*upar*t + vpar;
+            double df = 12*t*t + 2*upar;
+            if (fabs(df) < 1e-6) break;
+            double dt = -f/df; if (!std::isfinite(dt)) break;
+            t += dt; if (fabs(dt) < 1e-8) break;
+        }
+        double phase = t*t*t*t + upar*t*t + vpar*t;
+        double amp = 1.0 / (1.0 + fabs(4*t*t*t + 2*upar*t + vpar));
+        return std::polar(amp, phase);
+    }
+};
+
+// 3) Fiber Mode Sheaf (approx LP modes using Bessel functions)
+//    - Base: 1D circle argument; stalk: complex mode amplitude for given radial index (val)
+#include <complex>
+#include <cmath>
+static double J0(double x) { // crude Bessel J0 approximation (series for small x)
+    // Use std::cyl_bessel_j if available; fallback to simple approx
+    #ifdef _GLIBCXX_USE_C99_MATH
+    return std::cyl_bessel_j(0, x);
+    #else
+    if (fabs(x) < 1e-6) return 1.0;
+    return sin(x)/x; // crude
+    #endif
+}
+class FiberModeSheaf : public SheafStrategy {
+public:
+    const char* getName() const override { return "Fiber Mode Sheaf (LP modes)"; }
+    const char* getDesc() const override { return "Approximates transverse fiber modes (LP_lm) as local stalk functions; shows nodal structure and degeneracy."; }
+    void getPoint(double u, double v, double val, int sheet, double out[3], const StalkParams& p) override {
+        double R = 4.5;
+        double phi = u; // use u as angular coordinate
+        double r = 0.8 + val * p.beta; // radial coordinate within fiber core
+        // choose mode indexes from sheet
+        int l = std::max(0, sheet % 4);
+        int m = 1 + (sheet / 4);
+        double arg = 2.405 * m * r; // scaled to produce zeros roughly
+        double radial = J0(arg);
+        std::complex<double> field = std::polar(radial, l * phi);
+        out[0] = R * cos(phi) + 0.4 * std::real(field);
+        out[1] = std::abs(field);
+        out[2] = R * sin(phi) + 0.4 * std::imag(field);
+    }
+    std::complex<double> evaluateComplex(double u, double v, double val, int sheet, const StalkParams& p) const override {
+        double phi = u; double r = 0.8 + val * p.beta;
+        int l = std::max(0, sheet % 4);
+        int m = 1 + (sheet / 4);
+        double arg = 2.405 * m * r;
+        double radial = J0(arg);
+        return std::polar(radial, (double)l * phi);
+    }
+    bool isMultiSheeted() const override { return true; }
+    int sheetsCount() const override { return 12; }
+};
+
+// 4) Cantor Sheaf still useful as 1D fractal example
+class CantorSheaf : public SheafStrategy {
+    double cantor_fn(double x, int depth) const {
+        if (depth <= 0) return x;
+        if (x < 1.0/3.0) return 0.5 * cantor_fn(x * 3.0, depth - 1);
+        if (x > 2.0/3.0) return 0.5 + 0.5 * cantor_fn((x - 2.0/3.0) * 3.0, depth - 1);
+        return 0.5;
+    }
+public:
+    const char* getName() const override { return "Cantor-Lebesgue Sheaf"; }
+    const char* getDesc() const override { return "1D fractal singular support example."; }
+    void getPoint(double u, double v, double val, int sheet, double out[3], const StalkParams& p) override {
+        double r = 4.5;
+        double x = fmod(u / (2.0 * PI), 1.0); if (x < 0) x += 1.0;
+        double h = (cantor_fn(x, std::max(1, int(p.alpha * 6.0))) - 0.5) * 4.0;
+        out[0] = r * cos(u);
+        out[1] = h + val * p.beta;
+        out[2] = r * sin(u);
+    }
+    std::complex<double> evaluateComplex(double u, double v, double val, int sheet, const StalkParams& p) const override {
+        double x = fmod(u / (2.0 * PI), 1.0); if (x < 0) x += 1.0;
+        double h = (cantor_fn(x, std::max(1, int(p.alpha * 6.0))) - 0.5) * 4.0;
+        return std::complex<double>(h + val * p.beta, 0.0);
+    }
+};
+
+// ----------------- UI Context & OpenGL View ---------------------------------
+struct UIContext {
+    AppState* state;
+    Fl_Box* desc_box = nullptr;
+    Fl_Value_Slider* s_u_pos = nullptr;
+    Fl_Value_Slider* s_v_pos = nullptr;
+    Fl_Value_Slider* s_alpha = nullptr;
+    Fl_Value_Slider* s_beta = nullptr;
+    Fl_Choice* menu = nullptr;
+    Fl_Choice* base_choice = nullptr;
+    std::vector<std::unique_ptr<SheafStrategy>> strategies;
+
+    UIContext(AppState* s) : state(s) {
+        strategies.push_back(std::make_unique<OpticalVortexSheaf>());
+        strategies.push_back(std::make_unique<CausticSheaf>());
+        strategies.push_back(std::make_unique<FiberModeSheaf>());
+        strategies.push_back(std::make_unique<CantorSheaf>());
+        state->current = strategies[0].get();
+    }
+};
+
+class SheafView : public Fl_Gl_Window {
+    AppState* state; UIContext* ctx;
+public:
+    SheafView(int x,int y,int w,int h, AppState* s, UIContext* c) : Fl_Gl_Window(x,y,w,h), state(s), ctx(c) {}
+    void draw() override {
+        if (!valid()) { glViewport(0,0,w(),h()); glEnable(GL_DEPTH_TEST); glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); }
+        glClearColor(0.01f, 0.01f, 0.015f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glMatrixMode(GL_PROJECTION); glLoadIdentity(); gluPerspective(45.0, (double)w()/h(), 0.1, 200.0);
+        glMatrixMode(GL_MODELVIEW); glLoadIdentity(); gluLookAt(0.0, 12.0, 32.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
+        glRotated(state->rotX, 1.0, 0.0, 0.0); glRotated(state->rotY, 0.0, 1.0, 0.0);
+        if (!state->current) return;
+
+        // base grid (S1 or Torus patch) for reference
+        if (state->baseDim == 1) {
+            glColor4f(0.6f,0.6f,0.7f,0.35f); glBegin(GL_LINE_LOOP);
+            for(int i=0;i<360;i++) glVertex3d(4.5*cos(2*PI*i/360.0), -6.0, 4.5*sin(2*PI*i/360.0));
+            glEnd();
+        } else {
+            // render torus-like param grid for 2D base
+            glColor4f(0.5f,0.5f,0.6f,0.25f);
+            for(int uu=0; uu<24; ++uu) {
+                glBegin(GL_LINE_STRIP);
+                for(int vv=0; vv<48; ++vv) {
+                    double u = 2*PI*uu/24.0; double v = 2*PI*vv/48.0;
+                    double bx = 3.5 * cos(u) * (1.0 + 0.15*cos(v));
+                    double by = -6.0 + 0.2 * sin(v);
+                    double bz = 3.5 * sin(u) * (1.0 + 0.15*cos(v));
+                    glVertex3d(bx, by, bz);
+                }
+                glEnd();
+            }
+        }
+
+        // sample & render etale total space
+        if (state->showEtale) {
+            int u_steps = (state->baseDim==1 ? 200 : 80);
+            int v_steps = (state->baseDim==1 ? 12  : 40);
+            double umin = 0.0, umax = 2*PI;
+            double vmin = 0.0, vmax = (state->baseDim==1? 0.0 : 2*PI);
+            for(int i=0;i<u_steps;i++) {
+                double u1 = umin + (umax-umin)*i/(double)u_steps;
+                double u2 = umin + (umax-umin)*(i+1)/(double)u_steps;
+                glBegin(GL_QUAD_STRIP);
+                for(int j=0;j<=v_steps;j++) {
+                    double v = (state->baseDim==1? 0.0 : vmin + (vmax-vmin)*j/(double)v_steps);
+                    double val;
+                    for(int k=0;k<=6;k++) {
+                        // sample along fiber direction
+                        val = state->current->getMinVal() + (state->current->getMaxVal()-state->current->getMinVal()) * k/6.0;
+                        double p1[3], p2[3];
+                        state->current->getPoint(u1, v, val, state->active_sheet, p1, state->params);
+                        state->current->getPoint(u2, v, val, state->active_sheet, p2, state->params);
+                        std::complex<double> c1 = state->current->evaluateComplex(u1, v, val, state->active_sheet, state->params);
+                        if (state->colorMode == AppState::BY_ARG) color_by_arg(c1, 0.12f);
+                        else if (state->colorMode == AppState::BY_MOD) color_by_mod(c1, -5.0, 5.0, 0.12f);
+                        else glColor4f(0.2f,0.5f,0.9f,0.12f);
+                        glVertex3dv(p1);
+                        if (state->colorMode == AppState::BY_ARG) color_by_arg(c1, 0.12f);
+                        else if (state->colorMode == AppState::BY_MOD) color_by_mod(c1, -5.0, 5.0, 0.12f);
+                        else glColor4f(0.2f,0.5f,0.9f,0.12f);
+                        glVertex3dv(p2);
+                    }
+                }
+                glEnd();
+            }
+        }
+
+        // show a highlighted section (1D curve) or a 2D patch depending on baseDim
+        if (state->baseDim == 1) {
+            double start = state->u_pos - state->u_width/2.0, end = state->u_pos + state->u_width/2.0;
+            glLineWidth(3.0f);
+            glBegin(GL_LINE_STRIP);
+            for(int i=0;i<=400;i++){
+                double u = start + (end-start)*i/400.0;
+                double p[3]; state->current->getPoint(u, 0.0, state->section_val, state->active_sheet, p, state->params);
+                std::complex<double> cv = state->current->evaluateComplex(u, 0.0, state->section_val, state->active_sheet, state->params);
+                if (state->colorMode == AppState::BY_ARG) color_by_arg(cv,1.0f);
+                else if (state->colorMode == AppState::BY_MOD) color_by_mod(cv,-5.0,5.0,1.0f);
+                else glColor3f(1.0f,0.25f,0.25f);
+                glVertex3dv(p);
+            }
+            glEnd(); glLineWidth(1.0f);
+            // glyphs along curve to represent higher-dim stalk (vectors or small discs)
+            if (state->glyphMode != 0) {
+                for(int i=0;i<=40;i++){
+                    double u = start + (end-start)*i/40.0;
+                    double p[3]; state->current->getPoint(u, 0.0, state->section_val, state->active_sheet, p, state->params);
+                    std::complex<double> cv = state->current->evaluateComplex(u,0.0,state->section_val,state->active_sheet,state->params);
+                    float mag = (float)std::min(1.0, std::abs(cv));
+                    if (state->glyphMode==1) {
+                        // small arrow in normal plane using tangent
+                        double tan[3]; state->current->getTangent(u,0.0,state->section_val,state->active_sheet,tan,state->params);
+                        double nx = -tan[2], nz = tan[0]; double norm = sqrt(nx*nx + nz*nz); if (norm>1e-9){ nx/=norm; nz/=norm; }
+                        glBegin(GL_LINES); glColor3f(1.0f,1.0f,0.2f); glVertex3d(p[0],p[1],p[2]); glVertex3d(p[0]+0.5*mag*nx, p[1], p[2]+0.5*mag*nz); glEnd();
+                    } else {
+                        // small disc whose radius encodes magnitude
+                        int steps=10; glBegin(GL_TRIANGLE_FAN); color_by_mod(cv,-5.0,5.0,1.0f); glVertex3d(p[0],p[1],p[2]);
+                        for(int s=0;s<=steps;s++){ double a=2*PI*s/steps; glVertex3d(p[0]+0.15*mag*cos(a), p[1]+0.02*mag, p[2]+0.15*mag*sin(a)); }
+                        glEnd();
+                    }
+                }
+            }
+        } else {
+            // for 2D base, draw a color-mapped height-field of amplitude/phase over the patch
+            int ures=64, vres=64; double umin=state->u_pos-state->u_width/2.0, umax=state->u_pos+state->u_width/2.0;
+            double vmin=state->v_pos-state->v_width/2.0, vmax=state->v_pos+state->v_width/2.0;
+            for(int i=0;i<ures;i++){
+                double u1 = umin + (umax-umin)*i/ures; double u2 = umin + (umax-umin)*(i+1)/ures;
+                glBegin(GL_TRIANGLE_STRIP);
+                for(int j=0;j<=vres;j++){
+                    double v = vmin + (vmax-vmin)*j/vres;
+                    double p1[3], p2[3]; state->current->getPoint(u1,v,state->section_val,state->active_sheet,p1,state->params); state->current->getPoint(u2,v,state->section_val,state->active_sheet,p2,state->params);
+                    std::complex<double> c1 = state->current->evaluateComplex(u1,v,state->section_val,state->active_sheet,state->params);
+                    if (state->colorMode==AppState::BY_ARG) color_by_arg(c1,1.0f); else if (state->colorMode==AppState::BY_MOD) color_by_mod(c1,-5.0,5.0,1.0f); else glColor3f(0.3f,0.6f,0.9f);
+                    glVertex3dv(p1);
+                    if (state->colorMode==AppState::BY_ARG) color_by_arg(c1,1.0f); else if (state->colorMode==AppState::BY_MOD) color_by_mod(c1,-5.0,5.0,1.0f); else glColor3f(0.3f,0.6f,0.9f);
+                    glVertex3dv(p2);
+                }
+                glEnd();
+            }
+        }
+    }
+    int handle(int e) override { static int lx,ly; if(e==FL_PUSH){ lx=Fl::event_x(); ly=Fl::event_y(); return 1; } if(e==FL_DRAG){ state->rotY += (double)(Fl::event_x()-lx)*0.4; state->rotX += (double)(Fl::event_y()-ly)*0.4; lx=Fl::event_x(); ly=Fl::event_y(); redraw(); return 1;} if(e==FL_MOUSEWHEEL){ double d=Fl::event_dy(); state->u_width *= (1.0+0.05*d); redraw(); return 1;} return Fl_Gl_Window::handle(e); }
+};
+
+// ------------------- Main & UI wiring ---------------------------------------
+int main(){ static AppState g_state; Fl_Double_Window* win = new Fl_Double_Window(1400,900,"Grothendieck Etale Laboratory — Higher Dimensional"); static UIContext ctx(&g_state);
+    int sw=380; Fl_Group* sidebar = new Fl_Group(0,0,sw,900); sidebar->box(FL_FLAT_BOX); sidebar->color(fl_rgb_color(18,18,22));
+    Fl_Box* head = new Fl_Box(15,20,sw-30,30,"SHEAF TOPOLOGY — Higher-dimensional Lab"); head->labelcolor(FL_WHITE); head->labelfont(FL_BOLD); head->labelsize(16);
+    ctx.menu = new Fl_Choice(20,70,sw-40,28,"Instance"); ctx.menu->labelcolor(FL_WHITE); for(auto &s: ctx.strategies) ctx.menu->add(s->getName()); ctx.menu->value(0);
+    ctx.desc_box = new Fl_Box(20,110,sw-40,120,ctx.strategies[0]->getDesc()); ctx.desc_box->box(FL_BORDER_FRAME); ctx.desc_box->color(fl_rgb_color(34,34,40)); ctx.desc_box->labelcolor(fl_rgb_color(200,200,230)); ctx.desc_box->align(FL_ALIGN_WRAP|FL_ALIGN_INSIDE|FL_ALIGN_LEFT);
+
+    int y=250; auto create_s=[&](const char* lbl,double minv,double maxv,double curv){ auto s=new Fl_Value_Slider(20,y+20,sw-40,20,lbl); s->type(FL_HOR_NICE_SLIDER); s->bounds(minv,maxv); s->value(curv); s->labelcolor(FL_WHITE); s->labelsize(12); s->align(FL_ALIGN_TOP_LEFT); y+=60; return s; };
+    ctx.s_u_pos = create_s("u_pos (base)",0.0,2*PI,PI); auto s_u_width = create_s("u_width",0.05,2*PI,PI/2); auto s_v_pos = create_s("v_pos (base)",0.0,2*PI,PI); auto s_v_width = create_s("v_width",0.05,2*PI,PI/2);
+    y+=10; Fl_Box* sep=new Fl_Box(20,y,sw-40,1); sep->box(FL_FLAT_BOX); sep->color(FL_DARK3); y+=10;
+    ctx.s_alpha = create_s("Alpha",0.01,10.0,1.0); ctx.s_beta = create_s("Beta",0.001,3.0,0.5); auto s_morph = create_s("Morph",-3.0,3.0,0.0);
+    auto b_mesh = new Fl_Check_Button(20,y,160,25,"Show Etale"); b_mesh->labelcolor(FL_WHITE); b_mesh->value(1); auto b_diff = new Fl_Check_Button(180,y,160,25,"Show Tangents"); b_diff->labelcolor(FL_WHITE); b_diff->value(1); y+=40;
+    auto b_anim = new Fl_Check_Button(20,y,200,25,"Animate"); b_anim->labelcolor(FL_WHITE); b_anim->value(0); y+=35;
+    Fl_Choice* base_choice = new Fl_Choice(20,y,sw-40,25,"Base Dim / Manifold"); base_choice->add("1: Circle S^1"); base_choice->add("2: Torus / 2D patch"); base_choice->value(0); base_choice->labelcolor(FL_WHITE); y+=35;
+    Fl_Choice* color_choice = new Fl_Choice(20,y,sw-40,25,"Coloring"); color_choice->add("Argument"); color_choice->add("Log-modulus"); color_choice->add("Height"); color_choice->value(0); color_choice->labelcolor(FL_WHITE); y+=35;
+    Fl_Choice* glyph_choice = new Fl_Choice(20,y,sw-40,25,"Glyph"); glyph_choice->add("None"); glyph_choice->add("Arrow (vector)"); glyph_choice->add("Disc (mag)"); glyph_choice->value(0); glyph_choice->labelcolor(FL_WHITE); y+=40;
+    Fl_Box* help = new Fl_Box(20, y, sw-40, 160, R"(Notes:
+ - Switch base to 2D to explore how sections over open sets generalize.
+ - Optical examples: vortices (phase zeros), caustics (envelopes), fiber modes (nodal structure).
+Controls: drag to rotate, wheel to change section width.)" );
+    help->labelcolor(fl_rgb_color(200,200,230));
+    help->align(FL_ALIGN_WRAP | FL_ALIGN_INSIDE | FL_ALIGN_LEFT);
+    sidebar->end();
+
+    SheafView* view = new SheafView(sw,0,1400-sw,900,&g_state,&ctx);
+    // Callbacks
+    ctx.menu->callback([](Fl_Widget* w, void* d){ UIContext* c=(UIContext*)d; int idx=((Fl_Choice*)w)->value(); c->state->current=c->strategies[idx].get(); c->desc_box->label(c->state->current->getDesc()); c->desc_box->window()->redraw(); }, &ctx);
+    ctx.s_u_pos->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->u_pos = (double)((Fl_Value_Slider*)w)->value(); }, &g_state);
+    s_u_width->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->u_width = (double)((Fl_Value_Slider*)w)->value(); }, &g_state);
+    s_v_pos->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->v_pos = (double)((Fl_Value_Slider*)w)->value(); }, &g_state);
+    s_v_width->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->v_width = (double)((Fl_Value_Slider*)w)->value(); }, &g_state);
+    ctx.s_alpha->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->params.alpha = (double)((Fl_Value_Slider*)w)->value(); }, &g_state);
+    ctx.s_beta->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->params.beta = (double)((Fl_Value_Slider*)w)->value(); }, &g_state);
+    s_morph->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->params.morph = (double)((Fl_Value_Slider*)w)->value(); }, &g_state);
+    b_mesh->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->showEtale = ((Fl_Check_Button*)w)->value(); }, &g_state);
+    b_diff->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->showDifferentials = ((Fl_Check_Button*)w)->value(); }, &g_state);
+    b_anim->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->animate = ((Fl_Check_Button*)w)->value(); }, &g_state);
+    base_choice->callback([](Fl_Widget* w, void* s){ int v=((Fl_Choice*)w)->value(); ((AppState*)s)->baseDim = (v==0?1:2); }, &g_state);
+    color_choice->callback([](Fl_Widget* w, void* s){ int v=((Fl_Choice*)w)->value(); ((AppState*)s)->colorMode = (AppState::ColorMode)v; }, &g_state);
+    glyph_choice->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->glyphMode = ((Fl_Choice*)w)->value(); }, &g_state);
+
+    Fl::add_idle([](void* v){ SheafView* sv=(SheafView*)v; if(g_state.animate){ g_state.anim_t += 0.02; g_state.u_pos = PI + sin(g_state.anim_t)*1.0*PI; ctx.s_u_pos->value(g_state.u_pos);} sv->redraw(); }, view);
+
+    win->resizable(view); win->show(); return Fl::run(); }

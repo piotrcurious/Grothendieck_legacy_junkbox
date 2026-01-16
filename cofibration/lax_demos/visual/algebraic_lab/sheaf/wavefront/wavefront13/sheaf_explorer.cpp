@@ -1,0 +1,190 @@
+#include <FL/Fl.H>
+#include <FL/Fl_Double_Window.H>
+#include <FL/Fl_Gl_Window.H>
+#include <FL/Fl_Value_Slider.H>
+#include <FL/Fl_Check_Button.H>
+#include <FL/Fl_Box.H>
+#include <FL/Fl_Group.H>
+#include <FL/gl.h>
+#include <GL/glu.h>
+
+#include <cmath>
+#include <vector>
+#include <complex>
+
+static constexpr float PI = 3.14159265359f;
+using Complex = std::complex<double>;
+
+// -----------------------------------------------------------------------------
+// Rigorous Density Matrix Dynamics (NaCl Lattice + Lindblad Bath)
+// -----------------------------------------------------------------------------
+struct QuantumSystem {
+    static const int N = 64; 
+    double L = 25.0;         
+    double dx = L / N;
+    double dk = 2.0 * PI / L;
+    
+    // Density Matrix in Coordinate Representation rho[x][x']
+    std::vector<std::vector<Complex>> rho;
+
+    QuantumSystem() {
+        rho.assign(N, std::vector<Complex>(N, 0.0));
+        // Initial State: Coherent Gaussian Packet
+        double x0 = -5.0, p0 = 2.5, sigma = 1.5;
+        std::vector<Complex> psi(N);
+        for(int i=0; i<N; ++i) {
+            double x = -L/2.0 + i*dx;
+            double phase = p0 * x;
+            double env = exp(-pow(x-x0,2)/(4.0*sigma*sigma));
+            psi[i] = Complex(env * cos(phase), env * sin(phase));
+        }
+        for(int i=0; i<N; i++)
+            for(int j=0; j<N; j++)
+                rho[i][j] = psi[i] * std::conj(psi[j]);
+    }
+};
+
+class NumericalLvNSolver {
+public:
+    // Hamiltonian: H = P^2/2m + V_latt(x)
+    void evolve(QuantumSystem& s, double dt, double m_eff, double V_latt, double gamma) {
+        int N = s.N;
+        // 1. Hamiltonian Evolution: U = exp(-i*H*dt)
+        // Kinetic part in Momentum Space, Potential part in Position Space
+        // For rigor, we compute the commutator [H, rho] directly
+        std::vector<std::vector<Complex>> d_rho(N, std::vector<Complex>(N, 0.0));
+
+        for(int i=0; i<N; i++) {
+            for(int j=0; j<N; j++) {
+                double xi = -s.L/2.0 + i*s.dx;
+                double xj = -s.L/2.0 + j*s.dx;
+                
+                // Periodic Potential of NaCl lattice
+                double Vi = V_latt * cos(2.0 * PI * xi / 5.64); 
+                double Vj = V_latt * cos(2.0 * PI * xj / 5.64);
+
+                // Kinetic approximation (Finite Difference 2nd Derivative)
+                int im = (i-1+N)%N, ip = (i+1)%N;
+                int jm = (j-1+N)%N, jp = (j+1)%N;
+                
+                Complex kin_i = -(s.rho[ip][j] - 2.0*s.rho[i][j] + s.rho[im][j]) / (2.0 * m_eff * s.dx * s.dx);
+                Complex kin_j = (s.rho[i][jp] - 2.0*s.rho[i][j] + s.rho[i][jm]) / (2.0 * m_eff * s.dx * s.dx);
+                
+                // [H, rho] = H*rho - rho*H
+                d_rho[i][j] = -Complex(0, 1) * (kin_i + kin_j + (Vi - Vj) * s.rho[i][j]);
+                
+                // 2. Lindblad Dissipator: L(rho) = gamma * (X rho X - 1/2{X^2, rho})
+                // This models decoherence/scattering by destroying off-diagonal spatial correlations
+                if (i != j) {
+                    d_rho[i][j] -= gamma * pow(xi - xj, 2) * s.rho[i][j];
+                }
+            }
+        }
+
+        // Apply Step
+        for(int i=0; i<N; i++)
+            for(int j=0; j<N; j++)
+                s.rho[i][j] += d_rho[i][j] * dt;
+    }
+
+    double get_wigner(const QuantumSystem& s, int x_idx, double p) {
+        Complex sum = 0;
+        int N = s.N;
+        for(int dy = -N/2; dy < N/2; dy++) {
+            int i1 = (x_idx + dy + N) % N;
+            int i2 = (x_idx - dy + N) % N;
+            double y = dy * s.dx;
+            sum += s.rho[i1][i2] * std::polar(1.0, -2.0 * p * y);
+        }
+        return sum.real() / N;
+    }
+};
+
+// -----------------------------------------------------------------------------
+// UI and View
+// -----------------------------------------------------------------------------
+class PhysicalWignerView : public Fl_Gl_Window {
+    QuantumSystem sys;
+    NumericalLvNSolver solver;
+    float rotX = 30, rotY = -40;
+public:
+    float gamma = 0.02f, V0 = 1.5f, m = 0.5f;
+    bool running = false;
+
+    PhysicalWignerView(int x, int y, int w, int h) : Fl_Gl_Window(x,y,w,h) {}
+
+    void draw() override {
+        if (!valid()) {
+            glViewport(0, 0, w(), h());
+            glEnable(GL_DEPTH_TEST);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        }
+        glClearColor(0.01f, 0.01f, 0.02f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        glMatrixMode(GL_PROJECTION); glLoadIdentity();
+        gluPerspective(45, (float)w()/h(), 1, 1000);
+        glMatrixMode(GL_MODELVIEW); glLoadIdentity();
+        gluLookAt(110, 80, 130, 0, 0, 0, 0, 1, 0);
+        glRotatef(rotX, 1, 0, 0); glRotatef(rotY, 0, 1, 0);
+
+        if(running) solver.evolve(sys, 0.05, m, V0, gamma);
+
+        int N = sys.N;
+        for(int i=0; i<N-1; i++) {
+            glBegin(GL_TRIANGLE_STRIP);
+            for(int j=0; j<N; j++) {
+                double p = (j - N/2) * sys.dk;
+                double w1 = solver.get_wigner(sys, i, p);
+                double w2 = solver.get_wigner(sys, i+1, p);
+                
+                auto color = [](double w) {
+                    if(w > 0) glColor4f(0.2f, 0.6f, 1.0f, (float)w*15.0f);
+                    else glColor4f(1.0f, 0.1f, 0.2f, (float)fabs(w)*15.0f);
+                };
+
+                color(w1); glVertex3f((i-N/2)*2.5f, (float)w1*100.0f, (float)p*25.0f);
+                color(w2); glVertex3f((i+1-N/2)*2.5f, (float)w2*100.0f, (float)p*25.0f);
+            }
+            glEnd();
+        }
+    }
+
+    int handle(int e) override {
+        static int lx, ly;
+        if(e == FL_PUSH) { lx = Fl::event_x(); ly = Fl::event_y(); return 1; }
+        if(e == FL_DRAG) {
+            rotY += (Fl::event_x()-lx); rotX += (Fl::event_y()-ly);
+            lx = Fl::event_x(); ly = Fl::event_y(); redraw(); return 1;
+        }
+        return Fl_Gl_Window::handle(e);
+    }
+};
+
+int main() {
+    Fl_Double_Window* win = new Fl_Double_Window(1280, 900, "Rigorous NaCl Master Equation Solver");
+    PhysicalWignerView* view = new PhysicalWignerView(320, 0, 960, 900);
+    
+    Fl_Group* ui = new Fl_Group(0, 0, 320, 900);
+    ui->box(FL_FLAT_BOX); ui->color(fl_rgb_color(15, 15, 25));
+
+    auto slider = [&](int y, const char* l, float min, float max, float def, float* v) {
+        auto s = new Fl_Value_Slider(20, y, 280, 20, l);
+        s->type(FL_HOR_NICE_SLIDER); s->bounds(min, max); s->value(def);
+        s->labelcolor(FL_WHITE); s->align(FL_ALIGN_TOP_LEFT);
+        s->callback([](Fl_Widget* w, void* d){ *(float*)d = (float)((Fl_Value_Slider*)w)->value(); }, v);
+    };
+
+    slider(100, "Lattice Potential (V0)", 0.0f, 5.0f, 1.5f, &view->V0);
+    slider(160, "Phonon Coupling (Gamma)", 0.0f, 0.2f, 0.02f, &view->gamma);
+    slider(220, "Effective Mass (m*)", 0.1f, 2.0f, 0.5f, &view->m);
+
+    auto btn = new Fl_Check_Button(20, 280, 200, 25, "Solve Lindblad Dynamics");
+    btn->labelcolor(FL_WHITE); btn->callback([](Fl_Widget* w, void* d){ ((PhysicalWignerView*)d)->running = ((Fl_Check_Button*)w)->value(); }, view);
+
+    ui->end();
+    Fl::add_idle([](void* d){ ((PhysicalWignerView*)d)->redraw(); }, view);
+    win->show();
+    return Fl::run();
+}

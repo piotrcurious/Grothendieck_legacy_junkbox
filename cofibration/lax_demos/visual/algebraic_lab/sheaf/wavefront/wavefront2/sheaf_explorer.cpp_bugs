@@ -1,0 +1,335 @@
+#include <FL/Fl.H>
+#include <FL/Fl_Double_Window.H>
+#include <FL/Fl_Gl_Window.H>
+#include <FL/Fl_Choice.H>
+#include <FL/Fl_Value_Slider.H>
+#include <FL/Fl_Check_Button.H>
+#include <FL/Fl_Box.H>
+#include <FL/Fl_Group.H>
+#include <FL/gl.h>
+#include <GL/glu.h>
+
+#include <cmath>
+#include <vector>
+#include <memory>
+#include <complex>
+
+static constexpr float PI = 3.14159265359f;
+
+// -----------------------------------------------------------------------------
+// Core Optics & Sheaf State
+// -----------------------------------------------------------------------------
+struct StalkParams {
+    float alpha = 1.0f; 
+    float beta  = 0.5f; 
+    float morph = 0.0f; 
+};
+
+class SheafStrategy;
+
+struct AppState {
+    float rotX = 25.0f, rotY = -45.0f;
+    float u_pos = PI, u_width = 2.0f * PI, section_val = 0.0f;
+    StalkParams params;
+    SheafStrategy* current = nullptr; 
+    bool showEtale = true;
+    bool showDifferentials = true; 
+    bool animate = false;
+    float anim_t = 0.0f;
+};
+
+// -----------------------------------------------------------------------------
+// Rigorous Optics-Based Sheaf Strategies
+// -----------------------------------------------------------------------------
+class SheafStrategy {
+public:
+    virtual ~SheafStrategy() {}
+    
+    // Mapping from (Base-Coordinate, Fiber-Parameter) to 3D Visualization Space
+    virtual void getPoint(float theta, float val, float out[3], const StalkParams& p) = 0;
+    
+    virtual void getTangent(float theta, float val, float out[3], const StalkParams& p) {
+        float p1[3], p2[3], dt = 0.005f;
+        getPoint(theta - dt, val, p1, p);
+        getPoint(theta + dt, val, p2, p);
+        for(int i=0; i<3; i++) out[i] = (p2[i] - p1[i]) / (2.0f * dt);
+    }
+
+    virtual float getMinVal() { return -2.5f; }
+    virtual float getMaxVal() { return 2.5f; }
+    virtual const char* getName() = 0;
+    virtual const char* getDesc() = 0;
+    virtual const char* getParamALabel() { return "Param A"; }
+    virtual const char* getParamBLabel() { return "Param B"; }
+};
+
+// 1. Wigner Distribution Sheaf (Phase-Space Optics)
+// Maps the 'local frequency' of a light wave as a section of a phase-space bundle.
+class WignerSheaf : public SheafStrategy {
+public:
+    void getPoint(float theta, float val, float out[3], const StalkParams& p) override {
+        float r_base = 4.5f;
+        // The signal: A chirp or frequency-modulated pulse
+        // s(t) = exp(i * (alpha*t^2 + beta*t))
+        // The Wigner distribution is concentrated along the instantaneous frequency: 
+        // f_inst = d/dt Phase = 2*alpha*t + beta
+        
+        float t = theta - PI;
+        float inst_freq = p.alpha * t + p.beta * sinf(p.morph);
+        
+        // Etale space height represents the energy density in phase space
+        float phase_dist = val - inst_freq;
+        float density = expf(-powf(phase_dist, 2.0f) / 0.2f);
+        
+        out[0] = (r_base + val) * cosf(theta);
+        out[1] = density * 4.0f;
+        out[2] = (r_base + val) * sinf(theta);
+    }
+    const char* getName() override { return "Wigner Phase-Space"; }
+    const char* getDesc() override { return "A sheaf on the time domain where\nstalks are local momentum (frequency).\nSections track the Wigner distribution."; }
+    const char* getParamALabel() override { return "Chirp Rate"; }
+    const char* getParamBLabel() override { return "Freq Offset"; }
+};
+
+// 2. Hamiltonian Multi-Path Sheaf (Ray Optics)
+// Models the 'eikonal' sheaf where light takes multiple paths through a medium.
+class HamiltonianSheaf : public SheafStrategy {
+public:
+    void getPoint(float theta, float val, float out[3], const StalkParams& p) override {
+        float r_base = 5.0f;
+        // In a graded-index medium, rays can 'fold' over the coordinate space.
+        // We model the eikonal surface S(x, y) where dS/dx = p (momentum)
+        // Here, theta is the position and val is the launch angle (fiber).
+        
+        float x = theta;
+        float angle = val * p.alpha;
+        
+        // Ray Equation: x(t) = x0 + v*t + sin(p.morph)*t^2
+        // We project the 'Optical Action' as the height.
+        float action = angle * sinf(x) + p.beta * cosf(x + p.morph);
+        
+        out[0] = (r_base + val) * cosf(theta);
+        out[1] = action * 2.0f;
+        out[2] = (r_base + val) * sinf(theta);
+    }
+    const char* getName() override { return "Hamiltonian Ray Sheaf"; }
+    const char* getDesc() override { return "Models ray propagation in GRIN media.\nSheets represent the 'Action' surface.\nCaustics occur at the fold points."; }
+    const char* getParamALabel() override { return "Path Curvature"; }
+    const char* getParamBLabel() override { return "Medium Gradient"; }
+};
+
+// 3. Fresnel Diffraction Sheaf (Wavefront Propagation)
+// Models the sheaf of phase-factors in the Fresnel diffraction integral.
+class FresnelSheaf : public SheafStrategy {
+public:
+    void getPoint(float theta, float val, float out[3], const StalkParams& p) override {
+        float r_base = 4.5f;
+        // Fresnel Kernel: K(x, u) = exp(i * pi * (x-u)^2 / lambda*z)
+        // theta is 'x' (observation), val is 'u' (source point)
+        float x = theta / (2.0f * PI);
+        float u = val / 2.5f;
+        
+        float dist_sq = powf(x - u, 2.0f);
+        float phase = (PI * dist_sq) / (p.alpha + 0.1f);
+        
+        // The etale space visualizes the complex phase contribution
+        float h = p.beta * sinf(phase + p.morph);
+        
+        out[0] = (r_base + val) * cosf(theta);
+        out[1] = h * 3.0f;
+        out[2] = (r_base + val) * sinf(theta);
+    }
+    const char* getName() override { return "Fresnel Diffraction"; }
+    const char* getDesc() override { return "Sheaf of Huygens wavelets.\nSections represent the phase integral\ncontributions to the field at S1."; }
+    const char* getParamALabel() override { return "Propag. Distance"; }
+    const char* getParamBLabel() override { return "Aperture Scaling"; }
+};
+
+// -----------------------------------------------------------------------------
+// Visualizer Engine
+// -----------------------------------------------------------------------------
+class SheafView : public Fl_Gl_Window {
+    AppState* state;
+public:
+    SheafView(int x, int y, int w, int h, AppState* s) : Fl_Gl_Window(x,y,w,h), state(s) {}
+
+    void draw() override {
+        if (!valid()) {
+            glViewport(0,0,w(),h());
+            glEnable(GL_DEPTH_TEST);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        }
+        glClearColor(0.005f, 0.005f, 0.012f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        glMatrixMode(GL_PROJECTION); glLoadIdentity();
+        gluPerspective(40, (float)w()/h(), 0.1, 150);
+        glMatrixMode(GL_MODELVIEW); glLoadIdentity();
+        gluLookAt(0, 15, 40, 0, 0, 0, 0, 1, 0);
+        glRotatef(state->rotX, 1, 0, 0);
+        glRotatef(state->rotY, 0, 1, 0);
+
+        if (!state->current) return;
+
+        // Base Circle (The Manifold M)
+        glColor4f(0.5f, 0.5f, 0.7f, 0.2f);
+        glBegin(GL_LINE_LOOP);
+        for(int i=0; i<120; i++) glVertex3f(4.5f*cosf(2*PI*i/120.0f), -8.0f, 4.5f*sinf(2*PI*i/120.0f));
+        glEnd();
+
+        // The Etale Space (Total Space of the Sheaf)
+        if (state->showEtale) {
+            glBegin(GL_TRIANGLES);
+            int t_steps = 150, v_steps = 20;
+            float t_range = 2.0f * PI;
+            for(int i=0; i<t_steps; i++) {
+                float t1 = t_range * i/t_steps, t2 = t_range * (i+1)/t_steps;
+                for(int j=0; j<v_steps; j++) {
+                    float v1 = state->current->getMinVal() + (state->current->getMaxVal()-state->current->getMinVal())*j/v_steps;
+                    float v2 = state->current->getMinVal() + (state->current->getMaxVal()-state->current->getMinVal())*(j+1)/v_steps;
+                    
+                    float p1[3], p2[3], p3[3], p4[3];
+                    state->current->getPoint(t1, v1, p1, state->params);
+                    state->current->getPoint(t2, v1, p2, state->params);
+                    state->current->getPoint(t2, v2, p3, state->params);
+                    state->current->getPoint(t1, v2, p4, state->params);
+
+                    float alpha = 0.15f + 0.1f * sinf(t1);
+                    glColor4f(0.1f, 0.4f, 0.9f, alpha);
+                    glVertex3fv(p1); glVertex3fv(p2); glVertex3fv(p3);
+                    glVertex3fv(p1); glVertex3fv(p3); glVertex3fv(p4);
+                }
+            }
+            glEnd();
+        }
+
+        // The Section (Specific Observation in the Sheaf)
+        float start = state->u_pos - state->u_width/2.0f;
+        float end = state->u_pos + state->u_width/2.0f;
+
+        if (state->showDifferentials) {
+            glColor4f(0.2f, 1.0f, 0.5f, 0.6f);
+            glBegin(GL_LINES);
+            for(int i=0; i<=60; i++) {
+                float t = start + (end-start)*i/60.0f;
+                float p[3], tan[3];
+                state->current->getPoint(t, state->section_val, p, state->params);
+                state->current->getTangent(t, state->section_val, tan, state->params);
+                glVertex3fv(p);
+                glVertex3f(p[0] + tan[0]*0.2f, p[1] + tan[1]*0.2f, p[2] + tan[2]*0.2f);
+            }
+            glEnd();
+        }
+
+        glColor3f(1.0f, 0.3f, 0.1f);
+        glLineWidth(3.0f);
+        glBegin(GL_LINE_STRIP);
+        for(int i=0; i<=400; i++) {
+            float t = start + (end-start)*i/400.0f;
+            float p[3]; state->current->getPoint(t, state->section_val, p, state->params);
+            glVertex3fv(p);
+        }
+        glEnd();
+        glLineWidth(1.0f);
+    }
+
+    int handle(int e) override {
+        static int lx, ly;
+        if(e == FL_PUSH) { lx = Fl::event_x(); ly = Fl::event_y(); return 1; }
+        if(e == FL_DRAG) {
+            state->rotY += (float)(Fl::event_x()-lx) * 0.4f;
+            state->rotX += (float)(Fl::event_y()-ly) * 0.4f;
+            lx = Fl::event_x(); ly = Fl::event_y(); redraw(); return 1;
+        }
+        return Fl_Gl_Window::handle(e);
+    }
+};
+
+int main() {
+    static AppState g_state;
+    Fl_Double_Window* win = new Fl_Double_Window(1280, 850, "Optics Sheaf Laboratory");
+    static UIContext ctx(&g_state);
+
+    int sw = 350;
+    Fl_Group* sidebar = new Fl_Group(0, 0, sw, 850);
+    sidebar->box(FL_FLAT_BOX); sidebar->color(fl_rgb_color(15, 18, 22));
+
+    Fl_Box* head = new Fl_Box(20, 20, sw-40, 40, "FIELD ETALE SPACE");
+    head->labelcolor(FL_WHITE); head->labelfont(FL_BOLD); head->labelsize(24);
+
+    Fl_Choice* menu = new Fl_Choice(20, 95, sw-40, 30, "Optical System Model");
+    menu->align(FL_ALIGN_TOP_LEFT); menu->labelcolor(FL_WHITE);
+    for(auto& s : ctx.strategies) menu->add(s->getName());
+    menu->value(0);
+
+    ctx.desc_box = new Fl_Box(20, 145, sw-40, 110, ctx.strategies[0]->getDesc());
+    ctx.desc_box->box(FL_BORDER_BOX); ctx.desc_box->color(fl_rgb_color(30, 35, 45));
+    ctx.desc_box->labelcolor(fl_rgb_color(180, 200, 255));
+    ctx.desc_box->align(FL_ALIGN_WRAP | FL_ALIGN_INSIDE | FL_ALIGN_LEFT);
+
+    int y = 280;
+    auto create_s = [&](const char* lbl, float minv, float maxv, float curv) {
+        auto s = new Fl_Value_Slider(20, y+25, sw-40, 20, lbl);
+        s->type(FL_HOR_NICE_SLIDER); s->bounds(minv, maxv); s->value(curv);
+        s->labelcolor(FL_WHITE); s->labelsize(12); s->align(FL_ALIGN_TOP_LEFT);
+        y += 75; return s;
+    };
+
+    ctx.s_pos = create_s("Domain Center (u)", -4*PI, 8*PI, PI);
+    auto s_width = create_s("Domain Width (du)", 0.1, 8*PI, 2*PI);
+    auto s_val = create_s("Fiber Selection (val)", -2.5, 2.5, 0.0);
+
+    y += 10;
+    Fl_Box* sep = new Fl_Box(20, y, sw-40, 1); sep->box(FL_FLAT_BOX); sep->color(FL_DARK2);
+    y += 20;
+
+    ctx.s_alpha = create_s(ctx.strategies[0]->getParamALabel(), 0.1, 15.0, 1.0);
+    ctx.s_beta = create_s(ctx.strategies[0]->getParamBLabel(), 0.0, 5.0, 1.0);
+    auto s_morph = create_s("Wave Propagation Shift", -10.0, 10.0, 0.0);
+
+    auto b_mesh = new Fl_Check_Button(20, y, 140, 25, "Render Etale");
+    b_mesh->labelcolor(FL_WHITE); b_mesh->value(1);
+    auto b_diff = new Fl_Check_Button(180, y, 140, 25, "Show Tangents");
+    b_diff->labelcolor(FL_WHITE); b_diff->value(1);
+    y += 45;
+    auto b_anim = new Fl_Check_Button(20, y, 200, 25, "Animate Propagation");
+    b_anim->labelcolor(FL_WHITE); b_anim->value(0);
+
+    sidebar->end();
+    SheafView* view = new SheafView(sw, 0, 1280-sw, 850, &g_state);
+
+    menu->callback([](Fl_Widget* w, void* d){
+        UIContext* c = (UIContext*)d;
+        int idx = ((Fl_Choice*)w)->value();
+        c->state->current = c->strategies[idx].get();
+        c->desc_box->label(c->state->current->getDesc());
+        c->s_alpha->label(c->state->current->getParamALabel());
+        c->s_beta->label(c->state->current->getParamBLabel());
+        c->desc_box->window()->redraw();
+    }, &ctx);
+
+    ctx.s_pos->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->u_pos = (float)((Fl_Value_Slider*)w)->value(); }, &g_state);
+    s_width->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->u_width = (float)((Fl_Value_Slider*)w)->value(); }, &g_state);
+    s_val->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->section_val = (float)((Fl_Value_Slider*)w)->value(); }, &g_state);
+    ctx.s_alpha->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->params.alpha = (float)((Fl_Value_Slider*)w)->value(); }, &g_state);
+    ctx.s_beta->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->params.beta = (float)((Fl_Value_Slider*)w)->value(); }, &g_state);
+    s_morph->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->params.morph = (float)((Fl_Value_Slider*)w)->value(); }, &g_state);
+    
+    b_mesh->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->showEtale = ((Fl_Check_Button*)w)->value(); }, &g_state);
+    b_diff->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->showDifferentials = ((Fl_Check_Button*)w)->value(); }, &g_state);
+    b_anim->callback([](Fl_Widget* w, void* s){ ((AppState*)s)->animate = ((Fl_Check_Button*)w)->value(); }, &g_state);
+
+    Fl::add_idle([](void* v){
+        SheafView* sv = (SheafView*)v;
+        if(g_state.animate) {
+            g_state.anim_t += 0.01f;
+            g_state.params.morph = sinf(g_state.anim_t * 0.5f) * 5.0f;
+        }
+        sv->redraw();
+    }, view);
+
+    win->resizable(view);
+    win->show();
+    return Fl::run();
+}
