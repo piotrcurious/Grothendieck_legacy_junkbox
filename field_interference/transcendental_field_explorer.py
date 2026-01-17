@@ -182,7 +182,7 @@ if __name__ == "__main__":
         explorer.current_base_name = 'pi'
         explorer.current_base_val = np.pi
         explorer.update(None)
-        plt.savefig('/home/ubuntu/transcendental_interference_static.png', dpi=300, facecolor='#050505')
+        plt.savefig('./transcendental_interference_static.png', dpi=300, facecolor='#050505')
     else:
         explorer = TranscendentalFieldExplorer(interactive=True)
         plt.show()

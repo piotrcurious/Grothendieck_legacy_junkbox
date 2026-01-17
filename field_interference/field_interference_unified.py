@@ -134,7 +134,7 @@ if __name__ == "__main__":
     import sys
     if "--static" in sys.argv:
         explorer = UnifiedFieldExplorer(interactive=False)
-        plt.savefig('/home/ubuntu/unified_field_interference.png', dpi=300, facecolor='#050505')
+        plt.savefig('./unified_field_interference.png', dpi=300, facecolor='#050505')
     else:
         explorer = UnifiedFieldExplorer(interactive=True)
         plt.show()
