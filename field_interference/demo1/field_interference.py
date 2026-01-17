@@ -83,8 +83,8 @@ def visualize_field_interference():
     cbar.ax.yaxis.set_tick_params(color='white', labelcolor='white')
 
     plt.tight_layout()
-    plt.savefig('/home/ubuntu/field_interference_v2.png', dpi=300, facecolor='black')
-    print("Visualization saved to /home/ubuntu/field_interference_v2.png")
+    plt.savefig('./field_interference_v2.png', dpi=300, facecolor='black')
+    print("Visualization saved to ./field_interference_v2.png")
 
 if __name__ == "__main__":
     visualize_field_interference()

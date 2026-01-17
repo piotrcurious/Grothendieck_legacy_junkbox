@@ -129,8 +129,8 @@ if __name__ == "__main__":
         explorer.p = 5
         explorer.n = 2
         explorer.update(None)
-        plt.savefig('/home/ubuntu/gf_extension_visualization.png', dpi=300, facecolor='#0a0a0a')
-        print("Static visualization saved to /home/ubuntu/gf_extension_visualization.png")
+        plt.savefig('./gf_extension_visualization.png', dpi=300, facecolor='#0a0a0a')
+        print("Static visualization saved to ./gf_extension_visualization.png")
     else:
         explorer = GFExplorer(interactive=True)
         plt.show()
