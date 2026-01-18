@@ -1,0 +1,244 @@
+/**
+ * Advanced Algebraic Compressor: Dictionary Learning & Structure Sharing
+ * * Improvement: Instead of compressing blocks in isolation, we:
+ * 1. Learn a "Global Algebraic Dictionary" (K-Means clustering on the signal space).
+ * 2. Map every block to the closest Dictionary Element (Basis) + Affine Transform.
+ * 3. Quantize the transform parameters for high compression ratios.
+ *
+ * Compile:
+ * g++ -O3 -I /usr/include/eigen3 shared_galois.cpp -o shared_comp -lboost_iostreams -lz -fopenmp
+ */
+
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <cmath>
+#include <random>
+#include <algorithm>
+#include <Eigen/Dense>
+#include <boost/iostreams/filtering_streambuf.hpp>
+#include <boost/iostreams/copy.hpp>
+#include <boost/iostreams/filter/zlib.hpp>
+
+using namespace Eigen;
+using namespace std;
+
+// --- Tuning Parameters ---
+const int BLOCK_SIZE = 8;
+const int VECTOR_DIM = BLOCK_SIZE * BLOCK_SIZE;
+const int DICT_SIZE = 256; // Size of our "Base Field" (fits in 1 byte index)
+
+// --- Data Structures ---
+struct Image {
+    int width, height;
+    MatrixXf data;
+};
+
+// Represents the "Galois Map": Index + Linear Transformation
+struct BlockMap {
+    uint8_t basis_index; // Index in Dictionary (0-255)
+    uint8_t scale;       // Quantized Scale (alpha)
+    uint8_t offset;      // Quantized Offset (beta)
+};
+
+// --- Helpers: PGM IO (Simplified) ---
+Image loadPGM(const string& filename) {
+    ifstream file(filename, ios::binary);
+    string magic; int w, h, maxVal;
+    file >> magic >> w >> h >> maxVal;
+    file.ignore(256, '\n');
+    Image img; img.width = w; img.height = h; img.data.resize(h, w);
+    vector<unsigned char> buffer(w * h);
+    file.read(reinterpret_cast<char*>(buffer.data()), buffer.size());
+    for(size_t i=0; i<buffer.size(); ++i) 
+        img.data(i/w, i%w) = static_cast<float>(buffer[i]);
+    return img;
+}
+
+void savePGM(const string& filename, const Image& img) {
+    ofstream file(filename, ios::binary);
+    file << "P5\n" << img.width << " " << img.height << "\n255\n";
+    vector<unsigned char> buffer(img.width * img.height);
+    for(int i=0; i<img.height; ++i)
+        for(int j=0; j<img.width; ++j)
+            buffer[i*img.width+j] = (unsigned char)std::max(0.f, std::min(255.f, img.data(i,j)));
+    file.write(reinterpret_cast<char*>(buffer.data()), buffer.size());
+}
+
+// --- Phase 1: Dictionary Learning (K-Means) ---
+// Finds the "shared algebraic structures" across the entire image
+MatrixXf learn_dictionary(const Image& img) {
+    cout << "[*] Learning Global Algebraic Structures (K-Means)..." << endl;
+    
+    // 1. Extract all blocks as vectors
+    vector<VectorXf> vectors;
+    for(int i=0; i <= img.height - BLOCK_SIZE; i+=BLOCK_SIZE) {
+        for(int j=0; j <= img.width - BLOCK_SIZE; j+=BLOCK_SIZE) {
+            Map<const MatrixXf> block_map(img.data.block(i,j,BLOCK_SIZE,BLOCK_SIZE).data(), BLOCK_SIZE, BLOCK_SIZE);
+            VectorXf vec = Map<const VectorXf>(block_map.data(), VECTOR_DIM);
+            
+            // Normalize for shape learning (remove brightness/contrast)
+            float mean = vec.mean();
+            vec.array() -= mean;
+            float norm = vec.norm();
+            if(norm > 1e-5) vec /= norm;
+            
+            vectors.push_back(vec);
+        }
+    }
+
+    // 2. Initialize Dictionary (Random selection)
+    MatrixXf dictionary(VECTOR_DIM, DICT_SIZE);
+    std::mt19937 rng(12345);
+    std::uniform_int_distribution<int> dist(0, vectors.size()-1);
+    for(int k=0; k<DICT_SIZE; ++k) dictionary.col(k) = vectors[dist(rng)];
+
+    // 3. K-Means Iterations
+    for(int iter=0; iter<10; ++iter) {
+        vector<VectorXf> centroids(DICT_SIZE, VectorXf::Zero(VECTOR_DIM));
+        vector<int> counts(DICT_SIZE, 0);
+
+        // Assignment step
+        for(const auto& vec : vectors) {
+            VectorXf dots = dictionary.transpose() * vec; // Similarity
+            int best_k;
+            dots.maxCoeff(&best_k);
+            centroids[best_k] += vec;
+            counts[best_k]++;
+        }
+
+        // Update step
+        float total_shift = 0;
+        for(int k=0; k<DICT_SIZE; ++k) {
+            if(counts[k] > 0) {
+                centroids[k] /= counts[k];
+                centroids[k].normalize(); // Keep it on the unit sphere
+                total_shift += (centroids[k] - dictionary.col(k)).norm();
+                dictionary.col(k) = centroids[k];
+            } else {
+                // Re-init dead cluster
+                dictionary.col(k) = vectors[dist(rng)];
+            }
+        }
+        if(total_shift < 1e-3) break;
+    }
+    return dictionary;
+}
+
+// --- Phase 2: Compression ---
+void compress(const string& inputFile, const string& outputFile) {
+    Image img = loadPGM(inputFile);
+    
+    // 1. Learn Structure
+    MatrixXf dictionary = learn_dictionary(img);
+
+    stringstream bitstream;
+    
+    // Write Header
+    bitstream.write((char*)&img.width, sizeof(int));
+    bitstream.write((char*)&img.height, sizeof(int));
+
+    // Write Dictionary (The "Shared Keys")
+    // 64 floats * 256 entries is small overhead for large images
+    bitstream.write((char*)dictionary.data(), dictionary.size() * sizeof(float));
+
+    // 2. Map Blocks to Dictionary
+    // We look for: Block = alpha * Dictionary_Item + beta
+    cout << "[*] Mapping Blocks to Shared Structures..." << endl;
+    
+    for(int i=0; i <= img.height - BLOCK_SIZE; i+=BLOCK_SIZE) {
+        for(int j=0; j <= img.width - BLOCK_SIZE; j+=BLOCK_SIZE) {
+            
+            // Extract Block
+            MatrixXf blk = img.data.block(i,j,BLOCK_SIZE,BLOCK_SIZE);
+            VectorXf vec = Map<VectorXf>(blk.data(), VECTOR_DIM);
+
+            // Calculate Beta (Offset/Mean)
+            float beta = vec.mean();
+            vec.array() -= beta;
+
+            // Calculate Alpha (Scale/Contrast)
+            float alpha = vec.norm();
+            if(alpha > 1e-5) vec /= alpha;
+
+            // Find Best Basis (Highest Dot Product)
+            VectorXf dots = dictionary.transpose() * vec;
+            int best_k;
+            float similarity = dots.maxCoeff(&best_k);
+            
+            // If correlation is negative, we could flip, but for simplicity we ignore sign optimization here
+            // (In a full Galois implementation, we'd handle group inversion)
+            
+            // Quantize to 1 byte each
+            // Scale: usually 0..255 range relative to some max, highly simplified here:
+            // Let's assume max variance is 1000 for standard images.
+            uint8_t q_scale = (uint8_t)std::min(255.f, std::max(0.f, alpha * 0.5f)); 
+            uint8_t q_offset = (uint8_t)std::min(255.f, std::max(0.f, beta));
+
+            BlockMap bmap = {(uint8_t)best_k, q_scale, q_offset};
+            bitstream.write((char*)&bmap, sizeof(BlockMap));
+        }
+    }
+
+    // 3. Entropy Code the Result
+    ofstream outFile(outputFile, ios::binary);
+    boost::iostreams::filtering_streambuf<boost::iostreams::output> out;
+    out.push(boost::iostreams::zlib_compressor());
+    out.push(outFile);
+    boost::iostreams::copy(bitstream, out);
+
+    cout << "[*] Compressed: " << outputFile << endl;
+}
+
+// --- Phase 3: Decompression ---
+void decompress(const string& inputFile, const string& outputFile) {
+    ifstream inFile(inputFile, ios::binary);
+    stringstream bitstream;
+    boost::iostreams::filtering_streambuf<boost::iostreams::input> in;
+    in.push(boost::iostreams::zlib_decompressor());
+    in.push(inFile);
+    boost::iostreams::copy(in, bitstream);
+
+    int w, h;
+    bitstream.read((char*)&w, sizeof(int));
+    bitstream.read((char*)&h, sizeof(int));
+
+    // Load Dictionary
+    MatrixXf dictionary(VECTOR_DIM, DICT_SIZE);
+    bitstream.read((char*)dictionary.data(), dictionary.size() * sizeof(float));
+
+    Image img; img.width = w; img.height = h; img.data.resize(h, w);
+
+    cout << "[*] Reconstructing from Algebraic Basis..." << endl;
+
+    for(int i=0; i <= h - BLOCK_SIZE; i+=BLOCK_SIZE) {
+        for(int j=0; j <= w - BLOCK_SIZE; j+=BLOCK_SIZE) {
+            BlockMap bmap;
+            bitstream.read((char*)&bmap, sizeof(BlockMap));
+
+            // Decode Parameters
+            // Must match the quantization logic in compressor
+            float alpha = (float)bmap.scale * 2.0f; 
+            float beta = (float)bmap.offset;
+
+            // Retrieve Basis Vector
+            VectorXf vec = dictionary.col(bmap.basis_index);
+
+            // Apply Group Action: Affine Transform
+            vec = (vec * alpha).array() + beta;
+
+            // Write back
+            img.data.block(i,j,BLOCK_SIZE,BLOCK_SIZE) = Map<MatrixXf>(vec.data(), BLOCK_SIZE, BLOCK_SIZE);
+        }
+    }
+    savePGM(outputFile, img);
+    cout << "[*] Decompressed: " << outputFile << endl;
+}
+
+int main(int argc, char* argv[]) {
+    if(argc < 4) return 1;
+    string mode = argv[1];
+    if(mode == "c") compress(argv[2], argv[3]);
+    else if(mode == "d") decompress(argv[2], argv[3]);
+    return 0;
+}
