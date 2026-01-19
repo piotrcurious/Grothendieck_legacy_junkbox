@@ -1,0 +1,190 @@
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <cmath>
+#include <algorithm>
+#include <string>
+#include <Eigen/Dense>
+#include <boost/iostreams/filtering_streambuf.hpp>
+#include <boost/iostreams/copy.hpp>
+#include <boost/iostreams/filter/zlib.hpp>
+
+using namespace Eigen;
+using namespace std;
+
+/**
+ * IMPROVED GDHC: D4 Galois Morphisms & Feature-Selected Dictionary
+ */
+
+// --- Morphism Engine ($D_4$ Group + Polarity) ---
+// Total 16 morphisms per base atom
+enum Morphism : uint8_t {
+    ID = 0, ROT90, ROT180, ROT270, FLIP_H, FLIP_V, TRANS, ANTITRANS,
+    NEG_ID, NEG_ROT90, NEG_ROT180, NEG_ROT270, NEG_FLIP_H, NEG_FLIP_V, NEG_TRANS, NEG_ANTITRANS
+};
+
+MatrixXf apply_morphism(const MatrixXf& block, uint8_t m) {
+    MatrixXf res = block;
+    bool negate = (m >= 8);
+    uint8_t op = m % 8;
+
+    switch(op) {
+        case ROT90:  res = block.transpose().colwise().reverse(); break;
+        case ROT180: res = block.reverse(); break;
+        case ROT270: res = block.transpose().rowwise().reverse(); break;
+        case FLIP_H: res = block.rowwise().reverse(); break;
+        case FLIP_V: res = block.colwise().reverse(); break;
+        case TRANS:  res = block.transpose(); break;
+        case ANTITRANS: res = block.transpose().reverse(); break;
+        default: break; // Identity
+    }
+    return negate ? -res : res;
+}
+
+// --- Configuration ---
+struct CompressionConfig {
+    int dict_block_size = 16;
+    int dict_entries = 128;   
+    int dct_block_size = 8;
+    float dct_step = 4.0f;
+    int dct_coeffs = 3; 
+};
+
+struct DictionaryEntry {
+    uint16_t base_id;
+    uint8_t morphism; 
+};
+
+// --- DCT Utilities ---
+MatrixXf get_dct_matrix(int N) {
+    MatrixXf T(N, N);
+    float pi = acos(-1.0);
+    for (int i = 0; i < N; ++i) {
+        for (int j = 0; j < N; ++j) {
+            T(i, j) = (i == 0) ? 1.0/sqrt(N) : sqrt(2.0/N) * cos((2*j+1)*i*pi/(2.0*N));
+        }
+    }
+    return T;
+}
+
+// --- Improved Dictionary Building ---
+class GaloisDictionary {
+public:
+    vector<MatrixXf> atoms;
+
+    void train(const MatrixXf& data, int B, int max_entries) {
+        vector<pair<float, MatrixXf>> candidates;
+        // Step 1: Feature Extraction (High variance blocks make better atoms)
+        for (int i = 0; i + B <= data.rows(); i += B) {
+            for (int j = 0; j + B <= data.cols(); j += B) {
+                MatrixXf blk = data.block(i, j, B, B);
+                float var = (blk.array() - blk.mean()).square().sum();
+                if (var > 10.0f) { // Ignore flat blocks
+                    MatrixXf norm_blk = (blk.array() - blk.mean());
+                    norm_blk /= (norm_blk.norm() + 1e-6);
+                    candidates.push_back({var, norm_blk});
+                }
+            }
+        }
+        // Step 2: Sort by Importance and Prune
+        sort(candidates.rbegin(), candidates.rend(), [](const auto& a, const auto& b){
+            return a.first < b.first;
+        });
+
+        for(auto& c : candidates) {
+            if (atoms.size() >= max_entries) break;
+            
+            // Redundancy check against existing atoms under all morphisms
+            bool redundant = false;
+            for(const auto& existing : atoms) {
+                for(uint8_t m=0; m<16; ++m) {
+                    float dot = (apply_morphism(existing, m).array() * c.second.array()).sum();
+                    if (dot > 0.92f) { redundant = true; break; }
+                }
+                if(redundant) break;
+            }
+            if (!redundant) atoms.push_back(c.second);
+        }
+    }
+
+    DictionaryEntry find_best(const MatrixXf& target, float& out_scale) {
+        float best_corr = -1.0f;
+        DictionaryEntry best = {0, 0};
+        
+        for (size_t i = 0; i < atoms.size(); ++i) {
+            for (uint8_t m = 0; m < 16; ++m) {
+                MatrixXf morphed = apply_morphism(atoms[i], m);
+                float corr = (morphed.array() * target.array()).sum();
+                if (corr > best_corr) {
+                    best_corr = corr;
+                    best = {(uint16_t)i, m};
+                }
+            }
+        }
+        out_scale = best_corr; 
+        return best;
+    }
+};
+
+// --- Core Compression Implementation ---
+void compress_optimized(const string& in, const string& out_file, CompressionConfig cfg) {
+    // [Load PGM logic remains similar but uses Eigen for efficiency]
+    // ... (Skipping standard PGM loading for brevity, assume 'img' is loaded) ...
+    
+    // 1. Train Dictionary
+    GaloisDictionary dict;
+    dict.train(img_data, cfg.dict_block_size, cfg.dict_entries);
+
+    // 2. Encode L1 (Dictionary + Morphism Mapping)
+    stringstream ss;
+    uint32_t ds = dict.atoms.size();
+    ss.write((char*)&ds, 4);
+    for(auto& a : dict.atoms) ss.write((char*)a.data(), a.size() * sizeof(float));
+
+    MatrixXf recon = MatrixXf::Zero(img_h, img_w);
+    int B = cfg.dict_block_size;
+
+    for (int i = 0; i + B <= img_h; i += B) {
+        for (int j = 0; j + B <= img_w; j += B) {
+            MatrixXf blk = img_data.block(i, j, B, B);
+            float mean = blk.mean();
+            MatrixXf centered = blk.array() - mean;
+            float norm = centered.norm();
+            centered /= (norm + 1e-6);
+
+            float scale;
+            DictionaryEntry entry = dict.find_best(centered, scale);
+            
+            // Quantize and write
+            uint8_t q_mean = (uint8_t)clamp(mean, 0.0f, 255.0f);
+            uint8_t q_norm = (uint8_t)clamp(norm / 2.0f, 0.0f, 255.0f);
+            ss.write((char*)&entry, sizeof(DictionaryEntry));
+            ss.write((char*)&q_mean, 1);
+            ss.write((char*)&q_norm, 1);
+
+            // Reconstruct for residual pass
+            recon.block(i, j, B, B) = (apply_morphism(dict.atoms[entry.base_id], entry.morphism) * (q_norm * 2.0f)).array() + q_mean;
+        }
+    }
+
+    // 3. Encode L2 (Residual DCT)
+    MatrixXf residual = img_data - recon;
+    MatrixXf T = get_dct_matrix(cfg.dct_block_size);
+    int db = cfg.dct_block_size;
+    
+    for (int i = 0; i + db <= img_h; i += db) {
+        for (int j = 0; j + db <= img_w; j += db) {
+            MatrixXf rd = residual.block(i, j, db, db);
+            MatrixXf coeff = T * rd * T.transpose();
+            for(int r=0; r<cfg.dct_coeffs; ++r) {
+                for(int c=0; c<cfg.dct_coeffs; ++c) {
+                    int8_t q = (int8_t)clamp(round(coeff(r,c)/cfg.dct_step), -128.0, 127.0);
+                    ss.write((char*)&q, 1);
+                }
+            }
+        }
+    }
+
+    // [Final Zlib Pipeline]
+    // ...
+}
