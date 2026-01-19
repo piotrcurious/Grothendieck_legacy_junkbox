@@ -1,0 +1,460 @@
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <cmath>
+#include <algorithm>
+#include <string>
+#include <sstream>
+#include <cstdint>
+#include <cfloat>
+#include <Eigen/Dense>
+#include <boost/iostreams/filtering_streambuf.hpp>
+#include <boost/iostreams/copy.hpp>
+#include <boost/iostreams/filter/zlib.hpp>
+
+/**
+ * Galois-DCT Hybrid Compressor (GDHC) - v5.3 "Architectural Integrity" (restored semantics)
+ *
+ * This file restores original v3.0 semantics where needed while keeping robustness fixes:
+ * - Fixed 4-byte header fields (int32_t) for exact format compatibility
+ * - Restored original spectral bitmask automorphism mapping
+ * - Restored original spatial morphism element-order semantics using .eval()
+ * - Restored duplicate detection threshold to 0.85 (original behavior)
+ * - Kept safety improvements: safe PGM header parsing, safe unaryExpr for log/exp, weight guards
+ * - Binary atom I/O uses sizeof(float) and Eigen contiguous storage
+ */
+
+using namespace Eigen;
+using namespace std;
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+enum Morphism : uint8_t {
+    ID = 0, ROT90, ROT180, ROT270, FLIP_H, FLIP_V, TRANS, ANTITRANS,
+    PHASE_H, PHASE_V, PHASE_D, EXP_1, EXP_2, LOG_1, SQUASH, STRETCH,
+    NEG_BIT = 16
+};
+
+// --- Small matrix utility helpers (explicit to avoid subtle Eigen expression bugs) ---
+static MatrixXf flip_horizontal_eval(const MatrixXf &m) {
+    MatrixXf r(m.rows(), m.cols());
+    for (int i = 0; i < m.rows(); ++i) r.row(i) = m.row(i).reverse();
+    return r;
+}
+static MatrixXf flip_vertical_eval(const MatrixXf &m) {
+    MatrixXf r(m.rows(), m.cols());
+    for (int j = 0; j < m.cols(); ++j) r.col(j) = m.col(j).reverse();
+    return r;
+}
+static MatrixXf rot90_eval(const MatrixXf &m) { return flip_horizontal_eval(m.transpose()); }
+static MatrixXf rot180_eval(const MatrixXf &m) {
+    MatrixXf r(m.rows(), m.cols());
+    for (int i = 0; i < m.rows(); ++i) r.row(i) = m.row(m.rows()-1-i).reverse();
+    return r;
+}
+static MatrixXf rot270_eval(const MatrixXf &m) { return flip_vertical_eval(m.transpose()); }
+static MatrixXf antitranspose_eval(const MatrixXf &m) { return rot180_eval(m.transpose()); }
+
+// Reproduces original v3 spatial morphism semantics (using Eigen eval where chains existed originally)
+MatrixXf apply_galois_action(const MatrixXf& block, uint8_t m) {
+    MatrixXf res;
+    bool negate = (m & NEG_BIT);
+    uint8_t op = m & 0x0F;
+
+    if (op < 8) {
+        switch(op) {
+            case ROT90:     res = block.transpose().colwise().reverse().eval(); break;
+            case ROT180:    res = block.reverse().eval(); break;
+            case ROT270:    res = block.transpose().rowwise().reverse().eval(); break;
+            case FLIP_H:    res = block.rowwise().reverse().eval(); break;
+            case FLIP_V:    res = block.colwise().reverse().eval(); break;
+            case TRANS:     res = block.transpose().eval(); break;
+            case ANTITRANS: res = block.transpose().reverse().eval(); break;
+            default:        res = block; break;
+        }
+    } else {
+        res = block;
+        switch(op) {
+            case PHASE_H: res.rowwise().reverseInPlace(); break;
+            case PHASE_V: res.colwise().reverseInPlace(); break;
+            case EXP_1:   res = res.unaryExpr([](float v){ return std::exp(v); }); break;
+            case EXP_2:   res = res.unaryExpr([](float v){ return std::exp(std::tanh(v)); }); break;
+            case LOG_1:
+                res = res.unaryExpr([](float v){ float a = std::abs(v); return (a>1e-12f) ? std::log(a) : 0.0f; });
+                break;
+            case SQUASH:  res = res.unaryExpr([](float v){ return 1.0f / (1.0f + std::exp(-v)); }); break;
+            case STRETCH: res = res.unaryExpr([](float v){ return std::tanh(v); }); break;
+            default: break;
+        }
+    }
+    if (negate) res = -res;
+    return res;
+}
+
+// Restored original spectral mapping (bitmask-driven permutation)
+MatrixXf apply_spectral_action(const MatrixXf& coeffs, uint8_t m) {
+    bool negate = (m & NEG_BIT);
+    uint8_t op = m & 0x0F;
+    MatrixXf res = coeffs;
+    if (op & 1) res = res.transpose().eval();
+    if (op & 2) {
+        MatrixXf tmp = res;
+        for (int r = 0; r < tmp.rows(); ++r) tmp.row(r) = tmp.row(r).reverse();
+        res = tmp;
+    }
+    if (op & 4) {
+        MatrixXf tmp = res;
+        for (int c = 0; c < tmp.cols(); ++c) tmp.col(c) = tmp.col(c).reverse();
+        res = tmp;
+    }
+    if (negate) res = -res;
+    return res;
+}
+
+struct CompressionConfig {
+    int spatial_block = 16;
+    int spatial_stride = 8;
+    int spatial_entries = 256;
+    int spectral_block = 8;
+    int spectral_coeffs = 4; // Sub-dimension of the DCT searched in the dictionary
+    int spectral_entries = 128;
+    float quant_step = 2.0f;
+
+    void validate() {
+        if (spectral_coeffs > spectral_block) spectral_coeffs = spectral_block;
+        if (spatial_stride > spatial_block) spatial_stride = spatial_block;
+        if (spatial_block <= 0) spatial_block = 8;
+        if (spectral_block <= 0) spectral_block = 8;
+    }
+};
+
+struct Image {
+    int width = 0, height = 0;
+    MatrixXf data;
+};
+
+#pragma pack(push, 1)
+struct FieldEntry {
+    uint16_t id;
+    uint8_t morphism;
+    uint8_t luma;
+    uint8_t chroma;
+};
+#pragma pack(pop)
+
+Image loadPGM(const string& filename) {
+    ifstream file(filename, ios::binary);
+    if (!file) { cerr << "IO Error: " << filename << endl; exit(1); }
+
+    string magic; file >> magic;
+    if (magic != "P5") { cerr << "Only P5 PGM supported" << endl; exit(1); }
+
+    auto skip_comments = [&](ifstream &f){
+        // skip whitespace and comments
+        while (isspace(f.peek())) f.get();
+        while (f.peek() == '#') { string dummy; getline(f, dummy); }
+    };
+
+    skip_comments(file);
+    int w, h, maxVal;
+    file >> w; skip_comments(file);
+    file >> h; skip_comments(file);
+    file >> maxVal; file.get(); // consume header newline
+
+    Image img; img.width = w; img.height = h; img.data.resize(h, w);
+    vector<unsigned char> buf((size_t)w * (size_t)h);
+    file.read(reinterpret_cast<char*>(buf.data()), buf.size());
+    if (!file) { cerr << "PGM read failed or truncated: " << filename << endl; exit(1); }
+
+    for (int i = 0; i < h; ++i)
+        for (int j = 0; j < w; ++j)
+            img.data(i, j) = static_cast<float>(buf[i * w + j]);
+    return img;
+}
+
+void savePGM(const string& filename, const Image& img) {
+    ofstream file(filename, ios::binary);
+    file << "P5\n" << img.width << " " << img.height << "\n255\n";
+    vector<unsigned char> buf((size_t)img.width * (size_t)img.height);
+    for (int i = 0; i < img.height; ++i)
+        for (int j = 0; j < img.width; ++j) {
+            float v = img.data(i, j);
+            v = std::max(0.0f, std::min(255.0f, v));
+            buf[i * img.width + j] = static_cast<unsigned char>(std::lround(v));
+        }
+    file.write(reinterpret_cast<char*>(buf.data()), buf.size());
+}
+
+class ManifoldDictionary {
+public:
+    vector<MatrixXf> atoms;
+    bool is_spectral;
+
+    ManifoldDictionary(bool spec) : is_spectral(spec) {}
+
+    void learn(const vector<MatrixXf>& samples, int limit) {
+        if (samples.empty() || limit <= 0) return;
+
+        struct Node { float score; MatrixXf m; };
+        vector<Node> candidates;
+        candidates.reserve(samples.size());
+
+        for (const auto &s : samples) {
+            float n = s.norm();
+            if (n > 1e-5f) candidates.push_back({n, s / n});
+        }
+
+        sort(candidates.begin(), candidates.end(), [](const Node& a, const Node& b){ return a.score > b.score; });
+
+        for (const auto &c : candidates) {
+            if ((int)atoms.size() >= limit) break;
+            bool exists = false;
+            for (const auto &a : atoms) {
+                if (a.rows() != c.m.rows() || a.cols() != c.m.cols()) continue;
+                for (int m = 0; m < 32; ++m) {
+                    MatrixXf morphed = is_spectral ? apply_spectral_action(a, (uint8_t)m) : apply_galois_action(a, (uint8_t)m);
+                    // normalized dot product (since both are normalized)
+                    float dot = (morphed.array() * c.m.array()).sum();
+                    if (std::abs(dot) > 0.85f) { exists = true; break; } // restored threshold
+                }
+                if (exists) break;
+            }
+            if (!exists) atoms.push_back(c.m);
+        }
+    }
+
+    FieldEntry solve(const MatrixXf& target, float& scale) {
+        FieldEntry best = {0, 0, 0, 0};
+        scale = 0.0f;
+        if (atoms.empty()) return best;
+        float best_corr = -FLT_MAX;
+
+        for (size_t i = 0; i < atoms.size(); ++i) {
+            const MatrixXf &a = atoms[i];
+            if (a.rows() != target.rows() || a.cols() != target.cols()) continue;
+            for (int m = 0; m < 32; ++m) {
+                MatrixXf morphed = is_spectral ? apply_spectral_action(a, (uint8_t)m) : apply_galois_action(a, (uint8_t)m);
+                float corr = (morphed.array() * target.array()).sum();
+                if (corr > best_corr) {
+                    best_corr = corr;
+                    best.id = static_cast<uint16_t>(i);
+                    best.morphism = static_cast<uint8_t>(m);
+                }
+            }
+        }
+
+        if (best.id >= atoms.size()) best.id = 0;
+        scale = best_corr;
+        return best;
+    }
+};
+
+void compress(const string& in, const string& out, CompressionConfig cfg) {
+    cfg.validate();
+    Image img = loadPGM(in);
+    stringstream ss;
+
+    // Header using fixed 4-byte integers
+    int32_t tw = static_cast<int32_t>(img.width), th = static_cast<int32_t>(img.height);
+    int32_t s_block = static_cast<int32_t>(cfg.spatial_block), s_stride = static_cast<int32_t>(cfg.spatial_stride);
+    int32_t sp_block = static_cast<int32_t>(cfg.spectral_block), sp_coeffs = static_cast<int32_t>(cfg.spectral_coeffs);
+    ss.write(reinterpret_cast<const char*>(&tw), sizeof(int32_t));
+    ss.write(reinterpret_cast<const char*>(&th), sizeof(int32_t));
+    ss.write(reinterpret_cast<const char*>(&s_block), sizeof(int32_t));
+    ss.write(reinterpret_cast<const char*>(&s_stride), sizeof(int32_t));
+    ss.write(reinterpret_cast<const char*>(&sp_block), sizeof(int32_t));
+    ss.write(reinterpret_cast<const char*>(&sp_coeffs), sizeof(int32_t));
+    ss.write(reinterpret_cast<const char*>(&cfg.quant_step), sizeof(float));
+
+    // Spatial samples (sliding window)
+    vector<MatrixXf> spatial_samples;
+    for (int i = 0; i + cfg.spatial_block <= img.height; i += cfg.spatial_stride)
+        for (int j = 0; j + cfg.spatial_block <= img.width; j += cfg.spatial_stride) {
+            MatrixXf b = img.data.block(i, j, cfg.spatial_block, cfg.spatial_block);
+            MatrixXf centered = b.array() - b.mean();
+            spatial_samples.push_back(centered);
+        }
+
+    ManifoldDictionary s_dict(false);
+    s_dict.learn(spatial_samples, cfg.spatial_entries);
+
+    // Spatial projection & serialization data buffer
+    MatrixXf recon = MatrixXf::Zero(img.height, img.width);
+    MatrixXf weight = MatrixXf::Zero(img.height, img.width);
+    vector<FieldEntry> spatial_data;
+    spatial_data.reserve((img.height / cfg.spatial_stride) * (img.width / cfg.spatial_stride));
+
+    for (int i = 0; i + cfg.spatial_block <= img.height; i += cfg.spatial_stride) {
+        for (int j = 0; j + cfg.spatial_block <= img.width; j += cfg.spatial_stride) {
+            MatrixXf blk = img.data.block(i, j, cfg.spatial_block, cfg.spatial_block);
+            float mu = static_cast<float>(blk.mean());
+            MatrixXf centered = blk.array() - mu;
+            float sigma = centered.norm();
+            if (sigma > 1e-6f) centered /= sigma;
+
+            float scale;
+            FieldEntry e = s_dict.solve(centered, scale);
+            e.luma = static_cast<uint8_t>(std::clamp(mu, 0.0f, 255.0f));
+            e.chroma = static_cast<uint8_t>(std::clamp(sigma * 0.5f, 0.0f, 255.0f));
+            spatial_data.push_back(e);
+
+            if (e.id < s_dict.atoms.size()) {
+                MatrixXf atom = apply_galois_action(s_dict.atoms[e.id], e.morphism);
+                recon.block(i, j, cfg.spatial_block, cfg.spatial_block).array() += (atom.array() * (static_cast<float>(e.chroma) * 2.0f)) + static_cast<float>(e.luma);
+            } else {
+                recon.block(i, j, cfg.spatial_block, cfg.spatial_block).array() += static_cast<float>(e.luma);
+            }
+            weight.block(i, j, cfg.spatial_block, cfg.spatial_block).array() += 1.0f;
+        }
+    }
+
+    // prevent division by zero by using max(weight, 1.0)
+    MatrixXf weight_safe = weight.array().max(1.0f);
+    recon = recon.array() / weight_safe.array();
+
+    // Spectral residual & DCT basis
+    MatrixXf res = img.data - recon;
+    int sb = cfg.spectral_block;
+    int sc = cfg.spectral_coeffs;
+    MatrixXf T(sb, sb);
+    for (int r = 0; r < sb; ++r)
+        for (int c = 0; c < sb; ++c)
+            T(r, c) = (r == 0) ? static_cast<float>(1.0 / sqrt((double)sb)) : static_cast<float>(sqrt(2.0 / sb) * cos((2 * c + 1) * r * M_PI / (2.0 * sb)));
+
+    vector<MatrixXf> spec_samples;
+    for (int i = 0; i + sb <= img.height; i += sb) {
+        for (int j = 0; j + sb <= img.width; j += sb) {
+            MatrixXf full_c = T * res.block(i, j, sb, sb) * T.transpose();
+            spec_samples.push_back(full_c.block(0, 0, sc, sc));
+        }
+    }
+
+    ManifoldDictionary spec_dict(true);
+    spec_dict.learn(spec_samples, cfg.spectral_entries);
+
+    // Serialize dictionaries and data
+    uint32_t s_size = static_cast<uint32_t>(s_dict.atoms.size());
+    ss.write(reinterpret_cast<const char*>(&s_size), sizeof(uint32_t));
+    for (const auto &a : s_dict.atoms) {
+        ss.write(reinterpret_cast<const char*>(a.data()), static_cast<std::streamsize>(a.size() * sizeof(float)));
+    }
+
+    uint32_t sp_size = static_cast<uint32_t>(spec_dict.atoms.size());
+    ss.write(reinterpret_cast<const char*>(&sp_size), sizeof(uint32_t));
+    for (const auto &a : spec_dict.atoms) {
+        ss.write(reinterpret_cast<const char*>(a.data()), static_cast<std::streamsize>(a.size() * sizeof(float)));
+    }
+
+    // write spatial FieldEntries
+    for (const auto &e : spatial_data) ss.write(reinterpret_cast<const char*>(&e), sizeof(FieldEntry));
+
+    // write spectral FieldEntries (one per sb x sb block)
+    for (int i = 0; i + sb <= img.height; i += sb) {
+        for (int j = 0; j + sb <= img.width; j += sb) {
+            MatrixXf full_c = T * res.block(i, j, sb, sb) * T.transpose();
+            float n = 0.0f;
+            FieldEntry e = spec_dict.solve(full_c.block(0, 0, sc, sc), n);
+            e.chroma = static_cast<uint8_t>(std::clamp(n / cfg.quant_step, 0.0f, 255.0f));
+            ss.write(reinterpret_cast<const char*>(&e), sizeof(FieldEntry));
+        }
+    }
+
+    // Compress and write to file
+    ofstream ofs(out, ios::binary);
+    if (!ofs) { cerr << "Could not open output file for writing: " << out << endl; exit(1); }
+    boost::iostreams::filtering_streambuf<boost::iostreams::output> out_z;
+    out_z.push(boost::iostreams::zlib_compressor());
+    out_z.push(ofs);
+    boost::iostreams::copy(ss, out_z);
+}
+
+void decompress(const string& in, const string& out) {
+    ifstream ifs(in, ios::binary);
+    if (!ifs) { cerr << "Could not open " << in << endl; exit(1); }
+
+    stringstream ss;
+    boost::iostreams::filtering_streambuf<boost::iostreams::input> in_z;
+    in_z.push(boost::iostreams::zlib_decompressor());
+    in_z.push(ifs);
+    boost::iostreams::copy(in_z, ss);
+
+    int32_t tw = 0, th = 0; CompressionConfig cfg;
+    ss.read(reinterpret_cast<char*>(&tw), sizeof(int32_t)); ss.read(reinterpret_cast<char*>(&th), sizeof(int32_t));
+    ss.read(reinterpret_cast<char*>(&cfg.spatial_block), sizeof(int32_t)); ss.read(reinterpret_cast<char*>(&cfg.spatial_stride), sizeof(int32_t));
+    ss.read(reinterpret_cast<char*>(&cfg.spectral_block), sizeof(int32_t)); ss.read(reinterpret_cast<char*>(&cfg.spectral_coeffs), sizeof(int32_t));
+    ss.read(reinterpret_cast<char*>(&cfg.quant_step), sizeof(float));
+    cfg.validate();
+
+    int w = static_cast<int>(tw), h = static_cast<int>(th);
+
+    uint32_t s_size = 0; ss.read(reinterpret_cast<char*>(&s_size), sizeof(uint32_t));
+    vector<MatrixXf> s_atoms(s_size, MatrixXf(cfg.spatial_block, cfg.spatial_block));
+    for (uint32_t i = 0; i < s_size; ++i) ss.read(reinterpret_cast<char*>(s_atoms[i].data()), static_cast<std::streamsize>(s_atoms[i].size() * sizeof(float)));
+
+    uint32_t sp_size = 0; ss.read(reinterpret_cast<char*>(&sp_size), sizeof(uint32_t));
+    vector<MatrixXf> sp_atoms(sp_size, MatrixXf(cfg.spectral_coeffs, cfg.spectral_coeffs));
+    for (uint32_t i = 0; i < sp_size; ++i) ss.read(reinterpret_cast<char*>(sp_atoms[i].data()), static_cast<std::streamsize>(sp_atoms[i].size() * sizeof(float)));
+
+    Image img; img.width = w; img.height = h; img.data.setZero(h, w);
+    MatrixXf weight = MatrixXf::Zero(h, w);
+
+    // Reconstruct Spatial Manifold
+    for (int i = 0; i + cfg.spatial_block <= h; i += cfg.spatial_stride) {
+        for (int j = 0; j + cfg.spatial_block <= w; j += cfg.spatial_stride) {
+            FieldEntry e; ss.read(reinterpret_cast<char*>(&e), sizeof(FieldEntry));
+            if (e.id < s_atoms.size()) {
+                MatrixXf atom = apply_galois_action(s_atoms[e.id], e.morphism);
+                img.data.block(i, j, cfg.spatial_block, cfg.spatial_block).array() += (atom.array() * (static_cast<float>(e.chroma) * 2.0f)) + static_cast<float>(e.luma);
+            } else {
+                img.data.block(i, j, cfg.spatial_block, cfg.spatial_block).array() += static_cast<float>(e.luma);
+            }
+            weight.block(i, j, cfg.spatial_block, cfg.spatial_block).array() += 1.0f;
+        }
+    }
+
+    MatrixXf wsafe = weight.array().max(1.0f);
+    img.data = img.data.array() / wsafe.array();
+
+    // Apply Spectral Ideals
+    int sb = cfg.spectral_block;
+    int sc = cfg.spectral_coeffs;
+    MatrixXf T(sb, sb);
+    for (int r = 0; r < sb; ++r)
+        for (int c = 0; c < sb; ++c)
+            T(r, c) = (r == 0) ? static_cast<float>(1.0 / sqrt((double)sb)) : static_cast<float>(sqrt(2.0 / sb) * cos((2 * c + 1) * r * M_PI / (2.0 * sb)));
+
+    for (int i = 0; i + sb <= h; i += sb) {
+        for (int j = 0; j + sb <= w; j += sb) {
+            FieldEntry e; ss.read(reinterpret_cast<char*>(&e), sizeof(FieldEntry));
+            MatrixXf coeff = MatrixXf::Zero(sb, sb);
+            if (e.id < sp_atoms.size()) {
+                coeff.block(0, 0, sc, sc) = apply_spectral_action(sp_atoms[e.id], e.morphism) * (static_cast<float>(e.chroma) * cfg.quant_step);
+            }
+            img.data.block(i, j, sb, sb) += T.transpose() * coeff * T;
+        }
+    }
+
+    savePGM(out, img);
+}
+
+int main(int argc, char** argv) {
+    if (argc < 4) {
+        cout << "GDHC v5.3 - Usage: " << argv[0] << " <c/d> <in> <out> [spatial_block stride spectral_block coeffs quant]" << endl;
+        return 1;
+    }
+    CompressionConfig cfg;
+    if (argc >= 5) cfg.spatial_block = stoi(argv[4]);
+    if (argc >= 6) cfg.spatial_stride = stoi(argv[5]);
+    if (argc >= 7) cfg.spectral_block = stoi(argv[6]);
+    if (argc >= 8) cfg.spectral_coeffs = stoi(argv[7]);
+    if (argc >= 9) cfg.quant_step = stof(argv[8]);
+    cfg.validate();
+
+    string mode = argv[1];
+    if (mode == "c") compress(argv[2], argv[3], cfg);
+    else if (mode == "d") decompress(argv[2], argv[3]);
+    else cerr << "Unknown mode: use 'c' or 'd'" << endl;
+    return 0;
+}
