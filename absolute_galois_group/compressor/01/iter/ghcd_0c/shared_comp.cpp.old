@@ -1,0 +1,314 @@
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <cmath>
+#include <algorithm>
+#include <string>
+#include <map>
+#include <Eigen/Dense>
+#include <boost/iostreams/filtering_streambuf.hpp>
+#include <boost/iostreams/copy.hpp>
+#include <boost/iostreams/filter/zlib.hpp>
+
+/**
+ * Galois-DCT Hybrid Compressor (GDHC) - Fully Tunable Version
+ * * To Compile:
+ * g++ -O3 -I /usr/include/eigen3 gdhc_tunable.cpp -o gdhc_tunable -lboost_iostreams -lz
+ */
+
+using namespace Eigen;
+using namespace std;
+
+// --- Configuration Structure ---
+struct CompressionConfig {
+    int dict_block_size = 16;  // Size of Level 1 blocks
+    int dict_entries = 64;     // Number of basis vectors
+    int dct_block_size = 8;    // Size of Level 2 residual blocks
+    float dct_step = 4.0f;     // Quantization step for DCT coefficients
+    int dct_coeffs = 2;        // Number of low-freq DCT coeffs to keep (NxN)
+
+    void print() const {
+        cout << "--- GDHC Configuration ---" << endl;
+        cout << "L1 Dict Block: " << dict_block_size << "x" << dict_block_size << endl;
+        cout << "L1 Dict Size:  " << dict_entries << " entries" << endl;
+        cout << "L2 DCT Block:  " << dct_block_size << "x" << dct_block_size << endl;
+        cout << "L2 DCT Step:   " << dct_step << endl;
+        cout << "L2 DCT Coeffs: " << dct_coeffs << "x" << dct_coeffs << endl;
+        cout << "--------------------------" << endl;
+    }
+};
+
+struct Image {
+    int width, height;
+    MatrixXf data;
+};
+
+struct DictionaryEntry {
+    uint16_t base_id;
+    uint8_t morphism_step; 
+};
+
+// --- DCT Basis Generation ---
+MatrixXf get_dct_matrix(int N) {
+    MatrixXf T(N, N);
+    float pi = acos(-1.0);
+    for (int i = 0; i < N; ++i) {
+        for (int j = 0; j < N; ++j) {
+            if (i == 0) T(i, j) = 1.0 / sqrt(N);
+            else T(i, j) = sqrt(2.0 / N) * cos((2 * j + 1) * i * pi / (2.0 * N));
+        }
+    }
+    return T;
+}
+
+MatrixXf apply_dct(const MatrixXf& block, const MatrixXf& T) { return T * block * T.transpose(); }
+MatrixXf apply_idct(const MatrixXf& coeff, const MatrixXf& T) { return T.transpose() * coeff * T; }
+
+// --- Morphism-Aware Dictionary ---
+class GaloisDictionary {
+public:
+    vector<VectorXf> bases;
+    
+    void train(const MatrixXf& data, int block_size, int dict_size) {
+        int vec_dim = block_size * block_size;
+        for (int i = 0; i < dict_size && (i + 1) * block_size <= data.rows(); ++i) {
+            MatrixXf blk = data.block(i * block_size, 0, block_size, block_size);
+            VectorXf vec = Map<VectorXf>(blk.data(), vec_dim);
+            vec.array() -= vec.mean();
+            if (vec.norm() > 1e-5) vec.normalize();
+            bases.push_back(vec);
+        }
+    }
+
+    DictionaryEntry find_best(const VectorXf& target) {
+        float best_corr = -2.0; 
+        DictionaryEntry best = {0, 0};
+        for (size_t i = 0; i < bases.size(); ++i) {
+            for (uint8_t m = 0; m < 2; ++m) { 
+                float sign = (m == 0 ? 1.0f : -1.0f);
+                float corr = bases[i].dot(target) * sign;
+                if (corr > best_corr) {
+                    best_corr = corr;
+                    best = {(uint16_t)i, m};
+                }
+            }
+        }
+        return best;
+    }
+};
+
+// --- PGM IO ---
+Image loadPGM(const string& filename) {
+    ifstream file(filename, ios::binary);
+    if (!file) { cerr << "Error: Cannot open " << filename << endl; exit(1); }
+
+    string magic; file >> magic;
+    if (magic != "P5") { cerr << "Error: Only P5 supported." << endl; exit(1); }
+
+    auto skip = [&](ifstream& f) {
+        while (f >> ws && f.peek() == '#') { string d; getline(f, d); }
+    };
+
+    int w, h, maxVal;
+    skip(file); file >> w;
+    skip(file); file >> h;
+    skip(file); file >> maxVal;
+    file.ignore(1);
+
+    Image img; img.width = w; img.height = h; img.data.resize(h, w);
+    vector<unsigned char> buf(w * h);
+    file.read((char*)buf.data(), buf.size());
+    for (int i = 0; i < h; ++i)
+        for (int j = 0; j < w; ++j)
+            img.data(i, j) = (float)buf[i * w + j];
+    return img;
+}
+
+void savePGM(const string& filename, const Image& img) {
+    ofstream file(filename, ios::binary);
+    file << "P5\n" << img.width << " " << img.height << "\n255\n";
+    vector<unsigned char> buf(img.width * img.height);
+    for (int i = 0; i < img.height; ++i)
+        for (int j = 0; j < img.width; ++j)
+            buf[i * img.width + j] = (unsigned char)max(0.f, min(255.f, img.data(i, j)));
+    file.write((char*)buf.data(), buf.size());
+}
+
+// --- Compression Logic ---
+void compress(const string& inputFile, const string& outputFile, const CompressionConfig& config) {
+    Image img = loadPGM(inputFile);
+    stringstream bitstream;
+
+    // Header
+    bitstream.write((char*)&img.width, sizeof(int));
+    bitstream.write((char*)&img.height, sizeof(int));
+    bitstream.write((char*)&config.dict_block_size, sizeof(int));
+    bitstream.write((char*)&config.dict_entries, sizeof(int));
+    bitstream.write((char*)&config.dct_block_size, sizeof(int));
+    bitstream.write((char*)&config.dct_step, sizeof(float));
+    bitstream.write((char*)&config.dct_coeffs, sizeof(int));
+
+    // L1: Dictionary
+    GaloisDictionary dict;
+    dict.train(img.data, config.dict_block_size, config.dict_entries);
+    uint32_t actual_dict_size = dict.bases.size();
+    bitstream.write((char*)&actual_dict_size, sizeof(uint32_t));
+    int vec_dim = config.dict_block_size * config.dict_block_size;
+    for (const auto& b : dict.bases) {
+        bitstream.write((char*)b.data(), vec_dim * sizeof(float));
+    }
+
+    MatrixXf recon = MatrixXf::Zero(img.height, img.width);
+    for (int i = 0; i + config.dict_block_size <= img.height; i += config.dict_block_size) {
+        for (int j = 0; j + config.dict_block_size <= img.width; j += config.dict_block_size) {
+            MatrixXf blk = img.data.block(i, j, config.dict_block_size, config.dict_block_size);
+            VectorXf vec = Map<VectorXf>(blk.data(), vec_dim);
+            float mean = vec.mean();
+            vec.array() -= mean;
+            float norm = vec.norm();
+            if (norm > 1e-5) vec /= norm;
+
+            DictionaryEntry entry = dict.find_best(vec);
+            bitstream.write((char*)&entry, sizeof(DictionaryEntry));
+            uint8_t q_norm = (uint8_t)min(255.f, norm * 0.5f);
+            uint8_t q_mean = (uint8_t)min(255.f, mean);
+            bitstream.write((char*)&q_norm, 1);
+            bitstream.write((char*)&q_mean, 1);
+
+            VectorXf rvec = dict.bases[entry.base_id] * (entry.morphism_step == 0 ? 1.0f : -1.0f);
+            rvec = (rvec * (q_norm * 2.0f)).array() + q_mean;
+            recon.block(i, j, config.dict_block_size, config.dict_block_size) = Map<MatrixXf>(rvec.data(), config.dict_block_size, config.dict_block_size);
+        }
+    }
+
+    // L2: DCT Residuals
+    MatrixXf residual = img.data - recon;
+    MatrixXf T_dct = get_dct_matrix(config.dct_block_size);
+    for (int i = 0; i + config.dct_block_size <= img.height; i += config.dct_block_size) {
+        for (int j = 0; j + config.dct_block_size <= img.width; j += config.dct_block_size) {
+            MatrixXf blk = residual.block(i, j, config.dct_block_size, config.dct_block_size);
+            MatrixXf coeff = apply_dct(blk, T_dct);
+            for (int r = 0; r < config.dct_coeffs; ++r) {
+                for (int c = 0; c < config.dct_coeffs; ++c) {
+                    int8_t q = (int8_t)max(-128, min(127, (int)round(coeff(r, c) / config.dct_step)));
+                    bitstream.write((char*)&q, sizeof(int8_t));
+                }
+            }
+        }
+    }
+
+    // Zlib Pipeline
+    bitstream.seekg(0, ios::beg);
+    ofstream outFile(outputFile, ios::binary);
+    boost::iostreams::filtering_streambuf<boost::iostreams::output> out;
+    out.push(boost::iostreams::zlib_compressor());
+    out.push(outFile);
+    boost::iostreams::copy(bitstream, out);
+    boost::iostreams::close(out);
+    cout << "[*] Success. Compressed to: " << outputFile << endl;
+}
+
+void decompress(const string& inputFile, const string& outputFile) {
+    ifstream inFile(inputFile, ios::binary);
+    stringstream bitstream;
+    boost::iostreams::filtering_streambuf<boost::iostreams::input> in;
+    in.push(boost::iostreams::zlib_decompressor());
+    in.push(inFile);
+    boost::iostreams::copy(in, bitstream);
+
+    int w, h;
+    CompressionConfig cfg;
+    bitstream.read((char*)&w, sizeof(int));
+    bitstream.read((char*)&h, sizeof(int));
+    bitstream.read((char*)&cfg.dict_block_size, sizeof(int));
+    bitstream.read((char*)&cfg.dict_entries, sizeof(int));
+    bitstream.read((char*)&cfg.dct_block_size, sizeof(int));
+    bitstream.read((char*)&cfg.dct_step, sizeof(float));
+    bitstream.read((char*)&cfg.dct_coeffs, sizeof(int));
+
+    uint32_t dict_size;
+    bitstream.read((char*)&dict_size, sizeof(uint32_t));
+    int vec_dim = cfg.dict_block_size * cfg.dict_block_size;
+    vector<VectorXf> bases(dict_size, VectorXf(vec_dim));
+    for (uint32_t i = 0; i < dict_size; ++i) {
+        bitstream.read((char*)bases[i].data(), vec_dim * sizeof(float));
+    }
+
+    Image img; img.width = w; img.height = h; img.data.setZero(h, w);
+    for (int i = 0; i + cfg.dict_block_size <= h; i += cfg.dict_block_size) {
+        for (int j = 0; j + cfg.dict_block_size <= w; j += cfg.dict_block_size) {
+            DictionaryEntry entry; bitstream.read((char*)&entry, sizeof(DictionaryEntry));
+            uint8_t q_norm, q_mean;
+            bitstream.read((char*)&q_norm, 1);
+            bitstream.read((char*)&q_mean, 1);
+            VectorXf rvec = bases[entry.base_id] * (entry.morphism_step == 0 ? 1.0f : -1.0f);
+            rvec = (rvec * (q_norm * 2.0f)).array() + q_mean;
+            img.data.block(i, j, cfg.dict_block_size, cfg.dict_block_size) = Map<MatrixXf>(rvec.data(), cfg.dict_block_size, cfg.dict_block_size);
+        }
+    }
+
+    MatrixXf T_dct = get_dct_matrix(cfg.dct_block_size);
+    for (int i = 0; i + cfg.dct_block_size <= h; i += cfg.dct_block_size) {
+        for (int j = 0; j + cfg.dct_block_size <= w; j += cfg.dct_block_size) {
+            MatrixXf coeff = MatrixXf::Zero(cfg.dct_block_size, cfg.dct_block_size);
+            for (int r = 0; r < cfg.dct_coeffs; ++r) {
+                for (int c = 0; c < cfg.dct_coeffs; ++c) {
+                    int8_t q; bitstream.read((char*)&q, sizeof(int8_t));
+                    coeff(r, c) = q * cfg.dct_step;
+                }
+            }
+            img.data.block(i, j, cfg.dct_block_size, cfg.dct_block_size) += apply_idct(coeff, T_dct);
+        }
+    }
+    savePGM(outputFile, img);
+    cout << "[*] Success. Decompressed to: " << outputFile << endl;
+}
+
+int main(int argc, char* argv[]) {
+    if (argc < 4) {
+        cerr << "--- GDHC Tunable Compressor ---" << endl;
+        cerr << "Usage: " << argv[0] << " <mode: c/d> <in> <out> [params...]" << endl;
+        cerr << "\nParameters (for compression mode 'c' only):" << endl;
+        cerr << "  1. dict_block_size (e.g. 16)" << endl;
+        cerr << "  2. dict_entries    (e.g. 64)" << endl;
+        cerr << "  3. dct_block_size  (e.g. 8)" << endl;
+        cerr << "  4. dct_step        (e.g. 4.0)" << endl;
+        cerr << "  5. dct_coeffs      (e.g. 2 - keep NxN coeffs)" << endl;
+        cerr << "\nExamples:" << endl;
+        cerr << "  High Quality: " << argv[0] << " c in.pgm out.gdhc 16 256 8 1.0 8" << endl;
+        cerr << "  Small File:   " << argv[0] << " c in.pgm out.gdhc 32 32 16 12.0 1" << endl;
+        return 1;
+    }
+
+    string mode = argv[1];
+    if (mode == "c") {
+        CompressionConfig config;
+        
+        // Expose all parameters through argv
+        if (argc >= 5) config.dict_block_size = stoi(argv[4]);
+        if (argc >= 6) config.dict_entries    = stoi(argv[5]);
+        if (argc >= 7) config.dct_block_size  = stoi(argv[6]);
+        if (argc >= 8) config.dct_step        = stof(argv[7]);
+        if (argc >= 9) config.dct_coeffs      = stoi(argv[8]);
+
+        // Safety validation
+        if (config.dct_coeffs > config.dct_block_size) {
+            cerr << "[!] Error: dct_coeffs cannot exceed dct_block_size." << endl;
+            return 1;
+        }
+        if (config.dict_block_size <= 0 || config.dct_block_size <= 0) {
+            cerr << "[!] Error: Block sizes must be positive." << endl;
+            return 1;
+        }
+
+        config.print();
+        compress(argv[2], argv[3], config);
+    } else if (mode == "d") {
+        decompress(argv[2], argv[3]);
+    } else {
+        cerr << "[!] Unknown mode: " << mode << endl;
+        return 1;
+    }
+
+    return 0;
+}
