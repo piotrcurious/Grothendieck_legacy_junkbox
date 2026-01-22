@@ -96,41 +96,37 @@ float read_float32_le(std::istream& is) {
 }
 
 // --- Robust Matrix Resizing (handles mixed up/down scaling) ---
+
 MatrixXf resize_matrix(const MatrixXf& src, int target_size) {
     if (src.rows() == target_size && src.cols() == target_size) return src;
-    
     MatrixXf dst(target_size, target_size);
-    const int src_size = src.rows();
-    
-    // Calculate scaling factor
-    const float scale = static_cast<float>(src_size - 1) / (target_size - 1);
-
+    const float scale_r = static_cast<float>(src.rows()) / target_size;
+    const float scale_c = static_cast<float>(src.cols()) / target_size;
+    const Eigen::Index src_rows = src.rows();
+    const Eigen::Index src_cols = src.cols();
     for (int r = 0; r < target_size; ++r) {
         for (int c = 0; c < target_size; ++c) {
-            // Find coordinates in source space
-            float src_r = r * scale;
-            float src_c = c * scale;
-
-            // Get the 4 surrounding pixels
-            int r0 = static_cast<int>(src_r);
-            int c0 = static_cast<int>(src_c);
-            int r1 = std::min(r0 + 1, src_size - 1);
-            int c1 = std::min(c0 + 1, src_size - 1);
-
-            // Interpolation weights
-            float dr = src_r - r0;
-            float dc = src_c - c0;
-
-            // Bilinear formula
-            float v00 = src(r0, c0);
-            float v01 = src(r0, c1);
-            float v10 = src(r1, c0);
-            float v11 = src(r1, c1);
-
-            dst(r, c) = (1 - dr) * (1 - dc) * v00 +
-                        dr * (1 - dc) * v10 +
-                        (1 - dr) * dc * v01 +
-                        dr * dc * v11;
+            const float src_r_start = r * scale_r;
+            const float src_r_end = std::min((r + 1) * scale_r, static_cast<float>(src_rows));
+            const float src_c_start = c * scale_c;
+            const float src_c_end = std::min((c + 1) * scale_c, static_cast<float>(src_cols));
+            const int r0 = static_cast<int>(src_r_start);
+            const int r1 = static_cast<int>(std::min(static_cast<Eigen::Index>(std::ceil(src_r_end)), src_rows));
+            const int c0 = static_cast<int>(src_c_start);
+            const int c1 = static_cast<int>(std::min(static_cast<Eigen::Index>(std::ceil(src_c_end)), src_cols));
+            const int r_count = r1 - r0;
+            const int c_count = c1 - c0;
+            if (r_count > 1 || c_count > 1) {
+                if (r_count > 0 && c_count > 0) {
+                    dst(r, c) = src.block(r0, c0, r_count, c_count).mean();
+                } else {
+                    dst(r, c) = 0.0f;
+                }
+            } else {
+                const Eigen::Index sr = std::min(std::max(static_cast<Eigen::Index>(r0), Eigen::Index(0)), src_rows - 1);
+                const Eigen::Index sc = std::min(std::max(static_cast<Eigen::Index>(c0), Eigen::Index(0)), src_cols - 1);
+                dst(r, c) = src(sr, sc);
+            }
         }
     }
     return dst;
