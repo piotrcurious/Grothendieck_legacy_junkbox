@@ -1,0 +1,487 @@
+// shared_comp.cpp
+// Production-ready GDHC with extended morphism engine (D4 + circular shifts + sign)
+// Dependencies: Eigen (headers), Boost.Iostreams (zlib compressor/decompressor)
+
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <cmath>
+#include <algorithm>
+#include <string>
+#include <sstream>
+#include <cstdint>
+#include <cfloat>
+#include <cstring>
+#include <iomanip>
+#include <limits>
+
+#include <Eigen/Dense>
+
+#include <boost/iostreams/filtering_streambuf.hpp>
+#include <boost/iostreams/copy.hpp>
+#include <boost/iostreams/filter/zlib.hpp>
+
+using namespace Eigen;
+using namespace std;
+
+static constexpr double PI = 3.14159265358979323846;
+
+// canonical small atom size
+const int CS = 8;
+// circular shift granularity per axis (0..SHIFT_DIM-1)
+const int SHIFT_DIM = 4;
+// dihedral ops count
+const int OPS = 8;
+
+enum QTType : uint8_t { QL = 0, QS = 1 };
+
+struct Config {
+    int bs = 16;          // base block
+    int rs = 8;           // residual block
+    int be = 256;         // base dict max atoms
+    int re = 512;         // residual dict max atoms
+    float bvt = 40;       // base variance threshold
+    float rvt = 10;       // residual variance threshold
+    float lb = 250;       // Lagrange base
+    float lr = 120;       // Lagrange residual
+};
+
+#pragma pack(push,1)
+struct Entry {
+    uint16_t id = 0;
+    uint16_t m  = 0;   // morph code: bits [0..2]=op, bit3=neg, [4..7]=sx, [8..11]=sy
+    uint8_t off = 0;   // DC offset quantized
+    uint8_t gn  = 0;   // quantized gain
+};
+#pragma pack(pop)
+
+// ---------------- Engine ----------------
+struct Engine {
+    static MatrixXf D;
+    static int D_N;
+
+    static void ensureD(int N) {
+        if (D_N == N && D.size() == (size_t)N*N) return;
+        D_N = N;
+        D = MatrixXf(N,N);
+        const float s1 = sqrt(1.0f / N);
+        const float s2 = sqrt(2.0f / N);
+        for(int k=0;k<N;++k){
+            for(int n=0;n<N;++n){
+                D(k,n) = (k==0? s1 : s2) * (float)cos(PI * (n + 0.5) * k / N);
+            }
+        }
+    }
+
+    // return explicit MatrixXf to avoid mixed expression types
+    static MatrixXf dct(const MatrixXf& s, bool inv=false) {
+        int N = s.rows();
+        ensureD(N);
+        if (inv) return (D.transpose() * s * D).eval();
+        else     return (D * s * D.transpose()).eval();
+    }
+
+    // circular shift right by sx and down by sy (wrap)
+    static MatrixXf circ_shift(const MatrixXf &b, int sx, int sy) {
+        int N = b.rows(), M = b.cols();
+        MatrixXf r(N,M);
+        for(int i=0;i<N;++i){
+            int ii = (i - sy) % N; if(ii < 0) ii += N;
+            for(int j=0;j<M;++j){
+                int jj = (j - sx) % M; if(jj < 0) jj += M;
+                r(i,j) = b(ii,jj);
+            }
+        }
+        return r;
+    }
+
+    // Extended morph: op in [0..7] (D4), bit3=neg, sx in bits [4..7], sy in [8..11]
+    static MatrixXf morph(const MatrixXf& b, uint16_t m) {
+        int op = m & 0x7;
+        bool neg = ((m >> 3) & 1) != 0;
+        int sx = ((m >> 4) & 0xF) % SHIFT_DIM;
+        int sy = ((m >> 8) & 0xF) % SHIFT_DIM;
+
+        int N = b.rows();
+        MatrixXf r = MatrixXf::Zero(N,N);
+
+        switch(op) {
+            case 0: r = b; break;
+            case 1: for(int i=0;i<N;i++) for(int j=0;j<N;j++) r(j, N-1-i) = b(i,j); break; // rot90 cw
+            case 2: for(int i=0;i<N;i++) for(int j=0;j<N;j++) r(N-1-i, N-1-j) = b(i,j); break; // rot180
+            case 3: for(int i=0;i<N;i++) for(int j=0;j<N;j++) r(N-1-j, i) = b(i,j); break; // rot270
+            case 4: for(int i=0;i<N;i++) for(int j=0;j<N;j++) r(i, N-1-j) = b(i,j); break; // flip LR
+            case 5: for(int i=0;i<N;i++) for(int j=0;j<N;j++) r(N-1-i, j) = b(i,j); break; // flip UD
+            case 6: for(int i=0;i<N;i++) for(int j=0;j<N;j++) r(j, i) = b(i,j); break; // transpose
+            case 7: for(int i=0;i<N;i++) for(int j=0;j<N;j++) r(N-1-j, N-1-i) = b(i,j); break; // anti-diag reflect
+            default: r = b; break;
+        }
+        if (sx != 0 || sy != 0) r = circ_shift(r, sx, sy);
+        if (neg) r = -r;
+        return r;
+    }
+};
+MatrixXf Engine::D = MatrixXf();
+int Engine::D_N = 0;
+
+// ---------------- Utilities ----------------
+MatrixXf resz(const MatrixXf& s, int t) {
+    if (s.rows() == t && s.cols() == t) return s;
+    MatrixXf d = MatrixXf::Zero(t,t);
+    for(int r=0;r<t;++r) for(int c=0;c<t;++c) {
+        int rr = min((int)(r * s.rows() / t), (int)s.rows()-1);
+        int cc = min((int)(c * s.cols() / t), (int)s.cols()-1);
+        d(r,c) = s(rr,cc);
+    }
+    return d;
+}
+
+// ---------------- Dictionary ----------------
+struct Dict {
+    vector<MatrixXf> atoms;
+
+    static MatrixXf make_weight() {
+        MatrixXf w(CS,CS);
+        for(int i=0;i<CS;++i) for(int j=0;j<CS;++j) w(i,j) = 1.0f / (1.0f + 0.25f*(i+j));
+        return w;
+    }
+
+    // Train atoms from image d, using bs block sampling, up to maxe atoms, skip patches with energy < vth
+    void train(const MatrixXf &d, int bs, int maxe, float vth) {
+        atoms.clear();
+        vector<pair<MatrixXf,float>> pool;
+        MatrixXf W = make_weight();
+
+        for(int i=0;i<=d.rows()-bs;i+=bs) {
+            for(int j=0;j<=d.cols()-bs;j+=bs) {
+                MatrixXf b = d.block(i,j,bs,bs);
+                MatrixXf c = b.array() - b.mean();
+                float v = c.squaredNorm();
+                if (v < vth) continue;
+                MatrixXf cn = resz(c, CS);
+                float nrm = cn.norm();
+                if (nrm < 1e-6f) continue;
+                cn /= nrm;
+
+                float best = -FLT_MAX; uint16_t best_m = 0;
+                for(int op=0; op<OPS; ++op) for(int sx=0;sx<SHIFT_DIM;++sx) for(int sy=0; sy<SHIFT_DIM; ++sy) for(int neg=0; neg<2; ++neg) {
+                    uint16_t m = (uint16_t)(op | (neg<<3) | (sx<<4) | (sy<<8));
+                    MatrixXf cand = Engine::morph(cn, m);
+                    float e = fabs((cand.array() * W.array() * cn.array()).sum());
+                    if (e > best) { best = e; best_m = m; }
+                }
+
+                MatrixXf bestA = Engine::morph(cn, best_m);
+                float bestN = bestA.norm();
+                if (bestN > 1e-6f) pool.emplace_back(bestA / bestN, v);
+            }
+        }
+
+        sort(pool.begin(), pool.end(), [](auto &a, auto &b){ return a.second > b.second; });
+
+        for(const auto &it : pool) {
+            if ((int)atoms.size() >= maxe) break;
+            bool redundant = false;
+            for(const auto &a : atoms) {
+                for(int op=0; op<OPS && !redundant; ++op) for(int sx=0; sx<SHIFT_DIM && !redundant; ++sx)
+                for(int sy=0; sy<SHIFT_DIM && !redundant; ++sy) for(int neg=0; neg<2 && !redundant; ++neg) {
+                    uint16_t m = (uint16_t)(op | (neg<<3) | (sx<<4) | (sy<<8));
+                    float sim = (Engine::morph(a,m).array() * it.first.array()).sum();
+                    if (fabs(sim) > 0.95f) redundant = true;
+                }
+            }
+            if (!redundant) atoms.push_back(it.first);
+        }
+    }
+
+    // Serialize / deserialize atoms (DCT + simple scalar quantization)
+    void ser(stringstream &ss, bool decode_mode) {
+        if (!decode_mode) {
+            uint32_t n = (uint32_t)atoms.size();
+            ss.write((char*)&n, 4);
+            Engine::ensureD(CS);
+            for (auto &a : atoms) {
+                MatrixXf co = Engine::dct(a, false);
+                for(int i=0;i<CS;++i) for(int j=0;j<CS;++j) {
+                    double val = (double)co(i,j) * 127.0 / (1.0 + (i+j)*0.5);
+                    int8_t v = (int8_t)clamp(val, -128.0, 127.0);
+                    ss.write((char*)&v, 1);
+                }
+            }
+        } else {
+            uint32_t n = 0; ss.read((char*)&n, 4);
+            atoms.assign(n, MatrixXf::Zero(CS,CS));
+            Engine::ensureD(CS);
+            for(uint32_t k=0;k<n;++k) {
+                MatrixXf co(CS,CS);
+                for(int i=0;i<CS;++i) for(int j=0;j<CS;++j) {
+                    int8_t v; ss.read((char*)&v, 1);
+                    co(i,j) = (float)((double)v * (1.0 + (i+j)*0.5) / 127.0);
+                }
+                atoms[k] = Engine::dct(co, true);
+            }
+        }
+    }
+
+    // Solve for best atom/morph match. Returns Entry (id and m); sc_out is signed continuous scale.
+    Entry solve(const MatrixXf &t, float &sc_out) {
+        Entry e; sc_out = 0.f;
+        if (atoms.empty()) return e;
+        MatrixXf tc = resz(t, CS);
+        float tn = tc.norm();
+        if (tn < 1e-6f) return e;
+        tc /= tn;
+
+        MatrixXf W = make_weight();
+        float best = -FLT_MAX; size_t best_id = 0; uint16_t best_m = 0;
+
+        for(size_t i=0;i<atoms.size();++i) {
+            for(int op=0; op<OPS; ++op) for(int sx=0;sx<SHIFT_DIM;++sx) for(int sy=0; sy<SHIFT_DIM; ++sy) for(int neg=0; neg<2; ++neg) {
+                uint16_t m = (uint16_t)(op | (neg<<3) | (sx<<4) | (sy<<8));
+                float c = (Engine::morph(atoms[i], m).array() * W.array() * tc.array()).sum();
+                if (c > best) { best = c; best_id = i; best_m = m; }
+            }
+        }
+
+        e.id = (uint16_t)best_id;
+        e.m  = best_m;
+        sc_out = best * tn;
+        return e;
+    }
+};
+
+// ---------------- RDO and codec ----------------
+struct RDO { float ssd = FLT_MAX; float bits = 0; string s; };
+
+// comp_qt: compress quadtree node (base/residual). Uses Dict to encode atom choice.
+RDO comp_qt(const MatrixXf &src, int r, int c, int sz, Dict &d, MatrixXf &rec, float lambda, bool split, int ms) {
+    RDO res;
+    int he = min(sz, (int)src.rows() - r), we = min(sz, (int)src.cols() - c);
+    if (he <= 0 || we <= 0) return res;
+
+    MatrixXf blk = src.block(r,c,he,we);
+    float mu = blk.mean();
+    float sc = 0.f;
+    float qs = 1.5f;
+
+    Entry e = d.solve(blk.array() - mu, sc);
+    e.off = (uint8_t)(clamp(mu + 128.f, 0.f, 255.f) / 4.0f) * 4;
+    e.gn = (uint8_t)clamp(fabs(sc) / qs, 0.f, 255.f);
+
+    MatrixXf at = MatrixXf::Zero(sz, sz);
+    if (e.id < d.atoms.size() && e.gn > 0) {
+        MatrixXf a = Engine::morph(d.atoms[e.id], e.m);
+        if (sc < 0) a = -a;
+        at = resz(a, sz);
+        float an = at.norm();
+        if (an > 1e-6f) at *= (e.gn * qs / an);
+    }
+
+    MatrixXf lr = (at.array() + (e.off - 128.f)).matrix().block(0,0,he,we);
+    float cost = (blk - lr).squaredNorm() + lambda * (sizeof(Entry) * 8.0f);
+
+    // Try splitting
+    if (split && sz > ms && sz >= 2) {
+        int h = sz/2;
+        RDO ch[4];
+        float ss = 0, sb = 4; // overhead bits for split node
+        for(int i=0;i<4;++i) {
+            ch[i] = comp_qt(src, r + (i/2)*h, c + (i%2)*h, h, d, rec, lambda, true, ms);
+            ss += ch[i].ssd; sb += ch[i].bits;
+        }
+        if (ss + lambda * sb < cost) {
+            res.ssd = ss; res.bits = sb;
+            uint8_t f = QS; res.s.append((char*)&f,1);
+            for(int i=0;i<4;++i) res.s.append(ch[i].s);
+            return res;
+        }
+    }
+
+    // Use leaf encoding
+    rec.block(r,c,he,we) = lr;
+    res.ssd = (blk - lr).squaredNorm();
+    res.bits = sizeof(Entry) * 8.0f;
+    if (split) { uint8_t f = QL; res.s.append((char*)&f,1); }
+    res.s.append((char*)&e, sizeof(Entry));
+    return res;
+}
+
+// dec_qt: decode node from a stream (stringstream or streambuf). Recovers pixels into t.
+void dec_qt(stringstream &ss, MatrixXf &t, int r, int c, int sz, const vector<MatrixXf> &ats, bool split) {
+    if (split) {
+        uint8_t f = 0; if (!ss.read((char*)&f,1)) return;
+        if (f == QS) {
+            int h = sz/2;
+            for(int i=0;i<4;++i) dec_qt(ss, t, r + (i/2)*h, c + (i%2)*h, h, ats, true);
+            return;
+        }
+    }
+    Entry e; if (!ss.read((char*)&e, sizeof(Entry))) return;
+    int he = min(sz, (int)t.rows() - r), we = min(sz, (int)t.cols() - c);
+    if (he <= 0 || we <= 0) return;
+
+    MatrixXf at = MatrixXf::Constant(he,we, e.off - 128.f);
+    if (e.id < ats.size() && e.gn > 0) {
+        MatrixXf a = resz(Engine::morph(ats[e.id], e.m), sz);
+        float an = a.norm();
+        if (an > 1e-6f) at += (a.array() * (e.gn * 1.5f / an)).matrix().block(0,0,he,we);
+    }
+    t.block(r,c,he,we) += at;
+}
+
+// An overload that decodes directly from a streambuf (for residual direct entries)
+void dec_qt(boost::iostreams::filtering_streambuf<boost::iostreams::input> &bb, MatrixXf &t, int r, int c, int sz, const vector<MatrixXf> &ats, bool split) {
+    // This helper isn't used elsewhere in this file; the residuals were written raw in stream
+    // We'll not implement a streambuf-read here; decoder uses the stringstream-based dec_qt for nodes.
+    (void)bb; (void)t; (void)r; (void)c; (void)sz; (void)ats; (void)split;
+}
+
+// ---------------- Process (encode/decode file) ----------------
+void process(const string &in, const string &out, bool decode_mode, const Config &cfg = Config()) {
+    stringstream bs;
+    if (!decode_mode) {
+        // Encode
+        ifstream fin(in, ios::binary);
+        if (!fin) { cerr << "Cannot open input: " << in << "\n"; return; }
+        string magic; int w,h,maxv;
+        fin >> magic >> w >> h >> maxv; fin.ignore(1);
+        if (magic != "P6") { cerr << "Unsupported input (expect P6 PPM)\n"; return; }
+
+        uint32_t mag = 0x47444843; bs.write((char*)&mag,4); // 'GHDC' magic
+        bs.write((char*)&w,4); bs.write((char*)&h,4);
+        bs.write((char*)&cfg.bs,4); bs.write((char*)&cfg.rs,4);
+
+        vector<MatrixXf> ch(3, MatrixXf::Zero(h,w));
+        for(int i=0;i<h;i++) for(int j=0;j<w;j++) for(int k=0;k<3;k++) {
+            uint8_t v; fin.read((char*)&v,1); ch[k](i,j) = v;
+        }
+
+        for(int k=0;k<3;k++) {
+            Dict bd, rd;
+            MatrixXf rec = MatrixXf::Zero(h,w);
+
+            // Base layer
+            bd.train(ch[k], cfg.bs, cfg.be, cfg.bvt);
+            bd.ser(bs, false);
+
+            for(int i=0;i<h;i+=cfg.bs) for(int j=0;j<w;j+=cfg.bs) {
+                RDO rdo = comp_qt(ch[k], i, j, cfg.bs, bd, rec, cfg.lb, true, cfg.bs/2);
+                uint32_t s = (uint32_t)rdo.s.size();
+                bs.write((char*)&s, 4);
+                if (s) bs.write(rdo.s.data(), s);
+            }
+
+            // Residual layer
+            MatrixXf resi = ch[k] - rec;
+            MatrixXf rr = MatrixXf::Zero(h,w);
+            rd.train(resi, cfg.rs, cfg.re, cfg.rvt);
+            rd.ser(bs, false);
+
+            for(int i=0;i<h;i+=cfg.rs) for(int j=0;j<w;j+=cfg.rs) {
+                RDO r = comp_qt(resi, i, j, cfg.rs, rd, rr, cfg.lr, false, 0);
+                if (r.s.size() == sizeof(Entry)) bs.write(r.s.data(), sizeof(Entry));
+                else { Entry z; memset(&z,0,sizeof(z)); bs.write((char*)&z,sizeof(z)); }
+            }
+        }
+
+        // Compress bs into output file using zlib
+        ofstream fo(out, ios::binary);
+        boost::iostreams::filtering_streambuf<boost::iostreams::output> z;
+        z.push(boost::iostreams::zlib_compressor()); z.push(fo);
+        boost::iostreams::copy(bs, z);
+    } else {
+        // Decode
+        ifstream fi(in, ios::binary);
+        if (!fi) { cerr << "Cannot open input: " << in << "\n"; return; }
+        boost::iostreams::filtering_streambuf<boost::iostreams::input> z;
+        z.push(boost::iostreams::zlib_decompressor()); z.push(fi);
+        boost::iostreams::copy(z, bs);
+
+        uint32_t mag; bs.read((char*)&mag, 4);
+        if (mag != 0x47444843) { cerr << "Invalid file magic\n"; return; }
+        int w,h,bsz,rsz; bs.read((char*)&w,4); bs.read((char*)&h,4); bs.read((char*)&bsz,4); bs.read((char*)&rsz,4);
+
+        ofstream fo(out, ios::binary);
+        fo << "P6\n" << w << " " << h << "\n255\n";
+        vector<MatrixXf> ch(3, MatrixXf::Zero(h,w));
+
+        for(int k=0;k<3;k++) {
+            Dict bd, rd;
+            bd.ser(bs, true);
+            for(int i=0;i<h;i+=bsz) for(int j=0;j<w;j+=bsz) {
+                uint32_t s; bs.read((char*)&s,4);
+                string t; if (s>0) { t.assign(s, 0); bs.read(&t[0], s); }
+                stringstream ss(t);
+                dec_qt(ss, ch[k], i, j, bsz, bd.atoms, true);
+            }
+
+            rd.ser(bs, true);
+            for(int i=0;i<h;i+=rsz) for(int j=0;j<w;j+=rsz) {
+                // residual entries are written as raw Entry per block in encoder
+                Entry e; if (!bs.read((char*)&e, sizeof(Entry))) { /* no more data */ }
+                else {
+                    int he = min(rsz, (int)ch[k].rows() - i), we = min(rsz, (int)ch[k].cols() - j);
+                    MatrixXf at = MatrixXf::Constant(he, we, e.off - 128.f);
+                    if (e.id < rd.atoms.size() && e.gn > 0) {
+                        MatrixXf a = resz(Engine::morph(rd.atoms[e.id], e.m), rsz);
+                        float an = a.norm();
+                        if (an > 1e-6f) at += (a.array() * (e.gn * 1.5f / an)).matrix().block(0,0,he,we);
+                    }
+                    ch[k].block(i,j,he,we) += at;
+                }
+            }
+        }
+
+        for(int i=0;i<h;i++) for(int j=0;j<w;j++) for(int k=0;k<3;k++) {
+            uint8_t v = (uint8_t)clamp(ch[k](i,j), 0.f, 255.f);
+            fo.write((char*)&v, 1);
+        }
+    }
+}
+
+
+
+void help(const char* p) {
+    cout << "GDHC v10.6 - Compact Spectral Hybrid\n"
+         << "Usage: " << p << " <c/d> <in> <out> [opts]\n\n"
+         << "Opts:\n"
+         << " --bs <int>  Base block (16)\n"
+         << " --rs <int>  Resid block (8)\n"
+         << " --be <int>  Base entries (256)\n"
+         << " --re <int>  Resid entries (512)\n"
+         << " --lb <float> Base lambda (250)\n"
+         << " --lr <float> Resid lambda (120)\n"
+         << " --bv <float> Base var (40)\n"
+         << " --rv <float> Resid var (10)\n";
+}
+
+int main(int argc, char** argv) {
+    if (argc < 4) { help(argv[0]); return 1; }
+
+    string m = argv[1], in = argv[2], out = argv[3];
+    Config c;
+
+    for (int i = 4; i < argc; ++i) {
+        string a = argv[i];
+        if (i + 1 >= argc) break;
+        if (a == "--bs") c.bs = stoi(argv[++i]);
+        else if (a == "--rs") c.rs = stoi(argv[++i]);
+        else if (a == "--be") c.be = stoi(argv[++i]);
+        else if (a == "--re") c.re = stoi(argv[++i]);
+        else if (a == "--lb") c.lb = stof(argv[++i]);
+        else if (a == "--lr") c.lr = stof(argv[++i]);
+        else if (a == "--bv") c.bvt = stof(argv[++i]);
+        else if (a == "--rv") c.rvt = stof(argv[++i]);
+    }
+
+    try {
+        bool dec = (m == "d");
+        cout << (dec ? "Decompressing..." : "Compressing...") << endl;
+        process(in, out, dec, c);
+        cout << "Done." << endl;
+    } catch (const exception& e) {
+        cerr << "Err: " << e.what() << endl;
+        return 1;
+    }
+    return 0;
+}
