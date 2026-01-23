@@ -1,0 +1,776 @@
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <cmath>
+#include <algorithm>
+#include <string>
+#include <sstream>
+#include <cstdint>
+#include <cfloat>
+#include <random>
+#include <numeric>
+#include <map>
+#include <set>
+#include <iomanip>
+#include <cstring>
+
+// Dependencies: Eigen3 and Boost.Iostreams
+#include <Eigen/Dense>
+#include <boost/iostreams/filtering_streambuf.hpp>
+#include <boost/iostreams/copy.hpp>
+#include <boost/iostreams/filter/zlib.hpp>
+
+using namespace Eigen;
+using namespace std;
+
+// --- Configuration & Constants ---
+
+const int CANONICAL_SIZE = 8;
+
+struct CompressionConfig {
+    int base_block_size = 16;
+    int resid_block_size = 8;
+    int base_entries = 512;
+    int resid_entries = 1024;
+    float base_var_threshold = 20.0f;
+    float resid_var_threshold = 5.0f;
+    int crypto_trials = 32;
+    int max_atoms_per_block = 4;
+};
+
+// Packed structure for efficient storage
+// Morphism: 7 bits for transform, 1 bit for sign of scale
+#pragma pack(push, 1)
+struct PackedAtom {
+    uint16_t id;
+    uint8_t morphism; 
+    uint8_t gain;
+};
+#pragma pack(pop)
+
+// --- Helper Functions ---
+
+MatrixXf resize_matrix(const MatrixXf& src, int target_size) {
+    if (src.rows() == target_size && src.cols() == target_size) return src;
+    
+    MatrixXf dst(target_size, target_size);
+    const int src_size = src.rows();
+    const float scale = static_cast<float>(src_size - 1) / (target_size - 1);
+
+    for (int r = 0; r < target_size; ++r) {
+        for (int c = 0; c < target_size; ++c) {
+            float src_r = r * scale;
+            float src_c = c * scale;
+            int r0 = static_cast<int>(src_r);
+            int c0 = static_cast<int>(src_c);
+            int r1 = std::min(r0 + 1, src_size - 1);
+            int c1 = std::min(c0 + 1, src_size - 1);
+
+            float dr = src_r - r0;
+            float dc = src_c - c0;
+
+            float v00 = src(r0, c0);
+            float v01 = src(r0, c1);
+            float v10 = src(r1, c0);
+            float v11 = src(r1, c1);
+
+            dst(r, c) = (1 - dr) * (1 - dc) * v00 +
+                        dr * (1 - dc) * v10 +
+                        (1 - dr) * dc * v01 +
+                        dr * dc * v11;
+        }
+    }
+    return dst;
+}
+
+// --- Transformation Engine ---
+
+class CryptoMorphismEngine {
+public:
+    static MatrixXf apply(const MatrixXf& src, uint16_t key) {
+        if (key < 16) return apply_geometric(src, key);
+        // Permutation morphs for higher keys
+        const int rows = src.rows();
+        const int cols = src.cols();
+        const int n = rows * cols;
+        MatrixXf dst(rows, cols);
+        std::mt19937 rng(key);
+        std::vector<int> indices(n);
+        std::iota(indices.begin(), indices.end(), 0);
+        std::shuffle(indices.begin(), indices.end(), rng);
+        const float* src_ptr = src.data();
+        float* dst_ptr = dst.data();
+        for(int i = 0; i < n; ++i) {
+            dst_ptr[i] = src_ptr[indices[i]];
+        }
+        return dst;
+    }
+private:
+    static MatrixXf apply_geometric(const MatrixXf& block, uint16_t m) {
+        // Bit 3 (value 8) indicates negation in legacy, but here we handle sign separately.
+        // We strictly use 0-7 for geometry here.
+        const uint8_t op = m & 7;
+        MatrixXf res;
+        switch(op) {
+            case 0: res = block; break;
+            case 1: res = flip_both(block); break;
+            case 2: res = flip_horizontal(block); break;
+            case 3: res = flip_vertical(block); break;
+            case 4: res = block.transpose(); break;
+            case 5: res = flip_both(block.transpose()); break;
+            case 6: res = flip_horizontal(block.transpose()); break;
+            case 7: res = flip_vertical(block.transpose()); break;
+            default: res = block;
+        }
+        return res;
+    }
+    static MatrixXf flip_both(const MatrixXf& m) {
+        return m.colwise().reverse().rowwise().reverse();
+    }
+    static MatrixXf flip_horizontal(const MatrixXf& m) {
+        return m.rowwise().reverse();
+    }
+    static MatrixXf flip_vertical(const MatrixXf& m) {
+        return m.colwise().reverse();
+    }
+};
+
+// --- Dictionary I/O Quantization ---
+
+void write_quantized_matrix(ostream& os, const MatrixXf& mat) {
+    // Quantize normalized float (-1.0 to 1.0) to int8 (-127 to 127)
+    vector<int8_t> buf(mat.size());
+    const float* data = mat.data();
+    for(size_t i = 0; i < buf.size(); ++i) {
+        buf[i] = static_cast<int8_t>(std::clamp(data[i] * 127.0f, -127.0f, 127.0f));
+    }
+    os.write(reinterpret_cast<const char*>(buf.data()), buf.size());
+}
+
+void read_quantized_matrix(istream& is, MatrixXf& mat) {
+    vector<int8_t> buf(mat.size());
+    is.read(reinterpret_cast<char*>(buf.data()), buf.size());
+    float* data = mat.data();
+    for(size_t i = 0; i < buf.size(); ++i) {
+        data[i] = static_cast<float>(buf[i]) / 127.0f;
+    }
+}
+
+// --- Dictionary Logic ---
+
+
+ class ManifoldDictionary {
+public:
+    struct SparseMatch {
+        uint16_t id;
+        uint16_t morph;
+        float scale;
+    };
+
+    struct Tile {
+        int r, c;
+        float energy;
+        VectorXf vec; // Normalized canonical vector
+    };
+
+    vector<MatrixXf> atoms;
+    static const int CANONICAL_SIZE = 8; // Assumed based on context
+
+    // --- Utilities ---
+
+    static std::string quantize_key(const VectorXf &v, int bits = 6) {
+        const float levels = float(1 << bits);
+        std::string s;
+        s.reserve(v.size());
+        for (int i = 0; i < v.size(); ++i) {
+            int q = int(std::round((v[i] + 1.0f) * 0.5f * (levels - 1)));
+            s.push_back(static_cast<char>(std::clamp(q, 0, (1 << bits) - 1)));
+        }
+        return s;
+    }
+
+    // --- Core Logic ---
+
+    void train(const MatrixXf &data, int block_size, int max_entries, float min_var) {
+        atoms.clear();
+        if (data.rows() < block_size || data.cols() < block_size) return;
+
+        MatrixXf residual_map = data;
+        const int stride = block_size; // No overlap for standard dictionary training
+        const int dim = CANONICAL_SIZE * CANONICAL_SIZE;
+
+        // Stage 1: Extract Tiles & Initial Energy
+        vector<Tile> tiles;
+        for (int r = 0; r <= data.rows() - block_size; r += stride) {
+            for (int c = 0; c <= data.cols() - block_size; c += stride) {
+                MatrixXf block = data.block(r, c, block_size, block_size);
+                float mu = block.mean();
+                MatrixXf centered = block.array() - mu;
+                float var = centered.squaredNorm() / float(block_size * block_size);
+                
+                if (var < min_var) continue;
+
+                MatrixXf canonM = resize_matrix(centered, CANONICAL_SIZE);
+                VectorXf vec = Map<VectorXf>(canonM.data(), dim);
+                float n = vec.norm();
+                if (n < 1e-6f) continue;
+
+                tiles.push_back({r, c, centered.squaredNorm(), vec / n});
+            }
+        }
+
+        if (tiles.empty()) return;
+
+        // Stage 2: Grouping (Quantization) to find unique patterns
+        std::unordered_map<std::string, vector<int>> groups;
+        for (int i = 0; i < (int)tiles.size(); ++i) {
+            groups[quantize_key(tiles[i].vec)].push_back(i);
+        }
+
+        struct Representative { VectorXf vec; float freq; };
+        vector<Representative> reps;
+        for (auto &kv : groups) {
+            VectorXf meanv = VectorXf::Zero(dim);
+            for (int idx : kv.second) meanv += tiles[idx].vec;
+            meanv.normalize();
+            reps.push_back({meanv, (float)kv.second.size()});
+        }
+
+        // Stage 3: Greedy Atom Selection (No Caching)
+        atoms.reserve(max_entries);
+        for (int iter = 0; iter < max_entries; ++iter) {
+            int best_rep_idx = -1;
+            uint16_t best_m = 0;
+            float best_score = -1.0f;
+
+            // Evaluate each representative's potential across all morphisms
+            for (int ri = 0; ri < (int)reps.size(); ++ri) {
+                MatrixXf repM = Map<MatrixXf>(reps[ri].vec.data(), CANONICAL_SIZE, CANONICAL_SIZE);
+                
+                for (uint16_t m = 0; m < 16; ++m) {
+                    MatrixXf morphedM = CryptoMorphismEngine::apply(repM, m);
+                    VectorXf morphedV = Map<VectorXf>(morphedM.data(), dim);
+                    morphedV.normalize();
+
+                    // Diversity Check: Is this morphed atom too similar to what we already have?
+                    bool diverse = true;
+                    for (const auto& existing : atoms) {
+                        if (std::abs(Map<const VectorXf>(existing.data(), dim).dot(morphedV)) > 0.92f) {
+                            diverse = false; break;
+                        }
+                    }
+                    if (!diverse) continue;
+
+                    // Calculate "Reduction Potential" on-the-fly
+                    float total_reduction = 0;
+                    for (const auto& tile : tiles) {
+                        float corr = morphedV.dot(tile.vec);
+                        if (std::abs(corr) > 0.18f) {
+                            total_reduction += (corr * corr) * tile.energy;
+                        }
+                    }
+
+                    float score = total_reduction * reps[ri].freq;
+                    if (score > best_score) {
+                        best_score = score;
+                        best_rep_idx = ri;
+                        best_m = m;
+                    }
+                }
+            }
+
+            if (best_rep_idx == -1 || best_score <= 1e-6f) break;
+
+            // Finalize Atom: Apply the best morphism and store
+            MatrixXf winnerM = Map<MatrixXf>(reps[best_rep_idx].vec.data(), CANONICAL_SIZE, CANONICAL_SIZE);
+            MatrixXf final_atom = CryptoMorphismEngine::apply(winnerM, best_m);
+            atoms.push_back(final_atom);
+
+            // Global Residual Update
+            update_residual_map(residual_map, final_atom, tiles, block_size);
+            
+            // Refresh tile energies based on updated residual
+            for (auto& tile : tiles) {
+                tile.energy = residual_map.block(tile.r, tile.c, block_size, block_size).squaredNorm();
+            }
+        }
+    }
+
+    vector<SparseMatch> solve(MatrixXf &residual, int target_size, int max_atoms, int trials) {
+        vector<SparseMatch> matches;
+        if (atoms.empty()) return matches;
+
+        const int dim = CANONICAL_SIZE * CANONICAL_SIZE;
+
+        for (int k = 0; k < max_atoms; ++k) {
+            MatrixXf r_canon = resize_matrix(residual, CANONICAL_SIZE);
+            float r_norm = r_canon.norm();
+            if (r_norm < 1e-5f) break;
+
+            VectorXf r_vec = Map<VectorXf>(r_canon.data(), dim) / r_norm;
+            
+            int best_id = -1;
+            uint16_t best_morph = 0;
+            float best_corr = 0.0f;
+
+            // Search Dictionary (On-the-fly Morphisms)
+            int limit = std::min((int)atoms.size(), 512);
+            for (int i = 0; i < limit; ++i) {
+                for (int m = 0; m < std::min(trials, 16); ++m) {
+                    MatrixXf candM = CryptoMorphismEngine::apply(atoms[i], m);
+                    float c = Map<VectorXf>(candM.data(), dim).normalized().dot(r_vec);
+                    if (std::abs(c) > std::abs(best_corr)) {
+                        best_corr = c;
+                        best_id = i;
+                        best_morph = m;
+                    }
+                }
+            }
+
+            if (std::abs(best_corr) < 0.2f) break;
+
+            float scale = best_corr * r_norm;
+            matches.push_back({(uint16_t)best_id, best_morph, scale});
+
+            // Subtract from residual
+            MatrixXf recon = resize_matrix(CryptoMorphismEngine::apply(atoms[best_id], best_morph), target_size);
+            float anorm = recon.norm();
+            if (anorm > 1e-6f) {
+                residual -= recon * (scale / anorm);
+            }
+        }
+        return matches;
+    }
+
+private:
+    // Helper to update the full image residual
+    void update_residual_map(MatrixXf &res, const MatrixXf &atom, const vector<Tile> &tiles, int b_size) {
+        MatrixXf atom_resz = resize_matrix(atom, b_size);
+        atom_resz.normalize();
+
+        for (const auto &tile : tiles) {
+            MatrixXf block = res.block(tile.r, tile.c, b_size, b_size);
+            float scale = (block.array() * atom_resz.array()).sum();
+            if (std::abs(scale) > 0.1f) {
+                res.block(tile.r, tile.c, b_size, b_size) -= scale * atom_resz;
+            }
+        }
+    }
+};
+
+// --- Compression Layers ---
+
+void compress_layer(const MatrixXf &src, ManifoldDictionary &dict, MatrixXf &recon, stringstream &stream, int block_size, int max_atoms, int crypto_trials) {
+    MatrixXf target_layer = src.array() - 128.0f; // Center data around 0
+    recon = MatrixXf::Zero(src.rows(), src.cols());
+
+    // Buffers for Planar/Structure-of-Arrays storage (Better Zlib compression)
+    vector<int16_t> dc_deltas;
+    vector<uint8_t> num_atoms_list;
+    vector<PackedAtom> atom_data;
+    
+    float prev_dc = 0.0f;
+
+    // Raster Scan: Top to Bottom, Left to Right
+    for(int i = 0; i <= src.rows() - block_size; i += block_size) {
+        for(int j = 0; j <= src.cols() - block_size; j += block_size) {
+            
+            MatrixXf block = target_layer.block(i, j, block_size, block_size);
+            float mu = block.mean();
+            
+            // 1. Delta Encode DC with ERROR FEEDBACK to prevent color drift
+            float dc_val = std::clamp(mu, -128.0f, 127.0f);
+            
+            // Compute delta based on the CURRENT predictor state
+            int16_t delta = static_cast<int16_t>(std::round(dc_val - prev_dc));
+            dc_deltas.push_back(delta);
+            
+            // Update predictor exactly as the decoder will (Accumulate the quantized delta)
+            // This captures the quantization error in 'prev_dc' so the next block corrects for it
+            prev_dc += delta; 
+
+            // 2. Solve for Atoms
+            // IMPORTANT: Atoms must solve the residual relative to the RECONSTRUCTED DC, not the exact mean.
+            MatrixXf centered = block.array() - prev_dc;
+            auto matches = dict.solve(centered, block_size, max_atoms, crypto_trials);
+            
+            num_atoms_list.push_back(static_cast<uint8_t>(matches.size()));
+
+            // 3. Reconstruct Block Locally (Accumulate)
+            // Start with the RECONSTRUCTED DC value
+            MatrixXf block_recon = MatrixXf::Constant(block_size, block_size, prev_dc);
+
+            for(auto &m : matches) {
+                PackedAtom pa;
+                pa.id = m.id;
+                
+                float abs_scale = std::abs(m.scale);
+                uint8_t sign_bit = (m.scale < 0) ? 1 : 0;
+                
+                // Pack: 7 bits for morph, 1 bit for sign (MSB)
+                pa.morphism = (m.morph & 0x7F) | (sign_bit << 7);
+                pa.gain = static_cast<uint8_t>(std::clamp(abs_scale, 0.0f, 255.0f));
+                
+                atom_data.push_back(pa);
+
+                // Add to reconstruction
+                if(pa.gain > 0) {
+                     MatrixXf a_mat = resize_matrix(CryptoMorphismEngine::apply(dict.atoms[pa.id], m.morph), block_size);
+                     float n = a_mat.norm();
+                     if(n > 1e-6f) block_recon += a_mat * (m.scale / n);
+                }
+            }
+            
+            // Store reconstruction (plus 128 offset back to pixel space)
+            recon.block(i, j, block_size, block_size) = block_recon.array() + 128.0f;
+        }
+    }
+
+    // Write Planar Data
+    // Writing arrays of similar types together helps Deflate find matches
+    stream.write(reinterpret_cast<const char*>(dc_deltas.data()), dc_deltas.size() * sizeof(int16_t));
+    stream.write(reinterpret_cast<const char*>(num_atoms_list.data()), num_atoms_list.size());
+    stream.write(reinterpret_cast<const char*>(atom_data.data()), atom_data.size() * sizeof(PackedAtom));
+}
+
+void decompress_layer(stringstream &stream, MatrixXf &target, int block_size, const vector<MatrixXf> &atoms) {
+    int rows = target.rows();
+    int cols = target.cols();
+    
+    // Implicit Geometry: Calculate how many blocks fit
+    int blocks_r = rows / block_size;
+    int blocks_c = cols / block_size;
+    int total_blocks = blocks_r * blocks_c;
+
+    // Read Planar Data
+    vector<int16_t> dc_deltas(total_blocks);
+    stream.read(reinterpret_cast<char*>(dc_deltas.data()), total_blocks * sizeof(int16_t));
+
+    vector<uint8_t> num_atoms_list(total_blocks);
+    stream.read(reinterpret_cast<char*>(num_atoms_list.data()), total_blocks);
+
+    int total_atoms = 0;
+    for(int n : num_atoms_list) total_atoms += n;
+
+    vector<PackedAtom> atom_data(total_atoms);
+    stream.read(reinterpret_cast<char*>(atom_data.data()), total_atoms * sizeof(PackedAtom));
+
+    int atom_idx = 0;
+    float prev_dc = 0.0f;
+
+    for(int i = 0; i < blocks_r; ++i) {
+        for(int j = 0; j < blocks_c; ++j) {
+            int block_flat_idx = i * blocks_c + j;
+            
+            // Decode DC
+            float dc = prev_dc + dc_deltas[block_flat_idx];
+            prev_dc = dc;
+
+            MatrixXf block_res = MatrixXf::Constant(block_size, block_size, dc);
+            
+            int count = num_atoms_list[block_flat_idx];
+            for(int k=0; k<count; ++k) {
+                PackedAtom pa = atom_data[atom_idx++];
+                if(pa.id >= atoms.size()) continue;
+
+                uint16_t morph = pa.morphism & 0x7F; // Bottom 7 bits
+                bool negative = (pa.morphism >> 7) & 1; // Top bit
+                float scale = (float)pa.gain;
+                if(negative) scale = -scale;
+
+                MatrixXf a_mat = resize_matrix(CryptoMorphismEngine::apply(atoms[pa.id], morph), block_size);
+                float n = a_mat.norm();
+                if(n > 1e-6f) block_res += a_mat * (scale / n);
+            }
+            
+            target.block(i*block_size, j*block_size, block_size, block_size) = block_res.array() + 128.0f;
+        }
+    }
+}
+
+// --- Image I/O ---
+
+struct Image3 { 
+    int width = 0, height = 0; 
+    std::vector<MatrixXf> channels; 
+    Image3() { channels.resize(3); } 
+};
+
+Image3 loadPPM(const string& filename) {
+    ifstream in(filename, ios::binary);
+    if (!in) throw runtime_error("Cannot open file: " + filename);
+    string magic; in >> magic; if (magic != "P6") throw runtime_error("Only P6 PPM format supported");
+    in >> std::ws; while(in.peek() == '#') { in.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); in >> std::ws; }
+    int w, h, max_val; in >> w >> h >> max_val; in.ignore();
+    Image3 img; img.width = w; img.height = h; 
+    for(int k = 0; k < 3; ++k) img.channels[k].resize(h, w);
+    vector<uint8_t> buf(w * 3);
+    for(int i = 0; i < h; ++i) {
+        in.read(reinterpret_cast<char*>(buf.data()), w * 3);
+        for(int j = 0; j < w; ++j) {
+            img.channels[0](i, j) = buf[j * 3];
+            img.channels[1](i, j) = buf[j * 3 + 1];
+            img.channels[2](i, j) = buf[j * 3 + 2];
+        }
+    }
+    return img;
+}
+
+void savePPM(const string& filename, const Image3& img) {
+    ofstream out(filename, ios::binary);
+    out << "P6\n" << img.width << " " << img.height << "\n255\n";
+    vector<uint8_t> buf(img.width * 3);
+    for(int i = 0; i < img.height; ++i) {
+        for(int j = 0; j < img.width; ++j) {
+            buf[j * 3]     = static_cast<uint8_t>(std::clamp(img.channels[0](i, j), 0.0f, 255.0f));
+            buf[j * 3 + 1] = static_cast<uint8_t>(std::clamp(img.channels[1](i, j), 0.0f, 255.0f));
+            buf[j * 3 + 2] = static_cast<uint8_t>(std::clamp(img.channels[2](i, j), 0.0f, 255.0f));
+        }
+        out.write(reinterpret_cast<char*>(buf.data()), img.width * 3);
+    }
+}
+
+// --- Main Runners ---
+
+void run_compression(const string &input, const string &output, const CompressionConfig &cfg) {
+    std::cout << "Loading " << input << "..." << std::endl;
+    Image3 img = loadPPM(input);
+    stringstream bitstream;
+    
+    // Header
+    const uint32_t magic = 0x50414B32; // "PAK2"
+    bitstream.write(reinterpret_cast<const char*>(&magic), 4);
+    bitstream.write(reinterpret_cast<const char*>(&img.width), 4);
+    bitstream.write(reinterpret_cast<const char*>(&img.height), 4);
+    bitstream.write(reinterpret_cast<const char*>(&cfg.base_block_size), 4);
+    bitstream.write(reinterpret_cast<const char*>(&cfg.resid_block_size), 4);
+
+    Image3 recon_full; 
+    recon_full.width = img.width; recon_full.height = img.height;
+    recon_full.channels.resize(3);
+
+    for(int k = 0; k < 3; ++k) {
+        std::cout << "Compressing Channel " << k << "..." << std::endl;
+        
+        // --- Base Layer ---
+        ManifoldDictionary b_dict;
+        b_dict.train(img.channels[k], cfg.base_block_size, cfg.base_entries, cfg.base_var_threshold);
+        
+        uint16_t n_b = static_cast<uint16_t>(b_dict.atoms.size());
+        bitstream.write(reinterpret_cast<const char*>(&n_b), 2);
+        for(const auto &a : b_dict.atoms) write_quantized_matrix(bitstream, a);
+
+        std::cout << "  Base Dictionary: " << n_b << " atoms." << std::endl;
+
+        compress_layer(img.channels[k], b_dict, recon_full.channels[k], bitstream, cfg.base_block_size, cfg.max_atoms_per_block, cfg.crypto_trials);
+
+        // --- Residual Layer ---
+        MatrixXf residual = img.channels[k] - recon_full.channels[k];
+        ManifoldDictionary r_dict;
+        r_dict.train(residual, cfg.resid_block_size, cfg.resid_entries, cfg.resid_var_threshold);
+
+        uint16_t n_r = static_cast<uint16_t>(r_dict.atoms.size());
+        bitstream.write(reinterpret_cast<const char*>(&n_r), 2);
+        for(const auto &a : r_dict.atoms) write_quantized_matrix(bitstream, a);
+
+        std::cout << "  Residual Dictionary: " << n_r << " atoms." << std::endl;
+
+        MatrixXf resid_recon;
+        compress_layer(residual, r_dict, resid_recon, bitstream, cfg.resid_block_size, cfg.max_atoms_per_block, cfg.crypto_trials);
+
+        // Update Full Recon
+        recon_full.channels[k] += resid_recon; 
+    }
+
+    std::cout << "Writing compressed file..." << std::endl;
+    ofstream fout(output, ios::binary);
+    boost::iostreams::filtering_streambuf<boost::iostreams::output> out_f;
+    // Apply Zlib compression to the reorganized stream
+    out_f.push(boost::iostreams::zlib_compressor(boost::iostreams::zlib::best_compression)); 
+    out_f.push(fout);
+    boost::iostreams::copy(bitstream, out_f);
+    std::cout << "Done." << std::endl;
+}
+
+void run_decompression(const string &input, const string &output) {
+    std::cout << "Reading " << input << "..." << std::endl;
+    ifstream fin(input, ios::binary);
+    if(!fin) throw runtime_error("Could not open input file");
+
+    boost::iostreams::filtering_streambuf<boost::iostreams::input> in_f;
+    in_f.push(boost::iostreams::zlib_decompressor());
+    in_f.push(fin);
+    
+    stringstream ss; 
+    boost::iostreams::copy(in_f, ss);
+
+    uint32_t magic; ss.read(reinterpret_cast<char*>(&magic), 4);
+    if (magic != 0x50414B32) throw runtime_error("Invalid File Format or Magic Number");
+
+    int w, h, b_size, r_size; 
+    ss.read(reinterpret_cast<char*>(&w), 4); 
+    ss.read(reinterpret_cast<char*>(&h), 4); 
+    ss.read(reinterpret_cast<char*>(&b_size), 4); 
+    ss.read(reinterpret_cast<char*>(&r_size), 4);
+
+    Image3 out; out.width = w; out.height = h; out.channels.resize(3);
+
+    for(int k = 0; k < 3; ++k) {
+        out.channels[k] = MatrixXf::Zero(h, w);
+
+        // Base Layer
+        uint16_t n_b; ss.read(reinterpret_cast<char*>(&n_b), 2);
+        vector<MatrixXf> b_atoms(n_b, MatrixXf::Zero(CANONICAL_SIZE, CANONICAL_SIZE));
+        for(auto &a : b_atoms) read_quantized_matrix(ss, a);
+        
+        decompress_layer(ss, out.channels[k], b_size, b_atoms);
+
+        // Residual Layer
+        uint16_t n_r; ss.read(reinterpret_cast<char*>(&n_r), 2);
+        vector<MatrixXf> r_atoms(n_r, MatrixXf::Zero(CANONICAL_SIZE, CANONICAL_SIZE));
+        for(auto &a : r_atoms) read_quantized_matrix(ss, a);
+        
+        MatrixXf res_layer = MatrixXf::Zero(h, w);
+        decompress_layer(ss, res_layer, r_size, r_atoms);
+        
+        out.channels[k] += res_layer;
+    }
+    
+    std::cout << "Saving " << output << "..." << std::endl;
+    savePPM(output, out);
+    std::cout << "Done." << std::endl;
+}
+
+
+void print_help(const char* prog) {
+    cout << "GDHC v10.5 - Galois-DCT Hybrid Compressor\n"
+         << "Usage: " << prog << " <mode:c/d> <input.ppm/bin> <output> [options]\n\n"
+         << "Modes:\n"
+         << "  c    Compress PPM image to binary\n"
+         << "  d    Decompress binary to PPM image\n\n"
+         << "Compression Options:\n"
+         << "  --base-block <int>      Base layer block size (default: 16)\n"
+         << "  --resid-block <int>     Residual layer block size (default: 8)\n"
+         << "  --base-entries <int>    Base dictionary size (default: 512)\n"
+         << "  --resid-entries <int>   Residual dictionary size (default: 1024)\n"
+         << "  --lambda-base <float>   Base RDO lambda (default: 150.0)\n"
+         << "  --lambda-resid <float>  Residual RDO lambda (default: 50.0)\n"
+         << "  --base-var <float>      Min variance for base atoms (default: 30.0)\n"
+         << "  --resid-var <float>     Min variance for residual atoms (default: 5.0)\n"
+         << "  --max-atoms <int>       Max atoms per block (1-3, default: 3)\n"
+         << "  --overlap <float>       Block overlap stride 0-1 (default: 0.5)\n"
+         << "  --crypto-trials <int>   Morphism trials (default: 32)\n\n"
+         << "Examples:\n"
+         << "  " << prog << " c input.ppm output.gdhc\n"
+         << "  " << prog << " c input.ppm output.gdhc --max-atoms 2 --overlap 0.25\n"
+         << "  " << prog << " d output.gdhc reconstructed.ppm\n";
+}
+
+int main(int argc, char** argv) {
+    if(argc < 4) {
+        print_help(argv[0]);
+        return 1;
+    }
+
+    const string mode = argv[1];
+    const string in_file = argv[2];
+    const string out_file = argv[3];
+
+    CompressionConfig cfg;
+
+    // Parse command line arguments
+    for(int i = 4; i < argc; ++i) {
+        const string arg = argv[i];
+        if(i + 1 >= argc) break;
+        
+        try {
+            if(arg == "--base-block") {
+                cfg.base_block_size = stoi(argv[++i]);
+                if (cfg.base_block_size < 4 || cfg.base_block_size > 128) {
+                    throw runtime_error("base-block must be between 4 and 128");
+                }
+            }
+            else if(arg == "--resid-block") {
+                cfg.resid_block_size = stoi(argv[++i]);
+                if (cfg.resid_block_size < 2 || cfg.resid_block_size > 64) {
+                    throw runtime_error("resid-block must be between 2 and 64");
+                }
+            }
+            else if(arg == "--base-entries") {
+                cfg.base_entries = stoi(argv[++i]);
+                if (cfg.base_entries < 1 || cfg.base_entries > 10000) {
+                    throw runtime_error("base-entries must be between 1 and 10000");
+                }
+            }
+            else if(arg == "--resid-entries") {
+                cfg.resid_entries = stoi(argv[++i]);
+                if (cfg.resid_entries < 1 || cfg.resid_entries > 10000) {
+                    throw runtime_error("resid-entries must be between 1 and 10000");
+                }
+            }
+            else if(arg == "--lambda-base") {
+//                cfg.lambda_base = stof(argv[++i]);
+            }
+            else if(arg == "--lambda-resid") {
+//                cfg.lambda_resid = stof(argv[++i]);
+            }
+            else if(arg == "--base-var") {
+                cfg.base_var_threshold = stof(argv[++i]);
+            }
+            else if(arg == "--resid-var") {
+                cfg.resid_var_threshold = stof(argv[++i]);
+            }
+            else if(arg == "--max-atoms") {
+                cfg.max_atoms_per_block = stoi(argv[++i]);
+                if (cfg.max_atoms_per_block < 1 || cfg.max_atoms_per_block > 3) {
+                    throw runtime_error("max-atoms must be between 1 and 3");
+                }
+            }
+            else if(arg == "--overlap") {
+//                cfg.overlap_stride = stof(argv[++i]);
+//                if (cfg.overlap_stride <= 0.0f || cfg.overlap_stride > 1.0f) {
+//                    throw runtime_error("overlap must be between 0 and 1");
+//                }
+            }
+            else if(arg == "--crypto-trials") {
+                cfg.crypto_trials = stoi(argv[++i]);
+                if (cfg.crypto_trials < 1 || cfg.crypto_trials > 1024) {
+                    throw runtime_error("crypto-trials must be between 1 and 1024");
+                }
+            }
+            else {
+                cerr << "Unknown argument: " << arg << endl;
+                //return 0;
+            }
+        } catch(const exception& e) {
+            cerr << "Error with argument " << arg << ": " << e.what() << endl;
+            return 1;
+        }
+    }
+
+    try {
+        if(mode == "c") {
+            cout << "Compressing: " << in_file << " -> " << out_file << endl;
+            cout << "Config: base_block=" << cfg.base_block_size 
+                 << ", resid_block=" << cfg.resid_block_size
+                 << ", max_atoms=" << cfg.max_atoms_per_block << endl;
+                 //<< ", overlap=" << cfg.overlap_stride << endl;
+            run_compression(in_file, out_file, cfg);
+            cout << "Compression complete!" << endl;
+        }
+        else if(mode == "d") {
+            cout << "Decompressing: " << in_file << " -> " << out_file << endl;
+            run_decompression(in_file, out_file);
+            cout << "Decompression complete!" << endl;
+        }
+        else {
+            cerr << "Unknown mode: " << mode << " (use 'c' or 'd')" << endl;
+            return 1;
+        }
+    } catch(const exception& e) {
+        cerr << "Error: " << e.what() << endl;
+        return 1;
+    }
+
+    return 0;
+}
