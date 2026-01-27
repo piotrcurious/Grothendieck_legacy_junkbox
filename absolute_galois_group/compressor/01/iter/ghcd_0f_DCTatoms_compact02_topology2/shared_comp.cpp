@@ -363,7 +363,7 @@ void process(string in, string out, bool dec, Config cfg={}) {
     if(!dec) {
         ifstream fin(in, ios::binary); string m; int w, h, mv; fin >> m >> w >> h >> mv; fin.ignore();
         uint32_t mag=0x47444843; bs.write((char*)&mag,4); bs.write((char*)&w,4); bs.write((char*)&h,4);
-        bs.write((char*)&cfg.bs,4); bs.write((char*)&cfg.rs,4);
+        bs.write((char*)&cfg.bs,4); bs.write((char*)&cfg.rs,4); bs.write((char*)&cfg.rs2,4);
         // Note: file format now includes a second-residual dictionary and entries after first residual
         vector<MatrixXf> ch(3, MatrixXf::Zero(h,w));
         for(int i=0; i<h; i++) for(int j=0; j<w; j++) for(int k=0; k<3; k++) { uint8_t v; fin.read((char*)&v,1); ch[k](i,j)=v; }
@@ -431,7 +431,7 @@ void process(string in, string out, bool dec, Config cfg={}) {
         if(uncompress(d.data(), &dl, (const Bytef*)buf.data(), sz) == Z_OK)
             bs.write((char*)d.data(), dl);
         uint32_t mag; bs.read((char*)&mag,4); if(mag!=0x47444843) return;
-        int w,h,bsz,rsz; bs.read((char*)&w,4); bs.read((char*)&h,4); bs.read((char*)&bsz,4); bs.read((char*)&rsz,4);
+        int w,h,bsz,rsz,rsz2; bs.read((char*)&w,4); bs.read((char*)&h,4); bs.read((char*)&bsz,4); bs.read((char*)&rsz,4); bs.read((char*)&rsz2,4);
         ofstream fo(out, ios::binary); fo << "P6\n" << w << " " << h << "\n255\n";
         vector<MatrixXf> ch(3, MatrixXf::Zero(h,w));
 
@@ -469,7 +469,6 @@ void process(string in, string out, bool dec, Config cfg={}) {
 
             flg_idx = 0; ent_idx = 0;
             vector<const vector<MatrixXf>*> fallbacks2 = {&bd.atoms, &rd.atoms};
-            int rsz2 = cfg.rs2;
             for(int i=0; i<h; i+=rsz2) for(int j=0; j<w; j+=rsz2)
                 dec_qt(r2flags, entries_r2, ch[k], i, j, rsz2, rd2.atoms, fallbacks2, 1);
         }
