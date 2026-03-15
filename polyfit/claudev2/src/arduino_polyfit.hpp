@@ -14,11 +14,44 @@ public:
     uint64_t value;
     uint8_t width;
 
-    BitField(uint64_t val = 0, uint8_t w = 32) : value(val & (0xFFFFFFFFFFFFFFFF >> (64 - w))), width(w) {}
+    BitField(uint64_t val = 0, uint8_t w = 32) : value(val), width(w) {
+        if (width < 64) {
+            value &= (1ULL << width) - 1;
+        }
+    }
 
     bool get_coeff(uint8_t i) const {
         if (i >= width) return false;
         return (value >> i) & 1;
+    }
+
+    BitField operator+(const BitField& other) const {
+        uint8_t w = width > other.width ? width : other.width;
+        return BitField(value ^ other.value, w);
+    }
+
+    BitField operator*(const BitField& other) const {
+        uint64_t res = 0;
+        for (uint8_t i = 0; i < width; ++i) {
+            if ((value >> i) & 1) {
+                res ^= (other.value << i);
+            }
+        }
+        uint8_t w = width + other.width;
+        if (w > 64) w = 64;
+        return BitField(res, w);
+    }
+
+    BitField frobenius() const {
+        uint64_t res = 0;
+        for (uint8_t i = 0; i < 32; ++i) {
+            if ((value >> i) & 1) {
+                res |= (1ULL << (2 * i));
+            }
+        }
+        uint8_t w = width * 2;
+        if (w > 64) w = 64;
+        return BitField(res, w);
     }
 };
 
