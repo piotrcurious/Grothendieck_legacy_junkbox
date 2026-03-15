@@ -113,8 +113,28 @@ public:
     PolynomialFitter(uint8_t d);
     ~PolynomialFitter();
 
+    // Disable copying due to raw pointer ownership
+    PolynomialFitter(const PolynomialFitter&) = delete;
+    PolynomialFitter& operator=(const PolynomialFitter&) = delete;
+
     bool fit(const float* x, const float* y, size_t n, float lambda = 0.0f);
+
+    /**
+     * @brief Lebesgue-based fitting using projection onto Legendre basis.
+     * Maps discrete data to continuous function space L2[-1, 1].
+     */
+    bool fit_lebesgue(const float* x, const float* y, size_t n);
+
     float predict(float x) const;
+    float predict_lebesgue(float x, float x_min, float x_max) const;
+};
+
+/**
+ * @brief Legendre orthogonal basis for L2[-1, 1].
+ */
+class LegendreBasis {
+public:
+    static float eval(uint8_t n, float x);
 };
 
 /**

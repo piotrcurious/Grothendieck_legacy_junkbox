@@ -132,6 +132,69 @@ bool PolynomialFitter::fit(const float* x, const float* y, size_t n, float lambd
     return true;
 }
 
+float LegendreBasis::eval(uint8_t n, float x) {
+    if (n == 0) return 1.0f;
+    if (n == 1) return x;
+    float p0 = 1.0f, p1 = x, p2 = 0;
+    for (uint8_t i = 2; i <= n; ++i) {
+        p2 = ((2.0f * i - 1.0f) * x * p1 - (i - 1.0f) * p0) / i;
+        p0 = p1; p1 = p2;
+    }
+    return p1;
+}
+
+bool PolynomialFitter::fit_lebesgue(const float* x, const float* y, size_t n) {
+    if (n == 0) return false;
+
+    // Normalize domain to [-1, 1] for Legendre orthogonality
+    float x_min = x[0], x_max = x[0];
+    for(size_t i = 1; i < n; ++i) {
+        if (x[i] < x_min) x_min = x[i];
+        if (x[i] > x_max) x_max = x[i];
+    }
+    float x_range = x_max - x_min;
+    if (x_range < 1e-9) x_range = 1.0f;
+
+    for (uint8_t d = 0; d <= degree; ++d) {
+        float coeff = 0;
+        float norm_factor = 0;
+
+        for (size_t i = 0; i < n; ++i) {
+            float x_norm = 2.0f * (x[i] - x_min) / x_range - 1.0f;
+            float p = LegendreBasis::eval(d, x_norm);
+            coeff += y[i] * p;
+            norm_factor += p * p;
+        }
+
+        // Projection: c_n = <f, p_n> / <p_n, p_n>
+        if (norm_factor > 1e-9) {
+            weights[d] = coeff / norm_factor;
+        } else {
+            weights[d] = 0;
+        }
+    }
+
+    // Note: To use weights[d] with predict(), we'd need to evaluate
+    // Legendre polynomials instead of simple powers.
+    // For simplicity, we'll keep weights as Legendre coefficients
+    // and we'd need a modified predict().
+    // Let's modify predict() or add predict_lebesgue().
+
+    return true;
+}
+
+float PolynomialFitter::predict_lebesgue(float x, float x_min, float x_max) const {
+    float x_range = x_max - x_min;
+    if (x_range < 1e-9) x_range = 1.0f;
+    float x_norm = 2.0f * (x - x_min) / x_range - 1.0f;
+
+    float result = 0;
+    for (uint8_t d = 0; d <= degree; ++d) {
+        result += weights[d] * LegendreBasis::eval(d, x_norm);
+    }
+    return result;
+}
+
 void AlgebraicFeatureExtractor::extract(float x, float* features) const {
     uint32_t bits;
     memcpy(&bits, &x, sizeof(float));
