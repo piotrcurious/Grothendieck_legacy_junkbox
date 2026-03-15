@@ -29,6 +29,48 @@ int32_t MachineScheme::to_int32() const {
     return (int32_t)mantissa.data;
 }
 
+F2Polynomial F2Polynomial::operator/(const F2Polynomial& other) const {
+    if (other.data == 0) return F2Polynomial(0);
+    uint8_t d_this = degree();
+    uint8_t d_other = other.degree();
+    if (d_this < d_other) return F2Polynomial(0);
+
+    uint64_t q = 0;
+    uint64_t r = data;
+    for (int8_t i = (int8_t)d_this - (int8_t)d_other; i >= 0; --i) {
+        if ((r >> (i + d_other)) & 1) {
+            q |= (1ULL << i);
+            r ^= (other.data << i);
+        }
+    }
+    return F2Polynomial(q, 64);
+}
+
+F2Polynomial F2Polynomial::operator%(const F2Polynomial& other) const {
+    if (other.data == 0) return F2Polynomial(0);
+    uint8_t d_this = degree();
+    uint8_t d_other = other.degree();
+    if (d_this < d_other) return F2Polynomial(data, 64);
+
+    uint64_t r = data;
+    for (int8_t i = (int8_t)d_this - (int8_t)d_other; i >= 0; --i) {
+        if ((r >> (i + d_other)) & 1) {
+            r ^= (other.data << i);
+        }
+    }
+    return F2Polynomial(r, 64);
+}
+
+MachineScheme MachineScheme::relative(const MachineScheme& X, const MachineScheme& S) {
+    if (X.type == FLOAT32 && S.type == FLOAT32) {
+        // Morphism as difference in the affine space of floats
+        return MachineScheme(X.to_float() - S.to_float());
+    } else {
+        // Morphism in the discrete space
+        return MachineScheme(X.to_int32() - S.to_int32());
+    }
+}
+
 F2Polynomial MachineScheme::to_poly() const {
     if (type == FLOAT32) {
         uint32_t bits = ((sign.data & 1) << 31) |
@@ -178,6 +220,26 @@ float PolynomialFitter::predict(float x) const {
         res += weights[d] * current_x;
     }
     return res;
+}
+
+ResidualFitter::ResidualFitter(uint8_t d_base, uint8_t d_res)
+    : base_fitter(d_base), residual_fitter(d_res) {}
+
+bool ResidualFitter::fit(const float* x, const float* y, size_t n, float lambda) {
+    if (!base_fitter.fit(x, y, n, lambda)) return false;
+
+    float* residuals = new float[n];
+    for (size_t i = 0; i < n; ++i) {
+        residuals[i] = y[i] - base_fitter.predict(x[i]);
+    }
+
+    bool res = residual_fitter.fit(x, residuals, n, lambda);
+    delete[] residuals;
+    return res;
+}
+
+float ResidualFitter::predict(float x) const {
+    return base_fitter.predict(x) + residual_fitter.predict(x);
 }
 
 float PolynomialFitter::predict_lebesgue(float x, float x_min, float x_max) const {

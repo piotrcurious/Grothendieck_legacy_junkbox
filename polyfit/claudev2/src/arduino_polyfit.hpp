@@ -40,6 +40,17 @@ public:
         }
         return F2Polynomial(res, 64);
     }
+
+    uint8_t degree() const {
+        if (data == 0) return 0;
+        for (int8_t i = 63; i >= 0; --i) {
+            if ((data >> i) & 1) return i;
+        }
+        return 0;
+    }
+
+    F2Polynomial operator/(const F2Polynomial& other) const;
+    F2Polynomial operator%(const F2Polynomial& other) const;
 };
 
 /**
@@ -60,6 +71,12 @@ struct MachineScheme {
     float to_float() const;
     int32_t to_int32() const;
     F2Polynomial to_poly() const;
+
+    /**
+     * @brief Computes the relative scheme X over S (morphism X -> S).
+     * In this context, it could represent the signal relative to a base or time.
+     */
+    static MachineScheme relative(const MachineScheme& X, const MachineScheme& S);
 };
 
 /**
@@ -92,6 +109,31 @@ struct QuantizedField {
  * @brief CategoricalFeatureExtractor - Functorial extraction of features.
  * Maps the machine scheme into a higher-dimensional feature space.
  */
+/**
+ * @brief Adjoint functors for data scaling.
+ * Represents the natural transformation between the data scheme and the normalized scheme.
+ */
+class ScaleFunctor {
+public:
+    float x_min, x_max;
+    ScaleFunctor(float min = 0, float max = 1) : x_min(min), x_max(max) {}
+
+    float map(float x) const {
+        float range = x_max - x_min;
+        return (range < 1e-9f) ? 0.0f : (x - x_min) / range;
+    }
+};
+
+class UnscaleFunctor {
+public:
+    float x_min, x_max;
+    UnscaleFunctor(float min = 0, float max = 1) : x_min(min), x_max(max) {}
+
+    float map(float x) const {
+        return x * (x_max - x_min) + x_min;
+    }
+};
+
 class CategoricalFeatureExtractor {
 public:
     uint8_t max_degree;
@@ -130,6 +172,21 @@ public:
 
     float predict(float x) const;
     float predict_lebesgue(float x, float x_min, float x_max) const;
+};
+
+/**
+ * @brief ResidualFitter - Multi-layer decomposition system.
+ * Implements a GDHC-like architecture: Base Layer + Residual Layer.
+ */
+class ResidualFitter {
+public:
+    PolynomialFitter base_fitter;
+    PolynomialFitter residual_fitter;
+
+    ResidualFitter(uint8_t d_base, uint8_t d_res);
+
+    bool fit(const float* x, const float* y, size_t n, float lambda = 0.0f);
+    float predict(float x) const;
 };
 
 /**
