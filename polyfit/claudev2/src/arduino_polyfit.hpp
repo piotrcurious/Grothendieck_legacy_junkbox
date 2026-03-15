@@ -117,6 +117,21 @@ public:
     float predict(float x) const;
 };
 
+/**
+ * @brief Purely algebraic feature extractor based on scheme theory.
+ */
+class AlgebraicFeatureExtractor {
+public:
+    uint8_t max_degree;
+    bool use_frobenius;
+
+    AlgebraicFeatureExtractor(uint8_t degree, bool frob = false) : max_degree(degree), use_frobenius(frob) {}
+
+    // Extracts features by treating float input as a polynomial over F2
+    // and generating higher order terms in F2[x]
+    void extract(float x, float* features) const;
+};
+
 } // namespace polyfit
 
 #endif // ARDUINO_POLYFIT_HPP

@@ -132,4 +132,32 @@ bool PolynomialFitter::fit(const float* x, const float* y, size_t n, float lambd
     return true;
 }
 
+void AlgebraicFeatureExtractor::extract(float x, float* features) const {
+    uint32_t bits;
+    memcpy(&bits, &x, sizeof(float));
+    BitField base_poly(bits, 32);
+
+    features[0] = 1.0f;
+    BitField current = base_poly;
+
+    for (uint8_t d = 1; d <= max_degree; ++d) {
+        if (use_frobenius) {
+            current = current.frobenius();
+        }
+
+        uint32_t res_bits = (uint32_t)current.value;
+        float res_float;
+        memcpy(&res_float, &res_bits, sizeof(float));
+
+        // Handle potential NaN/Inf from bit manipulation
+        if (!isfinite(res_float)) res_float = 0.0f;
+
+        features[d] = res_float;
+
+        if (!use_frobenius) {
+            current = current * base_poly;
+        }
+    }
+}
+
 } // namespace polyfit
