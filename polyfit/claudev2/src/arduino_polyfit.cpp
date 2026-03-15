@@ -14,6 +14,36 @@ BitField MachineNumber::get_bitfield() const {
     }
 }
 
+BitField MachineNumber::get_sign() const {
+    if (type == NumType::INT32) return BitField(val.i32 < 0 ? 1 : 0, 1);
+    uint32_t bits;
+    memcpy(&bits, &val.f32, sizeof(float));
+    return BitField(bits >> 31, 1);
+}
+
+BitField MachineNumber::get_exponent() const {
+    if (type == NumType::INT32) return BitField(0, 8);
+    uint32_t bits;
+    memcpy(&bits, &val.f32, sizeof(float));
+    return BitField((bits >> 23) & 0xFF, 8);
+}
+
+BitField MachineNumber::get_mantissa() const {
+    if (type == NumType::INT32) return BitField(val.i32, 23);
+    uint32_t bits;
+    memcpy(&bits, &val.f32, sizeof(float));
+    return BitField(bits & 0x7FFFFF, 23);
+}
+
+MachineNumber MachineNumber::from_scheme(BitField sign, BitField exp, BitField mant) {
+    uint32_t bits = ((sign.value & 1) << 31) |
+                    ((exp.value & 0xFF) << 23) |
+                    (mant.value & 0x7FFFFF);
+    float f;
+    memcpy(&f, &bits, sizeof(float));
+    return MachineNumber(f);
+}
+
 MachineNumber FieldMorphism::add(MachineNumber x, MachineNumber y) {
     if (x.type != y.type) return MachineNumber(0);
     if (x.type == NumType::INT32) {
@@ -67,7 +97,7 @@ float PolynomialFitter::predict(float x) const {
 
 // Simple solver for small systems (Normal Equations)
 // (X^T * X + lambda * I) * w = X^T * y
-bool PolynomialFitter::fit(const float* x, const float* y, size_t n, float lambda) {
+bool PolynomialFitter::fit(const float* x, const float* y, size_t n, float lambda, float epsilon) {
     uint8_t dim = degree + 1;
     float XtX[dim * dim];
     float Xty[dim];
@@ -110,7 +140,7 @@ bool PolynomialFitter::fit(const float* x, const float* y, size_t n, float lambd
         Xty[i] = Xty[pivot];
         Xty[pivot] = tmp;
 
-        if (fabs(XtX[i * dim + i]) < 1e-9) return false;
+        if (fabs(XtX[i * dim + i]) < epsilon) return false;
 
         for (uint8_t j = i + 1; j < dim; ++j) {
             float factor = XtX[j * dim + i] / XtX[i * dim + i];
@@ -220,6 +250,26 @@ void AlgebraicFeatureExtractor::extract(float x, float* features) const {
         if (!use_frobenius) {
             current = current * base_poly;
         }
+    }
+}
+
+void GaloisActionExtractor::extract_frobenius_orbit(float x, float* features) const {
+    MachineNumber num(x);
+    BitField current_poly = num.get_bitfield();
+
+    for (uint8_t d = 0; d < max_degree; ++d) {
+        current_poly = current_poly.frobenius();
+        uint32_t bits = (uint32_t)current_poly.value;
+        float f;
+        memcpy(&f, &bits, sizeof(float));
+        features[d] = isfinite(f) ? f : 0.0f;
+    }
+}
+
+void GaloisActionExtractor::extract_cyclotomic(float x, float* features) const {
+    for (uint8_t d = 1; d <= max_degree; ++d) {
+        features[(d-1)*2] = sinf(2.0f * M_PI * x / (float)d);
+        features[(d-1)*2 + 1] = cosf(2.0f * M_PI * x / (float)d);
     }
 }
 

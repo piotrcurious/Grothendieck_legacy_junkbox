@@ -1,8 +1,8 @@
-#include "src/arduino_polyfit.hpp"
+#include "polyfit/claudev2/src/arduino_polyfit.hpp"
 #ifdef ARDUINO
 #include <Arduino.h>
 #else
-#include "src/mock_arduino.hpp"
+#include "polyfit/claudev2/src/mock_arduino.hpp"
 #endif
 
 using namespace polyfit;

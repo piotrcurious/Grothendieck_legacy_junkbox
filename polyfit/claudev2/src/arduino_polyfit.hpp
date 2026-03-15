@@ -65,6 +65,7 @@ enum class NumType {
 
 /**
  * @brief Base class for machine numbers with scheme structure.
+ * Represents numbers as collections of bit-polynomials over F2.
  */
 struct MachineNumber {
     NumType type;
@@ -78,6 +79,13 @@ struct MachineNumber {
     MachineNumber() : type(NumType::INT32) { val.i32 = 0; }
 
     BitField get_bitfield() const;
+
+    // Scheme-theoretic decomposition for Float32
+    BitField get_sign() const;
+    BitField get_exponent() const;
+    BitField get_mantissa() const;
+
+    static MachineNumber from_scheme(BitField sign, BitField exp, BitField mant);
 };
 
 /**
@@ -117,7 +125,7 @@ public:
     PolynomialFitter(const PolynomialFitter&) = delete;
     PolynomialFitter& operator=(const PolynomialFitter&) = delete;
 
-    bool fit(const float* x, const float* y, size_t n, float lambda = 0.0f);
+    bool fit(const float* x, const float* y, size_t n, float lambda = 0.0f, float epsilon = 1e-9f);
 
     /**
      * @brief Lebesgue-based fitting using projection onto Legendre basis.
@@ -150,6 +158,28 @@ public:
     // Extracts features by treating float input as a polynomial over F2
     // and generating higher order terms in F2[x]
     void extract(float x, float* features) const;
+};
+
+/**
+ * @brief Computes Galois orbits for features.
+ */
+class GaloisActionExtractor {
+public:
+    uint8_t max_degree;
+    NumType type;
+
+    GaloisActionExtractor(uint8_t degree, NumType t = NumType::FLOAT32) : max_degree(degree), type(t) {}
+
+    /**
+     * @brief Computes orbits under the Frobenius endomorphism (x -> x^2)
+     * in the scheme of machine numbers.
+     */
+    void extract_frobenius_orbit(float x, float* features) const;
+
+    /**
+     * @brief Computes cyclotomic features (sin/cos) capturing discrete symmetries.
+     */
+    void extract_cyclotomic(float x, float* features) const;
 };
 
 } // namespace polyfit
