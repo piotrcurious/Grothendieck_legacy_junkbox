@@ -140,8 +140,11 @@ public:
 
     CategoricalFeatureExtractor(uint8_t degree) : max_degree(degree) {}
 
-    // Extracts features by applying natural transformations (powers, frobenius)
+    // Extracts features by applying natural transformations (powers)
     void extract(float x, float* features) const;
+
+    // Extracts features from the Frobenius orbit (x -> x^2 -> x^4 ...)
+    void extract_frobenius(float x, float* features) const;
 
     // Cyclotomic features capturing discrete symmetries
     void extract_cyclotomic(float x, float* features) const;

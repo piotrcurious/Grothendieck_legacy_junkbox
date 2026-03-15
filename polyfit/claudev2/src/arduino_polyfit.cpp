@@ -114,6 +114,19 @@ void CategoricalFeatureExtractor::extract(float x, float* features) const {
     }
 }
 
+void CategoricalFeatureExtractor::extract_frobenius(float x, float* features) const {
+    MachineScheme base(x);
+    F2Polynomial current = base.to_poly();
+
+    for (uint8_t d = 0; d < max_degree; ++d) {
+        uint32_t bits = (uint32_t)current.data;
+        float f;
+        memcpy(&f, &bits, sizeof(float));
+        features[d] = isfinite(f) ? f : 0.0f;
+        current = current.frobenius();
+    }
+}
+
 void CategoricalFeatureExtractor::extract_cyclotomic(float x, float* features) const {
     for (uint8_t d = 1; d <= max_degree; ++d) {
         features[(d-1)*2] = sinf(2.0f * (float)M_PI * x / (float)d);
