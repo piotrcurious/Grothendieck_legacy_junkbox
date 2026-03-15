@@ -21,7 +21,7 @@ def compile_cpp():
         return False
     return True
 
-def run_algebraic_extraction(x_val, degree, use_frobenius=False):
+def run_categorical_extraction(x_val, degree):
     cpp_code = f"""
 #include "polyfit/claudev2/src/arduino_polyfit.hpp"
 #include "polyfit/claudev2/src/mock_arduino.hpp"
@@ -29,7 +29,7 @@ def run_algebraic_extraction(x_val, degree, use_frobenius=False):
 using namespace polyfit;
 
 void setup() {{
-    AlgebraicFeatureExtractor extractor({degree}, {str(use_frobenius).lower()});
+    CategoricalFeatureExtractor extractor({degree});
     float features[{degree} + 1];
     extractor.extract({x_val}f, features);
 
@@ -74,59 +74,18 @@ def test_algebraic_rigor():
     test_x = 1.234
     degree = 3
 
-    # Test F2 Multiplication
-    cpp_features = run_algebraic_extraction(test_x, degree, use_frobenius=False)
+    cpp_features = run_categorical_extraction(test_x, degree)
     print(f"Input float: {test_x}, Bits: {bin(float_to_bits(test_x))}")
-    print(f"C++ Algebraic Features (F2 mul): {cpp_features}")
+    print(f"C++ Categorical Features (F2 mul): {cpp_features}")
 
     # Python verification of F2 mul
     bits = float_to_bits(test_x)
-    py_features = [1.0]
-    current = bits
-    for _ in range(degree):
-        py_features.append(bits_to_float(current))
-        current = f2_poly_mul(current, bits)
-    # The C++ implementation stores current BEFORE multiplication in the loop effectively,
-    # but let's re-check the C++ logic.
-    # C++: current = base; for (1 to degree) { features[d] = current; current = current * base; }
-    # So features[1] = base, features[2] = base*base, etc.
-
-    print(f"Python expected (F2 mul): {[1.0] + [bits_to_float(f2_poly_mul(bits, bits) if i > 1 else bits) for i in range(1, degree+1)]}")
-    # Wait, my Python expected logic is a bit flawed, let's just use the same loop.
     py_features = [1.0]
     curr = bits
     for _ in range(degree):
         py_features.append(bits_to_float(curr))
         curr = f2_poly_mul(curr, bits)
     print(f"Python verified: {py_features}")
-
-    # Test Frobenius
-    cpp_frob = run_algebraic_extraction(test_x, degree, use_frobenius=True)
-    print(f"C++ Algebraic Features (Frobenius): {cpp_frob}")
-
-    # Morphism check: (a+b)^2 = a^2 + b^2 in F2
-    x1, x2 = 1.0, 2.0
-    # bits(x1) ^ bits(x2) is not bits(x1+x2) usually,
-    # but the MORPHISM is in the bit-space.
-
-    print("\nVerifying Morphism Property in Bit-Space:")
-    b1 = float_to_bits(x1)
-    b2 = float_to_bits(x2)
-    b_sum = b1 ^ b2
-
-    # Frobenius in Python
-    def frob(b):
-        res = 0
-        for i in range(32):
-            if (b >> i) & 1:
-                res |= (1 << (2 * i))
-        return res # We only care about bits here
-
-    f1 = frob(b1)
-    f2 = frob(b2)
-    f_sum = frob(b_sum)
-
-    print(f"frob(b1) ^ frob(b2) == frob(b1 ^ b2): { (f1 ^ f2) == f_sum }")
 
 if __name__ == "__main__":
     test_algebraic_rigor()

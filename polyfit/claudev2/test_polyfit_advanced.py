@@ -20,8 +20,7 @@ def compile_cpp():
         return False
     return True
 
-def run_test_case(x_data, y_data, degree, lambda_val=0.0):
-    # Generate C++ test case file
+def run_fitter_test(x_data, y_data, degree, lambda_val=0.0):
     cpp_code = f"""
 #include "polyfit/claudev2/src/arduino_polyfit.hpp"
 #include "polyfit/claudev2/src/mock_arduino.hpp"
@@ -55,8 +54,6 @@ void loop() {{}}
         return None
 
     result = subprocess.run(["./polyfit/claudev2/test_bin"], capture_output=True, text=True)
-
-    # Parse weights
     weights = []
     for line in result.stdout.splitlines():
         if "Weights:" in line:
@@ -101,19 +98,19 @@ def main():
     fig, axs = plt.subplots(2, 2, figsize=(15, 12))
 
     # Run Scenario 1
-    w1 = run_test_case(x_cubic, y_cubic, 3)
+    w1 = run_fitter_test(x_cubic, y_cubic, 3)
     plot_scenario(axs[0, 0], x_cubic, y_cubic, x_cubic, y_cubic, w1, "Clean Cubic", 3)
 
     # Run Scenario 2
-    w2 = run_test_case(x_noisy, y_noisy, 2)
+    w2 = run_fitter_test(x_noisy, y_noisy, 2)
     plot_scenario(axs[0, 1], x_noisy, y_noisy, x_noisy, y_noisy, w2, "Noisy Quadratic", 2)
 
     # Run Scenario 3 - Overfit No Reg
-    w3_no_reg = run_test_case(x_overfit, y_overfit, 5)
+    w3_no_reg = run_fitter_test(x_overfit, y_overfit, 5)
     plot_scenario(axs[1, 0], x_overfit, y_overfit, x_overfit_test, y_overfit_test, w3_no_reg, "Overfitting (deg 5, no reg)", 5)
 
     # Run Scenario 3 - Overfit With Reg
-    w3_reg = run_test_case(x_overfit, y_overfit, 5, lambda_val=1.0)
+    w3_reg = run_fitter_test(x_overfit, y_overfit, 5, lambda_val=1.0)
     plot_scenario(axs[1, 1], x_overfit, y_overfit, x_overfit_test, y_overfit_test, w3_reg, "Regularized (deg 5, lambda=1.0)", 5)
 
     plt.tight_layout()

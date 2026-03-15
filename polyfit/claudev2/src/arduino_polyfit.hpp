@@ -3,133 +3,128 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <math.h>
+#include <string.h>
 
 namespace polyfit {
 
 /**
- * @brief Represents a number as a polynomial over F2 (binary representation).
+ * @brief F2Polynomial - Element of the ring F2[x].
+ * Foundation of computer arithmetic as Grothendieck's Spec(F2).
  */
-class BitField {
+class F2Polynomial {
 public:
-    uint64_t value;
+    uint64_t data;
     uint8_t width;
 
-    BitField(uint64_t val = 0, uint8_t w = 32) : value(val), width(w) {
-        if (width < 64) {
-            value &= (1ULL << width) - 1;
-        }
+    F2Polynomial(uint64_t val = 0, uint8_t w = 64) : data(val), width(w) {
+        if (width < 64) data &= (1ULL << width) - 1;
     }
 
-    bool get_coeff(uint8_t i) const {
-        if (i >= width) return false;
-        return (value >> i) & 1;
+    F2Polynomial operator+(const F2Polynomial& other) const {
+        return F2Polynomial(data ^ other.data, width > other.width ? width : other.width);
     }
 
-    BitField operator+(const BitField& other) const {
-        uint8_t w = width > other.width ? width : other.width;
-        return BitField(value ^ other.value, w);
-    }
-
-    BitField operator*(const BitField& other) const {
+    F2Polynomial operator*(const F2Polynomial& other) const {
         uint64_t res = 0;
         for (uint8_t i = 0; i < width; ++i) {
-            if ((value >> i) & 1) {
-                res ^= (other.value << i);
-            }
+            if ((data >> i) & 1) res ^= (other.data << i);
         }
-        uint8_t w = width + other.width;
-        if (w > 64) w = 64;
-        return BitField(res, w);
+        return F2Polynomial(res, 64);
     }
 
-    BitField frobenius() const {
+    F2Polynomial frobenius() const {
         uint64_t res = 0;
         for (uint8_t i = 0; i < 32; ++i) {
-            if ((value >> i) & 1) {
-                res |= (1ULL << (2 * i));
-            }
+            if ((data >> i) & 1) res |= (1ULL << (2 * i));
         }
-        uint8_t w = width * 2;
-        if (w > 64) w = 64;
-        return BitField(res, w);
+        return F2Polynomial(res, 64);
     }
 };
 
 /**
- * @brief Represents different machine number formats.
+ * @brief MachineScheme - Categorical representation of numeric types.
+ * Each instance is a point in the scheme Spec(Z/2Z[x]/(constraints)).
  */
-enum class NumType {
-    INT32,
-    FLOAT32
+struct MachineScheme {
+    enum Type { FLOAT32, INT32 } type;
+
+    // Components of the structure sheaf
+    F2Polynomial sign;
+    F2Polynomial exponent;
+    F2Polynomial mantissa;
+
+    MachineScheme(float f);
+    MachineScheme(int32_t i);
+
+    float to_float() const;
+    int32_t to_int32() const;
+    F2Polynomial to_poly() const;
 };
 
 /**
- * @brief Base class for machine numbers with scheme structure.
- * Represents numbers as collections of bit-polynomials over F2.
+ * @brief SchemeMorphism - Implements arithmetic as transitions between schemes.
  */
-struct MachineNumber {
-    NumType type;
-    union {
-        int32_t i32;
-        float f32;
-    } val;
-
-    MachineNumber(int32_t v) : type(NumType::INT32) { val.i32 = v; }
-    MachineNumber(float v) : type(NumType::FLOAT32) { val.f32 = v; }
-    MachineNumber() : type(NumType::INT32) { val.i32 = 0; }
-
-    BitField get_bitfield() const;
-
-    // Scheme-theoretic decomposition for Float32
-    BitField get_sign() const;
-    BitField get_exponent() const;
-    BitField get_mantissa() const;
-
-    static MachineNumber from_scheme(BitField sign, BitField exp, BitField mant);
-};
-
-/**
- * @brief Implements arithmetic as scheme morphisms.
- */
-class FieldMorphism {
+class SchemeMorphism {
 public:
-    static MachineNumber add(MachineNumber x, MachineNumber y);
-    static MachineNumber multiply(MachineNumber x, MachineNumber y);
-    static float to_float(MachineNumber x);
+    static MachineScheme add(MachineScheme a, MachineScheme b);
+    static MachineScheme multiply(MachineScheme a, MachineScheme b);
 };
 
 /**
- * @brief Feature extractor preserving field structure.
+ * @brief QuantizedField - Defines the boundaries and quantization of the machine field.
  */
-class PolynomialFeatureExtractor {
+struct QuantizedField {
+    float epsilon;
+    float step;
+
+    static QuantizedField float32() {
+        return { 1.1920929e-7f, 1.0f / (float)(1 << 23) };
+    }
+
+    float quantize(float x) const {
+        if (step == 0) return x;
+        return roundf(x / step) * step;
+    }
+};
+
+/**
+ * @brief CategoricalFeatureExtractor - Functorial extraction of features.
+ * Maps the machine scheme into a higher-dimensional feature space.
+ */
+class CategoricalFeatureExtractor {
 public:
     uint8_t max_degree;
 
-    PolynomialFeatureExtractor(uint8_t degree) : max_degree(degree) {}
+    CategoricalFeatureExtractor(uint8_t degree) : max_degree(degree) {}
 
+    // Extracts features by applying natural transformations (powers, frobenius)
     void extract(float x, float* features) const;
+
+    // Cyclotomic features capturing discrete symmetries
+    void extract_cyclotomic(float x, float* features) const;
 };
 
 /**
- * @brief Simple polynomial fitter using normal equations.
+ * @brief PolynomialFitter - Robust fitter respecting categorical boundaries.
  */
 class PolynomialFitter {
 public:
     uint8_t degree;
     float* weights;
+    QuantizedField qfield;
 
-    PolynomialFitter(uint8_t d);
+    PolynomialFitter(uint8_t d, QuantizedField q = QuantizedField::float32());
     ~PolynomialFitter();
 
     // Disable copying due to raw pointer ownership
     PolynomialFitter(const PolynomialFitter&) = delete;
     PolynomialFitter& operator=(const PolynomialFitter&) = delete;
 
-    bool fit(const float* x, const float* y, size_t n, float lambda = 0.0f, float epsilon = 1e-9f);
+    bool fit(const float* x, const float* y, size_t n, float lambda = 0.0f);
 
     /**
      * @brief Lebesgue-based fitting using projection onto Legendre basis.
-     * Maps discrete data to continuous function space L2[-1, 1].
      */
     bool fit_lebesgue(const float* x, const float* y, size_t n);
 
@@ -138,48 +133,11 @@ public:
 };
 
 /**
- * @brief Legendre orthogonal basis for L2[-1, 1].
+ * @brief LegendreBasis - Orthogonal basis for L2[-1, 1].
  */
 class LegendreBasis {
 public:
     static float eval(uint8_t n, float x);
-};
-
-/**
- * @brief Purely algebraic feature extractor based on scheme theory.
- */
-class AlgebraicFeatureExtractor {
-public:
-    uint8_t max_degree;
-    bool use_frobenius;
-
-    AlgebraicFeatureExtractor(uint8_t degree, bool frob = false) : max_degree(degree), use_frobenius(frob) {}
-
-    // Extracts features by treating float input as a polynomial over F2
-    // and generating higher order terms in F2[x]
-    void extract(float x, float* features) const;
-};
-
-/**
- * @brief Computes Galois orbits for features.
- */
-class GaloisActionExtractor {
-public:
-    uint8_t max_degree;
-    NumType type;
-
-    GaloisActionExtractor(uint8_t degree, NumType t = NumType::FLOAT32) : max_degree(degree), type(t) {}
-
-    /**
-     * @brief Computes orbits under the Frobenius endomorphism (x -> x^2)
-     * in the scheme of machine numbers.
-     */
-    void extract_frobenius_orbit(float x, float* features) const;
-
-    /**
-     * @brief Computes cyclotomic features (sin/cos) capturing discrete symmetries.
-     */
-    void extract_cyclotomic(float x, float* features) const;
 };
 
 } // namespace polyfit

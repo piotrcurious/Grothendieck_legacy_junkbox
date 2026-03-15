@@ -5,6 +5,7 @@
 #include <vector>
 #include <string>
 #include <chrono>
+#include <iomanip>
 
 class MockSerial {
 public:
@@ -14,6 +15,7 @@ public:
     void print(int i) { std::cout << i; }
     void println(const std::string& s) { std::cout << s << std::endl; }
     void println(float f) { std::cout << f << std::endl; }
+    void println(float f, int p) { std::cout << std::fixed << std::setprecision(p) << f << std::endl; }
     void println(int i) { std::cout << i << std::endl; }
 };
 
