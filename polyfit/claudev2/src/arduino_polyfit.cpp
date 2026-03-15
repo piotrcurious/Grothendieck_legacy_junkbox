@@ -66,8 +66,8 @@ float PolynomialFitter::predict(float x) const {
 }
 
 // Simple solver for small systems (Normal Equations)
-// (X^T * X) * w = X^T * y
-bool PolynomialFitter::fit(const float* x, const float* y, size_t n) {
+// (X^T * X + lambda * I) * w = X^T * y
+bool PolynomialFitter::fit(const float* x, const float* y, size_t n, float lambda) {
     uint8_t dim = degree + 1;
     float XtX[dim * dim];
     float Xty[dim];
@@ -87,6 +87,11 @@ bool PolynomialFitter::fit(const float* x, const float* y, size_t n) {
             }
             Xty[r] += features[r] * y[i];
         }
+    }
+
+    // Add regularization (Ridge) - do not regularize the bias term
+    for (uint8_t i = 1; i < dim; ++i) {
+        XtX[i * dim + i] += lambda;
     }
 
     // Gaussian elimination with pivoting

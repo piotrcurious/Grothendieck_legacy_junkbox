@@ -80,7 +80,7 @@ public:
     PolynomialFitter(uint8_t d);
     ~PolynomialFitter();
 
-    bool fit(const float* x, const float* y, size_t n);
+    bool fit(const float* x, const float* y, size_t n, float lambda = 0.0f);
     float predict(float x) const;
 };
 
