@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SGA3 Exposé IX — Groupes Diagonalisables</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=IBM+Plex+Sans:ital,wght@0,300;0,400;1,300&display=swap');
+
+  :root {
+    --bg: #03030a;
+    --panel: #0b0b16;
+    --border: #1e2030;
+    --text: #c8cce0;
+    --subtle: #4a4f68;
+    --accent1: #ff4444;
+    --accent2: #44ff88;
+    --accent3: #4488ff;
+    --accent4: #ffee44;
+    --accent5: #ff44ee;
+    --accent6: #44eeff;
+    --gold: #c8a84b;
+    --dim: #2a2d40;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px;
+    gap: 20px;
+  }
+
+  header {
+    width: 100%;
+    max-width: 1060px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid var(--dim);
+    padding-bottom: 10px;
+  }
+  header h1 { font-size: 13px; font-weight: 400; color: var(--gold); letter-spacing: 0.08em; }
+  header span { font-size: 10px; color: var(--subtle); font-family: 'IBM Plex Sans', sans-serif; font-style: italic; }
+
+  #layout {
+    display: flex;
+    gap: 20px;
+    width: 100%;
+    max-width: 1060px;
+    align-items: flex-start;
+  }
+
+  #canvasWrap {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  canvas#c {
+    display: block;
+    border: 1px solid var(--border);
+    background: #000;
+    image-rendering: pixelated;
+  }
+
+  #controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    font-size: 11px;
+  }
+  .cg { display: flex; align-items: center; gap: 5px; }
+  .lbl { color: var(--subtle); font-size: 10px; min-width: 22px; }
+  input[type=range] {
+    width: 90px; height: 3px; cursor: pointer;
+    accent-color: var(--accent6);
+    vertical-align: middle;
+  }
+  .val { color: var(--accent6); min-width: 42px; font-size: 10px; }
+
+  .scene-btn {
+    background: transparent;
+    color: var(--subtle);
+    border: 1px solid var(--dim);
+    padding: 3px 10px;
+    cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    border-radius: 2px;
+    transition: all 0.1s;
+  }
+  .scene-btn:hover { border-color: var(--border); color: var(--text); }
+  .scene-btn.active { background: var(--dim); border-color: var(--accent6); color: var(--accent6); }
+  #btnAuto { border-color: var(--accent4); color: var(--accent4); }
+  #btnAuto.paused { border-color: var(--dim); color: var(--subtle); }
+
+  #info {
+    flex: 1;
+    min-width: 280px;
+    max-width: 380px;
+    font-size: 11px;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  .scene-title {
+    font-size: 12px;
+    color: var(--gold);
+    padding: 0 0 8px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--dim);
+    letter-spacing: 0.04em;
+  }
+  .prose {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 300;
+    font-size: 12px;
+    line-height: 1.7;
+    color: #9096b8;
+    margin-bottom: 14px;
+  }
+  .prose em { color: var(--accent6); font-style: normal; font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
+  .prose strong { color: var(--text); font-weight: 400; }
+
+  .section-label {
+    font-size: 9px;
+    color: var(--subtle);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin: 12px 0 5px;
+  }
+
+  table.terms {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10px;
+    margin-bottom: 12px;
+  }
+  table.terms td { padding: 4px 6px; vertical-align: top; }
+  table.terms tr { border-bottom: 1px solid var(--border); }
+  .tk { color: var(--accent6); white-space: nowrap; width: 100px; }
+  .tv { color: var(--subtle); line-height: 1.5; font-family: 'IBM Plex Sans', sans-serif; font-size: 11px; }
+
+  .ref-box {
+    border-left: 2px solid var(--gold);
+    padding: 6px 10px;
+    font-size: 10px;
+    color: #a08858;
+    line-height: 1.6;
+    background: #0d0c06;
+    margin-bottom: 10px;
+    border-radius: 0 2px 2px 0;
+    font-family: 'IBM Plex Sans', sans-serif;
+  }
+  .note-box {
+    border-left: 2px solid var(--accent3);
+    padding: 6px 10px;
+    font-size: 10px;
+    color: #5580a8;
+    line-height: 1.6;
+    background: #05080f;
+    border-radius: 0 2px 2px 0;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>SGA3 · Exposé IX · Groupes Diagonalisables</h1>
+  <span>Grothendieck et al., Séminaire de Géométrie Algébrique du Bois Marie, 1962–64</span>
+</header>
+
+<div id="layout">
+  <div id="canvasWrap">
+    <canvas id="c" width="640" height="480"></canvas>
+    <div id="controls">
+      <div class="cg">
+        <span class="lbl">scene</span>
+        <button class="scene-btn active" id="btn0" onclick="setScene(0)">0·diag</button>
+        <button class="scene-btn" id="btn1" onclick="setScene(1)">1·torsion</button>
+        <button class="scene-btn" id="btn2" onclick="setScene(2)">2·lift</button>
+        <button class="scene-btn" id="btn3" onclick="setScene(3)">3·ext</button>
+      </div>
+      <div class="cg">
+        <span class="lbl">θ</span>
+        <input type="range" id="slA" min="0" max="360" step="0.5" value="24" oninput="manualAngle(this.value)">
+        <span class="val" id="vA">24.0°</span>
+      </div>
+      <div class="cg">
+        <span class="lbl">z</span>
+        <input type="range" id="slZ" min="0.15" max="3.0" step="0.05" value="1.0" oninput="manualZoom(this.value)">
+        <span class="val" id="vZ">1.00</span>
+      </div>
+      <div class="cg">
+        <span class="lbl">n</span>
+        <input type="range" id="slN" min="1" max="60" step="1" value="12" oninput="manualN(this.value)">
+        <span class="val" id="vN">12</span>
+      </div>
+      <button class="scene-btn active" id="btnAuto" onclick="toggleAuto()">⏵ auto</button>
+    </div>
+  </div>
+
+  <div id="info"><!-- populated by JS --></div>
+</div>
+
+<script>
+// =============================================================================
+//  Constants
+// =============================================================================
+const S  = 2;              // render scale (canvas 640×480 = 2× the logical 320×240)
+const W  = 320;            // logical width
+const H  = 240;            // logical height
+const SRC_W  = 64;
+const SRC_H  = 64;
+const WARP_W = 132;
+const WARP_H = 132;
+const ANGLE_STEPS = 3600;  // 0.1° resolution
+
+// =============================================================================
+//  Color table  (from original RGB565 constants, converted to CSS)
+// =============================================================================
+const C = {
+  BG:     '#000000',
+  PANEL:  'rgb(16,16,16)',
+  FRAME:  'rgb(90,95,90)',
+  TEXT:   '#ffffff',
+  SUBTLE: 'rgb(45,48,52)',
+  A1: '#ff3333',  // COL_ACCENT1 0xF800
+  A2: '#00ff44',  // COL_ACCENT2 0x07E0
+  A3: '#0044ff',  // COL_ACCENT3 0x001F
+  A4: '#ffee00',  // COL_ACCENT4 0xFFE0
+  A5: '#ff22ff',  // COL_ACCENT5 0xF81F
+  A6: '#00eeff',  // COL_ACCENT6 0x07FF
+};
+
+// =============================================================================
+//  State
+// =============================================================================
+let gAngle = 24.0, gZoom = 1.0, gScene = 0, gN = 12, gAuto = true;
+let gT0 = performance.now();
+
+// =============================================================================
+//  Canvas setup
+// =============================================================================
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+
+// Off-screen warp canvas (132×132 pixels, written each frame)
+const warpCanvas = document.createElement('canvas');
+warpCanvas.width  = WARP_W;
+warpCanvas.height = WARP_H;
+const warpCtx = warpCanvas.getContext('2d');
+
+// Off-screen source canvas (64×64 pixels, built once)
+const srcCanvas = document.createElement('canvas');
+srcCanvas.width  = SRC_W;
+srcCanvas.height = SRC_H;
+const srcCtx = srcCanvas.getContext('2d');
+
+// =============================================================================
+//  Trigonometric LUT
+// =============================================================================
+const sinLUT = new Float32Array(ANGLE_STEPS);
+const cosLUT = new Float32Array(ANGLE_STEPS);
+for (let i = 0; i < ANGLE_STEPS; i++) {
+  const a = i * Math.PI / 1800;   // i × 0.1° in radians
+  sinLUT[i] = Math.sin(a);
+  cosLUT[i] = Math.cos(a);
+}
+function degToIdx(deg) {
+  let i = Math.round(deg * 10) % ANGLE_STEPS;
+  return (i + ANGLE_STEPS) % ANGLE_STEPS;
+}
+function SIN(i) { return sinLUT[((i % ANGLE_STEPS) + ANGLE_STEPS) % ANGLE_STEPS]; }
+function COS(i) { return cosLUT[((i % ANGLE_STEPS) + ANGLE_STEPS) % ANGLE_STEPS]; }
+
+// =============================================================================
+//  Polar LUT  (precomputed mapping for the warp disk renderer)
+//  Each entry: { inside: bool, angleIdx: int, radius: float [0,1] }
+// =============================================================================
+const polarLUT = new Array(WARP_W * WARP_H);
+(function buildPolarLUT() {
+  const cx   = (WARP_W - 1) * 0.5;
+  const cy   = (WARP_H - 1) * 0.5;
+  const maxR = (Math.min(WARP_W, WARP_H) - 1) * 0.5;
+  for (let y = 0; y < WARP_H; y++) {
+    for (let x = 0; x < WARP_W; x++) {
+      const dx = (x - cx) / maxR;
+      const dy = (y - cy) / maxR;
+      const r  = Math.sqrt(dx * dx + dy * dy);
+      const a  = Math.atan2(dy, dx);  // [-π, π]
+      let idx  = Math.round((a + Math.PI) * ANGLE_STEPS / (2 * Math.PI));
+      idx      = ((idx % ANGLE_STEPS) + ANGLE_STEPS) % ANGLE_STEPS;
+      polarLUT[y * WARP_W + x] = {
+        inside:   r <= 1.0,
+        angleIdx: idx,
+        radius:   Math.min(r, 1.0)
+      };
+    }
+  }
+})();
+
+// =============================================================================
+//  Source object  (64×64 RGBA raw buffer)
+//  Matches buildSourceObject() in original C++.
+// =============================================================================
+const srcRGBA = new Uint8ClampedArray(SRC_W * SRC_H * 4);
+function spx(x, y, r, g, b) {
+  if (x < 0 || x >= SRC_W || y < 0 || y >= SRC_H) return;
+  const p = ((y | 0) * SRC_W + (x | 0)) * 4;
+  srcRGBA[p] = r; srcRGBA[p+1] = g; srcRGBA[p+2] = b; srcRGBA[p+3] = 255;
+}
+(function buildSourceObject() {
+  const cx = SRC_W / 2, cy = SRC_H / 2;
+  // Background
+  for (let i = 0; i < SRC_W * SRC_H; i++) {
+    const p = i * 4; srcRGBA[p]=8; srcRGBA[p+1]=10; srcRGBA[p+2]=18; srcRGBA[p+3]=255;
+  }
+  // Coordinate grid (8-pixel spaced)
+  for (let y = 0; y < SRC_H; y++)
+    for (let x = 0; x < SRC_W; x++)
+      if ((x%8)===0 || (y%8)===0) spx(x, y, 18, 26, 40);
+  // Disk fill with radial gradient
+  for (let y = 0; y < SRC_H; y++) {
+    for (let x = 0; x < SRC_W; x++) {
+      const dx = (x-cx)/24, dy = (y-cy)/24;
+      const r = Math.sqrt(dx*dx + dy*dy);
+      if (r <= 1.0) {
+        const v = Math.min(255, (56 + (1-r)*128)|0);
+        spx(x, y, v, (v*0.45)|0, (255-v*0.35)|0);
+      }
+    }
+  }
+  // Unit-circle boundary outline
+  for (let a = 0; a < ANGLE_STEPS; a += 4)
+    spx(Math.round(cx + cosLUT[a]*24), Math.round(cy + sinLUT[a]*24), 90, 95, 90);
+  // Cross axes
+  for (let i = -20; i <= 20; i++) {
+    spx(Math.round(cx+i), Math.round(cy), 220, 220, 220);
+    spx(Math.round(cx), Math.round(cy+i), 220, 220, 220);
+  }
+  // Directional indicator (yellow diagonal — makes rotation visible)
+  for (let i = -18; i <= 18; i++) {
+    spx(Math.round(cx+i), Math.round(cy-i/2), 255, 238, 0);
+    if ((i&1)===0) spx(Math.round(cx+i), Math.round(cy-i/2+1), 255, 238, 0);
+  }
+  // Marker A (red-orange dot)
+  for (let yy = -3; yy <= 3; yy++)
+    for (let xx = -3; xx <= 3; xx++)
+      if (xx*xx+yy*yy <= 9) spx(Math.round(cx+14+xx), Math.round(cy-9+yy), 255, 80, 20);
+  // Marker B (green dot)
+  for (let yy = -2; yy <= 2; yy++)
+    for (let xx = -2; xx <= 2; xx++)
+      if (xx*xx+yy*yy <= 4) spx(Math.round(cx-11+xx), Math.round(cy+12+yy), 0, 255, 68);
+  // Upload to srcCanvas
+  srcCtx.putImageData(new ImageData(srcRGBA, SRC_W, SRC_H), 0, 0);
+})();
+
+// =============================================================================
+//  Bilinear source sampler
+// =============================================================================
+function sampleSrc(fx, fy) {
+  if (fx < 0 || fy < 0 || fx >= SRC_W-1 || fy >= SRC_H-1) return [4, 7, 12];
+  const x0 = fx|0, y0 = fy|0;
+  const tx = fx-x0, ty = fy-y0;
+  const p00 = (y0*SRC_W+x0)*4;
+  const p10 = p00+4, p01 = p00+SRC_W*4, p11 = p01+4;
+  const d = srcRGBA;
+  const s=(1-tx)*(1-ty), t=tx*(1-ty), u=(1-tx)*ty, v=tx*ty;
+  return [d[p00]*s+d[p10]*t+d[p01]*u+d[p11]*v,
+          d[p00+1]*s+d[p10+1]*t+d[p01+1]*u+d[p11+1]*v,
+          d[p00+2]*s+d[p10+2]*t+d[p01+2]*u+d[p11+2]*v];
+}
+
+// =============================================================================
+//  Warp renderer
+//  Applies rotation + zoom to the source texture via polar remapping.
+//  Writes result to warpCanvas (132×132 px).
+// =============================================================================
+function renderPolarWarp(angleDeg, zoom, srcCx, srcCy, srcRadius) {
+  const img    = warpCtx.createImageData(WARP_W, WARP_H);
+  const d      = img.data;
+  const rotIdx = degToIdx(angleDeg);
+  const invZ   = 1.0 / Math.max(0.15, zoom);
+
+  for (let i = 0; i < polarLUT.length; i++) {
+    const e = polarLUT[i];
+    let r, g, b;
+    if (!e.inside) {
+      r=4; g=7; b=12;
+    } else {
+      const idx    = (e.angleIdx + rotIdx) % ANGLE_STEPS;
+      const radius = e.radius * srcRadius * invZ;
+      const rgb    = sampleSrc(srcCx + cosLUT[idx]*radius, srcCy + sinLUT[idx]*radius);
+      r = rgb[0]|0; g = rgb[1]|0; b = rgb[2]|0;
+    }
+    const p = i*4;
+    d[p]=r; d[p+1]=g; d[p+2]=b; d[p+3]=255;
+  }
+  warpCtx.putImageData(img, 0, 0);
+}
+
+// =============================================================================
+//  Drawing helpers — all coordinates in the 320×240 logical space.
+//  ctx.scale(S,S) is applied once per frame in render().
+// =============================================================================
+
+function rrect(x, y, w, h, r) {
+  ctx.beginPath();
+  if (ctx.roundRect) { ctx.roundRect(x, y, w, h, r); }
+  else {
+    ctx.moveTo(x+r, y);
+    ctx.arcTo(x+w, y, x+w, y+h, r); ctx.arcTo(x+w, y+h, x, y+h, r);
+    ctx.arcTo(x, y+h, x, y, r);     ctx.arcTo(x, y, x+w, y, r);
+    ctx.closePath();
+  }
+}
+
+function fillPanel(x, y, w, h) {
+  ctx.fillStyle = C.PANEL;  rrect(x, y, w, h, 6); ctx.fill();
+  ctx.strokeStyle = C.FRAME; ctx.lineWidth = 0.5; rrect(x, y, w, h, 6); ctx.stroke();
+}
+
+function drawTitleBar(title, sub) {
+  ctx.fillStyle = 'rgb(24,26,36)';
+  ctx.fillRect(0, 0, W, 18);
+  ctx.fillStyle = '#c8a84b';
+  ctx.font = '6px "IBM Plex Mono", monospace';
+  ctx.fillText(title, 6, 11);
+  if (sub) { ctx.fillStyle = C.SUBTLE; ctx.fillText(sub, 170, 11); }
+}
+
+function drawFooter(angle, zoom, scene, n) {
+  ctx.fillStyle = 'rgb(18,20,28)';
+  ctx.fillRect(0, 208, W, 32);
+  ctx.fillStyle = 'rgb(80,85,100)';
+  ctx.font = '5.5px "IBM Plex Mono", monospace';
+  ctx.fillText(`scene=${scene}  θ=${angle.toFixed(1)}°  z=${zoom.toFixed(3)}  n=${n}`, 6, 218);
+  ctx.fillText('terms: diag · mult-type · [n] · G[n] · J-thickening · ext.', 6, 230);
+}
+
+function drawTermBox(x, y, w, h, term, meaning, accent) {
+  ctx.strokeStyle = accent; ctx.lineWidth = 0.4;
+  rrect(x, y, w, h, 4); ctx.stroke();
+  ctx.fillStyle = 'rgb(30,32,42)';
+  ctx.fillRect(x+1, y+1, w-2, 11);
+  ctx.fillStyle = accent;
+  ctx.font = '5px "IBM Plex Mono", monospace';
+  ctx.fillText(term, x+4, y+9);
+  ctx.fillStyle = 'rgb(130,135,155)';
+  ctx.font = '5px "IBM Plex Mono", monospace';
+  ctx.fillText(meaning, x+4, y+20);
+}
+
+function drawArrow(x1, y1, x2, y2, col) {
+  ctx.strokeStyle = col; ctx.lineWidth = 0.7;
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  const dx=x2-x1, dy=y2-y1, len=Math.sqrt(dx*dx+dy*dy);
+  if (len < 2) return;
+  const ux=dx/len, uy=dy/len, px=-uy, py=ux;
+  const ax=x2-ux*6, ay=y2-uy*6;
+  ctx.beginPath();
+  ctx.moveTo(x2,y2); ctx.lineTo(ax+px*3, ay+py*3);
+  ctx.moveTo(x2,y2); ctx.lineTo(ax-px*3, ay-py*3);
+  ctx.stroke();
+}
+
+function txt(x, y, s, col, fnt) {
+  ctx.fillStyle = col || C.TEXT;
+  ctx.font = fnt || '6px "IBM Plex Mono", monospace';
+  ctx.fillText(s, x, y);
+}
+
+// =============================================================================
+//  Scene 0 — Diagonalizable group scheme / local chart / base change
+//  Visual: source object in local chart (left), D_S(M) after fpqc cover (right).
+// =============================================================================
+function sceneDiagonalizable() {
+  fillPanel(4, 20, 154, 150);
+  fillPanel(164, 20, 152, 150);
+
+  // ——— Left panel: source object in local chart ———
+  // Draw srcCanvas (64×64) at logical (12,28); at canvas scale that is (24,56) px, size 128×128.
+  ctx.save();
+  ctx.scale(1/S, 1/S);  // drop back to canvas pixels for drawImage
+  ctx.drawImage(srcCanvas, 12*S, 28*S);  // drawn at native 128×128 canvas px
+  ctx.restore();
+
+  txt(12, 106, 'chart on S',      'rgb(140,145,165)', '5px monospace');
+  txt(12, 116, 'local object',    'rgb(140,145,165)', '5px monospace');
+  txt(12, 126, 'before base chg', 'rgb(140,145,165)', '5px monospace');
+
+  // ——— Right panel: warp-rendered D_S(M) after cover ———
+  renderPolarWarp(gAngle, gZoom, SRC_W/2, SRC_H/2, 24.0);
+  // Overlay: unit-circle marker and cross axes on warpCanvas
+  const hwx = WARP_W/2, hwy = WARP_H/2;
+  warpCtx.strokeStyle = 'rgba(90,95,90,0.8)'; warpCtx.lineWidth = 0.6;
+  warpCtx.beginPath(); warpCtx.arc(hwx, hwy, 48, 0, 2*Math.PI); warpCtx.stroke();
+  warpCtx.strokeStyle = 'rgba(45,48,52,0.7)'; warpCtx.lineWidth = 0.5;
+  warpCtx.beginPath(); warpCtx.moveTo(hwx-50,hwy); warpCtx.lineTo(hwx+50,hwy); warpCtx.stroke();
+  warpCtx.beginPath(); warpCtx.moveTo(hwx,hwy-50); warpCtx.lineTo(hwx,hwy+50); warpCtx.stroke();
+  warpCtx.fillStyle = 'rgba(200,168,75,0.9)'; warpCtx.font = '6px monospace';
+  warpCtx.fillText('D\u209B(M) after cover', 4, 10);
+  // Push warpCanvas to main canvas (logical position 170,28; canvas px 340,56; size 264×264 px)
+  ctx.save();
+  ctx.scale(1/S, 1/S);
+  ctx.drawImage(warpCanvas, 170*S, 28*S);
+  ctx.restore();
+
+  txt(170, 106, 'base change S\'→S', 'rgb(140,145,165)', '5px monospace');
+  txt(170, 116, 'rot  = char-group', 'rgb(140,145,165)', '5px monospace');
+  txt(170, 126, 'zoom = lattice sc.', 'rgb(140,145,165)', '5px monospace');
+
+  // Term boxes (right column of right panel)
+  drawTermBox(248,  30,  66, 32, 'D(M)',    'Spec(\u2124[M])',     C.A1);
+  drawTermBox(248,  66,  66, 32, 'mult.type','fpqc-loc. diag.',    C.A2);
+  drawTermBox(248, 102,  66, 32, 'fpqc',    'faith. flat cover',   C.A4);
+  drawTermBox(248, 138,  66, 26, 'base chg','G \u00d7\u209b S\'', C.A6);
+}
+
+// =============================================================================
+//  Scene 1 — n-multiplication [n]: G→G, kernel G[n]=nG, schematic density
+// =============================================================================
+function drawKernelRow(x, y, w, n, phaseDeg) {
+  const cx = x+24, cy = y+10, r = 9;
+  ctx.strokeStyle = C.FRAME; ctx.lineWidth = 0.4;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, 2*Math.PI); ctx.stroke();
+  ctx.strokeStyle = C.SUBTLE; ctx.lineWidth = 0.3;
+  ctx.beginPath(); ctx.moveTo(cx-r-4,cy); ctx.lineTo(cx+r+4,cy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx,cy-r-4); ctx.lineTo(cx,cy+r+4); ctx.stroke();
+
+  const phaseIdx = degToIdx(phaseDeg);
+  for (let k = 0; k < n; k++) {
+    const idx = (phaseIdx + Math.round(k*ANGLE_STEPS/n)) % ANGLE_STEPS;
+    const px = cx + Math.round(COS(idx)*r);
+    const py = cy + Math.round(SIN(idx)*r);
+    ctx.fillStyle = k===0 ? C.A1 : (k%2 ? C.A4 : C.A6);
+    ctx.beginPath(); ctx.arc(px, py, 2, 0, 2*Math.PI); ctx.fill();
+  }
+
+  txt(x+48, y+8,  'n='+n,         C.TEXT,    '5px monospace');
+  txt(x+48, y+18, 'G[n]\u2284G',  C.SUBTLE,  '5px monospace');
+}
+
+function sceneTorsionDensity() {
+  fillPanel(4, 20, 190, 150);
+  fillPanel(198, 20, 118, 150);
+
+  txt(12, 31, 'n-action on G',      C.TEXT,   '6px monospace');
+  txt(12, 43, '[n] : G \u2192 G',   C.A6,     '6px monospace');
+  txt(12, 55, 'G[n] = ker([n])',     C.A4,     '6px monospace');
+
+  const ns = [2, 3, 4, 5, 6, 8, 12];
+  for (let i = 0; i < 7; i++) drawKernelRow(10, 64+i*18, 170, ns[i], gAngle);
+
+  drawTermBox(202,  28, 106, 32, 'schem. dense', 'tests detect all', C.A4);
+  drawTermBox(202,  66, 106, 32, 'reduced torus','union of G[n]',    C.A6);
+  drawTermBox(202, 104, 106, 32, 'test family',  'no vanish on G[n]',C.A2);
+  drawTermBox(202, 142, 106, 20, 'SGA3 IX',      'Theorem 4.7',      C.A1);
+}
+
+// =============================================================================
+//  Scene 2 — Nilpotent thickening J, lifting, conjugacy
+// =============================================================================
+function drawLiftTower(x, y, w, h, levels, bend) {
+  ctx.strokeStyle = C.FRAME; ctx.lineWidth = 0.4;
+  rrect(x, y, w, h, 6); ctx.stroke();
+  const top  = y+10;
+  const step = (h-24)/levels;
+  const mid  = x+w/2;
+
+  for (let i = 0; i < levels; i++) {
+    const yy = top + i*step;
+    const t  = (levels<=1) ? 0 : i/(levels-1);
+    const dx = Math.round(Math.sin(t*Math.PI)*bend);
+    const bw = w-16-2*dx;
+    const col = i===0 ? C.A1 : (i===levels-1 ? C.A2 : C.FRAME);
+    ctx.strokeStyle = col; ctx.lineWidth = 0.4;
+    rrect(x+8+dx, yy, bw, step-6, 4); ctx.stroke();
+    txt(x+8+dx+5, yy+step-13, 'J\u207F'.replace('n', ''+((levels-1-i)||'0')), C.TEXT, '5px monospace');
+    // Use superscript unicode: J⁰ J¹ J² J³ J⁴
+    const sups = ['\u2070','\u00b9','\u00b2','\u00b3','\u2074'];
+    txt(x+8+dx+5, yy+step-13, 'J'+(sups[levels-1-i]||''), C.TEXT, '5px monospace');
+    if (i < levels-1) {
+      const y1 = yy+step-6;
+      const nx2 = mid + Math.round(Math.sin(((i+1)/(levels-1))*Math.PI)*bend);
+      drawArrow(mid+dx, y1, nx2, yy+step+4, C.A4);
+    }
+  }
+}
+
+function drawConjugacyIcon(x, y, w, h, deltaDeg) {
+  ctx.strokeStyle = C.FRAME; ctx.lineWidth = 0.4;
+  rrect(x, y, w, h, 6); ctx.stroke();
+  const cx = x+w/2, cy = y+h/2-2;
+  const r  = Math.floor(Math.min(w,h)/4);
+  ctx.strokeStyle = C.A6; ctx.lineWidth = 0.5;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, 2*Math.PI); ctx.stroke();
+  ctx.strokeStyle = C.SUBTLE; ctx.lineWidth = 0.4;
+  ctx.beginPath(); ctx.arc(cx, cy, r-6, 0, 2*Math.PI); ctx.stroke();
+  const a = deltaDeg*Math.PI/180*0.5;
+  const ax = cx+Math.round(Math.cos(a)*r), ay = cy+Math.round(Math.sin(a)*r);
+  drawArrow(cx, cy, ax, ay, C.A5);
+  ctx.fillStyle = C.A5; ctx.beginPath(); ctx.arc(ax, ay, 3, 0, 2*Math.PI); ctx.fill();
+  txt(x+6, y+h-5, 'g \u2261 e  mod J', C.SUBTLE, '5px monospace');
+}
+
+function sceneLiftingRigidity() {
+  fillPanel(4, 20, 144, 150);
+  fillPanel(154, 20, 162, 150);
+
+  txt(10, 31, 'J nilpotent', C.TEXT,   '6px monospace');
+  txt(10, 43, 'H\u00b2 \u2192 lift', C.A1, '6px monospace');
+  txt(10, 55, 'H\u00b9 \u2192 conj.', C.A2,'6px monospace');
+
+  const t = (performance.now()-gT0)/1000;
+  drawLiftTower(10, 64, 128, 96, 5, 10.0+4.0*Math.sin(t*1.3));
+  drawConjugacyIcon(160, 26, 150, 68, 18.0+8.0*Math.sin(t*1.1));
+
+  drawTermBox(160, 102, 150, 22, 'H\u00b2 = 0', 'lift exists',    C.A1);
+  drawTermBox(160, 128, 150, 22, 'H\u00b9 = 0', 'unique up conj.',C.A2);
+  drawTermBox(160, 154, 150, 16, 'J nilpotent','finite layers',    C.A4);
+}
+
+// =============================================================================
+//  Scene 3 — Kernels, quotients, extensions; stability of the class
+// =============================================================================
+function sceneExtensions() {
+  fillPanel(4, 20, 176, 150);
+  fillPanel(186, 20, 130, 150);
+
+  const ey=66, bW=36, bH=26, xH=14, xG=80, xK=148;
+  ctx.strokeStyle=C.A1; ctx.lineWidth=0.5; rrect(xH,ey,bW,bH,4); ctx.stroke();
+  ctx.strokeStyle=C.A4;                    rrect(xG,ey,bW,bH,4); ctx.stroke();
+  ctx.strokeStyle=C.A2;                    rrect(xK,ey,bW,bH,4); ctx.stroke();
+  txt(xH+10, ey+17, 'H', C.A1, '8px monospace');
+  txt(xG+10, ey+17, 'G', C.A4, '8px monospace');
+  txt(xK+10, ey+17, 'K', C.A2, '8px monospace');
+
+  drawArrow(54, ey+13, 80, ey+13, C.TEXT);
+  drawArrow(120,ey+13,148, ey+13, C.TEXT);
+
+  txt(10, 32, '1 \u2192 H \u2192 G \u2192 K \u2192 1', C.TEXT, '6px monospace');
+  txt(10, 44, 'kernel / quotient / ext.',               C.A6,  '6px monospace');
+  txt(10, 56, 'class is stable',                        C.SUBTLE,'6px monospace');
+
+  ctx.strokeStyle = C.SUBTLE; ctx.lineWidth = 0.4;
+  rrect(30, 108, 128, 40, 6); ctx.stroke();
+  txt(38, 120, 'factorization:', C.TEXT,   '6px monospace');
+  txt(38, 132, 'H \u2192 G \u2192 G/H', C.A4,'6px monospace');
+  drawArrow(128,128,148,128, C.A5);
+  ctx.fillStyle=C.A5; ctx.beginPath(); ctx.arc(150,128,3,0,2*Math.PI); ctx.fill();
+
+  drawTermBox(190,  28, 114, 30, 'kernel',    'ker(u) mult.-type',   C.A1);
+  drawTermBox(190,  62, 114, 30, 'quotient',  'G/H stays in class',  C.A2);
+  drawTermBox(190,  96, 114, 30, 'extension', 'H,K type \u21d2 G',   C.A4);
+  drawTermBox(190, 130, 114, 24, 'field case','see \u00a78 Exp.IX',  C.A6);
+}
+
+// =============================================================================
+//  Main animation loop
+// =============================================================================
+function render(now) {
+  const t = (now - gT0) / 1000;
+
+  if (gAuto) {
+    gAngle  = (t * 20) % 360;
+    gZoom   = 1.0 + 0.35 * Math.sin(t * 1.2);
+    gN      = 2 + (Math.floor(t/1.2) % 48);
+    gScene  = Math.floor(t/9) % 4;
+    syncUI();
+  }
+
+  ctx.save();
+  ctx.scale(S, S);
+
+  ctx.fillStyle = C.BG; ctx.fillRect(0, 0, W, H);
+  drawTitleBar('SGA3 Expo\u0301s\u00e9 IX \u2013 homomorphismes', 'formal terms \u2192 code');
+
+  switch (gScene) {
+    case 0: sceneDiagonalizable();  break;
+    case 1: sceneTorsionDensity();  break;
+    case 2: sceneLiftingRigidity(); break;
+    case 3: sceneExtensions();      break;
+  }
+
+  drawFooter(gAngle, gZoom, gScene, gN);
+  ctx.restore();
+
+  refreshInfo();
+  requestAnimationFrame(render);
+}
+
+// =============================================================================
+//  Info panel — per-scene mathematical context (accurate to SGA3 IX)
+// =============================================================================
+const INFO = [
+  // ---- Scene 0 ----
+  {
+    title: 'Scene 0 · Diagonalizable Group Schemes',
+    prose: `For an abelian group <em>M</em>, the <strong>diagonalizable group scheme</strong>
+      <em>D(M) = Spec(ℤ[M])</em> represents the functor
+      <em>T ↦ Hom<sub>grp</sub>(M, 𝔾<sub>m</sub>(T))</em>.
+      A smooth commutative group scheme <em>G/S</em> is of <strong>multiplicative type</strong>
+      if it becomes diagonalizable after some fpqc cover <em>S′ → S</em>;
+      equivalently, the character sheaf <em>M = Hom(G, 𝔾<sub>m</sub>)</em> is a locally-constant
+      sheaf of finitely generated abelian groups on <em>S</em>.
+      <strong>Tori</strong> are the connected group schemes of multiplicative type.`,
+    terms: [
+      ['D(M)',       'Spec(ℤ[M]) — T-points are Hom(M, 𝔾ₘ(T))'],
+      ['mult. type', 'fpqc-locally isomorphic to D(M)'],
+      ['character',  'sheaf M = Hom(G, 𝔾ₘ), loc. constant'],
+      ['torus',      'connected multiplicative type group scheme'],
+      ['fpqc cover', 'faithfully flat quasi-compact map S′→S'],
+      ['base change','G ×ₛ S′ for a cover S′→S'],
+    ],
+    ref: `LEFT — source object in a local trivialising chart on S (the pre-cover picture).
+      RIGHT — D_S(M) visualised after the cover: <strong>rotation</strong> encodes the
+      action of the Galois group on the character group M; <strong>zoom</strong> encodes
+      lattice scaling.`,
+    note: `SGA3 Exposé IX §1–3 defines D(M), studies its functorial properties, and
+      characterises group schemes of multiplicative type via their character sheaves.`,
+  },
+
+  // ---- Scene 1 ----
+  {
+    title: 'Scene 1 · n-Torsion and Schematic Density',
+    prose: `The <strong>n-multiplication endomorphism</strong> <em>[n]: G→G</em>
+      (sending <em>x ↦ xⁿ</em> in multiplicative notation) has scheme-theoretic kernel
+      <em>G[n] = ker([n])</em>, written <em>nG</em> in the paper.
+      For <em>G = 𝔾<sub>m</sub></em>, <em>G[n] = μ<sub>n</sub> = Spec(ℤ[T]/(Tⁿ−1))</em>.
+      <strong>Theorem 4.7</strong> (SGA3 IX) asserts that for a torus <em>G</em>, the family
+      <em>(G[n])<sub>n≥1</sub></em> is <strong>schematically dense</strong> in <em>G</em>:
+      no non-zero regular function on <em>G</em> vanishes on every <em>G[n]</em>.`,
+    terms: [
+      ['[n]: G→G',   'multiplication-by-n endomorphism'],
+      ['G[n] = nG',  'scheme-theoretic n-torsion subscheme'],
+      ['μₙ',         'Spec(ℤ[T]/(Tⁿ−1)), n-th roots of unity'],
+      ['schem. dense','⋃ₙ G[n] is dense: no fct vanishes on all'],
+      ['Thm 4.7',    'torsion family detects all regular functions'],
+    ],
+    ref: `Each circle shows G[n] as n equally-spaced points on the unit circle
+      (the geometric fibre μₙ(k̄) for a separably closed field k̄).
+      The <strong>seven rows</strong> for n=2,3,4,5,6,8,12 illustrate the denseness:
+      their union approximates the full circle <em>𝔾ₘ</em>.`,
+    note: `SGA3 IX §4 develops the schematic density theory. The result is used to extend
+      morphisms from the dense subfamily to all of G.`,
+  },
+
+  // ---- Scene 2 ----
+  {
+    title: 'Scene 2 · Nilpotent Thickenings, Lifting, Rigidity',
+    prose: `Given a <strong>nilpotent ideal</strong> <em>J ⊂ A</em> (J<sup>N</sup>=0) and a
+      group scheme <em>G₀/A₀</em>, <em>A₀ = A/J</em>, of multiplicative type:
+      <br>• If the obstruction in <strong>H²</strong> vanishes, then G₀ lifts to A.
+      <br>• If additionally <strong>H¹ = 0</strong>, any two lifts are conjugate by a
+      unique element of G(A) congruent to the identity mod J.
+      <br>For group schemes of multiplicative type these cohomology groups vanish,
+      yielding <strong>rigidity</strong>: <em>G₀ lifts uniquely</em>.`,
+    terms: [
+      ['J nilpotent', 'ideal with J^N=0 for some N≥1'],
+      ['filtration',  'J⁰⊃J¹⊃…⊃J^N=0 (tower in visual)'],
+      ['lift',        'G over A restricting to G₀ over A/J'],
+      ['H²=0',        'deformation obstruction vanishes'],
+      ['H¹=0',        'automorphism sheaf trivial → unique lift'],
+      ['rigidity',    'mult.-type schemes lift uniquely through J'],
+    ],
+    ref: `The <strong>tower</strong> shows the nilpotence filtration (J⁰=A at top, J^k=0 at base).
+      The <strong>conjugacy icon</strong> shows a near-identity automorphism
+      g ≡ 1 (mod J) relating two hypothetical lifts.`,
+    note: `SGA3 IX §6–7 establishes the rigidity of multiplicative type group schemes
+      under nilpotent thickenings, a key tool in the structure theory of algebraic groups.`,
+  },
+
+  // ---- Scene 3 ----
+  {
+    title: 'Scene 3 · Kernels, Quotients, Extensions',
+    prose: `The class of <strong>multiplicative type group schemes</strong> is
+      stable under the following operations:
+      <br>(a) <em>Kernels</em> — ker(u) is of multiplicative type when G is.
+      <br>(b) <em>Quotients</em> — G/H is of multiplicative type when H ⊂ G is a closed
+      subgroup of multiplicative type.
+      <br>(c) <em>Extensions</em> — in an exact sequence 1→H→G→K→1, if H and K are of
+      multiplicative type then so is G.
+      This stability is the fundamental closure property of the class.`,
+    terms: [
+      ['ker(u)',    'scheme-theoretic kernel; stays in class'],
+      ['G/H',       'quotient group scheme; stays in class'],
+      ['extension', '1→H→G→K→1 with H,K ⇒ G in class'],
+      ['exact seq.','strict in the fppf topology'],
+      ['§8',        'field-theoretic consequences in Exposé IX'],
+    ],
+    ref: `The <strong>exact sequence</strong> 1→H→G→K→1 is shown with labelled boxes.
+      The <strong>factorisation panel</strong> shows H→G→G/H.
+      Right column: stability results for kernels, quotients, and extensions.
+      "field case" refers to §8 of Exposé IX.`,
+    note: `These stability results, together with rigidity under nilpotent thickenings,
+      allow one to classify all multiplicative type group schemes over a base S by their
+      character sheaves.`,
+  },
+];
+
+let lastInfoScene = -1;
+function refreshInfo() {
+  if (gScene === lastInfoScene) return;
+  lastInfoScene = gScene;
+  const d = INFO[gScene];
+  const rows = d.terms.map(([k,v]) =>
+    `<tr><td class="tk">${k}</td><td class="tv">${v}</td></tr>`
+  ).join('');
+  document.getElementById('info').innerHTML = `
+    <div class="scene-title">${d.title}</div>
+    <div class="prose">${d.prose}</div>
+    <div class="section-label">Key terms</div>
+    <table class="terms">${rows}</table>
+    <div class="ref-box">${d.ref}</div>
+    <div class="note-box">${d.note}</div>
+  `;
+}
+
+// =============================================================================
+//  UI controls
+// =============================================================================
+function setScene(n) {
+  gScene = n; gAuto = false;
+  document.getElementById('btnAuto').classList.add('paused');
+  document.getElementById('btnAuto').classList.remove('active');
+  document.getElementById('btnAuto').textContent = '⏸ auto';
+  for (let i=0; i<4; i++)
+    document.getElementById('btn'+i).classList.toggle('active', i===n);
+}
+function toggleAuto() {
+  gAuto = !gAuto;
+  const btn = document.getElementById('btnAuto');
+  btn.classList.toggle('active',  gAuto);
+  btn.classList.toggle('paused', !gAuto);
+  btn.textContent = gAuto ? '⏵ auto' : '⏸ auto';
+}
+function manualAngle(v) {
+  gAngle = parseFloat(v); gAuto = false;
+  document.getElementById('vA').textContent = parseFloat(v).toFixed(1)+'°';
+  document.getElementById('btnAuto').classList.add('paused');
+  document.getElementById('btnAuto').classList.remove('active');
+  document.getElementById('btnAuto').textContent = '⏸ auto';
+}
+function manualZoom(v) {
+  gZoom = parseFloat(v); gAuto = false;
+  document.getElementById('vZ').textContent = parseFloat(v).toFixed(2);
+  document.getElementById('btnAuto').classList.add('paused');
+  document.getElementById('btnAuto').classList.remove('active');
+  document.getElementById('btnAuto').textContent = '⏸ auto';
+}
+function manualN(v) {
+  gN = parseInt(v); gAuto = false;
+  document.getElementById('vN').textContent = v;
+  document.getElementById('btnAuto').classList.add('paused');
+  document.getElementById('btnAuto').classList.remove('active');
+  document.getElementById('btnAuto').textContent = '⏸ auto';
+}
+function syncUI() {
+  document.getElementById('slA').value = gAngle;
+  document.getElementById('vA').textContent = gAngle.toFixed(1)+'°';
+  document.getElementById('slZ').value = gZoom;
+  document.getElementById('vZ').textContent = gZoom.toFixed(2);
+  document.getElementById('slN').value = gN;
+  document.getElementById('vN').textContent = gN;
+  for (let i=0; i<4; i++)
+    document.getElementById('btn'+i).classList.toggle('active', i===gScene);
+}
+
+// =============================================================================
+//  Start
+// =============================================================================
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
