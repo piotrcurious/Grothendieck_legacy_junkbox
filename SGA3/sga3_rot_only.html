@@ -1,0 +1,390 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SGA3 — Rotation Only</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap');:root { --bg: #05060c; --panel: #0c1020; --panel2: #0a0d18; --line: #22283a; --text: #d7dbea; --muted: #7f879f; --accent: #67e8f9; --accent2: #fbbf24; --accent3: #a78bfa; --good: #86efac; --bad: #fda4af; }
+
+{ box-sizing: border-box; } body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top, rgba(103,232,249,0.08), transparent 30%), radial-gradient(circle at bottom right, rgba(167,139,250,0.08), transparent 28%), var(--bg); color: var(--text); font-family: 'IBM Plex Sans', sans-serif; display: flex; justify-content: center; padding: 24px; }
+
+
+.app { width: min(1180px, 100%); display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 18px; }
+
+.card { background: linear-gradient(180deg, rgba(12,16,32,0.96), rgba(7,10,18,0.98)); border: 1px solid var(--line); border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.35); overflow: hidden; }
+
+.header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-end; padding: 18px 18px 12px; border-bottom: 1px solid var(--line); } .title { font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: #f3d48a; letter-spacing: 0.06em; text-transform: uppercase; } .subtitle { font-size: 12px; color: var(--muted); line-height: 1.4; max-width: 58ch; }
+
+.leftBody { padding: 16px 18px 18px; display: grid; gap: 14px; }
+
+canvas { width: 100%; aspect-ratio: 4 / 3; background: radial-gradient(circle at center, #04060e 0%, #020308 70%); border: 1px solid var(--line); border-radius: 18px; display: block; }
+
+.controls { display: grid; gap: 10px; grid-template-columns: 1fr; padding: 12px 0 0; }
+
+.row { display: grid; grid-template-columns: 92px 1fr 66px; gap: 10px; align-items: center; font-size: 12px; } .label { color: var(--muted); font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; } input[type="range"] { width: 100%; accent-color: var(--accent); } .value { text-align: right; font-family: 'IBM Plex Mono', monospace; color: var(--accent); font-size: 12px; }
+
+.btnRow { display: flex; flex-wrap: wrap; gap: 10px; padding-top: 2px; } button { appearance: none; border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--text); border-radius: 12px; padding: 9px 12px; cursor: pointer; font-family: 'IBM Plex Mono', monospace; font-size: 12px; transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease; } button:hover { transform: translateY(-1px); border-color: rgba(103,232,249,0.7); } button.primary { border-color: rgba(103,232,249,0.65); } button.active { background: rgba(103,232,249,0.10); border-color: var(--accent); }
+
+.rightBody { padding: 18px; display: grid; gap: 14px; }
+
+.block { background: rgba(255,255,255,0.02); border: 1px solid var(--line); border-radius: 16px; padding: 14px 14px 12px; }
+
+.block h2 { margin: 0 0 8px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #e9ecfb; letter-spacing: 0.04em; }
+
+.plain { color: #cad0e3; font-size: 14px; line-height: 1.65; } .plain strong { color: #ffffff; font-weight: 500; } .plain code { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--accent); background: rgba(103,232,249,0.08); border: 1px solid rgba(103,232,249,0.15); padding: 1px 5px; border-radius: 999px; }
+
+.termGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .term { border: 1px solid var(--line); background: rgba(255,255,255,0.02); border-radius: 14px; padding: 12px; } .term .k { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--accent2); margin-bottom: 6px; } .term .v { font-size: 13px; color: #cbd3ea; line-height: 1.55; }
+
+.mini { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; } .mini .term .k { color: var(--accent3); }
+
+@media (max-width: 960px) { .app { grid-template-columns: 1fr; } .termGrid, .mini { grid-template-columns: 1fr; } .row { grid-template-columns: 82px 1fr 66px; } } </style>
+
+</head>
+<body>
+  <div class="app">
+    <section class="card">
+      <div class="header">
+        <div>
+          <div class="title">SGA3 · rotation only</div>
+          <div class="subtitle">
+            A single angle is shown two ways: as a running number and as the wrapped value after full turns are removed.
+            This page keeps to the SGA3 idea that the same object can be written locally in a standard form after a suitable cover.
+          </div>
+        </div>
+      </div><div class="leftBody">
+    <canvas id="view" width="960" height="720" aria-label="Rotation visualizer"></canvas>
+
+    <div class="controls">
+      <div class="row">
+        <div class="label">raw angle</div>
+        <input id="raw" type="range" min="-1440" max="1440" step="1" value="75" />
+        <div class="value" id="rawVal">75°</div>
+      </div>
+      <div class="row">
+        <div class="label">turn rate</div>
+        <input id="rate" type="range" min="-360" max="360" step="1" value="48" />
+        <div class="value" id="rateVal">48°/s</div>
+      </div>
+      <div class="btnRow">
+        <button class="primary" id="autoBtn">auto motion</button>
+        <button id="resetBtn">reset</button>
+        <button id="stepBtn">step +1 turn</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<aside class="card">
+  <div class="header">
+    <div>
+      <div class="title">what the page is doing</div>
+      <div class="subtitle">
+        Plain-language guide to the operations behind the picture and the code.
+      </div>
+    </div>
+  </div>
+
+  <div class="rightBody">
+    <div class="block">
+      <h2>one idea</h2>
+      <div class="plain">
+        The circle does not care which full turn you add. <strong>75°</strong>, <strong>435°</strong>, and <strong>-285°</strong>
+        all point to the same place on the ring. The code keeps one number for the running motion, then computes the
+        wrapped angle with <code>mod 360</code> before drawing the arrow.
+      </div>
+    </div>
+
+    <div class="block">
+      <h2>how this matches SGA3</h2>
+      <div class="plain">
+        In Exposé VIII, a diagonalizable group is built from an ordinary commutative group <code>M</code> by the recipe
+        <code>D(M)</code>. In Exposé IX, a group of multiplicative type is one that becomes diagonalizable after a suitable
+        faithfully flat quasi-compact cover. This demo only shows the simplest local behavior: the same object is written
+        in a standard form after choosing the right view.
+      </div>
+    </div>
+
+    <div class="block">
+      <h2>the three operations</h2>
+      <div class="mini">
+        <div class="term">
+          <div class="k">add</div>
+          <div class="v">Increase the raw angle by a chosen amount.</div>
+        </div>
+        <div class="term">
+          <div class="k">remove full turns</div>
+          <div class="v">Subtract or add 360° until the angle sits in the usual range.</div>
+        </div>
+        <div class="term">
+          <div class="k">draw the same point</div>
+          <div class="v">Use the wrapped value to place the arrow on the circle.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="block">
+      <h2>terms shown on screen</h2>
+      <div class="termGrid">
+        <div class="term">
+          <div class="k">raw angle</div>
+          <div class="v">The number that keeps growing while the motion continues.</div>
+        </div>
+        <div class="term">
+          <div class="k">wrapped angle</div>
+          <div class="v">The angle after full turns are removed, kept inside one circle turn.</div>
+        </div>
+        <div class="term">
+          <div class="k">full turns</div>
+          <div class="v">How many times 360° has been passed.</div>
+        </div>
+        <div class="term">
+          <div class="k">local view</div>
+          <div class="v">The standard way of writing the same object after choosing a cover.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+  </div><script>
+(() => {
+  const canvas = document.getElementById('view');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+
+  const raw = document.getElementById('raw');
+  const rate = document.getElementById('rate');
+  const rawVal = document.getElementById('rawVal');
+  const rateVal = document.getElementById('rateVal');
+  const autoBtn = document.getElementById('autoBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const stepBtn = document.getElementById('stepBtn');
+
+  let auto = true;
+  let baseAngle = 75;
+  let lastTime = performance.now();
+  let animatedAngle = baseAngle;
+
+  function resizeCanvas() {
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+    canvas.height = Math.max(1, Math.floor((rect.width * 0.75) * dpr));
+    draw();
+  }
+
+  function wrap360(deg) {
+    let x = deg % 360;
+    if (x < 0) x += 360;
+    return x;
+  }
+
+  function fullTurns(deg) {
+    return Math.trunc(deg / 360);
+  }
+
+  function drawGrid(cx, cy, radius) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 4; i++) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius * i / 4, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    for (let a = 0; a < 360; a += 30) {
+      const rad = a * Math.PI / 180;
+      const x = cx + Math.cos(rad) * radius;
+      const y = cy + Math.sin(rad) * radius;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawArrow(cx, cy, angleDeg, radius) {
+    const rad = angleDeg * Math.PI / 180;
+    const x = cx + Math.cos(rad) * radius;
+    const y = cy + Math.sin(rad) * radius;
+
+    ctx.save();
+    ctx.strokeStyle = '#67e8f9';
+    ctx.fillStyle = '#67e8f9';
+    ctx.lineWidth = 6;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+
+    const head = 18;
+    const left = rad + Math.PI * 0.82;
+    const right = rad - Math.PI * 0.82;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(left) * head, y + Math.sin(left) * head);
+    ctx.lineTo(x + Math.cos(right) * head, y + Math.sin(right) * head);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawTextBox(x, y, w, h, title, lines, accent) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,0.03)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = 1;
+    roundRect(x, y, w, h, 16);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = accent;
+    ctx.font = 'bold 22px "IBM Plex Mono", monospace';
+    ctx.fillText(title, x + 18, y + 32);
+
+    ctx.fillStyle = '#d7dbea';
+    ctx.font = '18px "IBM Plex Sans", sans-serif';
+    const arr = Array.isArray(lines) ? lines : [lines];
+    arr.forEach((line, i) => ctx.fillText(line, x + 18, y + 64 + i * 24));
+    ctx.restore();
+  }
+
+  function roundRect(x, y, w, h, r) {
+    if (ctx.roundRect) {
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, r);
+      return;
+    }
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function draw() {
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    const cx = w * 0.33;
+    const cy = h * 0.5;
+    const radius = Math.min(w, h) * 0.28;
+    const wrapped = wrap360(animatedAngle);
+    const turns = fullTurns(animatedAngle);
+
+    // background ring and reference lines
+    drawGrid(cx, cy, radius);
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    // zero direction
+    ctx.save();
+    ctx.strokeStyle = 'rgba(251,191,36,0.85)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + radius, cy);
+    ctx.stroke();
+    ctx.restore();
+
+    // wrapped angle arrow
+    drawArrow(cx, cy, wrapped, radius * 0.94);
+
+    // status cards
+    const boxX = w * 0.60;
+    drawTextBox(boxX, h * 0.14, w * 0.33, h * 0.18, 'raw', [
+      `${animatedAngle.toFixed(0)}°`,
+      `full turns: ${turns}`
+    ], '#fbbf24');
+
+    drawTextBox(boxX, h * 0.36, w * 0.33, h * 0.18, 'wrapped', [
+      `${wrapped.toFixed(0)}°`,
+      'same point on the circle'
+    ], '#67e8f9');
+
+    drawTextBox(boxX, h * 0.58, w * 0.33, h * 0.22, 'operation', [
+      'keep subtracting 360°',
+      'until the angle fits one turn'
+    ], '#a78bfa');
+
+    // bottom note inside canvas
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,0.70)';
+    ctx.font = '18px "IBM Plex Mono", monospace';
+    ctx.fillText('one point — many names', w * 0.08, h * 0.92);
+    ctx.restore();
+  }
+
+  function syncLabels() {
+    rawVal.textContent = `${Number(raw.value)}°`;
+    rateVal.textContent = `${Number(rate.value)}°/s`;
+  }
+
+  function tick(now) {
+    const dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+    if (auto) {
+      animatedAngle += Number(rate.value) * dt;
+      raw.value = String(Math.round(animatedAngle));
+      syncLabels();
+    } else {
+      animatedAngle = Number(raw.value);
+      syncLabels();
+    }
+    draw();
+    requestAnimationFrame(tick);
+  }
+
+  raw.addEventListener('input', () => {
+    auto = false;
+    autoBtn.classList.remove('active');
+    animatedAngle = Number(raw.value);
+    syncLabels();
+    draw();
+  });
+
+  rate.addEventListener('input', syncLabels);
+
+  autoBtn.addEventListener('click', () => {
+    auto = !auto;
+    autoBtn.classList.toggle('active', auto);
+    autoBtn.textContent = auto ? 'auto motion on' : 'auto motion off';
+  });
+
+  resetBtn.addEventListener('click', () => {
+    auto = false;
+    autoBtn.classList.remove('active');
+    animatedAngle = 75;
+    raw.value = '75';
+    syncLabels();
+    draw();
+  });
+
+  stepBtn.addEventListener('click', () => {
+    auto = false;
+    autoBtn.classList.remove('active');
+    animatedAngle += 360;
+    raw.value = String(Math.round(animatedAngle));
+    syncLabels();
+    draw();
+  });
+
+  window.addEventListener('resize', resizeCanvas);
+
+  syncLabels();
+  resizeCanvas();
+  autoBtn.classList.add('active');
+  requestAnimationFrame(tick);
+})();
+</script></body>
+</html>
