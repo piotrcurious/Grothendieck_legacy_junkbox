@@ -1,0 +1,411 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SGA3 — Diagonalizable vs Non-diagonalizable</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap');:root { --bg: #05060c; --panel: #0c1020; --panel2: #0a0d18; --line: #22283a; --text: #d7dbea; --muted: #7f879f; --accent: #67e8f9; --accent2: #fbbf24; --accent3: #a78bfa; --good: #86efac; --bad: #fda4af; }
+
+{ box-sizing: border-box; } body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top, rgba(103,232,249,0.08), transparent 30%), radial-gradient(circle at bottom right, rgba(167,139,250,0.08), transparent 28%), var(--bg); color: var(--text); font-family: 'IBM Plex Sans', sans-serif; display: flex; justify-content: center; padding: 24px; }
+
+
+.app { width: min(1280px, 100%); display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 18px; }
+
+.card { background: linear-gradient(180deg, rgba(12,16,32,0.96), rgba(7,10,18,0.98)); border: 1px solid var(--line); border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.35); overflow: hidden; }
+
+.header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-end; padding: 18px 18px 12px; border-bottom: 1px solid var(--line); } .title { font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: #f3d48a; letter-spacing: 0.06em; text-transform: uppercase; } .subtitle { font-size: 12px; color: var(--muted); line-height: 1.4; max-width: 64ch; }
+
+.leftBody { padding: 16px 18px 18px; display: grid; gap: 14px; }
+
+canvas { width: 100%; aspect-ratio: 4 / 3; background: radial-gradient(circle at center, #04060e 0%, #020308 70%); border: 1px solid var(--line); border-radius: 18px; display: block; }
+
+.controls { display: grid; gap: 10px; grid-template-columns: 1fr; padding: 12px 0 0; }
+
+.row { display: grid; grid-template-columns: 92px 1fr 76px; gap: 10px; align-items: center; font-size: 12px; } .label { color: var(--muted); font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; } input[type="range"] { width: 100%; accent-color: var(--accent); } .value { text-align: right; font-family: 'IBM Plex Mono', monospace; color: var(--accent); font-size: 12px; }
+
+.btnRow { display: flex; flex-wrap: wrap; gap: 10px; padding-top: 2px; } button { appearance: none; border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--text); border-radius: 12px; padding: 9px 12px; cursor: pointer; font-family: 'IBM Plex Mono', monospace; font-size: 12px; transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease; } button:hover { transform: translateY(-1px); border-color: rgba(103,232,249,0.7); } button.primary { border-color: rgba(103,232,249,0.65); } button.active { background: rgba(103,232,249,0.10); border-color: var(--accent); } button.warn.active { background: rgba(251,191,36,0.10); border-color: var(--accent2); }
+
+.rightBody { padding: 18px; display: grid; gap: 14px; }
+
+.block { background: rgba(255,255,255,0.02); border: 1px solid var(--line); border-radius: 16px; padding: 14px 14px 12px; }
+
+.block h2 { margin: 0 0 8px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #e9ecfb; letter-spacing: 0.04em; }
+
+.plain { color: #cad0e3; font-size: 14px; line-height: 1.65; } .plain strong { color: #ffffff; font-weight: 500; } .plain code { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--accent); background: rgba(103,232,249,0.08); border: 1px solid rgba(103,232,249,0.15); padding: 1px 5px; border-radius: 999px; }
+
+.termGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .term { border: 1px solid var(--line); background: rgba(255,255,255,0.02); border-radius: 14px; padding: 12px; } .term .k { font-family: 'IBM Plex Mono', monospace; font-size: 12px; margin-bottom: 6px; } .term .v { font-size: 13px; color: #cbd3ea; line-height: 1.55; } .k.good { color: var(--good); } .k.bad { color: var(--bad); } .k.alt { color: var(--accent3); } .k.warn { color: var(--accent2); }
+
+.mini { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; } .mini .term .k { color: var(--accent3); }
+
+@media (max-width: 960px) { .app { grid-template-columns: 1fr; } .termGrid, .mini { grid-template-columns: 1fr; } .row { grid-template-columns: 82px 1fr 76px; } } </style>
+
+</head>
+<body>
+  <div class="app">
+    <section class="card">
+      <div class="header">
+        <div>
+          <div class="title">SGA3 · diagonalizable vs non-diagonalizable</div>
+          <div class="subtitle">
+            One side shows a group that is already in the standard local form. The other side shows a group that is not in that form on the base, but becomes it after a cover, which is the SGA3 way to read the same object locally.
+          </div>
+        </div>
+      </div><div class="leftBody">
+    <canvas id="view" width="1024" height="768" aria-label="Diagonalizable comparison visualizer"></canvas>
+
+    <div class="controls">
+      <div class="row">
+        <div class="label">raw angle</div>
+        <input id="raw" type="range" min="-1440" max="1440" step="1" value="75" />
+        <div class="value" id="rawVal">75°</div>
+      </div>
+      <div class="row">
+        <div class="label">turn rate</div>
+        <input id="rate" type="range" min="-360" max="360" step="1" value="48" />
+        <div class="value" id="rateVal">48°/s</div>
+      </div>
+      <div class="btnRow">
+        <button class="primary active" id="autoBtn">auto motion on</button>
+        <button class="warn" id="modeBtn">mode: compare</button>
+        <button id="resetBtn">reset</button>
+        <button id="stepBtn">step +1 turn</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<aside class="card">
+  <div class="header">
+    <div>
+      <div class="title">plain-language guide</div>
+      <div class="subtitle">
+        The text stays close to what the code is doing and what SGA3 says locally.
+      </div>
+    </div>
+  </div>
+
+  <div class="rightBody">
+    <div class="block">
+      <h2>what changes, what does not</h2>
+      <div class="plain">
+        The number can keep growing forever, but the point on the circle repeats every <code>360°</code>. In the page, the raw angle stores the growing number, while the wrapped angle stores the position on one turn of the circle.
+      </div>
+    </div>
+
+    <div class="block">
+      <h2>the SGA3 distinction</h2>
+      <div class="plain">
+        A <strong>diagonalizable</strong> group is already in the standard form <code>D(M)</code>. A group of <strong>multiplicative type</strong> may not be in that form on the base, but after a suitable faithfully flat quasi-compact cover it becomes diagonalizable. That is the whole point of the comparison.
+      </div>
+    </div>
+
+    <div class="block">
+      <h2>how to read the two sides</h2>
+      <div class="mini">
+        <div class="term">
+          <div class="k good">left: diagonalizable</div>
+          <div class="v">The standard form is visible immediately.</div>
+        </div>
+        <div class="term">
+          <div class="k warn">right: not yet split</div>
+          <div class="v">The base does not show the standard form directly.</div>
+        </div>
+        <div class="term">
+          <div class="k alt">after cover</div>
+          <div class="v">The same object becomes standard once the view changes.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="block">
+      <h2>terms on screen</h2>
+      <div class="termGrid">
+        <div class="term">
+          <div class="k good">D(M)</div>
+          <div class="v">The standard diagonalizable form built from an ordinary commutative group M.</div>
+        </div>
+        <div class="term">
+          <div class="k warn">twisted form</div>
+          <div class="v">A group that is locally the same after a cover, but not visibly standard on the base.</div>
+        </div>
+        <div class="term">
+          <div class="k alt">wrapped angle</div>
+          <div class="v">The angle after removing whole turns.</div>
+        </div>
+        <div class="term">
+          <div class="k bad">not diagonalizable</div>
+          <div class="v">Here this means “not already standard on the base,” not “impossible to standardize locally.”</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+  </div><script>
+(() => {
+  const canvas = document.getElementById('view');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+
+  const raw = document.getElementById('raw');
+  const rate = document.getElementById('rate');
+  const rawVal = document.getElementById('rawVal');
+  const rateVal = document.getElementById('rateVal');
+  const autoBtn = document.getElementById('autoBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const stepBtn = document.getElementById('stepBtn');
+  const modeBtn = document.getElementById('modeBtn');
+
+  let auto = true;
+  let mode = 'compare'; // compare | split | twisted
+  let baseAngle = 75;
+  let lastTime = performance.now();
+  let animatedAngle = baseAngle;
+
+  function fitCanvas() {
+    const cssWidth = canvas.clientWidth;
+    const cssHeight = Math.round(cssWidth * 0.75);
+    canvas.width = Math.max(1, Math.floor(cssWidth * dpr));
+    canvas.height = Math.max(1, Math.floor(cssHeight * dpr));
+    draw();
+  }
+
+  function wrap360(deg) {
+    let x = deg % 360;
+    if (x < 0) x += 360;
+    return x;
+  }
+
+  function fullTurns(deg) {
+    return Math.trunc(deg / 360);
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    if (ctx.roundRect) {
+      ctx.roundRect(x, y, w, h, r);
+      return;
+    }
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function panel(x, y, w, h, title, subtitle, accent) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,0.03)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+    ctx.lineWidth = 1;
+    roundRect(x, y, w, h, 20);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = accent;
+    ctx.font = 'bold 18px "IBM Plex Mono", monospace';
+    ctx.fillText(title, x + 18, y + 30);
+
+    ctx.fillStyle = '#cbd3ea';
+    ctx.font = '15px "IBM Plex Sans", sans-serif';
+    const lines = subtitle.split('\n');
+    lines.forEach((line, i) => ctx.fillText(line, x + 18, y + 56 + i * 20));
+    ctx.restore();
+  }
+
+  function drawCircle(cx, cy, radius, angleDeg, accent, label, wrapNote) {
+    const rad = angleDeg * Math.PI / 180;
+    const x = cx + Math.cos(rad) * radius;
+    const y = cy + Math.sin(rad) * radius;
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.20)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 6; i++) {
+      const a = i * Math.PI / 3;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(a) * radius, cy + Math.sin(a) * radius);
+      ctx.stroke();
+    }
+
+    ctx.strokeStyle = accent;
+    ctx.fillStyle = accent;
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+
+    const head = 18;
+    const left = rad + Math.PI * 0.82;
+    const right = rad - Math.PI * 0.82;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(left) * head, y + Math.sin(left) * head);
+    ctx.lineTo(x + Math.cos(right) * head, y + Math.sin(right) * head);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = 'bold 16px "IBM Plex Mono", monospace';
+    ctx.fillText(label, cx - radius, cy + radius + 28);
+    ctx.font = '14px "IBM Plex Sans", sans-serif';
+    ctx.fillStyle = 'rgba(220,225,245,0.85)';
+    ctx.fillText(wrapNote, cx - radius, cy + radius + 50);
+    ctx.restore();
+  }
+
+  function draw() {
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    const scale = w / 1024;
+    const H = h / scale;
+    ctx.save();
+    ctx.scale(scale, scale);
+
+    const wrapped = wrap360(animatedAngle);
+    const turns = fullTurns(animatedAngle);
+
+    // top hint
+    ctx.fillStyle = 'rgba(243,212,138,0.95)';
+    ctx.font = '16px "IBM Plex Mono", monospace';
+    ctx.fillText('raw angle grows · wrapped angle repeats', 24, 28);
+
+    if (mode === 'compare' || mode === 'split') {
+      panel(24, 56, 460, 560, 'diagonalizable', 'already in the standard local form\nshown directly as D(M)', '#86efac');
+      drawCircle(164, 290, 126, wrapped, '#86efac', 'D(M)', 'standard form visible immediately');
+
+      ctx.fillStyle = '#cbd3ea';
+      ctx.font = '16px "IBM Plex Sans", sans-serif';
+      ctx.fillText('This side is already in the standard shape.', 44, 514);
+      ctx.fillText('The same wrapped angle is used every turn.', 44, 540);
+
+      ctx.fillStyle = 'rgba(134,239,172,0.16)';
+      ctx.fillRect(310, 448, 144, 2);
+      ctx.fillStyle = '#86efac';
+      ctx.font = '15px "IBM Plex Mono", monospace';
+      ctx.fillText('base → standard form', 300, 438);
+    }
+
+    if (mode === 'compare' || mode === 'twisted') {
+      panel(540, 56, 460, 560, 'not yet diagonalizable', 'looks different on the base\nbut becomes standard after a cover', '#fbbf24');
+      drawCircle(680, 290, 126, wrapped + 90, '#fbbf24', 'twisted form', 'same motion, different local view');
+
+      ctx.fillStyle = '#cbd3ea';
+      ctx.font = '16px "IBM Plex Sans", sans-serif';
+      ctx.fillText('The base does not show the standard shape directly.', 560, 514);
+      ctx.fillText('After a cover, the same object is read as D(M).', 560, 540);
+
+      // cover arrow
+      ctx.strokeStyle = 'rgba(251,191,36,0.6)';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(575, 440);
+      ctx.lineTo(720, 440);
+      ctx.stroke();
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = '15px "IBM Plex Mono", monospace';
+      ctx.fillText('fpqc cover', 616, 430);
+    }
+
+    // bottom strip
+    ctx.fillStyle = 'rgba(255,255,255,0.04)';
+    roundRect(24, 640, 976, 78, 18);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.stroke();
+
+    ctx.fillStyle = '#67e8f9';
+    ctx.font = '16px "IBM Plex Mono", monospace';
+    ctx.fillText(`raw angle: ${animatedAngle.toFixed(0)}°`, 42, 670);
+    ctx.fillText(`wrapped angle: ${wrapped.toFixed(0)}°`, 42, 694);
+    ctx.fillText(`full turns removed: ${turns}`, 310, 670);
+    ctx.fillStyle = '#cbd3ea';
+    ctx.font = '15px "IBM Plex Sans", sans-serif';
+    ctx.fillText('One side is already standard. The other side needs a cover before it can be written in that same form.', 310, 694);
+
+    ctx.restore();
+  }
+
+  function syncLabels() {
+    rawVal.textContent = `${Number(raw.value)}°`;
+    rateVal.textContent = `${Number(rate.value)}°/s`;
+  }
+
+  function tick(now) {
+    const dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+    if (auto) {
+      animatedAngle += Number(rate.value) * dt;
+      raw.value = String(Math.round(animatedAngle));
+      syncLabels();
+    } else {
+      animatedAngle = Number(raw.value);
+      syncLabels();
+    }
+    draw();
+    requestAnimationFrame(tick);
+  }
+
+  raw.addEventListener('input', () => {
+    auto = false;
+    autoBtn.classList.remove('active');
+    autoBtn.textContent = 'auto motion off';
+    animatedAngle = Number(raw.value);
+    syncLabels();
+    draw();
+  });
+
+  rate.addEventListener('input', syncLabels);
+
+  autoBtn.addEventListener('click', () => {
+    auto = !auto;
+    autoBtn.classList.toggle('active', auto);
+    autoBtn.textContent = auto ? 'auto motion on' : 'auto motion off';
+  });
+
+  resetBtn.addEventListener('click', () => {
+    auto = false;
+    autoBtn.classList.remove('active');
+    autoBtn.textContent = 'auto motion off';
+    animatedAngle = 75;
+    raw.value = '75';
+    syncLabels();
+    draw();
+  });
+
+  stepBtn.addEventListener('click', () => {
+    auto = false;
+    autoBtn.classList.remove('active');
+    autoBtn.textContent = 'auto motion off';
+    animatedAngle += 360;
+    raw.value = String(Math.round(animatedAngle));
+    syncLabels();
+    draw();
+  });
+
+  modeBtn.addEventListener('click', () => {
+    mode = mode === 'compare' ? 'split' : mode === 'split' ? 'twisted' : 'compare';
+    modeBtn.textContent = `mode: ${mode}`;
+    draw();
+  });
+
+  window.addEventListener('resize', fitCanvas);
+
+  syncLabels();
+  fitCanvas();
+  requestAnimationFrame(tick);
+})();
+</script></body>
+</html>
