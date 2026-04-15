@@ -114,6 +114,73 @@ void test_precision_float() {
     assert(std::abs(kahanEma.getValue() - 1.0f) < 1e-5);
 }
 
+void test_initialization() {
+    Serial.println("Testing initialization...");
+    KahanEMA ema1(0.1f, true);  // Initialize with first reading
+    float val = 10.0f;
+    float result = ema1.update(val);
+    assert(result == val);
+    Serial.println("Initialization with first reading passed.");
+
+    KahanEMA ema2(0.1f, false); // Initialize with 0
+    result = ema2.update(val);
+    assert(result != val);
+    assert(result == 0.1f * val);
+    Serial.println("Initialization with zero passed.");
+}
+
+void test_noisy_signal() {
+    Serial.println("Testing noisy signal smoothing...");
+    float alpha = 0.05f;
+    KahanEMA kahanEma(alpha);
+
+    Serial.println("SINE_DATA_START");
+    for (int i = 0; i < 1000; ++i) {
+        float clean = sin(i * 0.1f) * 10.0f;
+        float noisy = clean + (random(-100, 100) / 100.0f) * 2.0f;
+        float filtered = kahanEma.update(noisy);
+        if (i % 5 == 0) {
+            Serial.printf("%d,%f,%f,%f\n", i, clean, noisy, filtered);
+        }
+    }
+    Serial.println("SINE_DATA_END");
+}
+
+void test_alpha_change() {
+    Serial.println("Testing alpha change...");
+    KahanEMA ema(0.1f);
+    ema.update(10.0f);
+    assert(ema.getAlpha() == 0.1f);
+
+    ema.setAlpha(0.5f);
+    assert(ema.getAlpha() == 0.5f);
+
+    ema.setAlpha(2.0f);
+    assert(ema.getAlpha() == 1.0f); // Clamped
+
+    ema.setAlpha(-1.0f);
+    assert(ema.getAlpha() == 0.0f); // Clamped
+    Serial.println("Alpha change and clamping passed.");
+}
+
+void test_alpha_comparison() {
+    Serial.println("ALPHA_COMP_START");
+    float alphas[] = {0.01f, 0.05f, 0.1f, 0.2f};
+    float step_val = 10.0f;
+
+    for (float alpha : alphas) {
+        KahanEMA ema(alpha, false); // Initialize with 0
+        Serial.printf("ALPHA:%f\n", alpha);
+        for (int i = 0; i < 200; ++i) {
+            float val = ema.update(step_val);
+            if (i % 2 == 0) {
+                Serial.printf("%d,%f\n", i, val);
+            }
+        }
+    }
+    Serial.println("ALPHA_COMP_END");
+}
+
 void test_data_generation() {
     // This function will print data in a format easy to parse by Python
     float alpha = 0.00001f;
@@ -122,9 +189,11 @@ void test_data_generation() {
     KahanEMA kahanEma(alpha);
     StandardEMA<float> standardEma(alpha);
 
-    // Init
-    for(int i=0; i<1000; ++i) {
-        kahanEma.update(baseline);
+    // Init - KahanEMA(alpha, true) by default, so first update sets it to baseline
+    kahanEma.update(baseline);
+
+    // Standard EMA needs more steps to reach baseline if not manually set
+    for(int i=0; i<1000000; ++i) {
         standardEma.update(baseline);
     }
 
@@ -143,6 +212,10 @@ int main() {
     test_basic_convergence();
     test_numerical_stability();
     test_precision_float();
+    test_initialization();
+    test_alpha_change();
+    test_noisy_signal();
+    test_alpha_comparison();
     test_data_generation();
     Serial.println("All tests completed.");
     return 0;

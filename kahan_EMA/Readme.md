@@ -89,7 +89,22 @@ To run the C++ tests and generate the stability analysis:
 This will:
 - Compile the C++ test suite.
 - Run the tests and display results in the terminal.
-- Extract data and generate `stability_comparison.png` showing the error reduction over time.
+- Extract data and generate visualization plots.
+
+### Stability Comparison
+Comparison between Standard EMA and Kahan EMA under extreme precision stress (float32).
+
+![Stability Comparison](stability_comparison.png)
+
+### Smoothing Performance
+Evaluation of the filter's smoothing capability on a noisy sine wave.
+
+![Sine Smoothing](sine_smoothing.png)
+
+### Alpha Comparison
+Comparison of convergence speeds for different smoothing factors ($\alpha$).
+
+![Alpha Comparison](alpha_comparison.png)
 
 ## Hardware
 

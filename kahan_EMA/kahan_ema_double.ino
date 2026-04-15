@@ -1,35 +1,5 @@
 #include <Arduino.h>
-
-class KahanEMA_Double {
-public:
-    // Constructor
-    KahanEMA_Double(double alpha) : alpha(alpha), ema(0.0), compensation(0.0) {}
-
-    // Update the EMA with a new reading (using double precision)
-    double update(double reading) {
-        double y = alpha * (reading - ema) - compensation;
-        double t = ema + y;
-        compensation = (t - ema) - y;
-        ema = t;
-        return ema;
-    }
-
-    // Get the current EMA value
-    double getValue() const {
-        return ema;
-    }
-
-    // Reset the EMA and compensation
-    void reset() {
-        ema = 0.0;
-        compensation = 0.0;
-    }
-
-private:
-    double alpha;        // Smoothing factor (0.0 to 1.0)
-    double ema;          // Current exponential moving average
-    double compensation; // Kahan summation compensation term
-};
+#include "KahanEMA.hpp"
 
 // Define the smoothing factor (adjust as needed, using double)
 const double ALPHA = 0.1;
