@@ -1,6 +1,8 @@
 #ifndef KAHAN_EMA_HPP
 #define KAHAN_EMA_HPP
 
+#include <cmath>
+
 template <typename T>
 class KahanEMA_Template {
 public:
@@ -16,9 +18,13 @@ public:
     /**
      * @brief Update the EMA with a new reading.
      * @param reading The new value to incorporate.
+     * @param ignoreInvalid If true, NaN or Inf readings are ignored.
      * @return The updated EMA value.
      */
-    T update(T reading) {
+    T update(T reading, bool ignoreInvalid = true) {
+        if (ignoreInvalid && (std::isnan(reading) || std::isinf(reading))) {
+            return ema;
+        }
         if (!initialized) {
             ema = reading;
             compensation = 0.0;

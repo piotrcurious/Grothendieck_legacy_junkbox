@@ -11,8 +11,8 @@ void delay(unsigned long ms) {
 }
 
 unsigned long millis() {
-    static auto start = std::chrono::steady_clock::now();
-    auto now = std::chrono::steady_clock::now();
+    static auto start = std::chrono::high_resolution_clock::now();
+    auto now = std::chrono::high_resolution_clock::now();
     return std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count();
 }
 
