@@ -57,10 +57,10 @@ This ensures that the error from adding `y` to `EMA_old` is captured in `compens
 
 ## Code Structure
 
-* **`KahanEMA_Double` Class (or `KahanEMA` for float):**
+* **`KahanEMA.hpp`**: Contains the template class `KahanEMA_Template<T>` and typedefs for `KahanEMA` (float) and `KahanEMA_Double` (double).
     * Manages the state of the EMA (`ema`) and the compensation term (`compensation`).
-    * `KahanEMA_Double(double alpha)`: Constructor to initialize the filter with a smoothing factor.
-    * `update(double reading)`: Processes a new sensor reading and updates the EMA using Kahan summation. Returns the new filtered value.
+    * `KahanEMA_Template(T alpha)`: Constructor to initialize the filter with a smoothing factor.
+    * `update(T reading)`: Processes a new sensor reading and updates the EMA using Kahan summation. Returns the new filtered value.
     * `getValue()`: Returns the current filtered value.
     * `reset()`: Resets the filter state to zero.
 * **`ALPHA` Constant:** Defines the smoothing factor. Adjust this value between 0.0 and 1.0 based on your desired smoothing level.
@@ -70,7 +70,26 @@ This ensures that the error from adding `y` to `EMA_old` is captured in `compens
 ## Configuration
 
 * **Smoothing Factor (`ALPHA`):** Modify the `const double ALPHA = 0.1;` line (or `const float ALPHA = 0.1;` for the float version) to change how aggressively the EMA smooths the data. Values closer to 0.0 provide more smoothing, while values closer to 1.0 make the filter more responsive.
-* **Precision (`float` vs `double`):** The provided code uses `double` precision. If you need to conserve memory or find `float` sufficient for your application's accuracy requirements, you can switch back to `float` by changing all occurrences of `double` in the `KahanEMA_Double` class definition and instantiation to `float`, and potentially renaming the class back to `KahanEMA`.
+* **Precision (`float` vs `double`):** The library supports both via the `KahanEMA` and `KahanEMA_Double` typedefs.
+
+## Testing and Validation
+
+A comprehensive test suite is provided to verify the numerical stability of the Kahan EMA compared to a standard implementation.
+
+### Mock Arduino Environment
+The project includes `Arduino.h` and `mock_arduino.cpp` which provide a minimal Arduino-like environment for desktop testing. This allows the same code to be tested on a PC before deployment.
+
+### Running Tests
+To run the C++ tests and generate the stability analysis:
+1. Ensure you have `g++`, `python3`, `numpy`, and `matplotlib` installed.
+2. Run the test script:
+   ```bash
+   python3 kahan_EMA/run_tests.py
+   ```
+This will:
+- Compile the C++ test suite.
+- Run the tests and display results in the terminal.
+- Extract data and generate `stability_comparison.png` showing the error reduction over time.
 
 ## Hardware
 
