@@ -1,3 +1,4 @@
+// Basic 1D Constant Velocity Kalman Filter using Gaussian Elimination.
 #include "KahanMatrix.h"
 
 #include <cmath> // For isnan(), isinf() if needed, and other math functions

@@ -1,3 +1,4 @@
+// Enhanced 1D Kalman Filter with Partial Pivoting.
 #include "KahanMatrix.h"
 
 #include <cmath> // For fabs()

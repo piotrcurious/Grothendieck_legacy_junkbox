@@ -1,3 +1,4 @@
+// Advanced Kalman Filter with dynamic time constant adjustment.
 #include "KahanMatrix.h"
 
 #include <cmath> // For sqrt(), fabs()
