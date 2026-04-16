@@ -127,6 +127,9 @@ public:
         return (*this) * o.inv();
     }
 
+    GaussianDualField operator+(T s) const { return (*this) + GaussianDualField(s, 0, 0, sigma2); }
+    GaussianDualField operator-(T s) const { return (*this) - GaussianDualField(s, 0, 0, sigma2); }
+
     GaussianDualField operator*(T s) const {
         GaussianDualField r(0, 0, 0, sigma2);
         T p, e;
@@ -147,6 +150,12 @@ public:
         return (*this) * (1.0 / s);
     }
 
+    // Non-member friend operators for T op Field
+    friend GaussianDualField operator+(T s, const GaussianDualField& f) { return f + s; }
+    friend GaussianDualField operator-(T s, const GaussianDualField& f) { return GaussianDualField(s, 0, 0, f.sigma2) - f; }
+    friend GaussianDualField operator*(T s, const GaussianDualField& f) { return f * s; }
+    friend GaussianDualField operator/(T s, const GaussianDualField& f) { return GaussianDualField(s, 0, 0, f.sigma2) / f; }
+
     static GaussianDualField exp(const GaussianDualField &x) {
         T ea = std::exp(x.nominal);
         T s = std::sqrt(x.sigma2);
@@ -154,7 +163,7 @@ public:
         T ch = std::cosh(bs);
         T sh = std::sinh(bs);
         T res_nom = ea * ch;
-        T res_noise = ea * sh / s;
+        T res_noise = (s > 1e-15) ? ea * sh / s : ea * x.noise;
         T res_delta = res_nom * x.delta;
         return GaussianDualField(res_nom, res_noise, res_delta, x.sigma2);
     }
@@ -166,7 +175,7 @@ public:
         T denom = a * a - x.sigma2 * b * b;
         if (denom <= 0) return GaussianDualField(0, 0, 0, x.sigma2);
         T res_nom = 0.5 * std::log(denom);
-        T res_noise = (1.0 / s) * std::atanh(b * s / a);
+        T res_noise = (s > 1e-15) ? (1.0 / s) * std::atanh(b * s / a) : b / a;
         T res_delta = (x.delta * a) / denom;
         return GaussianDualField(res_nom, res_noise, res_delta, x.sigma2);
     }
@@ -188,18 +197,22 @@ public:
     static GaussianDualField sin(const GaussianDualField &x) {
         T a = x.nominal; T b = x.noise; T s = std::sqrt(x.sigma2);
         T bs = b * s;
-        T res_nom = std::sin(a) * std::cosh(bs);
-        T res_noise = std::cos(a) * (std::sinh(bs) / s);
-        T res_delta = std::cos(a) * std::cosh(bs) * x.delta;
+        T ch = std::cosh(bs);
+        T sh = std::sinh(bs);
+        T res_nom = std::sin(a) * ch;
+        T res_noise = (s > 1e-15) ? std::cos(a) * (sh / s) : std::cos(a) * b;
+        T res_delta = std::cos(a) * ch * x.delta;
         return GaussianDualField(res_nom, res_noise, res_delta, x.sigma2);
     }
 
     static GaussianDualField cos(const GaussianDualField &x) {
         T a = x.nominal; T b = x.noise; T s = std::sqrt(x.sigma2);
         T bs = b * s;
-        T res_nom = std::cos(a) * std::cosh(bs);
-        T res_noise = -std::sin(a) * (std::sinh(bs) / s);
-        T res_delta = -std::sin(a) * std::cosh(bs) * x.delta;
+        T ch = std::cosh(bs);
+        T sh = std::sinh(bs);
+        T res_nom = std::cos(a) * ch;
+        T res_noise = (s > 1e-15) ? -std::sin(a) * (sh / s) : -std::sin(a) * b;
+        T res_delta = -std::sin(a) * ch * x.delta;
         return GaussianDualField(res_nom, res_noise, res_delta, x.sigma2);
     }
 
@@ -209,13 +222,19 @@ public:
 
     static GaussianDualField asin(const GaussianDualField &x) {
         T a = x.nominal;
-        T der = 1.0 / std::sqrt(std::max(T(1e-20), 1.0 - a * a));
+        T limit = 1.0 - 1e-15;
+        if (a > limit) a = limit;
+        if (a < -limit) a = -limit;
+        T der = 1.0 / std::sqrt(1.0 - a * a);
         return GaussianDualField(std::asin(a), x.noise * der, x.delta * der, x.sigma2);
     }
 
     static GaussianDualField acos(const GaussianDualField &x) {
         T a = x.nominal;
-        T der = -1.0 / std::sqrt(std::max(T(1e-20), 1.0 - a * a));
+        T limit = 1.0 - 1e-15;
+        if (a > limit) a = limit;
+        if (a < -limit) a = -limit;
+        T der = -1.0 / std::sqrt(1.0 - a * a);
         return GaussianDualField(std::acos(a), x.noise * der, x.delta * der, x.sigma2);
     }
 
@@ -238,18 +257,22 @@ public:
     static GaussianDualField sinh(const GaussianDualField &x) {
         T a = x.nominal; T b = x.noise; T s = std::sqrt(x.sigma2);
         T bs = b * s;
-        T res_nom = std::sinh(a) * std::cosh(bs);
-        T res_noise = std::cosh(a) * (std::sinh(bs) / s);
-        T res_delta = std::cosh(a) * std::cosh(bs) * x.delta;
+        T ch = std::cosh(bs);
+        T sh = std::sinh(bs);
+        T res_nom = std::sinh(a) * ch;
+        T res_noise = (s > 1e-15) ? std::cosh(a) * (sh / s) : std::cosh(a) * b;
+        T res_delta = std::cosh(a) * ch * x.delta;
         return GaussianDualField(res_nom, res_noise, res_delta, x.sigma2);
     }
 
     static GaussianDualField cosh(const GaussianDualField &x) {
         T a = x.nominal; T b = x.noise; T s = std::sqrt(x.sigma2);
         T bs = b * s;
-        T res_nom = std::cosh(a) * std::cosh(bs);
-        T res_noise = std::sinh(a) * (std::sinh(bs) / s);
-        T res_delta = std::sinh(a) * std::cosh(bs) * x.delta;
+        T ch = std::cosh(bs);
+        T sh = std::sinh(bs);
+        T res_nom = std::cosh(a) * ch;
+        T res_noise = (s > 1e-15) ? std::sinh(a) * (sh / s) : std::sinh(a) * b;
+        T res_delta = std::sinh(a) * ch * x.delta;
         return GaussianDualField(res_nom, res_noise, res_delta, x.sigma2);
     }
 
