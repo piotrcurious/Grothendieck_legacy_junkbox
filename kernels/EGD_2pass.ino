@@ -29,18 +29,34 @@ void linearFit(float* x, float* y, int n, float& m, float& b) {
 }
 
 // Function to calculate exponential fit (y = a * e^(bx))
-// Uses the Fredholm integral equation approach for better accuracy
+// Uses the Fredholm/Volterra integral equation approach: y(t) = y(0) + b * integral(y(s)ds) from 0 to t
 void exponentialFitFredholm(float* x, float* y, int n, float& a, float& b) {
-  // Approximate the integral using discrete sum
-  float sum = 0;
-  float sumExpBx = 0;
-  for (int i = 0; i < n; i++) {
-    sum += y[i];
-    sumExpBx += y[i] * exp(-x[i]); // This approximates the kernel K(x,y) = exp(-x) * y
+  float integral[n];
+  integral[0] = 0;
+  for (int i = 1; i < n; i++) {
+    float dt = x[i] - x[i-1];
+    integral[i] = integral[i-1] + (y[i] + y[i-1]) * 0.5 * dt;
   }
-  // Average values to find 'a' and 'b'
-  a = sum / n;
-  b = sumExpBx / sum; // Simplified estimation of 'b'
+
+  // Linear fit: y = b * integral + y0
+  float sumI = 0, sumY = 0, sumIY = 0, sumI2 = 0;
+  for (int i = 0; i < n; i++) {
+    sumI += integral[i];
+    sumY += y[i];
+    sumIY += integral[i] * y[i];
+    sumI2 += integral[i] * integral[i];
+  }
+
+  float denominator = (n * sumI2 - sumI * sumI);
+  if (fabs(denominator) < 1e-6) {
+    b = 0;
+    a = sumY / n;
+  } else {
+    b = (n * sumIY - sumI * sumY) / denominator;
+    float y0 = (sumY - b * sumI) / n;
+    // For y = a * exp(bt), y(0) = a.
+    a = y0;
+  }
 }
 
 // Function to calculate polynomial coefficients (least squares method)
@@ -96,10 +112,8 @@ void polynomialFit(float* x, float* y, int n, int degree, float* coeffs) {
 
   for (int i = degree - 1; i >= 0; i--) {
     a[i] = B[i][degree];
-    for (int j = 0; j < degree; j++) {
-      if (j != i) {
-        a[i] -= B[i][j] * a[j];
-      }
+    for (int j = i + 1; j < degree; j++) {
+      a[i] -= B[i][j] * a[j];
     }
     a[i] /= B[i][i];
   }
@@ -217,7 +231,7 @@ Serial.print("Rate of exponential growth: ");
         Serial.println(magnitude);
 
         // Additional logic to handle detection based on magnitude and rate
-        if (rateOfGrowth > someThreshold && magnitude > someOtherThreshold) {
+        if (rateOfGrowth > 0.5 && magnitude > 25.0) {
           Serial.println("Confirmed exponential growth detected with significant rate and magnitude.");
         } else {
           Serial.println("Exponential growth detected, but not significant.");
