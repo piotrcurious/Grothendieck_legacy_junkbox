@@ -2,6 +2,8 @@
 #ifndef KALMAN_FIELD_FILTER_H
 #define KALMAN_FIELD_FILTER_H
 
+#include "GaussianDualField.h"
+
 template<typename Field>
 class KalmanFieldFilter {
 public:
@@ -12,20 +14,34 @@ public:
         return update_field(zRaw).nominal;
     }
 
-    Field update_field(double zRaw) {
+    /**
+     * @brief Update the filter with a new measurement.
+     * @param zRaw The raw measurement value.
+     * @param qOverride Optional process noise override.
+     * @param rOverride Optional measurement noise override.
+     */
+    Field update_field(double zRaw, const Field* qOverride = nullptr, const Field* rOverride = nullptr) {
+        Field currentQ = qOverride ? *qOverride : q;
+        Field currentR = rOverride ? *rOverride : r;
         Field z(zRaw, 0.0, 0.0, x.sigma2);
 
-        p = p + q;
-        Field k = p / (p + r);
+        // Predict
+        p = p + currentQ;
+
+        // Update
+        Field k = p / (p + currentR);
         x = x + k * (z - x);
+
         // Joseph form for better stability: P = (I-k)P(I-k)^T + kRk^T
-        // For 1D scalar, P = (1-k)^2 * P + k^2 * R
         Field one(1.0, 0.0, 0.0, x.sigma2);
         Field imk = one - k;
-        p = imk * imk * p + k * k * r;
+        p = imk * imk * p + k * k * currentR;
 
         return x;
     }
+
+    Field getX() const { return x; }
+    Field getP() const { return p; }
 
 private:
     Field q, r, p, x;
