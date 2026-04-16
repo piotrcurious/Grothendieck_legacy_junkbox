@@ -150,8 +150,14 @@ void loop() {
 
 2. **Improved Exponential Fit Calculation**:
    - By using a kernel-based method, we can better capture the nature of exponential growth compared to a simple linear transformation of logarithmic values.
+   - The implementation includes a hierarchical `ResidualFitter` that compares a linear base model against an exponential model to distinguish between steady growth and accelerated growth.
 
-3. **Verbose Comments**:
+3. **Numerical Stability and Robustness**:
+   - **Normalization**: Data is normalized to zero mean and unit variance before fitting to prevent numerical overflow and precision loss.
+   - **Ridge Regularization**: Polynomial fitting uses Ridge regression to prevent overfitting in short windows.
+   - **Filtering**: Signal processing includes Median Filtering for spike rejection and Exponential Moving Average (EMA) for high-frequency noise smoothing.
+
+4. **Verbose Comments**:
    - Detailed comments are added to explain each step and its relation to the Fredholm kernel concept.
 
 This code aims to detect exponential growth in temperature data more accurately by using the Fredholm integral approach. The thresholds and model can be further refined based on specific application requirements and sensor characteristics.
