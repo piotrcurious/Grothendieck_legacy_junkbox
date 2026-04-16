@@ -16,11 +16,35 @@ public:
     }
 
     /**
-     * @brief Prediction step.
+     * @brief Linear Prediction step.
      */
     void predict(const Field* qOverride = nullptr) {
         Field currentQ = qOverride ? *qOverride : q;
         p = p + currentQ;
+    }
+
+    /**
+     * @brief EKF Prediction step using automatic Jacobian for non-linear state transition.
+     * @tparam TransitionFunc A function or functor `Field f(Field x)`
+     */
+    template<typename TransitionFunc>
+    void predict_ekf(TransitionFunc f, const Field* qOverride = nullptr) {
+        Field currentQ = qOverride ? *qOverride : q;
+
+        // 1. Automatic Jacobian via Dual component
+        Field x_for_f = x;
+        x_for_f.delta = 1.0;
+        Field f_x = f(x_for_f);
+
+        double F_val = f_x.delta;
+
+        // 2. Propagate state
+        // Use nominal and noise from f(x)
+        x = Field(f_x.nominal, f_x.noise, 0, x.sigma2);
+
+        // 3. Propagate covariance (field-based)
+        Field F_field(F_val, 0, 0, x.sigma2);
+        p = F_field * p * F_field + currentQ;
     }
 
     /**
