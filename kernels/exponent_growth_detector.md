@@ -143,9 +143,10 @@ void loop() {
 
 ### Explanation of Fredholm Kernel Incorporation
 
-1. **Exponential Fit Using Fredholm Integral Concept**:
-   - The `exponentialFitFredholm()` function approximates the integral using a sum. We assume a kernel of the form \( K(x,y) = e^{-x} \cdot y \), which is used to weigh the temperature readings.
-   - This approach helps in estimating the parameters \( a \) and \( b \) for the exponential model \( y = a \cdot e^{bx} \).
+1. **Exponential Fit Using Volterra/Fredholm Integral Concept**:
+   - The `exponentialFitFredholm()` function uses an integral-based approach for exponential fitting. For the differential equation \( \frac{dy}{dt} = b y \), the equivalent integral equation is \( y(t) = y(0) + b \int_0^t y(s) ds \).
+   - This transforms the non-linear exponential fitting problem into a simple linear regression between \( y(t) \) and the cumulative integral \( \int y(s) ds \).
+   - This method is more robust than fitting to log-transformed data when dealing with noise and avoids the need for initial guesses required by iterative methods.
 
 2. **Improved Exponential Fit Calculation**:
    - By using a kernel-based method, we can better capture the nature of exponential growth compared to a simple linear transformation of logarithmic values.
