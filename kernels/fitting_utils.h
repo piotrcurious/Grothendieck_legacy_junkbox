@@ -145,7 +145,11 @@ inline float calculateMAE(float* x, float* y, int n, float(*model)(float, float,
 
 // Ridge Regression for Polynomial Fit with Normalization
 // lambda: regularization parameter
-inline void polynomialFitRidge(float* x, float* y, int n, int degree, float* coeffs, float lambda = 0.01) {
+inline bool polynomialFitRidge(float* x, float* y, int n, int degree, float* coeffs, float lambda = 0.01) {
+    if (n <= degree || n == 0) {
+        for (int i = 0; i <= degree; i++) coeffs[i] = 0;
+        return false;
+    }
     if (degree > 4) degree = 4;
     int systemSize = degree + 1;
 
@@ -204,6 +208,7 @@ inline void polynomialFitRidge(float* x, float* y, int n, int degree, float* coe
     }
 
     for(int i=0; i<systemSize; i++) coeffs[i] = a_norm[i];
+    return true;
 }
 
 // Function to evaluate a polynomial in normalized coordinates
@@ -289,7 +294,39 @@ struct ResidualFitter {
         rmse_residual = calculateRMSE(x, y, n, exponentialModel, a, exp_b);
     }
 
-    // Combined model output: y = base + residual
+    void fitResidualOnly(float* x, float* y, int n) {
+        // Step 1: Base Linear Fit
+        linearFit(x, y, n, m, b);
+
+        // Step 2: Fit residuals: r = y - (mx + b). Model: r = a*exp(exp_b*x)
+        float residuals[FITTING_BUFFER_SIZE];
+        for (int i = 0; i < n; i++) {
+            residuals[i] = y[i] - linearModel(x[i], m, b);
+        }
+
+        // Use a heuristic for exponential fitting on residuals (which can be negative)
+        // For simplicity, fit original y again but store it as residual part
+        // OR just keep the current model comparison logic which is more robust.
+        // Let's implement fitting on residuals but with a shift to keep them positive.
+        float min_r = residuals[0];
+        for (int i = 1; i < n; i++) if (residuals[i] < min_r) min_r = residuals[i];
+
+        float shifted_r[FITTING_BUFFER_SIZE];
+        float offset = (min_r < 0) ? -min_r + 1.0f : 0.0f;
+        for (int i = 0; i < n; i++) shifted_r[i] = residuals[i] + offset;
+
+        float ra, rb;
+        exponentialFitFredholm(x, shifted_r, n, ra, rb);
+        a = ra; // Note: this 'a' is for the shifted residuals
+        exp_b = rb;
+
+        // rmse_residual for the combined model: y = mx + b + a*exp(exp_b*x) - offset
+    }
+
+    // Combined model evaluation
+    float evaluate(float x, float offset = 0.0f) {
+        return linearModel(x, m, b) + exponentialModel(x, a, exp_b) - offset;
+    }
     // Wait, Fredholm approach for exponentialFitFredholm is a standalone fit.
     // Let's refine fit() to perform a true residual fit (y - linear_model)
     // but the Fredholm integral approach assumes a global model.
