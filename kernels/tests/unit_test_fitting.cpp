@@ -117,6 +117,22 @@ void test_rmse_mae() {
     std::cout << "test_rmse_mae PASSED" << std::endl;
 }
 
+void test_hampel_filter() {
+    std::cout << "Running test_hampel_filter..." << std::endl;
+    // Data with a clear outlier
+    float data[7] = {10.0, 10.1, 10.2, 50.0, 10.3, 10.4, 10.5};
+    // 50.0 is at index 3
+    float filtered = hampelFilter(data, 7, 3, 5); // window: {10.1, 10.2, 50.0, 10.3, 10.4}
+    // median: 10.3, mad: median(|.1-.3|, |.2-.3|, |50-.3|, |0|, |.1|) = median(.2, .1, 39.7, 0, .1) = 0.1
+    // sigma = 1.4826 * 0.1 = 0.14826. 3*sigma = 0.44. |50 - 10.3| = 39.7 > 0.44. Outlier!
+    ASSERT_NEAR(filtered, 10.3, 1e-3);
+
+    // Test non-outlier
+    float clean = hampelFilter(data, 7, 1, 5);
+    ASSERT_NEAR(clean, 10.1, 1e-3);
+    std::cout << "test_hampel_filter PASSED" << std::endl;
+}
+
 int main() {
     test_linear_fit();
     test_exponential_fit();
@@ -125,6 +141,7 @@ int main() {
     test_median_filter();
     test_ema();
     test_rmse_mae();
+    test_hampel_filter();
     std::cout << "\nALL UNIT TESTS PASSED!" << std::endl;
     return 0;
 }

@@ -49,10 +49,10 @@ void loop() {
 
     // Only analyze data if the buffer is full
     if (bufferIndex == 0) {
-      // Median filter to remove spikes from the buffer before fitting
+      // Robust outlier rejection using Hampel filter
       float filteredBuffer[bufferSize];
       for (int i = 0; i < bufferSize; i++) {
-          filteredBuffer[i] = medianFilter(temperatureBuffer, bufferSize, i, 3);
+          filteredBuffer[i] = hampelFilter(temperatureBuffer, bufferSize, i, 5);
       }
 
       // Convert time to seconds for analysis
@@ -65,11 +65,14 @@ void loop() {
       ResidualFitter fitter;
       fitter.fit(timeSeconds, filteredBuffer, bufferSize);
 
+      float confidence = fitter.growthConfidence();
+
       // Determine the best model
-      // Use RMSE ratio or just compare which one is better
-      if (fitter.rmse_residual < fitter.rmse_linear && fitter.rmse_residual < 2.0) { // Threshold for good fit
+      if (confidence > 0.2 && fitter.rmse_residual < 2.0) {
         Serial.println("Exponential growth detected!");
-      } else if (fitter.rmse_linear < 2.0) { // Threshold for good linear fit
+        Serial.print("Growth Confidence: ");
+        Serial.println(confidence);
+      } else if (fitter.rmse_linear < 2.0) {
         Serial.println("Linear growth detected.");
       } else {
         Serial.println("No significant growth detected or short-term noise.");
