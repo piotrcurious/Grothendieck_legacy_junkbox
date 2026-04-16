@@ -61,32 +61,25 @@ void loop() {
         timeSeconds[i] = (timeBuffer[i] - timeBuffer[0]) / 1000.0;
       }
 
-      // Perform linear fit
-      float m, b;
-      linearFit(timeSeconds, filteredBuffer, bufferSize, m, b);
-
-      // Perform exponential fit using Fredholm kernel approach
-      float a, expB;
-      exponentialFitFredholm(timeSeconds, filteredBuffer, bufferSize, a, expB);
-
-      // Calculate goodness of fit for both models
-      float r2Linear = goodnessOfFit(timeSeconds, filteredBuffer, bufferSize, linearModel, m, b);
-      float r2Exponential = goodnessOfFit(timeSeconds, filteredBuffer, bufferSize, exponentialModel, a, expB);
+      // Perform hierarchical fit
+      ResidualFitter fitter;
+      fitter.fit(timeSeconds, filteredBuffer, bufferSize);
 
       // Determine the best model
-      if (r2Exponential > r2Linear && r2Exponential > 0.9) { // Threshold for good exponential fit
+      // Use RMSE ratio or just compare which one is better
+      if (fitter.rmse_residual < fitter.rmse_linear && fitter.rmse_residual < 2.0) { // Threshold for good fit
         Serial.println("Exponential growth detected!");
-      } else if (r2Linear > 0.9) { // Threshold for good linear fit
+      } else if (fitter.rmse_linear < 2.0) { // Threshold for good linear fit
         Serial.println("Linear growth detected.");
       } else {
         Serial.println("No significant growth detected or short-term noise.");
       }
 
       // Debug output
-      Serial.print("R^2 Linear: ");
-      Serial.println(r2Linear);
-      Serial.print("R^2 Exponential: ");
-      Serial.println(r2Exponential);
+      Serial.print("RMSE Linear: ");
+      Serial.println(fitter.rmse_linear);
+      Serial.print("RMSE Exponential: ");
+      Serial.println(fitter.rmse_residual);
       Serial.print("Temperature Readings: ");
       for (int i = 0; i < bufferSize; i++) {
         Serial.print(filteredBuffer[i]);

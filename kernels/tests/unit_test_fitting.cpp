@@ -102,6 +102,21 @@ void test_ema() {
     std::cout << "test_ema PASSED" << std::endl;
 }
 
+void test_rmse_mae() {
+    std::cout << "Running test_rmse_mae..." << std::endl;
+    float x[3] = {0, 1, 2};
+    float y[3] = {1, 2, 4}; // y = x + 1 but y[2] has error 1
+    // linear model y = x + 1 (m=1, b=1)
+    float rmse = calculateRMSE(x, y, 3, linearModel, 1.0, 1.0);
+    // residuals: 1-1=0, 2-2=0, 4-3=1. sqrt((0^2+0^2+1^2)/3) = sqrt(1/3) = 0.57735
+    ASSERT_NEAR(rmse, 0.57735, 1e-4);
+
+    float mae = calculateMAE(x, y, 3, linearModel, 1.0, 1.0);
+    // (0+0+1)/3 = 0.33333
+    ASSERT_NEAR(mae, 0.33333, 1e-4);
+    std::cout << "test_rmse_mae PASSED" << std::endl;
+}
+
 int main() {
     test_linear_fit();
     test_exponential_fit();
@@ -109,6 +124,7 @@ int main() {
     test_polynomial_fit();
     test_median_filter();
     test_ema();
+    test_rmse_mae();
     std::cout << "\nALL UNIT TESTS PASSED!" << std::endl;
     return 0;
 }
