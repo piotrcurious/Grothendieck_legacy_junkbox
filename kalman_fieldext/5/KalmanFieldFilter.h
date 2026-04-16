@@ -11,18 +11,25 @@ public:
       : q(q), r(r), p(p0), x(x0) {}
 
     double update(double zRaw) {
-        return update_field(zRaw).nominal;
+        predict();
+        return update_linear(zRaw).nominal;
     }
 
     /**
-     * @brief Update the filter with a new measurement (Standard Linear).
+     * @brief Prediction step.
      */
-    Field update_field(double zRaw, const Field* qOverride = nullptr, const Field* rOverride = nullptr) {
+    void predict(const Field* qOverride = nullptr) {
         Field currentQ = qOverride ? *qOverride : q;
+        p = p + currentQ;
+    }
+
+    /**
+     * @brief Linear measurement update step.
+     */
+    Field update_linear(double zRaw, const Field* rOverride = nullptr) {
         Field currentR = rOverride ? *rOverride : r;
         Field z(zRaw, 0.0, 0.0, x.sigma2);
 
-        p = p + currentQ;
         Field k = p / (p + currentR);
         x = x + k * (z - x);
 
@@ -34,25 +41,18 @@ public:
     }
 
     /**
-     * @brief Extended Kalman Filter update using Dual Numbers for automatic Jacobian.
-     * @tparam MeasurementFunc A function or functor `Field h(Field x)`
+     * @brief EKF measurement update step using Dual Numbers for automatic Jacobian.
      */
     template<typename MeasurementFunc>
-    Field update_ekf(double zRaw, MeasurementFunc h, const Field* qOverride = nullptr, const Field* rOverride = nullptr) {
-        Field currentQ = qOverride ? *qOverride : q;
+    Field update_ekf_step(double zRaw, MeasurementFunc h, const Field* rOverride = nullptr) {
         Field currentR = rOverride ? *rOverride : r;
 
-        // 1. Predict
-        p = p + currentQ;
-
-        // 2. Automatic Jacobian via Dual component
         Field x_for_h = x;
-        x_for_h.delta = 1.0; // Seed for derivative
+        x_for_h.delta = 1.0;
         Field h_x = h(x_for_h);
 
-        double H_val = h_x.delta; // dh/dx
+        double H_val = h_x.delta;
 
-        // 3. Update using Field operators for consistency and numerical stability
         Field H_field(H_val, 0, 0, x.sigma2);
         Field K_field = (p * H_field) / (H_field * p * H_field + currentR);
 
@@ -62,9 +62,26 @@ public:
 
         Field one(1.0, 0.0, 0.0, x.sigma2);
         Field imkH = one - K_field * H_field;
-        p = imkH * imkH * p + K_field * K_field * currentR; // Joseph form
+        p = imkH * imkH * p + K_field * K_field * currentR;
 
         return x;
+    }
+
+    /**
+     * @brief Combined Predict + EKF Update for convenience.
+     */
+    template<typename MeasurementFunc>
+    Field update_ekf(double zRaw, MeasurementFunc h, const Field* qOverride = nullptr, const Field* rOverride = nullptr) {
+        predict(qOverride);
+        return update_ekf_step(zRaw, h, rOverride);
+    }
+
+    /**
+     * @brief Standard combined Predict + Linear Update.
+     */
+    Field update_field(double zRaw, const Field* qOverride = nullptr, const Field* rOverride = nullptr) {
+        predict(qOverride);
+        return update_linear(zRaw, rOverride);
     }
 
     Field getX() const { return x; }
