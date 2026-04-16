@@ -96,13 +96,48 @@ public:
 };
 
 /**
+ * @brief Simple Rational number class for exact arithmetic.
+ */
+class Rational {
+private:
+    long long num_, den_;
+    void simplify() {
+        if (den_ == 0) throw std::runtime_error("Denominator cannot be zero.");
+        if (den_ < 0) { num_ = -num_; den_ = -den_; }
+        long long common = std::gcd(std::abs(num_), den_);
+        num_ /= common;
+        den_ /= common;
+    }
+public:
+    Rational(long long n = 0, long long d = 1) : num_(n), den_(d) { simplify(); }
+
+    Rational operator+(const Rational& o) const { return Rational(num_ * o.den_ + o.num_ * den_, den_ * o.den_); }
+    Rational operator-(const Rational& o) const { return Rational(num_ * o.den_ - o.num_ * den_, den_ * o.den_); }
+    Rational operator*(const Rational& o) const { return Rational(num_ * o.num_, den_ * o.den_); }
+    Rational operator/(const Rational& o) const { return Rational(num_ * o.den_, den_ * o.num_); }
+
+    bool operator==(const Rational& o) const { return num_ == o.num_ && den_ == o.den_; }
+    bool operator!=(const Rational& o) const { return !(*this == o); }
+
+    friend std::ostream& operator<<(std::ostream& os, const Rational& r) {
+        if (r.den_ == 1) return os << r.num_;
+        return os << r.num_ << "/" << r.den_;
+    }
+};
+
+// Forward declaration of AlgebraicKahanSummator
+template<typename Field>
+class AlgebraicKahanSummator;
+
+/**
  * @brief Represents a 2D Tensor (Matrix) over a generic Field.
  * Supports both element-wise operations and matrix multiplication.
+ * Uses a flat vector for internal storage.
  */
 template<typename Field>
 class Tensor {
 private:
-    std::vector<std::vector<Field>> data_;
+    std::vector<Field> data_;
     size_t rows_;
     size_t cols_;
 
@@ -110,7 +145,7 @@ public:
     Tensor() : rows_(0), cols_(0) {}
 
     Tensor(size_t rows, size_t cols, Field initial = Field(0)) : rows_(rows), cols_(cols) {
-        data_.assign(rows_, std::vector<Field>(cols_, initial));
+        data_.assign(rows_ * cols_, initial);
     }
 
     Tensor(const std::vector<std::vector<Field>>& data) {
@@ -120,21 +155,26 @@ public:
         } else {
             rows_ = data.size();
             cols_ = data[0].size();
+            data_.reserve(rows_ * cols_);
             for (const auto& row : data) {
                 if (row.size() != cols_) {
                     throw std::invalid_argument("Inconsistent column counts in Tensor initialization.");
                 }
+                for (const auto& val : row) {
+                    data_.push_back(val);
+                }
             }
-            data_ = data;
         }
     }
 
     Field& operator()(size_t r, size_t c) {
-        return data_.at(r).at(c);
+        if (r >= rows_ || c >= cols_) throw std::out_of_range("Tensor element access out of bounds.");
+        return data_[r * cols_ + c];
     }
 
     const Field& operator()(size_t r, size_t c) const {
-        return data_.at(r).at(c);
+        if (r >= rows_ || c >= cols_) throw std::out_of_range("Tensor element access out of bounds.");
+        return data_[r * cols_ + c];
     }
 
     size_t rows() const { return rows_; }
@@ -148,9 +188,8 @@ public:
     Tensor operator+(const Tensor& other) const {
         if (!has_same_dimensions(other)) throw std::invalid_argument("Dimension mismatch for addition.");
         Tensor result(rows_, cols_);
-        for (size_t i = 0; i < rows_; ++i)
-            for (size_t j = 0; j < cols_; ++j)
-                result.data_[i][j] = data_[i][j] + other.data_[i][j];
+        for (size_t i = 0; i < data_.size(); ++i)
+            result.data_[i] = data_[i] + other.data_[i];
         return result;
     }
 
@@ -158,9 +197,8 @@ public:
     Tensor operator-(const Tensor& other) const {
         if (!has_same_dimensions(other)) throw std::invalid_argument("Dimension mismatch for subtraction.");
         Tensor result(rows_, cols_);
-        for (size_t i = 0; i < rows_; ++i)
-            for (size_t j = 0; j < cols_; ++j)
-                result.data_[i][j] = data_[i][j] - other.data_[i][j];
+        for (size_t i = 0; i < data_.size(); ++i)
+            result.data_[i] = data_[i] - other.data_[i];
         return result;
     }
 
@@ -168,13 +206,25 @@ public:
     Tensor multiply_elementwise(const Tensor& other) const {
         if (!has_same_dimensions(other)) throw std::invalid_argument("Dimension mismatch for element-wise multiplication.");
         Tensor result(rows_, cols_);
-        for (size_t i = 0; i < rows_; ++i)
-            for (size_t j = 0; j < cols_; ++j)
-                result.data_[i][j] = data_[i][j] * other.data_[i][j];
+        for (size_t i = 0; i < data_.size(); ++i)
+            result.data_[i] = data_[i] * other.data_[i];
         return result;
     }
 
-    // Matrix multiplication
+    // Scalar operations
+    Tensor operator*(const Field& scalar) const {
+        Tensor result(rows_, cols_);
+        for (size_t i = 0; i < data_.size(); ++i) result.data_[i] = data_[i] * scalar;
+        return result;
+    }
+
+    Tensor operator/(const Field& scalar) const {
+        Tensor result(rows_, cols_);
+        for (size_t i = 0; i < data_.size(); ++i) result.data_[i] = data_[i] / scalar;
+        return result;
+    }
+
+    // Matrix multiplication (Naive)
     Tensor matmul(const Tensor& other) const {
         if (cols_ != other.rows_) throw std::invalid_argument("Dimension mismatch for matrix multiplication.");
         Tensor result(rows_, other.cols_);
@@ -182,29 +232,43 @@ public:
             for (size_t j = 0; j < other.cols_; ++j) {
                 Field sum = Field(0);
                 for (size_t k = 0; k < cols_; ++k) {
-                    sum += data_[i][k] * other.data_[k][j];
+                    sum += (*this)(i, k) * other(k, j);
                 }
-                result.data_[i][j] = sum;
+                result(i, j) = sum;
             }
         }
         return result;
     }
+
+    // Matrix multiplication with Kahan compensation
+    Tensor compensated_matmul(const Tensor& other) const;
 
     // Overload * for element-wise multiplication by default to match Kahan pattern
     Tensor operator*(const Tensor& other) const {
         return multiply_elementwise(other);
     }
 
-    Tensor& operator+=(const Tensor& other) { *this = *this + other; return *this; }
-    Tensor& operator-=(const Tensor& other) { *this = *this - other; return *this; }
-    Tensor& operator*=(const Tensor& other) { *this = multiply_elementwise(other); return *this; }
+    Tensor& operator+=(const Tensor& other) {
+        if (!has_same_dimensions(other)) throw std::invalid_argument("Dimension mismatch for +=.");
+        for (size_t i = 0; i < data_.size(); ++i) data_[i] += other.data_[i];
+        return *this;
+    }
+
+    Tensor& operator-=(const Tensor& other) {
+        if (!has_same_dimensions(other)) throw std::invalid_argument("Dimension mismatch for -=.");
+        for (size_t i = 0; i < data_.size(); ++i) data_[i] -= other.data_[i];
+        return *this;
+    }
+
+    Tensor& operator*=(const Tensor& other) {
+        if (!has_same_dimensions(other)) throw std::invalid_argument("Dimension mismatch for *=.");
+        for (size_t i = 0; i < data_.size(); ++i) data_[i] *= other.data_[i];
+        return *this;
+    }
 
     bool operator==(const Tensor& other) const {
         if (!has_same_dimensions(other)) return false;
-        for (size_t i = 0; i < rows_; ++i)
-            for (size_t j = 0; j < cols_; ++j)
-                if (!(data_[i][j] == other.data_[i][j])) return false;
-        return true;
+        return data_ == other.data_;
     }
 
     bool operator!=(const Tensor& other) const { return !(*this == other); }
@@ -215,7 +279,7 @@ public:
             if (i > 0) os << " ";
             os << "[";
             for (size_t j = 0; j < t.cols_; ++j) {
-                os << t.data_[i][j];
+                os << t(i, j);
                 if (j < t.cols_ - 1) os << ", ";
             }
             os << "]";
@@ -361,6 +425,23 @@ public:
         return rational_map_.preserves_invariant(state_, x, epsilon);
     }
 };
+
+// Implementation of compensated_matmul
+template<typename Field>
+Tensor<Field> Tensor<Field>::compensated_matmul(const Tensor<Field>& other) const {
+    if (cols_ != other.rows_) throw std::invalid_argument("Dimension mismatch for matrix multiplication.");
+    Tensor<Field> result(rows_, other.cols_);
+    for (size_t i = 0; i < rows_; ++i) {
+        for (size_t j = 0; j < other.cols_; ++j) {
+            AlgebraicKahanSummator<Field> kahan;
+            for (size_t k = 0; k < cols_; ++k) {
+                kahan.add((*this)(i, k) * other(k, j));
+            }
+            result(i, j) = kahan.algebraic_sum();
+        }
+    }
+    return result;
+}
 
 /**
  * @brief Cohomology-inspired error analysis.
