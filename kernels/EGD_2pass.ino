@@ -50,10 +50,10 @@ void loop() {
 
     // Only analyze data if the buffer is full
     if (bufferIndex == 0) {
-      // Median filter to remove spikes
+      // Robust outlier detection using Hampel Filter
       float filteredBuffer[bufferSize];
       for (int i = 0; i < bufferSize; i++) {
-          filteredBuffer[i] = medianFilter(temperatureBuffer, bufferSize, i, 3);
+          filteredBuffer[i] = hampelFilter(temperatureBuffer, bufferSize, i, 5);
       }
 
       // Convert time to seconds for analysis
@@ -62,73 +62,51 @@ void loop() {
         timeSeconds[i] = (timeBuffer[i] - timeBuffer[0]) / 1000.0;
       }
 
-      // Perform linear fit
-      float m, b;
-      linearFit(timeSeconds, filteredBuffer, bufferSize, m, b);
+      // First pass: Hierarchical fit to detect growth type
+      ResidualFitter fitter;
+      fitter.fit(timeSeconds, filteredBuffer, bufferSize);
 
-      // Perform exponential fit using Fredholm kernel approach
-      float a, expB;
-      exponentialFitFredholm(timeSeconds, filteredBuffer, bufferSize, a, expB);
+      float confidence = fitter.growthConfidence();
 
-      // Calculate goodness of fit for both models
-      float r2Linear = goodnessOfFit(timeSeconds, filteredBuffer, bufferSize, linearModel, m, b);
-      float r2Exponential = goodnessOfFit(timeSeconds, filteredBuffer, bufferSize, exponentialModel, a, expB);
-
-      // Determine the best model based on the first pass
-      if (r2Exponential > r2Linear && r2Exponential > 0.9) { // Threshold for good exponential fit
+      if (confidence > 0.2 && fitter.rmse_residual < 2.0) {
         Serial.println("Exponential growth detected on first pass!");
 
-        // Second pass: Fit polynomial and calculate derivative
-        const int degree = 3; // Degree of the polynomial
+        // Second pass: Fit polynomial for detailed rate analysis
+        const int degree = 3;
         float coeffs[degree + 1];
         Normalizer polyNorm;
         polyNorm.compute(timeSeconds, filteredBuffer, bufferSize);
-        polynomialFitRidge(timeSeconds, filteredBuffer, bufferSize, degree, coeffs);
+        if (polynomialFitRidge(timeSeconds, filteredBuffer, bufferSize, degree, coeffs)) {
+            float latestTime = timeSeconds[bufferSize - 1];
+            float rateOfGrowth = polynomialDerivativeNormalized(coeffs, degree, latestTime, polyNorm);
 
-        // Calculate the first derivative at the latest time point
-        float latestTime = timeSeconds[bufferSize - 1];
-        float rateOfGrowth = polynomialDerivativeNormalized(coeffs, degree, latestTime, polyNorm);
+            Serial.print("Rate of exponential growth: ");
+            Serial.println(rateOfGrowth);
+            Serial.print("Growth Confidence: ");
+            Serial.println(confidence);
 
-        Serial.print("Rate of exponential growth: ");
-        Serial.println(rateOfGrowth);
+            // Determine magnitude
+            float magnitude = exponentialModel(latestTime, fitter.a, fitter.exp_b);
+            Serial.print("Magnitude of growth: ");
+            Serial.println(magnitude);
 
-        // Output polynomial coefficients for debugging
-        Serial.println("Polynomial coefficients (normalized):");
-        for (int i = 0; i <= degree; i++) {
-          Serial.print("a");
-          Serial.print(i);
-          Serial.print(" = ");
-          Serial.println(coeffs[i]);
+            if (rateOfGrowth > 0.5 && magnitude > 25.0) {
+              Serial.println("Confirmed exponential growth detected with significant rate and magnitude.");
+            } else {
+              Serial.println("Exponential growth detected, but not significant.");
+            }
         }
-
-        // Determine the magnitude of exponential growth
-        float magnitude = exponentialModel(latestTime, a, expB);
-        Serial.print("Magnitude of exponential growth: ");
-        Serial.println(magnitude);
-
-        // Additional logic to handle detection based on magnitude and rate
-        if (rateOfGrowth > 0.5 && magnitude > 25.0) {
-          Serial.println("Confirmed exponential growth detected with significant rate and magnitude.");
-        } else {
-          Serial.println("Exponential growth detected, but not significant.");
-        }
-
-      } else if (r2Linear > 0.9) { // Threshold for good linear fit
+      } else if (fitter.rmse_linear < 2.0) {
         Serial.println("Linear growth detected.");
       } else {
         Serial.println("No significant growth detected or short-term noise.");
       }
 
       // Debug output
-      Serial.print("R^2 Linear: ");
-      Serial.println(r2Linear);
-      Serial.print("R^2 Exponential: ");
-      Serial.println(r2Exponential);
-      Serial.print("Temperature Readings: ");
-      for (int i = 0; i < bufferSize; i++) {
-        Serial.print(filteredBuffer[i]);
-        Serial.print(" ");
-      }
+      Serial.print("RMSE Linear: ");
+      Serial.println(fitter.rmse_linear);
+      Serial.print("RMSE Exponential: ");
+      Serial.println(fitter.rmse_residual);
       Serial.println();
     }
   }

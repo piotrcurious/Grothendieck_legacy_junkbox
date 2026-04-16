@@ -140,6 +140,15 @@ def main():
 
     print("\n" + "="*40 + "\n")
 
+    # Test 1f - High Noise
+    output_egd_high_noise = compile_and_run("test_egd_high_noise.cpp", "test_egd_high_noise")
+    if output_egd_high_noise:
+        egd_high_noise_ok = True # Just run it
+    else:
+        egd_high_noise_ok = False
+
+    print("\n" + "="*40 + "\n")
+
     # Test 2
     output_egd_2pass = compile_and_run("test_egd_2pass.cpp", "test_egd_2pass")
     if output_egd_2pass:
@@ -147,7 +156,7 @@ def main():
     else:
         egd_2pass_ok = False
 
-    if egd_ok and egd_spikes_ok and egd_step_ok and egd_compound_ok and egd_saturation_ok and egd_2pass_ok:
+    if egd_ok and egd_spikes_ok and egd_step_ok and egd_compound_ok and egd_saturation_ok and egd_high_noise_ok and egd_2pass_ok:
         print("\nALL TESTS PASSED!")
         exit(0)
     else:

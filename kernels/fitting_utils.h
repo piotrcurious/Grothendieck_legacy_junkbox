@@ -261,6 +261,52 @@ inline float medianFilter(float* data, int n, int index, int windowSize) {
     return window[count / 2];
 }
 
+// Hampel Filter for robust outlier detection using Median Absolute Deviation (MAD)
+// Returns filtered value at index.
+inline float hampelFilter(float* data, int n, int index, int windowSize, float n_sigma = 3.0f) {
+    float window[11];
+    if (windowSize > 11) windowSize = 11;
+    int half = windowSize / 2;
+    int count = 0;
+    for (int i = index - half; i <= index + half; i++) {
+        if (i >= 0 && i < n) {
+            window[count++] = data[i];
+        }
+    }
+
+    // Calculate Median
+    float sorted[11];
+    for(int i=0; i<count; i++) sorted[i] = window[i];
+    for (int i = 0; i < count - 1; i++) {
+        for (int j = i + 1; j < count; j++) {
+            if (sorted[i] > sorted[j]) {
+                float temp = sorted[i]; sorted[i] = sorted[j]; sorted[j] = temp;
+            }
+        }
+    }
+    float median = sorted[count / 2];
+
+    // Calculate MAD
+    float abs_dev[11];
+    for(int i=0; i<count; i++) abs_dev[i] = fabs(window[i] - median);
+    for (int i = 0; i < count - 1; i++) {
+        for (int j = i + 1; j < count; j++) {
+            if (abs_dev[i] > abs_dev[j]) {
+                float temp = abs_dev[i]; abs_dev[i] = abs_dev[j]; abs_dev[j] = temp;
+            }
+        }
+    }
+    float mad = abs_dev[count / 2];
+
+    // Standard deviation estimate from MAD: sigma approx 1.4826 * MAD
+    float sigma = 1.4826f * mad;
+
+    if (fabs(data[index] - median) > n_sigma * sigma) {
+        return median;
+    }
+    return data[index];
+}
+
 // Simple Alpha-Beta filter or EMA for smoothing
 // alpha: smoothing factor (0 to 1), higher means less smoothing
 inline float exponentialMovingAverage(float current, float previous, float alpha) {
@@ -326,6 +372,16 @@ struct ResidualFitter {
     // Combined model evaluation
     float evaluate(float x, float offset = 0.0f) {
         return linearModel(x, m, b) + exponentialModel(x, a, exp_b) - offset;
+    }
+
+    // Returns a score from 0.0 to 1.0 indicating how much better the exponential
+    // model explains the data than the linear model.
+    float growthConfidence() {
+        if (rmse_linear < 1e-6) return 0.0f;
+        float score = (rmse_linear - rmse_residual) / rmse_linear;
+        if (score < 0) return 0.0f;
+        if (score > 1.0f) return 1.0f;
+        return score;
     }
     // Wait, Fredholm approach for exponentialFitFredholm is a standalone fit.
     // Let's refine fit() to perform a true residual fit (y - linear_model)
