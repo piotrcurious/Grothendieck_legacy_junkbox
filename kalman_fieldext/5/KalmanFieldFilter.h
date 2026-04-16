@@ -15,27 +15,54 @@ public:
     }
 
     /**
-     * @brief Update the filter with a new measurement.
-     * @param zRaw The raw measurement value.
-     * @param qOverride Optional process noise override.
-     * @param rOverride Optional measurement noise override.
+     * @brief Update the filter with a new measurement (Standard Linear).
      */
     Field update_field(double zRaw, const Field* qOverride = nullptr, const Field* rOverride = nullptr) {
         Field currentQ = qOverride ? *qOverride : q;
         Field currentR = rOverride ? *rOverride : r;
         Field z(zRaw, 0.0, 0.0, x.sigma2);
 
-        // Predict
         p = p + currentQ;
-
-        // Update
         Field k = p / (p + currentR);
         x = x + k * (z - x);
 
-        // Joseph form for better stability: P = (I-k)P(I-k)^T + kRk^T
         Field one(1.0, 0.0, 0.0, x.sigma2);
         Field imk = one - k;
         p = imk * imk * p + k * k * currentR;
+
+        return x;
+    }
+
+    /**
+     * @brief Extended Kalman Filter update using Dual Numbers for automatic Jacobian.
+     * @tparam MeasurementFunc A function or functor `Field h(Field x)`
+     */
+    template<typename MeasurementFunc>
+    Field update_ekf(double zRaw, MeasurementFunc h, const Field* qOverride = nullptr, const Field* rOverride = nullptr) {
+        Field currentQ = qOverride ? *qOverride : q;
+        Field currentR = rOverride ? *rOverride : r;
+
+        // 1. Predict
+        p = p + currentQ;
+
+        // 2. Automatic Jacobian via Dual component
+        Field x_for_h = x;
+        x_for_h.delta = 1.0; // Seed for derivative
+        Field h_x = h(x_for_h);
+
+        double H_val = h_x.delta; // dh/dx
+
+        // 3. Update using Field operators for consistency and numerical stability
+        Field H_field(H_val, 0, 0, x.sigma2);
+        Field K_field = (p * H_field) / (H_field * p * H_field + currentR);
+
+        Field z_field(zRaw, 0, 0, x.sigma2);
+        Field innovation = z_field - Field(h_x.nominal, h_x.noise, 0, x.sigma2);
+        x = x + K_field * innovation;
+
+        Field one(1.0, 0.0, 0.0, x.sigma2);
+        Field imkH = one - K_field * H_field;
+        p = imkH * imkH * p + K_field * K_field * currentR; // Joseph form
 
         return x;
     }
