@@ -246,6 +246,34 @@ public:
         return sin(x) / cos(x);
     }
 
+    static GaussianDualField asin(const GaussianDualField &x) {
+        T a = x.nominal;
+        T der = 1.0 / std::sqrt(std::max(T(1e-20), 1.0 - a * a));
+        return GaussianDualField(std::asin(a), x.noise * der, x.delta * der, x.sigma2);
+    }
+
+    static GaussianDualField acos(const GaussianDualField &x) {
+        T a = x.nominal;
+        T der = -1.0 / std::sqrt(std::max(T(1e-20), 1.0 - a * a));
+        return GaussianDualField(std::acos(a), x.noise * der, x.delta * der, x.sigma2);
+    }
+
+    static GaussianDualField atan(const GaussianDualField &x) {
+        T a = x.nominal;
+        T der = 1.0 / (1.0 + a * a);
+        return GaussianDualField(std::atan(a), x.noise * der, x.delta * der, x.sigma2);
+    }
+
+    static GaussianDualField atan2(const GaussianDualField &y, const GaussianDualField &x) {
+        T a = x.nominal; T b = y.nominal;
+        T d = a * a + b * b;
+        if (d < 1e-20) return GaussianDualField(0, 0, 0, x.sigma2);
+        T res_nom = std::atan2(b, a);
+        T res_noise = (y.noise * a - x.noise * b) / d;
+        T res_delta = (y.delta * a - x.delta * b) / d;
+        return GaussianDualField(res_nom, res_noise, res_delta, x.sigma2);
+    }
+
     static GaussianDualField pow(const GaussianDualField &x, double y) {
         return exp(log(x) * y);
     }
@@ -256,6 +284,14 @@ public:
 
     static T norm(const GaussianDualField &x) {
         return std::sqrt(std::abs(x.nominal * x.nominal - x.sigma2 * x.noise * x.noise));
+    }
+
+    bool is_finite() const {
+        return std::isfinite(nominal) && std::isfinite(noise) && std::isfinite(delta);
+    }
+
+    void clear_compensation() {
+        nominal_c = 0; noise_c = 0; delta_c = 0;
     }
 
     operator T() const { return nominal; }
