@@ -81,17 +81,19 @@ void loop() {
         // Second pass: Fit polynomial and calculate derivative
         const int degree = 3; // Degree of the polynomial
         float coeffs[degree + 1];
-        polynomialFit(timeSeconds, filteredBuffer, bufferSize, degree, coeffs);
+        Normalizer polyNorm;
+        polyNorm.compute(timeSeconds, filteredBuffer, bufferSize);
+        polynomialFitRidge(timeSeconds, filteredBuffer, bufferSize, degree, coeffs);
 
         // Calculate the first derivative at the latest time point
         float latestTime = timeSeconds[bufferSize - 1];
-        float rateOfGrowth = polynomialDerivative(coeffs, degree, latestTime);
+        float rateOfGrowth = polynomialDerivativeNormalized(coeffs, degree, latestTime, polyNorm);
 
         Serial.print("Rate of exponential growth: ");
         Serial.println(rateOfGrowth);
 
         // Output polynomial coefficients for debugging
-        Serial.println("Polynomial coefficients:");
+        Serial.println("Polynomial coefficients (normalized):");
         for (int i = 0; i <= degree; i++) {
           Serial.print("a");
           Serial.print(i);

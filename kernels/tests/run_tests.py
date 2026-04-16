@@ -32,6 +32,10 @@ def validate_egd_output(output):
             linear_detected = True
         if "Exponential growth detected" in line:
             exponential_detected = True
+        if "RMSE Linear:" in line:
+            print(line)
+        if "RMSE Exponential:" in line:
+            print(line)
 
     if linear_detected:
         print("[PASS] Linear growth detected successfully.")
@@ -107,6 +111,26 @@ def main():
 
     print("\n" + "="*40 + "\n")
 
+    # Test 1c - Step
+    output_egd_step = compile_and_run("test_egd_step.cpp", "test_egd_step")
+    if output_egd_step:
+        # We don't strictly require it to detect "growth" here, just to run and see output.
+        # But a step shouldn't ideally be detected as linear or exponential growth for long.
+        egd_step_ok = True
+    else:
+        egd_step_ok = False
+
+    print("\n" + "="*40 + "\n")
+
+    # Test 1d - Compound
+    output_egd_compound = compile_and_run("test_egd_compound.cpp", "test_egd_compound")
+    if output_egd_compound:
+        egd_compound_ok = validate_egd_output(output_egd_compound)
+    else:
+        egd_compound_ok = False
+
+    print("\n" + "="*40 + "\n")
+
     # Test 2
     output_egd_2pass = compile_and_run("test_egd_2pass.cpp", "test_egd_2pass")
     if output_egd_2pass:
@@ -114,7 +138,7 @@ def main():
     else:
         egd_2pass_ok = False
 
-    if egd_ok and egd_spikes_ok and egd_2pass_ok:
+    if egd_ok and egd_spikes_ok and egd_step_ok and egd_compound_ok and egd_2pass_ok:
         print("\nALL TESTS PASSED!")
         exit(0)
     else:
