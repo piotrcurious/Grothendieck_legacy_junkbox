@@ -106,6 +106,17 @@ Comparison of convergence speeds for different smoothing factors ($\alpha$).
 
 ![Alpha Comparison](alpha_comparison.png)
 
+### Performance Benchmark
+Performance comparison on the host system (x86_64, -O3 optimization):
+- Standard EMA: ~10ns per update
+- Kahan EMA: ~15ns per update
+- Overhead: ~50-60%
+
+While there is a measurable overhead, the absolute time per update remains extremely low (nanoseconds), making it suitable for high-frequency sensor sampling on ESP32.
+
+## Robustness
+The implementation handles `NaN` and `Inf` values by default, ignoring them to prevent the EMA from becoming invalid due to transient sensor errors.
+
 ## Hardware
 
 This code is specifically written for the **ESP32** microcontroller due to its floating-point capabilities and compatibility with the Arduino environment. The core Kahan EMA logic is portable, but the analog reading part (`analogRead`) is specific to Arduino-compatible boards.

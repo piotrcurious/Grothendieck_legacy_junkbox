@@ -120,6 +120,15 @@ def run_sine_analysis():
     plt.savefig('kahan_EMA/sine_smoothing.png')
     print("Saved sine_smoothing.png")
 
+def run_benchmarks():
+    print("Extracting benchmark results from C++ test output...")
+    result = subprocess.run(["./kahan_EMA/test_main"], capture_output=True, text=True)
+    lines = result.stdout.splitlines()
+
+    for line in lines:
+        if line.startswith("PERF:"):
+            print(line)
+
 def run_alpha_comparison():
     print("Extracting alpha comparison data from C++ test output...")
     result = subprocess.run(["./kahan_EMA/test_main"], capture_output=True, text=True)
@@ -164,6 +173,7 @@ def run_alpha_comparison():
 
 if __name__ == "__main__":
     compile_and_run()
+    run_benchmarks()
     run_precision_comparison()
     run_sine_analysis()
     run_alpha_comparison()

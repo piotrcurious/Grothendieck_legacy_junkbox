@@ -208,6 +208,62 @@ void test_data_generation() {
     Serial.println("DATA_END");
 }
 
+void test_robustness() {
+    Serial.println("Testing robustness (NaN/Inf)...");
+    KahanEMA ema(0.1f);
+    ema.update(10.0f);
+    float current = ema.getValue();
+
+    // NaN should be ignored by default
+    float result = ema.update(NAN);
+    assert(result == current);
+    assert(ema.getValue() == current);
+
+    // Inf should be ignored by default
+    result = ema.update(INFINITY);
+    assert(result == current);
+    assert(ema.getValue() == current);
+
+    // If not ignored, it should propagate
+    result = ema.update(NAN, false);
+    assert(std::isnan(result));
+
+    Serial.println("Robustness tests passed.");
+}
+
+void test_performance() {
+    Serial.println("Running performance benchmark...");
+    const int iterations = 10000000;
+    float alpha = 0.05f;
+    KahanEMA kahanEma(alpha);
+    StandardEMA<float> standardEma(alpha);
+
+    // Volatile to prevent compiler optimization from skipping the loop
+    volatile float result = 0;
+
+    unsigned long start = millis();
+    for (int i = 0; i < iterations; ++i) {
+        result = standardEma.update((float)i);
+    }
+    unsigned long end = millis();
+    unsigned long standardTime = end - start;
+
+    start = millis();
+    for (int i = 0; i < iterations; ++i) {
+        result = kahanEma.update((float)i);
+    }
+    end = millis();
+    unsigned long kahanTime = end - start;
+
+    Serial.printf("PERF: Standard EMA %d iterations: %lu ms\n", iterations, standardTime);
+    Serial.printf("PERF: Kahan EMA %d iterations: %lu ms\n", iterations, kahanTime);
+    if (standardTime > 0) {
+        Serial.printf("PERF: Overhead: %.2f%%\n", (float)(kahanTime - standardTime) / standardTime * 100.0f);
+    } else {
+        Serial.println("PERF: Overhead: N/A (Standard time too low)");
+    }
+}
+
 int main() {
     test_basic_convergence();
     test_numerical_stability();
@@ -216,6 +272,8 @@ int main() {
     test_alpha_change();
     test_noisy_signal();
     test_alpha_comparison();
+    test_robustness();
+    test_performance();
     test_data_generation();
     Serial.println("All tests completed.");
     return 0;
