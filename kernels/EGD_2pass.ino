@@ -8,12 +8,23 @@ unsigned long timeBuffer[bufferSize]; // Buffer to store corresponding timestamp
 int bufferIndex = 0; // Index to keep track of the buffer position
 const unsigned long sampleInterval = 1000; // Sampling interval in milliseconds (1 second)
 
+float smoothedTemp = 0;
+bool firstReading = true;
+
 // Function to read temperature from the sensor
 float readTemperature() {
   int rawValue = analogRead(sensorPin);
   float voltage = rawValue * (5.0 / 1023.0);
   float temperatureC = (voltage - 0.5) * 100.0; // Convert voltage to temperature (assuming TMP36)
-  return temperatureC;
+
+  if (firstReading) {
+      smoothedTemp = temperatureC;
+      firstReading = false;
+  } else {
+      smoothedTemp = exponentialMovingAverage(temperatureC, smoothedTemp, 0.3);
+  }
+
+  return smoothedTemp;
 }
 
 void setup() {
@@ -39,6 +50,12 @@ void loop() {
 
     // Only analyze data if the buffer is full
     if (bufferIndex == 0) {
+      // Median filter to remove spikes
+      float filteredBuffer[bufferSize];
+      for (int i = 0; i < bufferSize; i++) {
+          filteredBuffer[i] = medianFilter(temperatureBuffer, bufferSize, i, 3);
+      }
+
       // Convert time to seconds for analysis
       float timeSeconds[bufferSize];
       for (int i = 0; i < bufferSize; i++) {
@@ -47,15 +64,15 @@ void loop() {
 
       // Perform linear fit
       float m, b;
-      linearFit(timeSeconds, temperatureBuffer, bufferSize, m, b);
+      linearFit(timeSeconds, filteredBuffer, bufferSize, m, b);
 
       // Perform exponential fit using Fredholm kernel approach
       float a, expB;
-      exponentialFitFredholm(timeSeconds, temperatureBuffer, bufferSize, a, expB);
+      exponentialFitFredholm(timeSeconds, filteredBuffer, bufferSize, a, expB);
 
       // Calculate goodness of fit for both models
-      float r2Linear = goodnessOfFit(timeSeconds, temperatureBuffer, bufferSize, linearModel, m, b);
-      float r2Exponential = goodnessOfFit(timeSeconds, temperatureBuffer, bufferSize, exponentialModel, a, expB);
+      float r2Linear = goodnessOfFit(timeSeconds, filteredBuffer, bufferSize, linearModel, m, b);
+      float r2Exponential = goodnessOfFit(timeSeconds, filteredBuffer, bufferSize, exponentialModel, a, expB);
 
       // Determine the best model based on the first pass
       if (r2Exponential > r2Linear && r2Exponential > 0.9) { // Threshold for good exponential fit
@@ -64,7 +81,7 @@ void loop() {
         // Second pass: Fit polynomial and calculate derivative
         const int degree = 3; // Degree of the polynomial
         float coeffs[degree + 1];
-        polynomialFit(timeSeconds, temperatureBuffer, bufferSize, degree, coeffs);
+        polynomialFit(timeSeconds, filteredBuffer, bufferSize, degree, coeffs);
 
         // Calculate the first derivative at the latest time point
         float latestTime = timeSeconds[bufferSize - 1];
@@ -107,7 +124,7 @@ void loop() {
       Serial.println(r2Exponential);
       Serial.print("Temperature Readings: ");
       for (int i = 0; i < bufferSize; i++) {
-        Serial.print(temperatureBuffer[i]);
+        Serial.print(filteredBuffer[i]);
         Serial.print(" ");
       }
       Serial.println();

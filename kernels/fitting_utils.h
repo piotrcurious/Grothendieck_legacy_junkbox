@@ -2,6 +2,7 @@
 #define FITTING_UTILS_H
 
 #include <math.h>
+#include <algorithm>
 
 // Common buffer size
 const int FITTING_BUFFER_SIZE = 30;
@@ -165,6 +166,37 @@ inline float polynomialDerivative(float* coeffs, int degree, float x) {
         derivative += i * coeffs[i] * pow(x, i - 1);
     }
     return derivative;
+}
+
+// Simple Median Filter for a small window to reject spikes
+// windowSize should be odd
+inline float medianFilter(float* data, int n, int index, int windowSize) {
+    float window[11]; // Max window size 11
+    if (windowSize > 11) windowSize = 11;
+    int half = windowSize / 2;
+    int count = 0;
+    for (int i = index - half; i <= index + half; i++) {
+        if (i >= 0 && i < n) {
+            window[count++] = data[i];
+        }
+    }
+    // Simple selection sort for median on small array
+    for (int i = 0; i < count - 1; i++) {
+        for (int j = i + 1; j < count; j++) {
+            if (window[i] > window[j]) {
+                float temp = window[i];
+                window[i] = window[j];
+                window[j] = temp;
+            }
+        }
+    }
+    return window[count / 2];
+}
+
+// Simple Alpha-Beta filter or EMA for smoothing
+// alpha: smoothing factor (0 to 1), higher means less smoothing
+inline float exponentialMovingAverage(float current, float previous, float alpha) {
+    return alpha * current + (1.0f - alpha) * previous;
 }
 
 #endif

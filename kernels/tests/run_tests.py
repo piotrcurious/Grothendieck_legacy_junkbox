@@ -79,12 +79,31 @@ def validate_egd_2pass_output(output):
     return linear_detected and exponential_detected and rate_reported
 
 def main():
+    # Unit Test
+    print("Running Unit Tests for fitting_utils.h...")
+    compile_cmd = ["g++", "-I", "..", "unit_test_fitting.cpp", "-o", "unit_test_fitting"]
+    subprocess.run(compile_cmd, cwd="kernels/tests", check=True)
+    unit_result = subprocess.run(["./unit_test_fitting"], cwd="kernels/tests", capture_output=True, text=True)
+    print(unit_result.stdout)
+    if unit_result.returncode != 0:
+        print("Unit Tests FAILED!")
+        exit(1)
+
     # Test 1
     output_egd = compile_and_run("test_egd.cpp", "test_egd")
     if output_egd:
         egd_ok = validate_egd_output(output_egd)
     else:
         egd_ok = False
+
+    print("\n" + "="*40 + "\n")
+
+    # Test 1b - Spikes
+    output_egd_spikes = compile_and_run("test_egd_spikes.cpp", "test_egd_spikes")
+    if output_egd_spikes:
+        egd_spikes_ok = validate_egd_output(output_egd_spikes)
+    else:
+        egd_spikes_ok = False
 
     print("\n" + "="*40 + "\n")
 
@@ -95,7 +114,7 @@ def main():
     else:
         egd_2pass_ok = False
 
-    if egd_ok and egd_2pass_ok:
+    if egd_ok and egd_spikes_ok and egd_2pass_ok:
         print("\nALL TESTS PASSED!")
         exit(0)
     else:
