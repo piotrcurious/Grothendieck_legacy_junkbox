@@ -62,13 +62,14 @@ private:
     uint8_t maxDegree;
 
     // Normalize time values to prevent numerical overflow
-    Value normalizeTime(Timestamp t, Timestamp tMin, Timestamp tRange) {
+    Value normalizeTime(Timestamp t, Timestamp tMin, Timestamp tRange) const {
         return static_cast<Value>(t - tMin) / static_cast<Value>(tRange);
     }
 
 public:
     PolynomialFitter() : maxDegree(MAX_POLYNOMIAL_DEGREE) {
         coefficients = new Value[maxDegree + 1];
+        for (uint8_t i = 0; i <= maxDegree; i++) coefficients[i] = 0.0f;
     }
 
     ~PolynomialFitter() {
@@ -82,8 +83,8 @@ public:
         Timestamp tMin = data[0].timestamp;
         Timestamp tMax = data[0].timestamp;
         for (size_t i = 1; i < data.getSize(); i++) {
-            tMin = min(tMin, data[i].timestamp);
-            tMax = max(tMax, data[i].timestamp);
+            if (data[i].timestamp < tMin) tMin = data[i].timestamp;
+            if (data[i].timestamp > tMax) tMax = data[i].timestamp;
         }
         Timestamp tRange = tMax - tMin + 1;  // Add 1 to prevent division by zero
 
@@ -129,12 +130,12 @@ public:
         return success;
     }
 
-    Value evaluate(Timestamp t, Timestamp tMin, Timestamp tRange) const {
+    Value evaluate(Timestamp t, Timestamp tMin, Timestamp tRange, uint8_t degree) const {
         Value x = normalizeTime(t, tMin, tRange);
         Value result = coefficients[0];
         Value xi = 1.0f;
         
-        for (uint8_t i = 1; i <= maxDegree; i++) {
+        for (uint8_t i = 1; i <= degree; i++) {
             xi *= x;
             result += coefficients[i] * xi;
         }
