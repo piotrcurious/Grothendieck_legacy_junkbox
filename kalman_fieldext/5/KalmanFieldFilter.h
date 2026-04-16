@@ -9,14 +9,22 @@ public:
       : q(q), r(r), p(p0), x(x0) {}
 
     double update(double zRaw) {
-        Field z(zRaw, 0.0, 0.0);
+        return update_field(zRaw).nominal;
+    }
+
+    Field update_field(double zRaw) {
+        Field z(zRaw, 0.0, 0.0, x.sigma2);
 
         p = p + q;
         Field k = p / (p + r);
         x = x + k * (z - x);
-        p = (Field(1.0,0.0,0.0) - k) * p;
+        // Joseph form for better stability: P = (I-k)P(I-k)^T + kRk^T
+        // For 1D scalar, P = (1-k)^2 * P + k^2 * R
+        Field one(1.0, 0.0, 0.0, x.sigma2);
+        Field imk = one - k;
+        p = imk * imk * p + k * k * r;
 
-        return x.nominal;
+        return x;
     }
 
 private:
