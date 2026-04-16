@@ -1,7 +1,8 @@
 #include <math.h>
+#include "fitting_utils.h"
 
 const int sensorPin = A0; // Thermistor connected to analog pin A0
-const int bufferSize = 30; // Number of readings in the buffer
+const int bufferSize = FITTING_BUFFER_SIZE; // Number of readings in the buffer
 float temperatureBuffer[bufferSize]; // Buffer to store temperature readings
 unsigned long timeBuffer[bufferSize]; // Buffer to store corresponding timestamps
 int bufferIndex = 0; // Index to keep track of the buffer position
@@ -13,150 +14,6 @@ float readTemperature() {
   float voltage = rawValue * (5.0 / 1023.0);
   float temperatureC = (voltage - 0.5) * 100.0; // Convert voltage to temperature (assuming TMP36)
   return temperatureC;
-}
-
-// Function to calculate linear fit (y = mx + b)
-void linearFit(float* x, float* y, int n, float& m, float& b) {
-  float sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
-  for (int i = 0; i < n; i++) {
-    sumX += x[i];
-    sumY += y[i];
-    sumXY += x[i] * y[i];
-    sumX2 += x[i] * x[i];
-  }
-  m = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
-  b = (sumY - m * sumX) / n;
-}
-
-// Function to calculate exponential fit (y = a * e^(bx))
-// Uses the Fredholm/Volterra integral equation approach: y(t) = y(0) + b * integral(y(s)ds) from 0 to t
-void exponentialFitFredholm(float* x, float* y, int n, float& a, float& b) {
-  float integral[n];
-  integral[0] = 0;
-  for (int i = 1; i < n; i++) {
-    float dt = x[i] - x[i-1];
-    integral[i] = integral[i-1] + (y[i] + y[i-1]) * 0.5 * dt;
-  }
-
-  // Linear fit: y = b * integral + y0
-  float sumI = 0, sumY = 0, sumIY = 0, sumI2 = 0;
-  for (int i = 0; i < n; i++) {
-    sumI += integral[i];
-    sumY += y[i];
-    sumIY += integral[i] * y[i];
-    sumI2 += integral[i] * integral[i];
-  }
-
-  float denominator = (n * sumI2 - sumI * sumI);
-  if (fabs(denominator) < 1e-6) {
-    b = 0;
-    a = sumY / n;
-  } else {
-    b = (n * sumIY - sumI * sumY) / denominator;
-    float y0 = (sumY - b * sumI) / n;
-    // For y = a * exp(bt), y(0) = a.
-    a = y0;
-  }
-}
-
-// Function to calculate polynomial coefficients (least squares method)
-void polynomialFit(float* x, float* y, int n, int degree, float* coeffs) {
-  float X[2 * degree + 1]; // Sum of powers of x
-  for (int i = 0; i < 2 * degree + 1; i++) {
-    X[i] = 0;
-    for (int j = 0; j < n; j++) {
-      X[i] += pow(x[j], i);
-    }
-  }
-
-  float B[degree + 1][degree + 2], a[degree + 1];
-  for (int i = 0; i <= degree; i++) {
-    for (int j = 0; j <= degree; j++) {
-      B[i][j] = X[i + j];
-    }
-  }
-
-  float Y[degree + 1]; // Array to store values of sigma(xi^k * yi)
-  for (int i = 0; i < degree + 1; i++) {
-    Y[i] = 0;
-    for (int j = 0; j < n; j++) {
-      Y[i] += pow(x[j], i) * y[j];
-    }
-  }
-
-  for (int i = 0; i <= degree; i++) {
-    B[i][degree + 1] = Y[i];
-  }
-
-  degree += 1;
-  for (int i = 0; i < degree; i++) {
-    for (int k = i + 1; k < degree; k++) {
-      if (B[i][i] < B[k][i]) {
-        for (int j = 0; j <= degree; j++) {
-          float temp = B[i][j];
-          B[i][j] = B[k][j];
-          B[k][j] = temp;
-        }
-      }
-    }
-  }
-
-  for (int i = 0; i < degree - 1; i++) {
-    for (int k = i + 1; k < degree; k++) {
-      float t = B[k][i] / B[i][i];
-      for (int j = 0; j <= degree; j++) {
-        B[k][j] -= t * B[i][j];
-      }
-    }
-  }
-
-  for (int i = degree - 1; i >= 0; i--) {
-    a[i] = B[i][degree];
-    for (int j = i + 1; j < degree; j++) {
-      a[i] -= B[i][j] * a[j];
-    }
-    a[i] /= B[i][i];
-  }
-
-  for (int i = 0; i < degree; i++) {
-    coeffs[i] = a[i];
-  }
-}
-
-// Function to calculate the first derivative of a polynomial at a given point
-float polynomialDerivative(float* coeffs, int degree, float x) {
-  float derivative = 0;
-  for (int i = 1; i <= degree; i++) {
-    derivative += i * coeffs[i] * pow(x, i - 1);
-  }
-  return derivative;
-}
-
-// Function to calculate the goodness of fit (R^2)
-float goodnessOfFit(float* x, float* y, int n, float(*model)(float, float, float), float param1, float param2) {
-  float ssTotal = 0, ssResidual = 0;
-  float meanY = 0;
-  for (int i = 0; i < n; i++) {
-    meanY += y[i];
-  }
-  meanY /= n;
-  for (int i = 0; i < n; i++) {
-    float yi = y[i];
-    float fi = model(x[i], param1, param2);
-    ssTotal += (yi - meanY) * (yi - meanY);
-    ssResidual += (yi - fi) * (yi - fi);
-  }
-  return 1 - (ssResidual / ssTotal);
-}
-
-// Linear model
-float linearModel(float x, float m, float b) {
-  return m * x + b;
-}
-
-// Exponential model
-float exponentialModel(float x, float a, float b) {
-  return a * exp(b * x);
 }
 
 void setup() {
@@ -213,7 +70,7 @@ void loop() {
         float latestTime = timeSeconds[bufferSize - 1];
         float rateOfGrowth = polynomialDerivative(coeffs, degree, latestTime);
 
-Serial.print("Rate of exponential growth: ");
+        Serial.print("Rate of exponential growth: ");
         Serial.println(rateOfGrowth);
 
         // Output polynomial coefficients for debugging

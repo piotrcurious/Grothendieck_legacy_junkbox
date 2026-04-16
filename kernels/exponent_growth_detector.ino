@@ -1,5 +1,7 @@
+#include "fitting_utils.h"
+
 const int sensorPin = A0; // Thermistor connected to analog pin A0
-const int bufferSize = 30; // Number of readings in the buffer
+const int bufferSize = FITTING_BUFFER_SIZE; // Number of readings in the buffer
 float temperatureBuffer[bufferSize]; // Buffer to store temperature readings
 unsigned long timeBuffer[bufferSize]; // Buffer to store corresponding timestamps
 int bufferIndex = 0; // Index to keep track of the buffer position
@@ -11,77 +13,6 @@ float readTemperature() {
   float voltage = rawValue * (5.0 / 1023.0);
   float temperatureC = (voltage - 0.5) * 100.0; // Convert voltage to temperature (assuming TMP36)
   return temperatureC;
-}
-
-// Function to calculate linear fit (y = mx + b)
-void linearFit(float* x, float* y, int n, float& m, float& b) {
-  float sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
-  for (int i = 0; i < n; i++) {
-    sumX += x[i];
-    sumY += y[i];
-    sumXY += x[i] * y[i];
-    sumX2 += x[i] * x[i];
-  }
-  m = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
-  b = (sumY - m * sumX) / n;
-}
-
-// Function to calculate exponential fit (y = a * e^(bx))
-// Uses the Fredholm/Volterra integral equation approach: y(t) = y(0) + b * integral(y(s)ds) from 0 to t
-void exponentialFitFredholm(float* x, float* y, int n, float& a, float& b) {
-  float integral[n];
-  integral[0] = 0;
-  for (int i = 1; i < n; i++) {
-    float dt = x[i] - x[i-1];
-    integral[i] = integral[i-1] + (y[i] + y[i-1]) * 0.5 * dt;
-  }
-
-  // Linear fit: y = b * integral + y0
-  float sumI = 0, sumY = 0, sumIY = 0, sumI2 = 0;
-  for (int i = 0; i < n; i++) {
-    sumI += integral[i];
-    sumY += y[i];
-    sumIY += integral[i] * y[i];
-    sumI2 += integral[i] * integral[i];
-  }
-
-  float denominator = (n * sumI2 - sumI * sumI);
-  if (fabs(denominator) < 1e-6) {
-    b = 0;
-    a = sumY / n;
-  } else {
-    b = (n * sumIY - sumI * sumY) / denominator;
-    float y0 = (sumY - b * sumI) / n;
-    // For y = a * exp(bt), y(0) = a.
-    a = y0;
-  }
-}
-
-// Function to calculate the goodness of fit (R^2)
-float goodnessOfFit(float* x, float* y, int n, float(*model)(float, float, float), float param1, float param2) {
-  float ssTotal = 0, ssResidual = 0;
-  float meanY = 0;
-  for (int i = 0; i < n; i++) {
-    meanY += y[i];
-  }
-  meanY /= n;
-  for (int i = 0; i < n; i++) {
-    float yi = y[i];
-    float fi = model(x[i], param1, param2);
-    ssTotal += (yi - meanY) * (yi - meanY);
-    ssResidual += (yi - fi) * (yi - fi);
-  }
-  return 1 - (ssResidual / ssTotal);
-}
-
-// Linear model
-float linearModel(float x, float m, float b) {
-  return m * x + b;
-}
-
-// Exponential model
-float exponentialModel(float x, float a, float b) {
-  return a * exp(b * x);
 }
 
 void setup() {
