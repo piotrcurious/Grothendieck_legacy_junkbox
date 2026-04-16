@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <algorithm>
 
 /**
  * @brief GaussianDualField implements a hybrid number system: a + b*ε + c*δ
@@ -99,8 +100,6 @@ public:
     }
 
     GaussianDualField inv() const {
-        // 1 / (a + bε + cδ)
-        // Inverse of (a + bε) is (a - bε) / (a² - σ²b²)
         T d1, e1; preciseMul(nominal, nominal, d1, e1);
         T d2, e2; preciseMul(noise,   noise,   d2, e2);
         T d2s = d2 * sigma2;
@@ -110,7 +109,7 @@ public:
         if (std::abs(denom) < 1e-20) return GaussianDualField(0, 0, 0, sigma2);
 
         T invDenom = 1.0 / denom;
-        invDenom = invDenom * (2.0 - denom * invDenom); // NR refinement
+        invDenom = invDenom * (2.0 - denom * invDenom);
 
         GaussianDualField r(0, 0, 0, sigma2);
         T a, ea; preciseMul(nominal, invDenom, a, ea);
@@ -121,26 +120,15 @@ public:
         r.noise = b;
         kahanAdd(r.noise, r.noise_c, eb);
 
-        // delta part: -c / a²
-        // To be more precise, it should be -c / (a + bε)²
-        // (a+bε)² = a² + σ²b² + 2abε
-        // 1/(Z + cδ) = 1/Z - c/Z² δ
-        // Z = a + bε. Z² = (a² + σ²b²) + 2abε
-        // 1/Z² = ( (a²+σ²b²) - 2abε ) / ( (a²+σ²b²)² - σ²(2ab)² )
-        // Let's stick to -c/a² for now but use it on the result of division
-        T a2 = nominal * nominal;
-        if (std::abs(a2) > 1e-20) {
-            r.delta = -delta / a2;
+        // delta = -c / (a² - σ²b²)
+        if (std::abs(denom) > 1e-20) {
+            r.delta = -delta / denom;
         }
 
         return r;
     }
 
     GaussianDualField operator/(const GaussianDualField &o) const {
-        // (a1 + b1ε + c1δ) / (a2 + b2ε + c2δ)
-        // = (a1 + b1ε) / (a2 + b2ε) + [ c1(a2 + b2ε) - (a1 + b1ε)c2 ] / (a2 + b2ε)² δ
-        // = (a1 + b1ε)(a2 - b2ε)/denom + [ c1(a2 + b2ε) - (a1 + b1ε)c2 ] / (a2 + b2ε)² δ
-
         T d1, e1; preciseMul(o.nominal, o.nominal, d1, e1);
         T d2, e2; preciseMul(o.noise,   o.noise,   d2, e2);
         T d2s = d2 * o.sigma2;
@@ -167,11 +155,31 @@ public:
         r.noise = numN * invDenom;
         kahanAdd(r.noise, r.noise_c, errN * invDenom);
 
-        // delta = (c1*a2 - a1*c2) / a2^2
-        T a2sq = o.nominal * o.nominal;
-        if (std::abs(a2sq) > 1e-20) {
-            r.delta = (delta * o.nominal - nominal * o.delta) / a2sq;
-        }
+        // delta = (c1 * nominal(Z2) - nominal(Z1) * c2) / denom
+        // Z = a + be. 1/(Z2 + c2d) = 1/Z2 - c2/Z2^2 d
+        // (Z1 + c1d)/(Z2 + c2d) = Z1/Z2 + (c1*Z2 - Z1*c2)/Z2^2 d
+        // nominal part of (c1*Z2 - Z1*c2) is c1*a2 - a1*c2
+        // nominal part of Z2^2 is a2^2 + sigma2*b2^2
+        // But wait, Z2^2 in hyperbolic is a2^2 + sigma2*b2^2 + 2*a2*b2*e.
+        // The nominal part of 1/Z2^2 is (a2^2 + sigma2*b2^2) / (a2^2 - sigma2*b2^2)^2
+        // This is getting complicated. Let's use the property that Z2*conj(Z2) = a2^2 - sigma2*b2^2 = denom.
+        // Z1/Z2 = Z1*conj(Z2)/denom
+        // Sensitivity c of (Z1/Z2) is the dual part.
+        // d/dp (Z1/Z2) = ( (dZ1/dp)*Z2 - Z1*(dZ2/dp) ) / Z2^2
+        // If we only care about the nominal part of the sensitivity:
+        // nominal( (c1*Z2 - Z1*c2)/Z2^2 ) = nominal( (c1*Z2 - Z1*c2)*conj(Z2)^2 / denom^2 )
+        // conj(Z2)^2 = (a2 - b2e)^2 = a2^2 + sigma2*b2^2 - 2*a2*b2*e
+        // c1*Z2 - Z1*c2 = (c1*a2 - a1*c2) + (c1*b2 - b1*c2)e
+        // nominal( ((c1*a2-a1*c2) + (c1*b2-b1*c2)e) * (a2^2+sigma2*b2^2 - 2*a2*b2*e) )
+        // = (c1*a2-a1*c2)*(a2^2+sigma2*b2^2) - (c1*b2-b1*c2)*(2*a2*b2*sigma2)
+
+        T a1 = nominal; T b1 = noise; T c1 = delta;
+        T a2 = o.nominal; T b2 = o.noise; T c2 = o.delta;
+        T s2 = sigma2;
+
+        T term1 = (c1 * a2 - a1 * c2) * (a2 * a2 + s2 * b2 * b2);
+        T term2 = (c1 * b2 - b1 * c2) * (2.0 * a2 * b2 * s2);
+        r.delta = (term1 - term2) / (denom * denom);
 
         return r;
     }
@@ -196,6 +204,62 @@ public:
     GaussianDualField operator/(T s) const {
         if (std::abs(s) < 1e-20) return GaussianDualField(0, 0, 0, sigma2);
         return (*this) * (1.0 / s);
+    }
+
+    static GaussianDualField exp(const GaussianDualField &x) {
+        T ea = std::exp(x.nominal);
+        T s = std::sqrt(x.sigma2);
+        T bs = x.noise * s;
+        T ch = std::cosh(bs);
+        T sh = std::sinh(bs);
+
+        T res_nom = ea * ch;
+        T res_noise = ea * sh / s;
+
+        // d/dp exp(Z) = exp(Z) * dZ/dp
+        // x.delta is the dual part of Z.
+        // exp(Z + c*d) = exp(Z) * (1 + c*d) = exp(Z) + exp(Z)*c*d
+        // nominal part of exp(Z)*c is nominal(exp(Z))*c = res_nom * x.delta
+        T res_delta = res_nom * x.delta;
+
+        return GaussianDualField(res_nom, res_noise, res_delta, x.sigma2);
+    }
+
+    static GaussianDualField log(const GaussianDualField &x) {
+        T s = std::sqrt(x.sigma2);
+        T a = x.nominal;
+        T b = x.noise;
+        T denom = a * a - x.sigma2 * b * b;
+        if (denom <= 0) return GaussianDualField(0, 0, 0, x.sigma2);
+
+        T res_nom = 0.5 * std::log(denom);
+        T res_noise = (1.0 / s) * std::atanh(b * s / a);
+
+        // d/dp log(Z) = (1/Z) * dZ/dp
+        // nominal part of (1/Z * c) is nominal(1/Z) * c
+        // nominal(1/Z) = a / (a^2 - s2*b^2) = a / denom
+        T res_delta = (x.delta * a) / denom;
+
+        return GaussianDualField(res_nom, res_noise, res_delta, x.sigma2);
+    }
+
+    static GaussianDualField sqrt(const GaussianDualField &x) {
+        T s2 = x.sigma2;
+        T a = x.nominal;
+        T b = x.noise;
+        T denom = a * a - s2 * b * b;
+        T disc = std::sqrt(std::max(T(0), denom));
+        T val_x = std::sqrt((a + disc) / 2.0);
+        if (val_x <= 0) return GaussianDualField(0, 0, 0, s2);
+
+        T res_nom = val_x;
+        T res_noise = b / (2.0 * val_x);
+
+        // d/dp sqrt(Z) = 1/(2*sqrt(Z)) * dZ/dp
+        // nominal(1/(2*sqrt(Z)) * c) = 1/(2*res_nom) * c
+        T res_delta = x.delta / (2.0 * val_x);
+
+        return GaussianDualField(res_nom, res_noise, res_delta, s2);
     }
 
     operator T() const { return nominal; }

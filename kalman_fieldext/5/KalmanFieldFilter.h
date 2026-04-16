@@ -43,6 +43,18 @@ public:
     Field getX() const { return x; }
     Field getP() const { return p; }
 
+    void reset(Field x0, Field p0) {
+        x = x0;
+        p = p0;
+    }
+
+    void init(Field q_new, Field r_new, Field x0, Field p0) {
+        q = q_new;
+        r = r_new;
+        x = x0;
+        p = p0;
+    }
+
 private:
     Field q, r, p, x;
 };
