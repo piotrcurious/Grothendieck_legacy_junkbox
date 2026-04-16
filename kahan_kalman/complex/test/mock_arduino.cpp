@@ -3,14 +3,15 @@
 #include <thread>
 #include <random>
 #include <vector>
+#include <cstdio>
 MockSerial Serial;
-static unsigned long mock_millis = 0;
+unsigned long global_mock_millis = 0;
 static int next_analog_value = 512;
 static std::vector<int> analog_sequence;
 static size_t sequence_index = 0;
-void delay(unsigned long ms) { mock_millis += ms; }
-unsigned long millis() { return mock_millis; }
-void resetMockTime() { mock_millis = 0; }
+void delay(unsigned long ms) { global_mock_millis += ms; }
+unsigned long millis() { return global_mock_millis; }
+void resetMockTime() { global_mock_millis = 0; }
 void setMockAnalogRead(int value) { next_analog_value = value; analog_sequence.clear(); }
 void setMockAnalogSequence(const std::vector<int>& sequence) { analog_sequence = sequence; sequence_index = 0; }
 int analogRead(uint8_t pin) {
