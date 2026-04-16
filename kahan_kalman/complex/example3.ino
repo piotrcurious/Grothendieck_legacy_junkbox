@@ -1,3 +1,4 @@
+// Numerically stable Kalman Filter utilizing LDLT Decomposition.
 #include "KahanMatrix.h"
 
 #include <cmath>   // For fabs(), sqrt()

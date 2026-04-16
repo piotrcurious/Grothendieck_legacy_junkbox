@@ -1,3 +1,4 @@
+// Kalman-based Low-Pass Filter with standard noise model.
 #include "KahanMatrix.h"
 
 #include <cmath> // For sqrt(), fabs(), pow()
@@ -13,7 +14,7 @@ const double PROCESS_NOISE_SPECTRAL_DENSITY_ACCEL = 0.01; // Tune this parameter
 
 // Define the standard deviation of the measurement noise (adjust based on sensor noise)
 // Higher values mean the filter trusts the measurements less, leading to more smoothing.
-const double MEASUREMENT_NOISE_STDDEV = 5.0; // Example: standard deviation of analog readings when input is stable
+const double MEASUREMENT_NOISE_STDDEV = 10.0; // Example: standard deviation of analog readings when input is stable
 
 // Define the minimum and maximum random interval between readings (in milliseconds)
 const unsigned long MIN_READ_INTERVAL_MS = 100;

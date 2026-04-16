@@ -1,135 +1,272 @@
 #ifndef KAHAN_MATRIX_H
 #define KAHAN_MATRIX_H
+
 #include <Arduino.h>
 #include <cmath>
 #include <cstring>
 #include <utility>
+
 #define KAHAN_EPSILON 1e-12
+
+/**
+ * @brief Computes the sum of an array using Kahan summation algorithm to minimize numerical error.
+ *
+ * @param input Pointer to the array of doubles.
+ * @param size Number of elements in the array.
+ * @return double The compensated sum.
+ */
 inline double kahanSum(const double* input, size_t size) {
-    double sum = 0.0; double c = 0.0;
+    double sum = 0.0;
+    double c = 0.0; // Compensation for lost low-order bits
     for (size_t i = 0; i < size; ++i) {
-        double y = input[i] - c; double t = sum + y;
-        c = (t - sum) - y; sum = t;
+        double y = input[i] - c;
+        double t = sum + y;
+        c = (t - sum) - y;
+        sum = t;
     }
     return sum;
 }
+
+/**
+ * @brief A basic Matrix class with dynamic allocation and Kahan-compensated operations.
+ */
 class Matrix {
 public:
-    double* data; int rows; int cols;
+    double* data;
+    int rows;
+    int cols;
+
+    /**
+     * @brief Construct a new Matrix object.
+     * @param r Rows
+     * @param c Columns
+     */
     Matrix(int r, int c) : rows(r), cols(c) {
-        if (rows <= 0 || cols <= 0) { rows = 0; cols = 0; data = nullptr; return; }
+        if (rows <= 0 || cols <= 0) {
+            rows = 0; cols = 0; data = nullptr;
+            return;
+        }
         data = new double[rows * cols];
-        if (data) { for (int i = 0; i < rows * cols; ++i) data[i] = 0.0; }
+        if (data) {
+            for (int i = 0; i < rows * cols; ++i) data[i] = 0.0;
+        }
     }
-    ~Matrix() { if (data) delete[] data; }
+
+    ~Matrix() {
+        if (data) delete[] data;
+    }
+
+    // Copy Constructor
     Matrix(const Matrix& other) : rows(other.rows), cols(other.cols) {
-        data = new double[rows * cols];
-        if (data) memcpy(data, other.data, rows * cols * sizeof(double));
+        if (other.data) {
+            data = new double[rows * cols];
+            if (data) memcpy(data, other.data, rows * cols * sizeof(double));
+        } else {
+            data = nullptr;
+        }
     }
+
+    // Copy Assignment
     Matrix& operator=(const Matrix& other) {
         if (this == &other) return *this;
         if (data) delete[] data;
-        rows = other.rows; cols = other.cols;
-        data = new double[rows * cols];
-        if (data) memcpy(data, other.data, rows * cols * sizeof(double));
+        rows = other.rows;
+        cols = other.cols;
+        if (other.data) {
+            data = new double[rows * cols];
+            if (data) memcpy(data, other.data, rows * cols * sizeof(double));
+        } else {
+            data = nullptr;
+        }
         return *this;
     }
+
+    // Move Constructor
     Matrix(Matrix&& other) noexcept : data(other.data), rows(other.rows), cols(other.cols) {
         other.data = nullptr; other.rows = 0; other.cols = 0;
     }
+
+    // Move Assignment
     Matrix& operator=(Matrix&& other) noexcept {
         if (this == &other) return *this;
         if (data) delete[] data;
-        data = other.data; rows = other.rows; cols = other.cols;
+        data = other.data;
+        rows = other.rows;
+        cols = other.cols;
         other.data = nullptr; other.rows = 0; other.cols = 0;
         return *this;
     }
+
+    /**
+     * @brief Access element at (r, c) - Read/Write
+     */
     double& operator()(int r, int c) {
         if (r < 0 || r >= rows || c < 0 || c >= cols) {
-            static double dummy; dummy = NAN; return dummy;
+            static double dummy;
+            dummy = NAN;
+            return dummy;
         }
         return data[r * cols + c];
     }
+
+    /**
+     * @brief Access element at (r, c) - Read Only
+     */
     const double& operator()(int r, int c) const {
         if (r < 0 || r >= rows || c < 0 || c >= cols) {
-            static double dummy; dummy = NAN; return (const double&)dummy;
+            static double dummy;
+            dummy = NAN;
+            return (const double&)dummy;
         }
         return data[r * cols + c];
     }
+
+    /**
+     * @brief Matrix Addition (this + other)
+     */
     Matrix add(const Matrix& other) const {
         if (rows != other.rows || cols != other.cols) return Matrix(0, 0);
         Matrix result(rows, cols);
-        for (int i = 0; i < rows; ++i) {
-            for (int j = 0; j < cols; ++j) {
-                double terms[] = {(*this)(i, j), other(i, j)};
-                result(i, j) = kahanSum(terms, 2);
-            }
+        for (int i = 0; i < rows * cols; ++i) {
+            double terms[] = {data[i], other.data[i]};
+            result.data[i] = kahanSum(terms, 2);
         }
         return result;
     }
+
+    /**
+     * @brief Matrix Subtraction (this - other)
+     */
     Matrix subtract(const Matrix& other) const {
         if (rows != other.rows || cols != other.cols) return Matrix(0, 0);
         Matrix result(rows, cols);
-        for (int i = 0; i < rows; ++i) {
-            for (int j = 0; j < cols; ++j) {
-                double terms[] = {(*this)(i, j), -other(i, j)};
-                result(i, j) = kahanSum(terms, 2);
-            }
+        for (int i = 0; i < rows * cols; ++i) {
+            double terms[] = {data[i], -other.data[i]};
+            result.data[i] = kahanSum(terms, 2);
         }
         return result;
     }
+
+    /**
+     * @brief Matrix Multiplication (this * other)
+     */
     Matrix multiply(const Matrix& other) const {
         if (cols != other.rows) return Matrix(0, 0);
         Matrix result(rows, other.cols);
         for (int i = 0; i < rows; ++i) {
             for (int j = 0; j < other.cols; ++j) {
-                double sum = 0.0; double c = 0.0;
+                double sum = 0.0;
+                double c = 0.0;
                 for (int k = 0; k < cols; ++k) {
                     double term = (*this)(i, k) * other(k, j);
-                    double y = term - c; double t = sum + y;
-                    c = (t - sum) - y; sum = t;
+                    double y = term - c;
+                    double t = sum + y;
+                    c = (t - sum) - y;
+                    sum = t;
                 }
                 result(i, j) = sum;
             }
         }
         return result;
     }
+
+    /**
+     * @brief Scalar Multiplication
+     */
     Matrix multiply_scalar(double scalar) const {
         Matrix result(rows, cols);
-        if (result.data) { for (int i = 0; i < rows * cols; ++i) result.data[i] = data[i] * scalar; }
+        if (result.data) {
+            for (int i = 0; i < rows * cols; ++i) result.data[i] = data[i] * scalar;
+        }
         return result;
     }
+
+    /**
+     * @brief Transpose current matrix
+     */
     Matrix transpose() const {
         Matrix result(cols, rows);
-        for (int i = 0; i < rows; ++i) { for (int j = 0; j < cols; ++j) result(j, i) = (*this)(i, j); }
+        for (int i = 0; i < rows; ++i) {
+            for (int j = 0; j < cols; ++j) {
+                result(j, i) = (*this)(i, j);
+            }
+        }
         return result;
     }
+
+    /**
+     * @brief Create an Identity matrix of size n x n
+     */
     static Matrix Identity(int n) {
         Matrix res(n, n);
         for (int i = 0; i < n; ++i) res(i, i) = 1.0;
         return res;
     }
+
+    /**
+     * @brief Utility for printing matrix to Serial
+     */
     void print() const {
         if (!data) { Serial.println("Empty Matrix"); return; }
         for (int i = 0; i < rows; ++i) {
-            for (int j = 0; j < cols; ++j) { Serial.print((*this)(i, j), 6); Serial.print("\t"); }
+            for (int j = 0; j < cols; ++j) {
+                Serial.print((*this)(i, j), 6);
+                Serial.print("\t");
+            }
             Serial.println();
         }
     }
 };
+
+/**
+ * @brief Fixed-size Matrix optimized for small embedded systems, avoiding heap allocation.
+ */
+template<int R, int C>
+class MatrixStatic {
+public:
+    double data[R * C];
+
+    MatrixStatic() {
+        for (int i = 0; i < R * C; ++i) data[i] = 0.0;
+    }
+
+    double& operator()(int r, int c) { return data[r * C + c]; }
+    const double& operator()(int r, int c) const { return data[r * C + c]; }
+
+    // Convert to dynamic Matrix
+    Matrix toDynamic() const {
+        Matrix res(R, C);
+        for (int i = 0; i < R * C; ++i) res.data[i] = data[i];
+        return res;
+    }
+};
+
+/**
+ * @brief Solves Ax = b for x using Gaussian Elimination with Partial Pivoting and Kahan Summation.
+ * Handles multiple columns in b (solving for multiple right-hand sides).
+ */
 inline Matrix solveLinear(const Matrix& A, const Matrix& b) {
     if (A.rows != A.cols || A.rows != b.rows) return Matrix(0, 0);
-    int n = A.rows; int m = b.cols;
+    int n = A.rows;
+    int m = b.cols;
     Matrix aug(n, n + m);
+    if (!aug.data) return Matrix(0, 0);
+
     for (int i = 0; i < n; ++i) {
         for (int j = 0; j < n; ++j) aug(i, j) = A(i, j);
         for (int j = 0; j < m; ++j) aug(i, n + j) = b(i, j);
     }
+
     for (int i = 0; i < n; ++i) {
         int pivot = i;
-        for (int k = i + 1; k < n; ++k) { if (fabs(aug(k, i)) > fabs(aug(pivot, i))) pivot = k; }
-        if (pivot != i) { for (int j = i; j < n + m; ++j) std::swap(aug(i, j), aug(pivot, j)); }
+        for (int k = i + 1; k < n; ++k) {
+            if (fabs(aug(k, i)) > fabs(aug(pivot, i))) pivot = k;
+        }
+        if (pivot != i) {
+            for (int j = i; j < n + m; ++j) std::swap(aug(i, j), aug(pivot, j));
+        }
         if (fabs(aug(i, i)) < KAHAN_EPSILON) return Matrix(0, 0);
+
         for (int k = i + 1; k < n; ++k) {
             double factor = aug(k, i) / aug(i, i);
             for (int j = i; j < n + m; ++j) {
@@ -139,74 +276,107 @@ inline Matrix solveLinear(const Matrix& A, const Matrix& b) {
             }
         }
     }
+
     Matrix x(n, m);
+    if (!x.data) return Matrix(0, 0);
     for (int col = 0; col < m; ++col) {
         for (int i = n - 1; i >= 0; --i) {
-            double sum = 0.0; double c = 0.0;
+            double sum = 0.0;
+            double c = 0.0;
             for (int j = i + 1; j < n; ++j) {
                 double term = aug(i, j) * x(j, col);
-                double y = term - c; double t = sum + y;
-                c = (t - sum) - y; sum = t;
+                double y = term - c;
+                double t = sum + y;
+                c = (t - sum) - y;
+                sum = t;
             }
             x(i, col) = (aug(i, n + col) - sum) / aug(i, i);
         }
     }
     return x;
 }
+
+/**
+ * @brief Performs LDLT decomposition of a symmetric positive-definite matrix A.
+ * A = LDL^T where L is lower triangular with unit diagonal and D is diagonal.
+ */
 inline bool ldltDecomposition(const Matrix& A, Matrix& L, Matrix& D) {
     if (A.rows != A.cols || L.rows != A.rows || L.cols != A.cols || D.rows != A.rows || D.cols != A.cols) return false;
     int n = A.rows;
     for (int i = 0; i < n; ++i) {
-        double sum_D = 0.0; double c_D = 0.0;
+        double sum_D = 0.0;
+        double c_D = 0.0;
         for (int k = 0; k < i; ++k) {
             double term = L(i, k) * L(i, k) * D(k, k);
-            double y = term - c_D; double t = sum_D + y;
-            c_D = (t - sum_D) - y; sum_D = t;
+            double y = term - c_D;
+            double t = sum_D + y;
+            c_D = (t - sum_D) - y;
+            sum_D = t;
         }
         D(i, i) = A(i, i) - sum_D;
         if (D(i, i) < KAHAN_EPSILON) return false;
         L(i, i) = 1.0;
         for (int j = i + 1; j < n; ++j) {
-            double sum_L = 0.0; double c_L = 0.0;
+            double sum_L = 0.0;
+            double c_L = 0.0;
             for (int k = 0; k < i; ++k) {
                 double term = L(j, k) * D(k, k) * L(i, k);
-                double y = term - c_L; double t = sum_L + y;
-                c_L = (t - sum_L) - y; sum_L = t;
+                double y = term - c_L;
+                double t = sum_L + y;
+                c_L = (t - sum_L) - y;
+                sum_L = t;
             }
             L(j, i) = (A(j, i) - sum_L) / D(i, i);
         }
     }
     return true;
 }
+
+/**
+ * @brief Solves A x = b using LDLT decomposition.
+ * Optimized for symmetric positive-definite systems common in Kalman filters.
+ */
 inline Matrix solveLDLT(const Matrix& A, const Matrix& b) {
     if (A.rows != A.cols || A.rows != b.rows) return Matrix(0, 0);
-    int n = A.rows; int m = b.cols;
+    int n = A.rows;
+    int m = b.cols;
     Matrix L(n, n), D(n, n);
     if (!ldltDecomposition(A, L, D)) return Matrix(0, 0);
+
     Matrix x(n, m);
+    if (!x.data) return Matrix(0, 0);
     for (int col = 0; col < m; ++col) {
         Matrix y(n, 1);
         for (int i = 0; i < n; ++i) {
-            double sum = 0.0; double c = 0.0;
+            double sum = 0.0;
+            double c = 0.0;
             for (int j = 0; j < i; ++j) {
                 double term = L(i, j) * y(j, 0);
-                double y_c = term - c; double t = sum + y_c;
-                c = (t - sum) - y_c; sum = t;
+                double y_c = term - c;
+                double t = sum + y_c;
+                c = (t - sum) - y_c;
+                sum = t;
             }
             y(i, 0) = b(i, col) - sum;
         }
+
         Matrix z(n, 1);
         for (int i = 0; i < n; ++i) z(i, 0) = y(i, 0) / D(i, i);
+
         for (int i = n - 1; i >= 0; --i) {
-            double sum = 0.0; double c = 0.0;
+            double sum = 0.0;
+            double c = 0.0;
             for (int j = i + 1; j < n; ++j) {
                 double term = L(j, i) * x(j, col);
-                double y_c = term - c; double t = sum + y_c;
-                c = (t - sum) - y_c; sum = t;
+                double y_c = term - c;
+                double t = sum + y_c;
+                c = (t - sum) - y_c;
+                sum = t;
             }
             x(i, col) = z(i, 0) - sum;
         }
     }
     return x;
 }
-#endif
+
+#endif // KAHAN_MATRIX_H

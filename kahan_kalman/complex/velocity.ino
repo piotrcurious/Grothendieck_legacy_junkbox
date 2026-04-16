@@ -1,3 +1,4 @@
+// Kalman Filter optimized for position and velocity estimation.
 #include "KahanMatrix.h"
 
 #include <cmath> // For sqrt(), fabs()
@@ -8,12 +9,12 @@ const int ANALOG_PIN = 34; // Example: GPIO 34
 
 // Define tuning parameters for process noise (adjust these based on expected signal variability)
 // These influence the filter's responsiveness to changes. Lower values mean more smoothing (lower pass).
-const double PROCESS_NOISE_POSITION_RATE = 1.0; // Tune this
-const double PROCESS_NOISE_VELOCITY_RATE = 0.1; // Tune this
+const double PROCESS_NOISE_POSITION_RATE = 0.1; // Tune this
+const double PROCESS_NOISE_VELOCITY_RATE = 0.01; // Tune this
 
 // Define the standard deviation of the measurement noise (adjust based on sensor noise)
 // Higher values mean the filter trusts the measurements less, leading to more smoothing (lower pass).
-const double MEASUREMENT_NOISE_STDDEV = 5.0; // Example: standard deviation of analog readings when input is stable
+const double MEASUREMENT_NOISE_STDDEV = 10.0; // Example: standard deviation of analog readings when input is stable
 
 // Define the minimum and maximum random interval between readings (in milliseconds)
 const unsigned long MIN_READ_INTERVAL_MS = 100;
