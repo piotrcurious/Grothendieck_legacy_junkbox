@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <cstdarg>
 #include <cstring>
+#include <vector>
 #define GPIO_NUM_34 34
 class MockSerial {
 public:
@@ -39,4 +40,7 @@ void randomSeed(unsigned long seed);
 void analogReadResolution(int res);
 void analogSetAttenuation(int atten);
 #define ADC_0db 0
+void setMockAnalogRead(int value);
+void setMockAnalogSequence(const std::vector<int>& sequence);
+void resetMockTime();
 #endif

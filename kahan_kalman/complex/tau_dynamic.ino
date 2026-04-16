@@ -8,11 +8,11 @@ const int ANALOG_PIN = 34; // Example: GPIO 34
 
 // Define tuning parameters for process noise (adjust these based on expected signal variability)
 // These represent the rate of uncertainty increase in position and velocity per second.
-const double PROCESS_NOISE_POSITION_RATE = 0.1; // Tune this
-const double PROCESS_NOISE_VELOCITY_RATE = 0.5; // Tune this
+const double PROCESS_NOISE_POSITION_RATE = 1.0; // Tune this
+const double PROCESS_NOISE_VELOCITY_RATE = 0.1; // Tune this
 
 // Define the standard deviation of the measurement noise (adjust based on sensor noise)
-const double MEASUREMENT_NOISE_STDDEV = 2.0; // Example: standard deviation of analog readings when input is stable
+const double MEASUREMENT_NOISE_STDDEV = 5.0; // Example: standard deviation of analog readings when input is stable
 
 // Define the minimum and maximum random interval between readings (in milliseconds)
 const unsigned long MIN_READ_INTERVAL_MS = 100;
@@ -92,8 +92,7 @@ void setup() {
     P(1, 0) = 0.0;
 
     // Identity Matrix (2x2)
-    Identity(0, 0) = 1.0;
-    Identity(1, 1) = 1.0;
+    Identity = Matrix::Identity(n_states);
 
     // Seed random number generator for random intervals
     randomSeed(analogRead(ANALOG_PIN)); // Use analog reading for a more random seed

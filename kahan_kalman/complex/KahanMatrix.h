@@ -34,12 +34,26 @@ public:
         if (data) memcpy(data, other.data, rows * cols * sizeof(double));
         return *this;
     }
+    Matrix(Matrix&& other) noexcept : data(other.data), rows(other.rows), cols(other.cols) {
+        other.data = nullptr; other.rows = 0; other.cols = 0;
+    }
+    Matrix& operator=(Matrix&& other) noexcept {
+        if (this == &other) return *this;
+        if (data) delete[] data;
+        data = other.data; rows = other.rows; cols = other.cols;
+        other.data = nullptr; other.rows = 0; other.cols = 0;
+        return *this;
+    }
     double& operator()(int r, int c) {
-        if (r < 0 || r >= rows || c < 0 || c >= cols) { static double dummy = NAN; return dummy; }
+        if (r < 0 || r >= rows || c < 0 || c >= cols) {
+            static double dummy; dummy = NAN; return dummy;
+        }
         return data[r * cols + c];
     }
     const double& operator()(int r, int c) const {
-        if (r < 0 || r >= rows || c < 0 || c >= cols) { static const double dummy = NAN; return dummy; }
+        if (r < 0 || r >= rows || c < 0 || c >= cols) {
+            static double dummy; dummy = NAN; return (const double&)dummy;
+        }
         return data[r * cols + c];
     }
     Matrix add(const Matrix& other) const {
@@ -90,10 +104,15 @@ public:
         for (int i = 0; i < rows; ++i) { for (int j = 0; j < cols; ++j) result(j, i) = (*this)(i, j); }
         return result;
     }
+    static Matrix Identity(int n) {
+        Matrix res(n, n);
+        for (int i = 0; i < n; ++i) res(i, i) = 1.0;
+        return res;
+    }
     void print() const {
         if (!data) { Serial.println("Empty Matrix"); return; }
         for (int i = 0; i < rows; ++i) {
-            for (int j = 0; j < cols; ++j) { Serial.print((*this)(i, j), 6); Serial.print("	"); }
+            for (int j = 0; j < cols; ++j) { Serial.print((*this)(i, j), 6); Serial.print("\t"); }
             Serial.println();
         }
     }
@@ -129,7 +148,7 @@ inline Matrix solveLinear(const Matrix& A, const Matrix& b) {
                 double y = term - c; double t = sum + y;
                 c = (t - sum) - y; sum = t;
             }
-            x(col < m ? i : 0, col) = (aug(i, n + col) - sum) / aug(i, i);
+            x(i, col) = (aug(i, n + col) - sum) / aug(i, i);
         }
     }
     return x;

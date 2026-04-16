@@ -83,8 +83,7 @@ void setup() {
     P(1, 0) = 0.0;
 
     // Identity Matrix
-    Identity(0, 0) = 1.0;
-    Identity(1, 1) = 1.0;
+    Identity = Matrix::Identity(n_states);
 
     // Seed random number generator for simulating noise
     randomSeed(analogRead(0)); // Use an unconnected analog pin for better randomness
