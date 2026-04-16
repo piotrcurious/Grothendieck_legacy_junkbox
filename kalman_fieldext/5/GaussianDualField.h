@@ -103,10 +103,8 @@ public:
         T d2, e2; preciseMul(noise,   noise,   d2, e2);
         T d2s = d2 * sigma2;
         T e2s = std::fma(d2, sigma2, -d2s) + sigma2 * e2;
-
         T denom = (d1 + e1) - (d2s + e2s);
         if (std::abs(denom) < 1e-20) return GaussianDualField(0, 0, 0, sigma2);
-
         T invDenom = 1.0 / denom;
         invDenom = invDenom * (2.0 - denom * invDenom);
 
@@ -122,46 +120,11 @@ public:
         if (std::abs(denom) > 1e-20) {
             r.delta = -delta / denom;
         }
-
         return r;
     }
 
     GaussianDualField operator/(const GaussianDualField &o) const {
-        T d1, e1; preciseMul(o.nominal, o.nominal, d1, e1);
-        T d2, e2; preciseMul(o.noise,   o.noise,   d2, e2);
-        T d2s = d2 * o.sigma2;
-        T e2s = std::fma(d2, o.sigma2, -d2s) + o.sigma2 * e2;
-        T denom = (d1 + e1) - (d2s + e2s);
-        if (std::abs(denom) < 1e-20) return GaussianDualField(0, 0, 0, sigma2);
-        T invDenom = 1.0 / denom;
-
-        T n1, f1; preciseMul(nominal, o.nominal, n1, f1);
-        T n2, f2; preciseMul(noise,   o.noise,   n2, f2);
-        T n2s = n2 * sigma2;
-        T f2s = std::fma(n2, sigma2, -n2s) + sigma2 * f2;
-        T numNom = n1 - n2s;
-        T errNom = (n1 - numNom) - n2s + f1 - f2s;
-
-        GaussianDualField r(0, 0, 0, sigma2);
-        r.nominal = numNom * invDenom;
-        kahanAdd(r.nominal, r.nominal_c, errNom * invDenom);
-
-        T m1, h1; preciseMul(noise,   o.nominal, m1, h1);
-        T m2, h2; preciseMul(nominal, o.noise,   m2, h2);
-        T numN = m1 - m2;
-        T errN = (m1 - numN) - m2 + h1 - h2;
-        r.noise = numN * invDenom;
-        kahanAdd(r.noise, r.noise_c, errN * invDenom);
-
-        T a1 = nominal; T b1 = noise; T c1 = delta;
-        T a2 = o.nominal; T b2 = o.noise; T c2 = o.delta;
-        T s2 = sigma2;
-
-        T term1 = (c1 * a2 - a1 * c2) * (a2 * a2 + s2 * b2 * b2);
-        T term2 = (c1 * b2 - b1 * c2) * (2.0 * a2 * b2 * s2);
-        r.delta = (term1 - term2) / (denom * denom);
-
-        return r;
+        return (*this) * o.inv();
     }
 
     GaussianDualField operator*(T s) const {
@@ -170,11 +133,9 @@ public:
         preciseMul(nominal, s, p, e);
         r.nominal = p;
         kahanAdd(r.nominal, r.nominal_c, e + nominal_c * s);
-
         preciseMul(noise, s, p, e);
         r.noise = p;
         kahanAdd(r.noise, r.noise_c, e + noise_c * s);
-
         preciseMul(delta, s, p, e);
         r.delta = p;
         kahanAdd(r.delta, r.delta_c, e + delta_c * s);
@@ -274,6 +235,28 @@ public:
         return GaussianDualField(res_nom, res_noise, res_delta, x.sigma2);
     }
 
+    static GaussianDualField sinh(const GaussianDualField &x) {
+        T a = x.nominal; T b = x.noise; T s = std::sqrt(x.sigma2);
+        T bs = b * s;
+        T res_nom = std::sinh(a) * std::cosh(bs);
+        T res_noise = std::cosh(a) * (std::sinh(bs) / s);
+        T res_delta = std::cosh(a) * std::cosh(bs) * x.delta;
+        return GaussianDualField(res_nom, res_noise, res_delta, x.sigma2);
+    }
+
+    static GaussianDualField cosh(const GaussianDualField &x) {
+        T a = x.nominal; T b = x.noise; T s = std::sqrt(x.sigma2);
+        T bs = b * s;
+        T res_nom = std::cosh(a) * std::cosh(bs);
+        T res_noise = std::sinh(a) * (std::sinh(bs) / s);
+        T res_delta = std::sinh(a) * std::cosh(bs) * x.delta;
+        return GaussianDualField(res_nom, res_noise, res_delta, x.sigma2);
+    }
+
+    static GaussianDualField tanh(const GaussianDualField &x) {
+        return sinh(x) / cosh(x);
+    }
+
     static GaussianDualField pow(const GaussianDualField &x, double y) {
         return exp(log(x) * y);
     }
@@ -284,6 +267,11 @@ public:
 
     static T norm(const GaussianDualField &x) {
         return std::sqrt(std::abs(x.nominal * x.nominal - x.sigma2 * x.noise * x.noise));
+    }
+
+    static GaussianDualField abs(const GaussianDualField &x) {
+        if (x.nominal >= 0) return x;
+        return x * T(-1.0);
     }
 
     bool is_finite() const {
