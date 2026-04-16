@@ -2,10 +2,45 @@
 #define FITTING_UTILS_H
 
 #include <math.h>
-#include <algorithm>
 
 // Common buffer size
 const int FITTING_BUFFER_SIZE = 30;
+
+// Normalization structure to improve numerical stability
+struct Normalizer {
+    float x_mean;
+    float x_std;
+    float y_mean;
+    float y_std;
+
+    void compute(float* x, float* y, int n) {
+        float sumX = 0, sumY = 0;
+        for (int i = 0; i < n; i++) {
+            sumX += x[i];
+            sumY += y[i];
+        }
+        x_mean = sumX / n;
+        y_mean = sumY / n;
+
+        float sqSumX = 0, sqSumY = 0;
+        for (int i = 0; i < n; i++) {
+            sqSumX += (x[i] - x_mean) * (x[i] - x_mean);
+            sqSumY += (y[i] - y_mean) * (y[i] - y_mean);
+        }
+        x_std = sqrt(sqSumX / n);
+        y_std = sqrt(sqSumY / n);
+
+        if (x_std < 1e-6) x_std = 1.0;
+        if (y_std < 1e-6) y_std = 1.0;
+    }
+
+    void normalize(float* x, float* y, float* x_norm, float* y_norm, int n) {
+        for (int i = 0; i < n; i++) {
+            x_norm[i] = (x[i] - x_mean) / x_std;
+            y_norm[i] = (y[i] - y_mean) / y_std;
+        }
+    }
+};
 
 // Linear model: y = mx + b
 inline float linearModel(float x, float m, float b) {
@@ -63,7 +98,7 @@ inline void exponentialFitFredholm(float* x, float* y, int n, float& a, float& b
         b = (n * sumIY - sumI * sumY) / denominator;
         float y_start = (sumY - b * sumI) / n;
         // y(t) = a * exp(b*t). At t = x[0], y(x[0]) = a * exp(b*x[0]) = y_start
-        // So a = y_start * exp(-b * x[0])
+        // So a = y_start * exp(-b * x[0]);
         a = y_start * exp(-b * x[0]);
     }
 }
@@ -86,86 +121,92 @@ inline float goodnessOfFit(float* x, float* y, int n, float(*model)(float, float
     return 1 - (ssResidual / ssTotal);
 }
 
-// Function to calculate polynomial coefficients (least squares method)
-// Max degree supported is 4 to keep buffer sizes fixed and small
-inline void polynomialFit(float* x, float* y, int n, int degree, float* coeffs) {
+// Ridge Regression for Polynomial Fit with Normalization
+// lambda: regularization parameter
+inline void polynomialFitRidge(float* x, float* y, int n, int degree, float* coeffs, float lambda = 0.01) {
     if (degree > 4) degree = 4;
+    int systemSize = degree + 1;
 
-    float X[2 * 4 + 1];
+    Normalizer norm;
+    norm.compute(x, y, n);
+    float x_n[FITTING_BUFFER_SIZE], y_n[FITTING_BUFFER_SIZE];
+    norm.normalize(x, y, x_n, y_n, n);
+
+    float X_pow[2 * 4 + 1];
     int maxPowers = 2 * degree + 1;
-    for (int i = 0; i < maxPowers; i++) X[i] = 0;
-
-    float Y[5];
-    for (int i = 0; i <= degree; i++) Y[i] = 0;
+    for (int i = 0; i < maxPowers; i++) X_pow[i] = 0;
+    float Y_pow[5];
+    for (int i = 0; i < systemSize; i++) Y_pow[i] = 0;
 
     for (int j = 0; j < n; j++) {
-        float x_pow = 1.0;
+        float xp = 1.0;
         for (int i = 0; i < maxPowers; i++) {
-            X[i] += x_pow;
-            if (i <= degree) {
-                Y[i] += x_pow * y[j];
-            }
-            x_pow *= x[j];
+            X_pow[i] += xp;
+            if (i < systemSize) Y_pow[i] += xp * y_n[j];
+            xp *= x_n[j];
         }
     }
 
-    float B[5][6], a[5];
-    for (int i = 0; i <= degree; i++) {
-        for (int j = 0; j <= degree; j++) {
-            B[i][j] = X[i + j];
-        }
-    }
-
-    for (int i = 0; i <= degree; i++) {
-        B[i][degree + 1] = Y[i];
-    }
-
-    int systemSize = degree + 1;
+    float B[5][6];
     for (int i = 0; i < systemSize; i++) {
-        for (int k = i + 1; k < systemSize; k++) {
-            if (fabs(B[i][i]) < fabs(B[k][i])) {
-                for (int j = 0; j <= systemSize; j++) {
-                    float temp = B[i][j];
-                    B[i][j] = B[k][j];
-                    B[k][j] = temp;
-                }
-            }
+        for (int j = 0; j < systemSize; j++) {
+            B[i][j] = X_pow[i + j];
+            if (i == j && i > 0) B[i][j] += lambda * n; // Ridge regularization (not on intercept)
         }
+        B[i][systemSize] = Y_pow[i];
     }
 
-    for (int i = 0; i < systemSize - 1; i++) {
+    // Gaussian Elimination with partial pivoting
+    for (int i = 0; i < systemSize; i++) {
+        int pivot = i;
+        for (int k = i + 1; k < systemSize; k++)
+            if (fabs(B[k][i]) > fabs(B[pivot][i])) pivot = k;
+
+        for (int j = 0; j <= systemSize; j++) {
+            float tmp = B[i][j]; B[i][j] = B[pivot][j]; B[pivot][j] = tmp;
+        }
+
+        if (fabs(B[i][i]) < 1e-9) continue;
+
         for (int k = i + 1; k < systemSize; k++) {
-            if (fabs(B[i][i]) < 1e-9) continue;
             float t = B[k][i] / B[i][i];
-            for (int j = 0; j <= systemSize; j++) {
-                B[k][j] -= t * B[i][j];
-            }
+            for (int j = i; j <= systemSize; j++) B[k][j] -= t * B[i][j];
         }
     }
 
+    float a_norm[5];
     for (int i = systemSize - 1; i >= 0; i--) {
-        a[i] = B[i][systemSize];
-        for (int j = i + 1; j < systemSize; j++) {
-            a[i] -= B[i][j] * a[j];
-        }
-        if (fabs(B[i][i]) > 1e-9)
-            a[i] /= B[i][i];
-        else
-            a[i] = 0;
+        a_norm[i] = B[i][systemSize];
+        for (int j = i + 1; j < systemSize; j++) a_norm[i] -= B[i][j] * a_norm[j];
+        if (fabs(B[i][i]) > 1e-9) a_norm[i] /= B[i][i]; else a_norm[i] = 0;
     }
 
-    for (int i = 0; i < systemSize; i++) {
-        coeffs[i] = a[i];
-    }
+    for(int i=0; i<systemSize; i++) coeffs[i] = a_norm[i];
 }
 
-// Function to calculate the first derivative of a polynomial at a given point
-inline float polynomialDerivative(float* coeffs, int degree, float x) {
-    float derivative = 0;
-    for (int i = 1; i <= degree; i++) {
-        derivative += i * coeffs[i] * pow(x, i - 1);
+// Function to evaluate a polynomial in normalized coordinates
+inline float evaluatePolynomialNormalized(float* coeffs, int degree, float x, const Normalizer& norm) {
+    float x_n = (x - norm.x_mean) / norm.x_std;
+    float y_n = 0;
+    float xp = 1.0;
+    for (int i = 0; i <= degree; i++) {
+        y_n += coeffs[i] * xp;
+        xp *= x_n;
     }
-    return derivative;
+    return y_n * norm.y_std + norm.y_mean;
+}
+
+// Function to calculate the first derivative of a polynomial at a given point in normalized coordinates
+inline float polynomialDerivativeNormalized(float* coeffs, int degree, float x, const Normalizer& norm) {
+    float x_n = (x - norm.x_mean) / norm.x_std;
+    float derivative_n = 0;
+    float xp = 1.0;
+    for (int i = 1; i <= degree; i++) {
+        derivative_n += i * coeffs[i] * xp;
+        if (i < degree) xp *= x_n;
+    }
+    // dy/dx = (dy/dy_n) * (dy_n/dx_n) * (dx_n/dx) = y_std * derivative_n * (1/x_std)
+    return derivative_n * (norm.y_std / norm.x_std);
 }
 
 // Simple Median Filter for a small window to reject spikes
