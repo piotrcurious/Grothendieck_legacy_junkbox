@@ -252,6 +252,20 @@ module SymbolicFPU (
                     exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
                 }
             end
+
+            `OP_FDIV: begin
+                if (type_a == `TYPE_ZERO && type_b != `TYPE_ZERO) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                end else if (type_b == `TYPE_NORMAL && coeff_b == FP_ONE) begin
+                    exact_hit = 1'b1; exact_result = operand_a;
+                end else if (((type_a == `TYPE_HYBRID) || (type_a == `TYPE_SYMBOLIC)) &&
+                             ((type_b == `TYPE_HYBRID) || (type_b == `TYPE_SYMBOLIC)) &&
+                             (symbol_a == symbol_b)) begin
+                    exact_hit = 1'b1;
+                    // S/S -> 1.0 (assuming coeff_a/coeff_b is done conceptually)
+                    exact_result = {`TYPE_NORMAL, `SYM_NONE, coeff_a / coeff_b};
+                end
+            end
         endcase
 
         // Main Control logic
