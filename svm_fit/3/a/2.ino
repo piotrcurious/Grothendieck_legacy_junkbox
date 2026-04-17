@@ -63,10 +63,12 @@ public:
 class PolynomialFitter {
 private:
     std::vector<Value> coefficients;
+    std::vector<std::vector<double>> R; // Upper triangular matrix from QR
     uint8_t degree = 0;
     Value tMid = 0;
     Value tHalfRange = 1;
     Automorphism valTransform;
+    double sigma_est = 0;
 
     double normalizeTime(Timestamp t) const {
         return (static_cast<double>(t) - tMid) / tHalfRange;
@@ -98,34 +100,36 @@ public:
             valTransform.offset = (minV <= 0) ? -minV + 1.0 : 0;
         }
 
-        size_t n = targetDegree + 1;
-        std::vector<std::vector<double>> A(n, std::vector<double>(n, 0.0));
-        std::vector<double> B(n, 0.0);
+        size_t k = targetDegree + 1;
+        size_t m = data.size();
+        // Weighted Design Matrix X (m x k) and vector y (m)
+        // For Ridge, we append sqrt(lambda)*I (k x k) to X and k zeros to y.
+        size_t rows = m + k;
+        std::vector<std::vector<double>> X(rows, std::vector<double>(k, 0.0));
+        std::vector<double> y(rows, 0.0);
 
-        for (size_t k = 0; k < data.size(); k++) {
-            const auto& p = data[k];
-            double x = normalizeTime(p.t);
-            double y = valTransform.forward(p.v);
-            double w = weights ? (*weights)[k] : 1.0;
+        for (size_t i = 0; i < m; i++) {
+            double x_norm = normalizeTime(data[i].t);
+            double val = valTransform.forward(data[i].v);
+            double w = weights ? (*weights)[i] : 1.0;
+            double sqrtW = sqrt(std::max(0.0, w));
 
-            std::vector<double> powers(n);
-            powers[0] = 1.0;
-            for (uint8_t i = 1; i < n; i++) powers[i] = powers[i-1] * x;
-
-            for (uint8_t i = 0; i < n; i++) {
-                for (uint8_t j = 0; j < n; j++) {
-                    A[i][j] += w * powers[i] * powers[j];
-                }
-                B[i] += w * y * powers[i];
+            double p = 1.0;
+            for (size_t j = 0; j < k; j++) {
+                X[i][j] = sqrtW * p;
+                p *= x_norm;
             }
+            y[i] = sqrtW * val;
         }
 
-        // Ridge Regularization
-        for (uint8_t i = 0; i < n; i++) {
-            A[i][i] += lambda;
+        // Ridge augmentation
+        double sqrtLambda = sqrt(lambda);
+        for (size_t j = 0; j < k; j++) {
+            X[m + j][j] = sqrtLambda;
+            // y[m + j] remains 0.0
         }
 
-        return solveLinearSystem(A, B, n);
+        return solveQR(X, y, rows, k);
     }
 
     // Iteratively Reweighted Least Squares for robustness
@@ -200,6 +204,35 @@ public:
         return valTransform.inverse(y_transformed);
     }
 
+    // Prediction with 95% confidence interval
+    void predictWithInterval(Timestamp t, Value& mean, Value& lower, Value& upper) const {
+        mean = predict(t);
+        double x_norm = normalizeTime(t);
+        size_t k = degree + 1;
+
+        std::vector<double> p(k);
+        p[0] = 1.0;
+        for (size_t i = 1; i < k; i++) p[i] = p[i - 1] * x_norm;
+
+        // Solve R^T * z = p for z
+        std::vector<double> z(k);
+        for (size_t i = 0; i < k; i++) {
+            double sum = 0;
+            for (size_t j = 0; j < i; j++) sum += R[j][i] * z[j];
+            z[i] = (p[i] - sum) / R[i][i];
+        }
+
+        double leverage = 0;
+        for (double val : z) leverage += val * val;
+
+        double se = sigma_est * sqrt(leverage);
+        double margin = 1.96 * se; // 95% CI using normal approximation
+
+        // Transform interval back
+        lower = valTransform.inverse(valTransform.forward(mean) - margin);
+        upper = valTransform.inverse(valTransform.forward(mean) + margin);
+    }
+
     double calculateRMSE(const std::deque<DataPoint>& data) const {
         double rss = calculateRSS(data);
         return sqrt(rss / data.size());
@@ -229,38 +262,90 @@ public:
     }
 
 private:
-    bool solveLinearSystem(std::vector<std::vector<double>>& A, std::vector<double>& B, uint8_t n) {
-        for (uint8_t k = 0; k < n; k++) {
-            // Pivoting
-            uint8_t maxRow = k;
-            double maxVal = std::abs(A[k][k]);
-            for (uint8_t i = k + 1; i < n; i++) {
-                if (std::abs(A[i][k]) > maxVal) {
-                    maxVal = std::abs(A[i][k]);
-                    maxRow = i;
-                }
-            }
-            if (maxVal < 1e-18) return false;
-            std::swap(A[k], A[maxRow]);
-            std::swap(B[k], B[maxRow]);
+    // Solve overdetermined system X*beta = y using Householder QR
+    bool solveQR(std::vector<std::vector<double>>& X, std::vector<double>& y, size_t m, size_t n) {
+        for (size_t k = 0; k < n; k++) {
+            double max_val = 0;
+            for (size_t i = k; i < m; i++) max_val = std::max(max_val, std::abs(X[i][k]));
+            if (max_val < 1e-18) continue; // Skip column if almost zero
 
-            for (uint8_t i = k + 1; i < n; i++) {
-                double factor = A[i][k] / A[k][k];
-                B[i] -= factor * B[k];
-                for (uint8_t j = k; j < n; j++) {
-                    A[i][j] -= factor * A[k][j];
-                }
+            double norm = 0;
+            for (size_t i = k; i < m; i++) {
+                X[i][k] /= max_val;
+                norm += X[i][k] * X[i][k];
             }
+            norm = sqrt(norm);
+
+            if (X[k][k] > 0) norm = -norm;
+            double u1 = X[k][k] - norm;
+            X[k][k] = norm * max_val;
+
+            for (size_t j = k + 1; j < n; j++) {
+                double dot = u1 * X[k][j];
+                for (size_t i = k + 1; i < m; i++) dot += X[i][k] * X[i][j];
+                double tau = dot / (u1 * norm);
+                X[k][j] += tau * u1;
+                for (size_t i = k + 1; i < m; i++) X[i][j] += tau * X[i][k];
+            }
+
+            double dot_y = u1 * y[k];
+            for (size_t i = k + 1; i < m; i++) dot_y += X[i][k] * y[i];
+            double tau_y = dot_y / (u1 * norm);
+            y[k] += tau_y * u1;
+            for (size_t i = k + 1; i < m; i++) y[i] += tau_y * X[i][k];
         }
 
+        // Store R for CI calculation
+        R.assign(n, std::vector<double>(n, 0.0));
+        for (size_t i = 0; i < n; i++) {
+            for (size_t j = i; j < n; j++) R[i][j] = X[i][j];
+        }
+
+        // Back-substitution for upper triangular R
         for (int i = n - 1; i >= 0; i--) {
-            double sum = 0;
-            for (uint8_t j = i + 1; j < n; j++) {
-                sum += A[i][j] * coefficients[j];
+            if (std::abs(X[i][i]) < 1e-18) {
+                coefficients[i] = 0;
+            } else {
+                double sum = 0;
+                for (size_t j = i + 1; j < n; j++) sum += X[i][j] * coefficients[j];
+                coefficients[i] = (y[i] - sum) / X[i][i];
             }
-            coefficients[i] = (B[i] - sum) / A[i][i];
         }
+
+        // Estimate sigma
+        double rss_transformed = 0;
+        for (size_t i = n; i < m; i++) rss_transformed += y[i] * y[i];
+        if (m > n) {
+            sigma_est = sqrt(rss_transformed / (m - n));
+        } else {
+            sigma_est = 0;
+        }
+
         return true;
+    }
+};
+
+class HampelFilter {
+public:
+    static bool isOutlier(const std::deque<DataPoint>& data, double nSigma = 3.0) {
+        if (data.size() < 7) return false;
+
+        std::vector<double> window;
+        for (const auto& p : data) window.push_back(p.v);
+
+        size_t n = window.size();
+        std::sort(window.begin(), window.end());
+        double median = window[n / 2];
+
+        std::vector<double> absDev;
+        for (double v : window) absDev.push_back(std::abs(v - median));
+        std::sort(absDev.begin(), absDev.end());
+        double mad = absDev[n / 2];
+
+        double sigma = 1.4826 * mad;
+        double currentVal = data.back().v;
+
+        return std::abs(currentVal - median) > nSigma * sigma;
     }
 };
 
@@ -281,7 +366,19 @@ void loop() {
         double t_sec = lastSampleTime / 1000.0;
         double rawValue = 2.0 * exp(0.1 * t_sec) + (random(-100, 100) / 500.0);
 
-        dataPoints.push_back({lastSampleTime, rawValue});
+        DataPoint p = {lastSampleTime, rawValue};
+
+        // Pre-filtering with Hampel Filter
+        static std::deque<DataPoint> filterWindow;
+        filterWindow.push_back(p);
+        if (filterWindow.size() > 10) filterWindow.pop_front();
+
+        if (HampelFilter::isOutlier(filterWindow)) {
+            Serial.println("Hampel Filter: Rejected outlier");
+            return; // Reject point
+        }
+
+        dataPoints.push_back(p);
         if (dataPoints.size() > MAX_DATA_POINTS) dataPoints.pop_front();
 
         if (dataPoints.size() >= MIN_DATA_POINTS) {
@@ -311,9 +408,12 @@ void loop() {
             if (bestType == TransformType::LOGARITHMIC) typeStr = "Log";
             else if (bestType == TransformType::SQUARE_ROOT) typeStr = "Sqrt";
 
-            Serial.printf("Best Fit: %s, Degree: %d, AICc: %.2f, RMSE: %.4f, Pred(now+5s): %.4f\n",
+            double mean, lower, upper;
+            bestFitter.predictWithInterval(lastSampleTime + 5000, mean, lower, upper);
+
+            Serial.printf("Best Fit: %s, Degree: %d, AICc: %.2f, RMSE: %.4f, Pred(now+5s): %.4f [%.4f, %.4f]\n",
                 typeStr, bestDegree, bestMetric, bestFitter.calculateRMSE(dataPoints),
-                bestFitter.predict(lastSampleTime + 5000));
+                mean, lower, upper);
         }
     }
 }
