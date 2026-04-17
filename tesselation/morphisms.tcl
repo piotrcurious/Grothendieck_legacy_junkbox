@@ -53,7 +53,7 @@ proc generate_fractal {beta digits depth} {
 # --- Morphism Application ---
 
 # A morphism can be a linear map or a nonlinear map like z -> z^2
-proc apply_morphism {points type} {
+proc apply_morphism {points type {beta {1.5 0.5}}} {
     set result {}
     foreach p $points {
         set x [cre $p]; set y [cim $p]
@@ -66,6 +66,9 @@ proc apply_morphism {points type} {
             lappend result [list [expr {$r * cos($y)}] [expr {$r * sin($y)}]]
         } elseif {$type == "conjugate"} {
             lappend result [list $x [expr {-$y}]]
+        } elseif {$type == "ScaleFunctor"} {
+            # Categorical scaling: z -> z * beta (refining the scheme)
+            lappend result [c_mul $p $beta]
         } else {
             lappend result $p
         }
@@ -90,7 +93,7 @@ set DIGITS_var "0,1,-1,i,-i"
 
 label .ctrl.lm -text "Morphism:"
 set MORPH_var "identity"
-tk_optionMenu .ctrl.om MORPH_var identity square exp conjugate
+tk_optionMenu .ctrl.om MORPH_var identity square exp conjugate ScaleFunctor
 pack .ctrl.lb .ctrl.eb .ctrl.ld .ctrl.ed .ctrl.lm .ctrl.om -side left -padx 4
 
 button .ctrl.draw -text "Draw" -command draw
@@ -120,7 +123,7 @@ proc draw {} {
     }
 
     set points [generate_fractal $beta $digits 6]
-    set m_points [apply_morphism $points $::MORPH_var]
+    set m_points [apply_morphism $points $::MORPH_var $beta]
 
     # Scale and center
     set w [winfo width .c]; set h [winfo height .c]
@@ -163,6 +166,39 @@ proc draw {} {
 
         .c create line $s_x $s_y $t_x $t_y -arrow last -fill "#555" -dash {2 2}
     }
+}
+
+proc export_svg {filename} {
+    set f [open $filename w]
+    puts $f "<svg width='800' height='600' xmlns='http://www.w3.org/2000/svg' style='background: black;'>"
+    foreach id [.c find all] {
+        set type [.c type $id]
+        set coords [.c coords $id]
+        if {$type == "line"} {
+            set fill [.c itemcget $id -fill]
+            puts $f "  <line x1='[lindex $coords 0]' y1='[lindex $coords 1]' x2='[lindex $coords 2]' y2='[lindex $coords 3]' stroke='$fill' stroke-width='1' />"
+        } elseif {$type == "oval"} {
+            set fill [.c itemcget $id -fill]
+            set cx [expr {([lindex $coords 0] + [lindex $coords 2]) / 2.0}]
+            set cy [expr {([lindex $coords 1] + [lindex $coords 3]) / 2.0}]
+            set r [expr {([lindex $coords 2] - [lindex $coords 0]) / 2.0}]
+            puts $f "  <circle cx='$cx' cy='$cy' r='$r' fill='$fill' />"
+        } elseif {$type == "text"} {
+            set fill [.c itemcget $id -fill]
+            set text [.c itemcget $id -text]
+            puts $f "  <text x='[lindex $coords 0]' y='[lindex $coords 1]' fill='$fill' font-family='Arial' font-size='12'>$text</text>"
+        }
+    }
+    puts $f "</svg>"
+    close $f
+    puts "SVG exported to $filename"
+}
+
+if {[lsearch -exact $argv "--headless"] != -1} {
+    update
+    draw
+    export_svg "morphisms.svg"
+    exit
 }
 
 after 500 draw
