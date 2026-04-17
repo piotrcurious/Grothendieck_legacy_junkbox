@@ -11,6 +11,7 @@ typedef std::function<double(double)> SignalGen;
 void run_scenario(const std::string& name, SignalGen signal_gen, int steps) {
     Serial.printf("\n--- Scenario: %s ---\n", name.c_str());
     dataPoints.clear();
+    filterWindow.clear();
     resetMockTime();
 
     for(int i = 0; i < steps; i++) {
@@ -93,6 +94,18 @@ int main() {
     run_scenario("Step Change", [](double t){
         return (t < 15.0) ? 10.0 : 30.0;
     }, 80);
+
+    // 7. Gapped Sampling with Linear Growth
+    run_scenario("Gapped Sampling", [](double t){
+        static double base_t = -1;
+        if (base_t < 0) base_t = t;
+        double elapsed = t - base_t;
+        // Create a large gap in the middle
+        if (elapsed > 10.0 && elapsed < 20.0) {
+             delay(10000); // Jump forward 10 seconds
+        }
+        return 10.0 + 2.0 * elapsed;
+    }, 50);
 
     return 0;
 }

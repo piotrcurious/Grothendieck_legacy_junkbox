@@ -61,6 +61,12 @@ public:
 };
 
 class PolynomialFitter {
+public:
+    enum class BasisType {
+        MONOMIAL,
+        LEGENDRE
+    };
+
 private:
     std::vector<Value> coefficients;
     std::vector<std::vector<double>> R; // Upper triangular matrix from QR
@@ -74,10 +80,28 @@ private:
         return (static_cast<double>(t) - tMid) / tHalfRange;
     }
 
+    double evaluateBasis(uint8_t i, double x) const {
+        if (basis == BasisType::MONOMIAL) {
+            return pow(x, i);
+        } else {
+            // Legendre polynomials via recurrence
+            if (i == 0) return 1.0;
+            if (i == 1) return x;
+            double p0 = 1.0, p1 = x, p2 = 0;
+            for (uint8_t j = 2; j <= i; j++) {
+                p2 = ((2.0 * j - 1.0) * x * p1 - (j - 1.0) * p0) / j;
+                p0 = p1;
+                p1 = p2;
+            }
+            return p1;
+        }
+    }
+
 public:
+    BasisType basis = BasisType::MONOMIAL;
     PolynomialFitter() : coefficients(MAX_POLYNOMIAL_DEGREE + 1, 0.0) {}
 
-    bool fit(const std::deque<DataPoint>& data, uint8_t targetDegree, TransformType vTrans = TransformType::LINEAR, double lambda = DEFAULT_RIDGE_LAMBDA, const std::vector<double>* weights = nullptr) {
+    bool fit(const std::deque<DataPoint>& data, uint8_t targetDegree, TransformType vTrans = TransformType::LINEAR, double lambda = DEFAULT_RIDGE_LAMBDA, const std::vector<double>* weights = nullptr, bool useLebesgueMeasure = false) {
         if (data.size() <= targetDegree) return false;
         degree = targetDegree;
 
@@ -112,12 +136,19 @@ public:
             double x_norm = normalizeTime(data[i].t);
             double val = valTransform.forward(data[i].v);
             double w = weights ? (*weights)[i] : 1.0;
+
+            if (useLebesgueMeasure && m > 1) {
+                double dt = 0;
+                if (i == 0) dt = (data[1].t - data[0].t);
+                else if (i == m - 1) dt = (data[m-1].t - data[m-2].t);
+                else dt = (data[i+1].t - data[i-1].t) / 2.0;
+                w *= dt;
+            }
+
             double sqrtW = sqrt(std::max(0.0, w));
 
-            double p = 1.0;
             for (size_t j = 0; j < k; j++) {
-                X[i][j] = sqrtW * p;
-                p *= x_norm;
+                X[i][j] = sqrtW * evaluateBasis(j, x_norm);
             }
             y[i] = sqrtW * val;
         }
@@ -133,7 +164,7 @@ public:
     }
 
     // Iteratively Reweighted Least Squares for robustness
-    bool fitRobust(const std::deque<DataPoint>& data, uint8_t targetDegree, TransformType vTrans = TransformType::LINEAR, int iterations = 5) {
+    bool fitRobust(const std::deque<DataPoint>& data, uint8_t targetDegree, TransformType vTrans = TransformType::LINEAR, int iterations = 5, bool useLebesgueMeasure = true) {
         // Initial weights based on median-based outlier detection for better convergence
         std::vector<double> initialWeights(data.size(), 1.0);
 
@@ -164,7 +195,7 @@ public:
             }
         }
 
-        if (!fit(data, targetDegree, vTrans, DEFAULT_RIDGE_LAMBDA, &initialWeights)) return false;
+        if (!fit(data, targetDegree, vTrans, DEFAULT_RIDGE_LAMBDA, &initialWeights, useLebesgueMeasure)) return false;
 
         for (int iter = 0; iter < iterations; iter++) {
             std::vector<double> residuals(data.size());
@@ -188,7 +219,7 @@ public:
                     weights[i] = 0;
                 }
             }
-            if (!fit(data, targetDegree, vTrans, DEFAULT_RIDGE_LAMBDA, &weights)) break;
+            if (!fit(data, targetDegree, vTrans, DEFAULT_RIDGE_LAMBDA, &weights, useLebesgueMeasure)) break;
         }
         return true;
     }
@@ -196,10 +227,8 @@ public:
     Value predict(Timestamp t) const {
         double x = normalizeTime(t);
         double y_transformed = 0;
-        double xi = 1.0;
         for (uint8_t i = 0; i <= degree; i++) {
-            y_transformed += coefficients[i] * xi;
-            xi *= x;
+            y_transformed += coefficients[i] * evaluateBasis(i, x);
         }
         return valTransform.inverse(y_transformed);
     }
@@ -211,8 +240,7 @@ public:
         size_t k = degree + 1;
 
         std::vector<double> p(k);
-        p[0] = 1.0;
-        for (size_t i = 1; i < k; i++) p[i] = p[i - 1] * x_norm;
+        for (size_t i = 0; i < k; i++) p[i] = evaluateBasis(i, x_norm);
 
         // Solve R^T * z = p for z
         std::vector<double> z(k);
@@ -350,6 +378,7 @@ public:
 };
 
 std::deque<DataPoint> dataPoints;
+std::deque<DataPoint> filterWindow;
 PolynomialFitter bestFitter;
 
 void setup() {
@@ -369,7 +398,6 @@ void loop() {
         DataPoint p = {lastSampleTime, rawValue};
 
         // Pre-filtering with Hampel Filter
-        static std::deque<DataPoint> filterWindow;
         filterWindow.push_back(p);
         if (filterWindow.size() > 10) filterWindow.pop_front();
 
@@ -392,6 +420,9 @@ void loop() {
                 uint8_t maxPossibleDegree = std::min((int)MAX_POLYNOMIAL_DEGREE, (int)dataPoints.size() - 2);
                 for (uint8_t d = 1; d <= maxPossibleDegree; d++) {
                     PolynomialFitter fitter;
+                    // For Log/Exp, monomial basis is more natural, for Linear/Sqrt, Legendre is very stable
+                    fitter.basis = (type == TransformType::LINEAR) ? PolynomialFitter::BasisType::LEGENDRE : PolynomialFitter::BasisType::MONOMIAL;
+
                     if (fitter.fitRobust(dataPoints, d, type)) {
                         double aicc = fitter.calculateAICc(dataPoints);
                         if (aicc < bestMetric) {
