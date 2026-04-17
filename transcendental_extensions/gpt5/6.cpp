@@ -292,6 +292,9 @@ static inline bool structurallyEqual(const ExprPtr &a, const ExprPtr &b) {
     return a->key_cache == b->key_cache;
 }
 
+// Rule: pair<pattern, replacement>
+using Rule = pair<ExprPtr, ExprPtr>;
+
 // Match pattern to subject. Returns true if match succeeded and fills bindings.
 // This is a recursive matching that handles n-ary sequence wildcards with backtracking.
 bool matchPattern(const ExprPtr &pat, const ExprPtr &subj, Bindings &B);
@@ -415,6 +418,68 @@ bool matchPattern(const ExprPtr &pat, const ExprPtr &subj, Bindings &B) {
     return false;
 }
 
+// forward
+ExprPtr simplify(const ExprPtr &root, const vector<Rule> &rules, int maxIter=50);
+vector<Rule> defaultRules();
+
+// ---------------------- Symbolic Differentiation ----------------------
+ExprPtr diff(const ExprPtr &e, const string &var) {
+    if (!e) return nullptr;
+    auto rules = defaultRules();
+    switch (e->kind) {
+        case Kind::CONST:
+            return ZERO();
+        case Kind::VAR:
+            return (e->label == var ? ONE() : ZERO());
+        case Kind::UNARY: {
+            ExprPtr du = diff(e->left, var);
+            if (e->label == "exp") {
+                return simplify(MUL({e, du}), rules);
+            } else if (e->label == "log") {
+                return simplify(MUL({P(e->left, C(-1, 0, "-1")), du}), rules); // d/dx log(u) = 1/u * du/dx
+            } else if (e->label == "sin") {
+                return simplify(MUL({U("cos", e->left), du}), rules);
+            } else if (e->label == "cos") {
+                // d/dx cos(u) = -sin(u) * du/dx
+                return simplify(MUL({U("neg", U("sin", e->left)), du}), rules);
+            } else if (e->label == "neg") {
+                return simplify(U("neg", du), rules);
+            }
+            throw runtime_error("Differentiation not implemented for morphism: " + e->label);
+        }
+        case Kind::POW: {
+            // d/dx (u^v) = u^v * (v' * ln(u) + v * u' / u)
+            ExprPtr u = e->left;
+            ExprPtr v = e->right;
+            ExprPtr du = diff(u, var);
+            ExprPtr dv = diff(v, var);
+            ExprPtr term1 = MUL({dv, U("log", u)});
+            ExprPtr term2 = MUL({v, du, P(u, C(-1, 0, "-1"))});
+            return simplify(MUL({e, ADD({term1, term2})}), rules);
+        }
+        case Kind::NARY: {
+            if (e->nop == NaryOp::ADD) {
+                vector<ExprPtr> d_ops;
+                for (auto &o : e->ops) d_ops.push_back(diff(o, var));
+                return simplify(N(NaryOp::ADD, d_ops), rules);
+            } else { // MUL
+                // Product rule: d/dx (u*v*w) = u'vw + uv'w + uvw'
+                vector<ExprPtr> sum_terms;
+                for (size_t i = 0; i < e->ops.size(); ++i) {
+                    vector<ExprPtr> prod_terms;
+                    for (size_t j = 0; j < e->ops.size(); ++j) {
+                        if (i == j) prod_terms.push_back(diff(e->ops[j], var));
+                        else prod_terms.push_back(e->ops[j]);
+                    }
+                    sum_terms.push_back(N(NaryOp::MUL, prod_terms));
+                }
+                return simplify(N(NaryOp::ADD, sum_terms), rules);
+            }
+        }
+    }
+    return ZERO();
+}
+
 // substitute bindings into replacement pattern
 // support splicing seq bindings into NARY replacements (if replacement contains Var("?+x") etc.)
 ExprPtr substitute(const ExprPtr &repl, const Bindings &B);
@@ -470,7 +535,8 @@ ExprPtr substitute(const ExprPtr &repl, const Bindings &B) {
         if (it != B.seq.end()) {
             // if seq bound to single element and we are substitute in non-nary context, return that element
             if (it->second.size()==1) return it->second[0];
-            // otherwise we are substituting a sequence into non-nary context: wrap as ADD of elements (default)
+            // otherwise we are substituting a sequence into non-nary context: ambiguous.
+            // In n-ary context substituteIntoNary handles splicing.
             return N(NaryOp::ADD, it->second);
         }
         // unbound -> represent empty sequence as neutral element
@@ -594,6 +660,10 @@ ExprPtr constantFold(const ExprPtr &node) {
                 else accumConst = (node->nop==NaryOp::ADD? accumConst+v : accumConst * v);
             } else nonConst.push_back(o);
         }
+        // Short-circuit for zero in multiplication
+        if (node->nop == NaryOp::MUL && hasAccumConst && abs(accumConst.real()) + abs(accumConst.imag()) < EPS) {
+            return ZERO();
+        }
         // If there is a constant neutral element and nonConst empty -> return const
         if (nonConst.empty()) {
             if (hasAccumConst) return C(accumConst.real(), accumConst.imag(), "");
@@ -614,7 +684,7 @@ ExprPtr constantFold(const ExprPtr &node) {
 }
 
 // top-level simplify: rewrite rules then constant fold repeatedly
-ExprPtr simplify(const ExprPtr &root, const vector<Rule> &rules, int maxIter=50) {
+ExprPtr simplify(const ExprPtr &root, const vector<Rule> &rules, int maxIter) {
     ExprPtr cur = root;
     for (int i=0;i<maxIter;++i) {
         ExprPtr next = rewriteFixedPoint(cur, rules, 1);
@@ -649,11 +719,38 @@ vector<Rule> defaultRules() {
     // x * 1 -> x  and 1 * x -> x  (but with n-ary canonicalization these will be handled by constant folding; still add safe rules)
     rules.emplace_back(MUL({W("x"), ONE()}), W("x"));
     rules.emplace_back(MUL({ONE(), W("x")}), W("x"));
+    // x * 0 -> 0
+    rules.emplace_back(MUL({W("x"), ZERO()}), ZERO());
+    rules.emplace_back(MUL({ZERO(), W("x")}), ZERO());
     // x + 0 -> x
     rules.emplace_back(ADD({W("x"), ZERO()}), W("x"));
     rules.emplace_back(ADD({ZERO(), W("x")}), W("x"));
-    // associative pattern using sequence wildcard: (a + b + ?+rest) -> (?+rest + a + b) example not typical; it's just showing seq wildcards.
-    // Example: combine like terms could be implemented with sophisticated patterns and canonicalization.
+    // x - 0 -> x
+    rules.emplace_back(N(NaryOp::ADD, {W("x"), U("neg", ZERO())}), W("x"));
+    // x^a * x^b -> x^(a+b)
+    rules.emplace_back(MUL({Wstar("pre"), P(W("x"), W("a")), P(W("x"), W("b")), Wstar("post")}),
+                       MUL({Wstar("pre"), P(W("x"), ADD({W("a"), W("b")})), Wstar("post")}));
+    // x * x^a -> x^(a+1)
+    rules.emplace_back(MUL({Wstar("pre"), W("x"), P(W("x"), W("a")), Wstar("post")}),
+                       MUL({Wstar("pre"), P(W("x"), ADD({W("a"), ONE()})), Wstar("post")}));
+    // x * x -> x^2
+    rules.emplace_back(MUL({Wstar("pre"), W("x"), W("x"), Wstar("post")}),
+                       MUL({Wstar("pre"), P(W("x"), C(2,0,"2")), Wstar("post")}));
+    // (x^a)^b -> x^(a*b)
+    rules.emplace_back(P(P(W("x"), W("a")), W("b")), P(W("x"), MUL({W("a"), W("b")})));
+    // x^1 -> x
+    rules.emplace_back(P(W("x"), ONE()), W("x"));
+    // x^0 -> 1
+    rules.emplace_back(P(W("x"), ZERO()), ONE());
+    // 1^x -> 1
+    rules.emplace_back(P(ONE(), W("x")), ONE());
+    // 0^x -> 0 (for x != 0)
+    rules.emplace_back(P(ZERO(), W("x")), ZERO());
+    // x * 0 -> 0
+    rules.emplace_back(MUL({W("x"), ZERO(), Wstar("rest")}), ZERO());
+    // x * 1 -> x
+    rules.emplace_back(MUL({W("x"), ONE(), Wstar("rest")}), MUL({W("x"), Wstar("rest")}));
+
     return rules;
 }
 
@@ -736,6 +833,21 @@ int main() {
     Rule stripZero = { ADD({ Wplus("prefix"), ZERO() }), ADD({ Wplus("prefix") }) };
     ExprPtr stripped = applyRuleOnce(sum2, stripZero);
     cout << "After strip zero: " << stripped->toString() << "\n";
+    cout << "\n";
+
+    // Example 8: Symbolic Differentiation
+    ExprPtr expr8 = ADD({ P(V("x"), C(2,0,"2")), MUL({C(3,0,"3"), V("x")}), C(5,0,"5") }); // x^2 + 3x + 5
+    cout << "Original Expr: " << expr8->toString() << "\n";
+    ExprPtr dexpr8 = diff(expr8, "x");
+    cout << "d/dx Result:   " << dexpr8->toString() << "\n";
+
+    ExprPtr expr9 = U("sin", P(V("x"), C(2,0,"2"))); // sin(x^2)
+    cout << "Original Expr: " << expr9->toString() << "\n";
+    cout << "d/dx Result:   " << diff(expr9, "x")->toString() << "\n";
+
+    ExprPtr expr10 = U("log", P(V("x"), C(3,0,"3"))); // log(x^3)
+    cout << "Original Expr: " << expr10->toString() << "\n";
+    cout << "d/dx Result:   " << diff(expr10, "x")->toString() << "\n";
 
     return 0;
 }

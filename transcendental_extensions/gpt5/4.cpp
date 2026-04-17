@@ -69,13 +69,29 @@ private:
         return std::to_string(v.real()) + (v.imag() >= 0 ? "+" : "") + std::to_string(v.imag()) + "i";
     }
 
-    // Very minimal evaluator for demo purposes (extendable)
+    // Evaluator that can handle numeric constants and some known labels
     static std::complex<double> evaluateExpression(const std::string& expr) {
-        // This is a stub — in a real system you’d parse & evaluate symbolically
-        // For demo: match known constants
         if (expr == "pi") return {M_PI, 0};
         if (expr == "e") return {std::exp(1.0), 0};
         if (expr == "-1") return {-1, 0};
+
+        // Try to parse as double
+        try {
+            size_t pos;
+            double val = std::stod(expr, &pos);
+            if (pos == expr.length()) return {val, 0};
+        } catch (...) {
+            // Not a simple double
+        }
+
+        // Fallback for demo: if it contains '^', try to evaluate parts (extremely minimal)
+        size_t caret = expr.find('^');
+        if (caret != std::string::npos) {
+            std::complex<double> base = evaluateExpression(expr.substr(0, caret));
+            std::complex<double> exp = evaluateExpression(expr.substr(caret + 1));
+            return std::pow(base, exp);
+        }
+
         return {0, 0}; // fallback
     }
 };
