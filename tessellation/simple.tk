@@ -1,0 +1,342 @@
+#!/usr/bin/env wish
+#
+# tesselate_cyclotomic_lattice.tcl
+# Improved Tcl/Tk demo: Projection of Cyclotomic Lattice Z[zeta_n]
+# This avoids oversimplified "n-gons on a grid" metaphors and directly
+# visualizes the algebraic structure of the cyclotomic integers.
+#
+
+package require Tk
+
+# --- Polynomial & Cyclotomic Math ---
+
+proc divisors {n} {
+    set ds {}
+    for {set d 1} {$d <= $n} {incr d} {
+        if {$n % $d == 0} { lappend ds $d }
+    }
+    return $ds
+}
+
+proc poly_trim {p} {
+    while {[llength $p] > 1 && [lindex $p end] == 0} {
+        set p [lrange $p 0 end-1]
+    }
+    return $p
+}
+
+proc poly_divide_exact {num den} {
+    set num [poly_trim $num]
+    set den [poly_trim $den]
+    set ln [llength $num]
+    set ld [llength $den]
+    if {$ld == 0} {error "divide by zero"}
+    set qlen [expr {$ln - $ld + 1}]
+    if {$qlen < 1} { return [list 0] }
+    set q [lrepeat $qlen 0]
+    set rem $num
+    while {[llength $rem] >= $ld} {
+        set d [expr {[llength $rem] - $ld}]
+        set qcoeff [expr {[lindex $rem end] / [lindex $den end]}]
+        lset q $d $qcoeff
+        for {set i 0} {$i < $ld} {incr i} {
+            set idx [expr {$i + $d}]
+            lset rem $idx [expr {[lindex $rem $idx] - $qcoeff * [lindex $den $i]}]
+        }
+        set rem [poly_trim $rem]
+    }
+    return [poly_trim $q]
+}
+
+array set PHI_CACHE {}
+proc compute_phi {n} {
+    if {[info exists ::PHI_CACHE($n)]} { return $::PHI_CACHE($n) }
+    if {$n == 1} { return [set ::PHI_CACHE(1) {-1 1}] }
+    set p [lrepeat [expr {$n+1}] 0]
+    lset p $n 1; lset p 0 -1
+    foreach d [divisors $n] {
+        if {$d < $n} { set p [poly_divide_exact $p [compute_phi $d]] }
+    }
+    return [set ::PHI_CACHE($n) $p]
+}
+
+proc totient {n} {
+    return [expr {[llength [compute_phi $n]] - 1}]
+}
+
+# --- Geometry & Projection ---
+
+# Map cyclotomic integer sum_{i=0}^{phi(n)-1} a_i * zeta_n^i to complex plane
+proc cyclotomic_to_complex {n coeffs} {
+    set re 0.0
+    set im 0.0
+    set pi [expr {acos(-1)}]
+    for {set i 0} {$i < [llength $coeffs]} {incr i} {
+        set a [lindex $coeffs $i]
+        if {$a == 0} continue
+        set angle [expr {2.0 * $pi * $i / $n}]
+        set re [expr {$re + $a * cos($angle)}]
+        set im [expr {$im + $a * sin($angle)}]
+    }
+    return [list $re $im]
+}
+
+# Calculate the Minkowski norm (sum of squared magnitudes of all embeddings)
+proc cyclotomic_norm {n coeffs} {
+    set norm_sq 0.0
+    set phi [totient $n]
+    set pi [expr {acos(-1)}]
+    # Minkowski embedding maps the cyclotomic integer to R^phi
+    for {set k 1} {$k < $n} {incr k} {
+        if {[gcd $k $n] == 1} {
+            set re 0.0; set im 0.0
+            for {set i 0} {$i < [llength $coeffs]} {incr i} {
+                set a [lindex $coeffs $i]
+                set angle [expr {2.0 * $pi * $i * $k / $n}]
+                set re [expr {$re + $a * cos($angle)}]
+                set im [expr {$im + $a * sin($angle)}]
+            }
+            set norm_sq [expr {$norm_sq + $re*$re + $im*$im}]
+        }
+    }
+    return [expr {sqrt($norm_sq)}]
+}
+
+proc gcd {a b} {
+    while {$b != 0} {
+        set t $b
+        set b [expr {$a % $b}]
+        set a $t
+    }
+    return $a
+}
+
+# Generate points within a "norm-ball" (heuristic: sum of absolute coefficients)
+proc generate_lattice_points {n bound} {
+    set phi [totient $n]
+    set points {}
+    set coeffs [lrepeat $phi 0]
+
+    # We'll use a simple recursive search for points with sum(abs(coeffs)) <= bound
+    # to avoid the exponential explosion of the hypercube.
+    proc generate_recursive {n phi bound current_coeffs depth result_ptr} {
+        upvar $result_ptr res
+        if {$depth == $phi} {
+            lappend res [list [cyclotomic_to_complex $n $current_coeffs] \
+                              [cyclotomic_norm $n $current_coeffs] \
+                              $current_coeffs]
+            return
+        }
+
+        # Heuristic bound for coefficients
+        for {set v -$bound} {$v <= $bound} {incr v} {
+            lappend current_coeffs $v
+            generate_recursive $n $phi $bound $current_coeffs [expr {$depth + 1}] res
+            set current_coeffs [lrange $current_coeffs 0 end-1]
+        }
+    }
+
+    set res {}
+    generate_recursive $n $phi $bound {} 0 res
+    return $res
+}
+
+# --- GUI ---
+
+wm title . "Cyclotomic Lattice Projection Z\[zeta_n\]"
+
+frame .ctrl -padx 5 -pady 5
+pack .ctrl -side top -fill x
+
+label .ctrl.ln -text "n (order):"
+entry .ctrl.en -textvariable N_var -width 4
+set N_var 5
+
+label .ctrl.lb -text "Bound (coeffs):"
+entry .ctrl.eb -textvariable B_var -width 4
+set B_var 2
+
+label .ctrl.ls -text "Scale:"
+entry .ctrl.es -textvariable S_var -width 4
+set S_var 60
+
+label .ctrl.lm -text "Mode:"
+set MODE_var "Lattice"
+tk_optionMenu .ctrl.om MODE_var Lattice Spectral
+pack .ctrl.lm .ctrl.om -side left -padx 4
+
+button .ctrl.draw -text "Project Lattice" -command draw_lattice
+pack .ctrl.ln .ctrl.en .ctrl.lb .ctrl.eb .ctrl.ls .ctrl.es .ctrl.draw -side left -padx 4
+
+label .ctrl.lg -text "Galois k:"
+set GALOIS_k 1
+tk_optionMenu .ctrl.gk GALOIS_k 1
+pack .ctrl.lg .ctrl.gk -side left -padx 4
+
+canvas .c -width 800 -height 600 -bg white
+pack .c -side top -fill both -expand 1
+
+proc to_canvas {re im} {
+    global S_var
+    set w [winfo width .c]; set h [winfo height .c]
+    set cx [expr {$w / 2.0}]; set cy [expr {$h / 2.0}]
+    set x [expr {$cx + $re * $::S_var}]
+    set y [expr {$cy - $im * $::S_var}]
+    return [list $x $y]
+}
+
+# Get elements of the Galois group (Z/nZ)*
+proc get_galois_elements {n} {
+    set elements {}
+    for {set k 1} {$k < $n} {incr k} {
+        if {[gcd $k $n] == 1} { lappend elements $k }
+    }
+    return $elements
+}
+
+proc update_galois_menu {n} {
+    set m [.ctrl.gk cget -menu]
+    $m delete 0 end
+    foreach k [get_galois_elements $n] {
+        $m add radiobutton -label $k -variable GALOIS_k -command draw_lattice
+    }
+    # Ensure current k is valid for new n
+    set elements [get_galois_elements $n]
+    if {[lsearch -exact $elements $::GALOIS_k] == -1} {
+        set ::GALOIS_k [lindex $elements 0]
+    }
+}
+
+proc draw_lattice {} {
+    .c delete all
+    set n $::N_var
+    update_galois_menu $n
+    set b $::B_var
+    if {$n < 1} { set n 1 }
+
+    set results [generate_lattice_points $n $b]
+
+    if {$::MODE_var == "Spectral"} {
+        draw_spectral $n $results
+        return
+    }
+
+    set max_norm 0.1
+    foreach res $results {
+        set norm [lindex $res 1]
+        if {$norm > $max_norm} { set max_norm $norm }
+    }
+
+    # Draw lines first
+    if {$n <= 12} {
+        foreach res $results {
+            set pt [lindex $res 0]
+            set p_re [lindex $pt 0]
+            set p_im [lindex $pt 1]
+            set p_c [to_canvas $p_re $p_im]
+
+            for {set i 0} {$i < $n} {incr i} {
+                set angle [expr {2.0 * acos(-1) * $i / $n}]
+                set n_re [expr {$p_re + cos($angle)}]
+                set n_im [expr {$p_im + sin($angle)}]
+                if {$i < [expr {$n/2}]} {
+                   set n_c [to_canvas $n_re $n_im]
+                   .c create line [lindex $p_c 0] [lindex $p_c 1] \
+                                  [lindex $n_c 0] [lindex $n_c 1] \
+                                  -fill #ddd
+                }
+            }
+        }
+    }
+
+    # Draw points colored by norm
+    foreach res $results {
+        set pt [lindex $res 0]
+        set norm [lindex $res 1]
+        set coeffs [lindex $res 2]
+        set c [to_canvas [lindex $pt 0] [lindex $pt 1]]
+        set r 2
+
+        set intensity [expr {int(255 * (1.0 - ($norm / $max_norm)))}]
+        if {$intensity < 0} {set intensity 0}
+        set color [format "#%02x%02x%02x" $intensity 0 [expr {255 - $intensity}]]
+
+        set id [.c create oval [expr {[lindex $c 0]-$r}] [expr {[lindex $c 1]-$r}] \
+                       [expr {[lindex $c 0]+$r}] [expr {[lindex $c 1]+$r}] \
+                       -fill $color -outline "" -tags "point"]
+
+        # Galois Action: sigma_k(zeta^i) = zeta^(i*k)
+        # We compute the position of sigma_k(pt)
+        set k $::GALOIS_k
+        if {$k > 1} {
+            set sk_re 0.0; set sk_im 0.0
+            set pi [expr {acos(-1)}]
+            for {set i 0} {$i < [llength $coeffs]} {incr i} {
+                set a [lindex $coeffs $i]
+                if {$a == 0} continue
+                set angle [expr {2.0 * $pi * $i * $k / $n}]
+                set sk_re [expr {$sk_re + $a * cos($angle)}]
+                set sk_im [expr {$sk_im + $a * sin($angle)}]
+            }
+            set sk_c [to_canvas $sk_re $sk_im]
+            .c create line [lindex $c 0] [lindex $c 1] [lindex $sk_c 0] [lindex $sk_c 1] \
+                           -fill "#faa" -arrow last -dash {2 2} -tags "galois"
+        }
+    }
+}
+
+proc draw_spectral {n results} {
+    # Spectral analysis (Bragg peaks)
+    # For a projected lattice, the diffraction pattern is the set of points
+    # where the density is high. Here we visualize the "intensity" of peaks.
+    set w [winfo width .c]; set h [winfo height .c]
+    set cx [expr {$w / 2.0}]; set cy [expr {$h / 2.0}]
+
+    foreach res $results {
+        set pt [lindex $res 0]
+        set norm [lindex $res 1]
+
+        # In a quasicrystal, intensity is related to the "internal" coordinates
+        # We approximate this by the inverse of the Minkowski norm.
+        set intensity [expr {1.0 / ($norm + 0.1)}]
+        set r [expr {$intensity * 5}]
+        if {$r > 10} {set r 10}
+
+        set c [to_canvas [lindex $pt 0] [lindex $pt 1]]
+        .c create oval [expr {[lindex $c 0]-$r}] [expr {[lindex $c 1]-$r}] \
+                       [expr {[lindex $c 0]+$r}] [expr {[lindex $c 1]+$r}] \
+                       -fill "#f80" -outline ""
+    }
+}
+
+proc export_svg {filename} {
+    set f [open $filename w]
+    puts $f "<svg width='800' height='600' xmlns='http://www.w3.org/2000/svg' style='background: white;'>"
+
+    foreach id [.c find all] {
+        set type [.c type $id]
+        set coords [.c coords $id]
+        if {$type == "line"} {
+            set fill [.c itemcget $id -fill]
+            puts $f "  <line x1='[lindex $coords 0]' y1='[lindex $coords 1]' x2='[lindex $coords 2]' y2='[lindex $coords 3]' stroke='$fill' stroke-width='1' />"
+        } elseif {$type == "oval"} {
+            set fill [.c itemcget $id -fill]
+            set cx [expr {([lindex $coords 0] + [lindex $coords 2]) / 2.0}]
+            set cy [expr {([lindex $coords 1] + [lindex $coords 3]) / 2.0}]
+            set r [expr {([lindex $coords 2] - [lindex $coords 0]) / 2.0}]
+            puts $f "  <circle cx='$cx' cy='$cy' r='$r' fill='$fill' />"
+        }
+    }
+    puts $f "</svg>"
+    close $f
+    puts "SVG exported to $filename"
+}
+
+if {[lsearch -exact $argv "--headless"] != -1} {
+    update
+    draw_lattice
+    export_svg "simple.svg"
+    exit
+}
+
+after 500 draw_lattice
