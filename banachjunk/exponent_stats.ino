@@ -44,7 +44,8 @@ private:
             sumXX += xValues[i] * xValues[i];
         }
 
-        T slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+        T denom = (n * sumXX - sumX * sumX);
+        T slope = (abs(denom) > 1e-9) ? (n * sumXY - sumX * sumY) / denom : 0;
         T intercept = (sumY - slope * sumX) / n;
 
         // Compute characteristics
@@ -56,27 +57,24 @@ private:
         T yMean = sumY / n;
         T ssTotal = 0, ssResidual = 0;
         
-        std::vector<T> predictedLog;
         for (size_t i = 0; i < logData.size(); ++i) {
             T predicted = intercept + slope * xValues[i];
-            predictedLog.push_back(predicted);
-            
             ssTotal += std::pow(logData[i] - yMean, 2);
             ssResidual += std::pow(logData[i] - predicted, 2);
         }
 
-        characteristics.rSquared = 1 - (ssResidual / ssTotal);
+        characteristics.rSquared = (abs(ssTotal) > 1e-9) ? (1 - (ssResidual / ssTotal)) : 1;
 
         // Compute residuals
         characteristics.residuals.resize(rawData.size());
         for (size_t i = 0; i < rawData.size(); ++i) {
-            T predicted = characteristics.baseExponent * 
-                          std::pow(std::exp(characteristics.growthRate), i);
+            T predicted = characteristics.baseExponent * std::exp(characteristics.growthRate * i);
             characteristics.residuals[i] = rawData[i] - predicted;
         }
 
-        // Find inflection point
-        characteristics.inflectionPoint = -1 / characteristics.growthRate;
+        // Simple exponential y = a*e^(bx) has no inflection point.
+        // For detection purposes, we'll store the time constant.
+        characteristics.inflectionPoint = (abs(characteristics.growthRate) > 1e-9) ? (1 / characteristics.growthRate) : 0;
 
         return characteristics;
     }
@@ -144,16 +142,31 @@ private:
 
             // Skewness
             T stdDev = std::sqrt(variance);
-            metrics.skewness[dim] = (m3 / dimData.size()) / std::pow(stdDev, 3);
+            metrics.skewness[dim] = (abs(stdDev) > 1e-9) ? (m3 / dimData.size()) / std::pow(stdDev, 3) : 0;
 
             // Kurtosis
-            metrics.kurtosis[dim] = (m4 / dimData.size()) / std::pow(variance, 2) - 3;
+            metrics.kurtosis[dim] = (abs(variance) > 1e-9) ? (m4 / dimData.size()) / std::pow(variance, 2) - 3 : 0;
 
-            // Entropy (Shannon Information Entropy)
+            // Entropy (Shannon Information Entropy) using a simple histogram
             T entropy = 0;
-            std::vector<T> probabilities(dimData.size(), 1.0 / dimData.size());
-            for (const auto& p : probabilities) {
-                entropy -= p * std::log2(p);
+            if (dimData.size() > 1) {
+                T minVal = *std::min_element(dimData.begin(), dimData.end());
+                T maxVal = *std::max_element(dimData.begin(), dimData.end());
+                T range = maxVal - minVal;
+
+                const int numBins = 10;
+                std::vector<int> bins(numBins, 0);
+                for (const auto& val : dimData) {
+                    int binIdx = (range > 1e-9) ? static_cast<int>((val - minVal) / range * (numBins - 1)) : 0;
+                    bins[binIdx]++;
+                }
+
+                for (int count : bins) {
+                    if (count > 0) {
+                        T p = static_cast<T>(count) / dimData.size();
+                        entropy -= p * std::log2(p);
+                    }
+                }
             }
             metrics.entropy[dim] = entropy;
         }

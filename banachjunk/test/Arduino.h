@@ -7,6 +7,9 @@
 #include <numeric>
 #include <cstdio>
 #include <stdarg.h>
+#include <cstdint>
+#include <array>
+#include <random>
 
 // Use inline functions instead of macros to avoid conflicts with std
 #undef max
@@ -75,3 +78,17 @@ extern SerialMock Serial;
 
 inline void delay(unsigned long ms) {}
 inline unsigned long millis() { return 0; }
+
+#define F(s) s
+
+inline long random(long max) {
+    static std::mt19937 gen(0);
+    std::uniform_int_distribution<long> dis(0, max - 1);
+    return dis(gen);
+}
+
+inline long random(long min, long max) {
+    static std::mt19937 gen(0);
+    std::uniform_int_distribution<long> dis(min, max - 1);
+    return dis(gen);
+}

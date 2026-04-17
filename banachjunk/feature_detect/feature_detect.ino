@@ -87,11 +87,12 @@ public:
         newFeature.value = signal[i + WINDOW_SIZE/2].value;
         newFeature.strength = l2Norm;
         
-        if (normRatio > 1.5) {
+        // Improved feature classification
+        if (l2Norm > 1e-9 && lInfNorm / l2Norm > 0.8) {
           newFeature.type = "spike";
-        } else if (l2Norm > 1e-9 && (lInfNorm / l2Norm > 2.0)) {
+        } else if (normRatio > 1.2) {
           newFeature.type = "step";
-        } else if (normRatio < 0.8 && normRatio > 0) {
+        } else if (normRatio < 0.6 && normRatio > 0) {
           newFeature.type = "oscillation";
         } else {
           newFeature.type = "transition";
