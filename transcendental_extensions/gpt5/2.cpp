@@ -19,7 +19,11 @@ public:
             {"cos", [](const std::complex<double>& z){ return std::cos(z); }},
             {"exp", [](const std::complex<double>& z){ return std::exp(z); }},
             {"log", [](const std::complex<double>& z){ return std::log(z); }},
-            {"neg", [](const std::complex<double>& z){ return -z; }}
+            {"neg", [](const std::complex<double>& z){ return -z; }},
+            {"sinh",[](const std::complex<double>& z){ return std::sinh(z); }},
+            {"cosh",[](const std::complex<double>& z){ return std::cosh(z); }},
+            {"phi", [](const std::complex<double>& z){ (void)z; return std::complex<double>((1.0+std::sqrt(5.0))/2.0, 0); }},
+            {"gamma",[](const std::complex<double>& z){ (void)z; return std::complex<double>(0.5772156649015328, 0); }}
         };
         return morph;
     }

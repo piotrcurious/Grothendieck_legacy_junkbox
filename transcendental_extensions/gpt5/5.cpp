@@ -116,7 +116,13 @@ MorphMap& morphisms() {
         {"exp", [](const cplx& z){ return std::exp(z); }},
         {"log", [](const cplx& z){ return std::log(z); }},
         {"sqrt",[](const cplx& z){ return std::sqrt(z); }},
-        {"neg", [](const cplx& z){ return -z; }}
+        {"neg", [](const cplx& z){ return -z; }},
+        {"sinh",[](const cplx& z){ return std::sinh(z); }},
+        {"cosh",[](const cplx& z){ return std::cosh(z); }},
+        {"tanh",[](const cplx& z){ return std::tanh(z); }},
+        {"asin",[](const cplx& z){ return std::asin(z); }},
+        {"acos",[](const cplx& z){ return std::acos(z); }},
+        {"atan",[](const cplx& z){ return std::atan(z); }},
     };
     return mm;
 }
@@ -126,6 +132,8 @@ bool labelToValue(const std::string& lbl, cplx &out) {
     if (lbl == "π" || lbl == "pi") { out = cplx(M_PI,0); return true; }
     if (lbl == "e") { out = cplx(std::exp(1.0),0); return true; }
     if (lbl == "i") { out = cplx(0,1); return true; }
+    if (lbl == "φ" || lbl == "phi") { out = cplx((1.0 + std::sqrt(5.0)) / 2.0, 0); return true; }
+    if (lbl == "γ" || lbl == "gamma") { out = cplx(0.5772156649015328, 0); return true; }
     if (lbl == "0") { out = cplx(0,0); return true; }
     if (lbl == "1") { out = cplx(1,0); return true; }
     return false;
