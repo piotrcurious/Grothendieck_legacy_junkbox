@@ -1,7 +1,7 @@
 #include <iostream>
 #include <complex>
 #include <cmath>
-#include <map>
+#include <vector>
 #include <string>
 #include <regex>
 
@@ -33,12 +33,24 @@ public:
         return TranscendentalComplex(value_ / other.value_, "(" + expression_ + "/" + other.expression_ + ")");
     }
 
+    TranscendentalComplex operator^(const TranscendentalComplex& other) const {
+        return TranscendentalComplex(std::pow(value_, other.value_), expression_ + "^" + other.expression_);
+    }
+
     // Apply morphism rules and pattern match
-    TranscendentalComplex simplify(const std::map<std::string, std::string>& morphisms) const {
+    TranscendentalComplex simplify(const std::vector<std::pair<std::string, std::string>>& morphisms) const {
         std::string simplifiedExpr = expression_;
-        for (const auto& [pattern, replacement] : morphisms) {
-            std::regex re(pattern);
-            simplifiedExpr = std::regex_replace(simplifiedExpr, re, replacement);
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (const auto& pair : morphisms) {
+                std::regex re(pair.first);
+                std::string next = std::regex_replace(simplifiedExpr, re, pair.second);
+                if (next != simplifiedExpr) {
+                    simplifiedExpr = next;
+                    changed = true;
+                }
+            }
         }
         // After pattern replacement, re-evaluate numeric value
         std::complex<double> eval = evaluateExpression(simplifiedExpr);
@@ -75,13 +87,16 @@ int main() {
     auto i  = TranscendentalComplex::constant("i", 0.0, 1.0);
 
     // Build expression: e^(i*pi)
-    TranscendentalComplex eulerIdentity = e^(i * pi); // We'll add ^ operator next
+    TranscendentalComplex eulerIdentity = e ^ (i * pi);
 
-    // Map of morphism rules (regex patterns → replacements)
-    std::map<std::string, std::string> morphisms = {
+    // List of morphism rules (regex patterns → replacements)
+    // Ordered from most specific to least specific
+    std::vector<std::pair<std::string, std::string>> morphisms = {
         {R"(e\^\(i\*pi\))", "-1"},
-        {R"(pi)", std::to_string(M_PI)},
-        {R"(e)", std::to_string(std::exp(1.0))}
+        {R"(e\^i\*pi)", "-1"},
+        {R"(\(i\*pi\))", "i*pi"},
+        {R"(pi)", "3.14159265358979323846"},
+        {R"(e)", "2.71828182845904523536"}
     };
 
     // Apply simplification (pattern match + replace)

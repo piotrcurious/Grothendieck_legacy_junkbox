@@ -5,6 +5,7 @@
 #include <map>
 #include <cmath>
 #include <sstream>
+#include <functional>
 
 class TranscendentalComplex {
 public:

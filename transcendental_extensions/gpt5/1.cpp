@@ -7,7 +7,7 @@
 
 class TranscendentalComplex {
 public:
-    enum class OpType { CONST, ADD, SUB, MUL, DIV };
+    enum class OpType { CONST, ADD, SUB, MUL, DIV, POW, UNARY };
 
     // Constructor for constant value
     explicit TranscendentalComplex(const std::complex<double>& val, std::string label = "")
@@ -30,6 +30,22 @@ public:
         return TranscendentalComplex(OpType::DIV, *this, other);
     }
 
+    TranscendentalComplex pow(const TranscendentalComplex& other) const {
+        return TranscendentalComplex(OpType::POW, *this, other);
+    }
+
+    static TranscendentalComplex sin(const TranscendentalComplex& arg) {
+        return TranscendentalComplex(OpType::UNARY, "sin", arg);
+    }
+
+    static TranscendentalComplex cos(const TranscendentalComplex& arg) {
+        return TranscendentalComplex(OpType::UNARY, "cos", arg);
+    }
+
+    static TranscendentalComplex exp(const TranscendentalComplex& arg) {
+        return TranscendentalComplex(OpType::UNARY, "exp", arg);
+    }
+
     // Evaluate recursively
     std::complex<double> getValue() const {
         switch (op_) {
@@ -38,6 +54,12 @@ public:
             case OpType::SUB: return left_->getValue() - right_->getValue();
             case OpType::MUL: return left_->getValue() * right_->getValue();
             case OpType::DIV: return left_->getValue() / right_->getValue();
+            case OpType::POW: return std::pow(left_->getValue(), right_->getValue());
+            case OpType::UNARY:
+                if (label_ == "sin") return std::sin(left_->getValue());
+                if (label_ == "cos") return std::cos(left_->getValue());
+                if (label_ == "exp") return std::exp(left_->getValue());
+                break;
         }
         return {};
     }
@@ -50,6 +72,8 @@ public:
             case OpType::SUB: return "(" + left_->toString() + " - " + right_->toString() + ")";
             case OpType::MUL: return "(" + left_->toString() + " * " + right_->toString() + ")";
             case OpType::DIV: return "(" + left_->toString() + " / " + right_->toString() + ")";
+            case OpType::POW: return "(" + left_->toString() + " ^ " + right_->toString() + ")";
+            case OpType::UNARY: return label_ + "(" + left_->toString() + ")";
         }
         return {};
     }
@@ -66,6 +90,10 @@ private:
         : op_(op), left_(std::make_shared<TranscendentalComplex>(lhs)),
           right_(std::make_shared<TranscendentalComplex>(rhs)) {}
 
+    // Constructor for unary operations
+    TranscendentalComplex(OpType op, std::string label, const TranscendentalComplex& arg)
+        : op_(op), label_(std::move(label)), left_(std::make_shared<TranscendentalComplex>(arg)) {}
+
     static std::string toStringValue(const std::complex<double>& c) {
         std::ostringstream oss;
         oss << c;
@@ -77,19 +105,23 @@ int main() {
     // Symbolic constants
     TranscendentalComplex pi({M_PI, 0}, "π");
     TranscendentalComplex e ({std::exp(1.0), 0}, "e");
+    TranscendentalComplex i ({0, 1}, "i");
 
     // Build symbolic expressions
     auto sum     = pi + e;
     auto product = pi * e;
     auto fancy   = (pi + e) * (pi - e) / e;
+    auto euler   = TranscendentalComplex::exp(i * pi);
 
     // Show symbolic form
     std::cout << "Symbolic sum:     " << sum.toString() << "\n";
     std::cout << "Symbolic product: " << product.toString() << "\n";
-    std::cout << "Fancy expression: " << fancy.toString() << "\n\n";
+    std::cout << "Fancy expression: " << fancy.toString() << "\n";
+    std::cout << "Euler identity:  " << euler.toString() << "\n\n";
 
     // Evaluate numerically
     std::cout << "pi + e     = " << sum.getValue() << "\n";
     std::cout << "pi * e     = " << product.getValue() << "\n";
     std::cout << "fancy expr = " << fancy.getValue() << "\n";
+    std::cout << "exp(i*pi)  = " << euler.getValue() << "\n";
 }
