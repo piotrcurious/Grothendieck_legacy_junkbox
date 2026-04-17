@@ -112,8 +112,16 @@ module SymbolicFPU (
         end
     end
 
+    // Behavioral real variables for simulation purposes
+    real r_a, r_b, r_res;
+
     // Combinational Logic: The core of the SFPU
     always @(*) begin
+        // Convert coefficients to real for accurate behavioral simulation
+        r_a = $bitstoreal(coeff_a);
+        r_b = $bitstoreal(coeff_b);
+        r_res = 0.0;
+
         // Default Look-Aside
         exact_hit = 1'b0;
         exact_result = {`TYPE_NAN, `SYM_NONE, 64'd0};
@@ -121,150 +129,210 @@ module SymbolicFPU (
         case (opcode)
             `OP_FADD: begin
                 if (type_b == `TYPE_ZERO) begin
-                    exact_hit = 1'b1; exact_result = operand_a;
+                    exact_hit = 1'b1;
+                    exact_result = operand_a;
                 end else if (type_a == `TYPE_ZERO) begin
-                    exact_hit = 1'b1; exact_result = operand_b;
+                    exact_hit = 1'b1;
+                    exact_result = operand_b;
                 end else if (((type_a == `TYPE_HYBRID) || (type_a == `TYPE_SYMBOLIC)) &&
                              ((type_b == `TYPE_HYBRID) || (type_b == `TYPE_SYMBOLIC)) &&
                              (symbol_a == symbol_b)) begin
                     exact_hit = 1'b1;
-                    exact_result = {`TYPE_HYBRID, symbol_a, coeff_a + coeff_b};
+                    r_res = r_a + r_b;
+                    exact_result = {`TYPE_HYBRID, symbol_a, $realtobits(r_res)};
                 end
             end
 
             `OP_FSUB: begin
                 if (type_b == `TYPE_ZERO) begin
-                    exact_hit = 1'b1; exact_result = operand_a;
+                    exact_hit = 1'b1;
+                    exact_result = operand_a;
                 end else if (((type_a == `TYPE_HYBRID) || (type_a == `TYPE_SYMBOLIC)) &&
                              ((type_b == `TYPE_HYBRID) || (type_b == `TYPE_SYMBOLIC)) &&
                              (symbol_a == symbol_b)) begin
                     exact_hit = 1'b1;
-                    exact_result = {`TYPE_HYBRID, symbol_a, coeff_a - coeff_b};
+                    r_res = r_a - r_b;
+                    exact_result = {`TYPE_HYBRID, symbol_a, $realtobits(r_res)};
                 end
             end
 
             `OP_FMUL: begin
                 if (type_a == `TYPE_ZERO || type_b == `TYPE_ZERO) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
                 end else if (type_a == `TYPE_SYMBOLIC && type_b == `TYPE_NORMAL) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_HYBRID, symbol_a, coeff_b};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_HYBRID, symbol_a, coeff_b};
                 end else if (type_a == `TYPE_NORMAL && type_b == `TYPE_SYMBOLIC) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_HYBRID, symbol_b, coeff_a};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_HYBRID, symbol_b, coeff_a};
                 end else if (type_a == `TYPE_HYBRID && type_b == `TYPE_NORMAL) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_HYBRID, symbol_a, coeff_a * coeff_b};
+                    exact_hit = 1'b1;
+                    r_res = r_a * r_b;
+                    exact_result = {`TYPE_HYBRID, symbol_a, $realtobits(r_res)};
                 end else if (type_a == `TYPE_NORMAL && type_b == `TYPE_HYBRID) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_HYBRID, symbol_b, coeff_a * coeff_b};
+                    exact_hit = 1'b1;
+                    r_res = r_a * r_b;
+                    exact_result = {`TYPE_HYBRID, symbol_b, $realtobits(r_res)};
                 end else if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_I &&
                              type_b == `TYPE_SYMBOLIC && symbol_b == `SYM_I) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_NEG_ONE};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_NEG_ONE};
                 end else if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_PI &&
                              type_b == `TYPE_SYMBOLIC && symbol_b == `SYM_I) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_HYBRID, `SYM_I, PI_VAL};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_HYBRID, `SYM_I, PI_VAL};
                 end else if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_I &&
                              type_b == `TYPE_SYMBOLIC && symbol_b == `SYM_PI) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_HYBRID, `SYM_I, PI_VAL};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_HYBRID, `SYM_I, PI_VAL};
+                end else if (type_a == `TYPE_HYBRID && symbol_a == `SYM_I &&
+                             type_b == `TYPE_SYMBOLIC && symbol_b == `SYM_I) begin
+                    // (c*i) * i -> -c
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_NORMAL, `SYM_NONE, -coeff_a};
+                end else if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_I &&
+                             type_b == `TYPE_HYBRID && symbol_b == `SYM_I) begin
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_NORMAL, `SYM_NONE, -coeff_b};
+                end
+            end
+
+            `OP_FDIV: begin
+                if (type_a == `TYPE_ZERO && type_b != `TYPE_ZERO) begin
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                end else if (type_b == `TYPE_NORMAL && coeff_b == FP_ONE) begin
+                    exact_hit = 1'b1;
+                    exact_result = operand_a;
+                end else if (((type_a == `TYPE_HYBRID) || (type_a == `TYPE_SYMBOLIC)) &&
+                             ((type_b == `TYPE_HYBRID) || (type_b == `TYPE_SYMBOLIC)) &&
+                             (symbol_a == symbol_b)) begin
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
+                end
+            end
+
+            `OP_FLOG: begin
+                if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_E) begin
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
+                end else if (type_a == `TYPE_NORMAL && coeff_a == FP_ONE) begin
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
                 end
             end
 
             `OP_FEXP: begin
                 if (type_a == `TYPE_ZERO) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
                 end else if (type_a == `TYPE_NORMAL && coeff_a == FP_ONE) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_SYMBOLIC, `SYM_E, FP_ONE};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_SYMBOLIC, `SYM_E, FP_ONE};
                 end else if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_LOG2) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_NORMAL, `SYM_NONE, 64'h4000000000000000};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_NORMAL, `SYM_NONE, 64'h4000000000000000};
                 end else if (type_a == `TYPE_HYBRID && symbol_a == `SYM_I && coeff_a == PI_VAL) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_NEG_ONE};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_NEG_ONE};
                 end
             end
 
             `OP_FSIN: begin
                 if (type_a == `TYPE_ZERO) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
-                } else if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_PI) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                end else if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_PI) begin
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
                 end
             end
 
             `OP_FCOS: begin
                 if (type_a == `TYPE_ZERO) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
                 end else if ((type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_PI) ||
                              (type_a == `TYPE_HYBRID && symbol_a == `SYM_PI && coeff_a == FP_ONE)) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_NEG_ONE};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_NEG_ONE};
                 end else if (type_a == `TYPE_HYBRID && symbol_a == `SYM_PI && coeff_a == 64'h4000000000000000) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
                 end
             end
 
             `OP_FSQRT: begin
                 if (type_a == `TYPE_ZERO) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
-                } else if (type_a == `TYPE_NORMAL && coeff_a == FP_ONE) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                end else if (type_a == `TYPE_NORMAL && coeff_a == FP_ONE) begin
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
                 end
             end
 
             `OP_FSINH: begin
                 if (type_a == `TYPE_ZERO) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
                 end
             end
 
             `OP_FCOSH: begin
                 if (type_a == `TYPE_ZERO) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
                 end
             end
 
             `OP_FASIN: begin
                 if (type_a == `TYPE_ZERO) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
                 end else if (type_a == `TYPE_NORMAL && coeff_a == FP_ONE) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_HYBRID, `SYM_PI, 64'h3FE0000000000000};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_HYBRID, `SYM_PI, 64'h3FE0000000000000};
                 end
             end
 
             `OP_FACOS: begin
                 if (type_a == `TYPE_NORMAL && coeff_a == FP_ONE) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
                 end else if (type_a == `TYPE_ZERO) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_HYBRID, `SYM_PI, 64'h3FE0000000000000};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_HYBRID, `SYM_PI, 64'h3FE0000000000000};
                 end
             end
 
             `OP_FTAN: begin
                 if (type_a == `TYPE_ZERO) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
                 end else if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_PI) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
                 end
             end
 
             `OP_FATAN: begin
                 if (type_a == `TYPE_ZERO) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
-                }
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                end
             end
 
             `OP_FTANH: begin
                 if (type_a == `TYPE_ZERO) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
-                }
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                end
             end
 
-            `OP_FDIV: begin
-                if (type_a == `TYPE_ZERO && type_b != `TYPE_ZERO) begin
-                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
-                end else if (type_b == `TYPE_NORMAL && coeff_b == FP_ONE) begin
-                    exact_hit = 1'b1; exact_result = operand_a;
-                end else if (((type_a == `TYPE_HYBRID) || (type_a == `TYPE_SYMBOLIC)) &&
-                             ((type_b == `TYPE_HYBRID) || (type_b == `TYPE_SYMBOLIC)) &&
-                             (symbol_a == symbol_b)) begin
-                    exact_hit = 1'b1;
-                    // S/S -> 1.0 (assuming coeff_a/coeff_b is done conceptually)
-                    exact_result = {`TYPE_NORMAL, `SYM_NONE, coeff_a / coeff_b};
-                end
+            default: begin
+                exact_hit = 1'b0;
             end
         endcase
 

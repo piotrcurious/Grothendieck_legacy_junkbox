@@ -411,6 +411,7 @@ ExprPtr parse(string s) {
 // forward
 ExprPtr diff(const ExprPtr &e, const string &var);
 ExprPtr integrate(const ExprPtr &e, const string &var);
+cplx definite_integrate(const ExprPtr &e, const string &var, double a, double b);
 ExprPtr substitute_var(const ExprPtr &e, const string &var, const ExprPtr &val);
 ExprPtr taylor_series(const ExprPtr &e, const string &var, double center, int order);
 cplx solve_newton(const ExprPtr &e, const string &var, cplx guess, int iterations = 10);
@@ -1037,6 +1038,9 @@ vector<Rule> defaultRules() {
     // sqrt(x) -> x^0.5
     rules.emplace_back(U("sqrt", W("x")), P(W("x"), C(0.5)));
 
+    // i^2 -> -1
+    rules.emplace_back(P(II(), C(2)), C(-1, 0, "-1"));
+
     return rules;
 }
 
@@ -1148,6 +1152,11 @@ int main() {
     ExprPtr ps2 = simplify(parse(s2), rules);
     cout << "Simplified: " << ps2->toString() << "\n";
 
+    cout << "\n--- Complex Identity Test ---\n";
+    string s14 = "i^2";
+    cout << "Expression: " << s14 << "\n";
+    cout << "Simplified: " << simplify(parse(s14), rules)->toString() << "\n";
+
     cout << "\n--- Cancellation Test ---\n";
     string s3 = "(x + y) - x";
     cout << "Parsing: " << s3 << "\n";
@@ -1205,6 +1214,10 @@ int main() {
     cout << "Integrating " << s11 << " wrt x:\n";
     cout << "Result: " << integrate(parse(s11), "x")->toString() << "\n";
 
+    string s11b = "cos(2*x)";
+    cout << "Integrating " << s11b << " wrt x:\n";
+    cout << "Result: " << integrate(parse(s11b), "x")->toString() << "\n";
+
     cout << "\n--- Simplification Identity Test ---\n";
     string s12 = "exp(log(x + y))";
     cout << "Expression: " << s12 << "\n";
@@ -1213,6 +1226,11 @@ int main() {
     string s13 = "x^a * x^b";
     cout << "Expression: " << s13 << "\n";
     cout << "Simplified: " << simplify(parse(s13), rules)->toString() << "\n";
+
+    cout << "\n--- Definite Integration Test ---\n";
+    string s15 = "x^2";
+    cout << "Integrating " << s15 << " from 0 to 3:\n";
+    cout << "Result: " << definite_integrate(parse(s15), "x", 0, 3).real() << "\n";
 
     return 0;
 }
@@ -1285,11 +1303,35 @@ ExprPtr integrate(const ExprPtr &e, const string &var) {
             if (e->label == var) return simplify(MUL({C(0.5), P(V(var), C(2))}), rules);
             else return simplify(MUL({e, V(var)}), rules);
         case Kind::UNARY:
-            if (e->label == "sin") return simplify(U("neg", U("cos", e->left)), rules);
-            if (e->label == "cos") return simplify(U("sin", e->left), rules);
-            if (e->label == "exp") return e;
-            if (e->label == "log") return simplify(ADD({MUL({V(var), U("log", V(var))}), U("neg", V(var))}), rules);
-            if (e->label == "tan") return simplify(U("neg", U("log", U("cos", V(var)))), rules);
+            if (e->label == "sin") {
+                // int sin(ax) dx = -1/a * cos(ax)
+                unordered_set<string> v; e->left->getVariables(v);
+                if (v.size() == 1 && v.count(var)) {
+                    ExprPtr da = diff(e->left, var);
+                    unordered_set<string> v2; da->getVariables(v2);
+                    if (v2.empty()) return simplify(MUL({U("neg", P(da, C(-1))), U("cos", e->left)}), rules);
+                }
+            }
+            if (e->label == "cos") {
+                unordered_set<string> v; e->left->getVariables(v);
+                if (v.size() == 1 && v.count(var)) {
+                    ExprPtr da = diff(e->left, var);
+                    unordered_set<string> v2; da->getVariables(v2);
+                    if (v2.empty()) return simplify(MUL({P(da, C(-1)), U("sin", e->left)}), rules);
+                }
+            }
+            if (e->label == "exp") {
+                unordered_set<string> v; e->left->getVariables(v);
+                if (v.size() == 1 && v.count(var)) {
+                    ExprPtr da = diff(e->left, var);
+                    unordered_set<string> v2; da->getVariables(v2);
+                    if (v2.empty()) return simplify(MUL({P(da, C(-1)), e}), rules);
+                }
+            }
+            if (e->label == "log") {
+                if (e->left->kind == Kind::VAR && e->left->label == var)
+                    return simplify(ADD({MUL({V(var), U("log", V(var))}), U("neg", V(var))}), rules);
+            }
             break;
         case Kind::POW:
             if (e->left->kind == Kind::VAR && e->left->label == var && e->right->kind == Kind::CONST) {
@@ -1322,4 +1364,11 @@ ExprPtr integrate(const ExprPtr &e, const string &var) {
             break;
     }
     throw runtime_error("Integration not implemented for this expression");
+}
+
+cplx definite_integrate(const ExprPtr &e, const string &var, double a, double b) {
+    ExprPtr indef = integrate(e, var);
+    cplx val_b = evaluate(substitute_var(indef, var, C(b)));
+    cplx val_a = evaluate(substitute_var(indef, var, C(a)));
+    return val_b - val_a;
 }
