@@ -28,6 +28,8 @@
 `define SYM_E         4'b0010
 `define SYM_I         4'b0011
 `define SYM_LOG2      4'b0100
+`define SYM_PHI       4'b0101
+`define SYM_GAMMA     4'b0110
 
 // FPU Opcodes
 `define OP_FADD       5'b00001
@@ -42,6 +44,7 @@
 `define OP_FASIN      5'b10110
 `define OP_FACOS      5'b10111
 `define OP_FATAN      5'b11000
+`define OP_FSQRT      5'b11001
 
 module SymbolicFPU (
     input wire clk,
@@ -81,11 +84,13 @@ module SymbolicFPU (
     reg        done_next;
 
     // High-precision constant values from a ROM
-    wire [63:0] PI_VAL, E_VAL, LOG2_VAL;
+    wire [63:0] PI_VAL, E_VAL, LOG2_VAL, PHI_VAL, GAMMA_VAL;
     ConstantROM constant_rom (
         .pi_val(PI_VAL), 
         .e_val(E_VAL), 
-        .log2_val(LOG2_VAL)
+        .log2_val(LOG2_VAL),
+        .phi_val(PHI_VAL),
+        .gamma_val(GAMMA_VAL)
     );
 
     always @(posedge clk or posedge reset) begin
@@ -301,6 +306,20 @@ module SymbolicFPU (
                     end
                 end
 
+                `OP_FSQRT: begin
+                    // Rule: sqrt(0) -> 0
+                    if (type_a == `TYPE_ZERO) begin
+                        result_next = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                    end
+                    // Rule: sqrt(1) -> 1
+                    else if (type_a == `TYPE_NORMAL && coeff_a == FP_ONE) begin
+                        result_next = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
+                    end
+                    else begin
+                        status_next[0] = 1'b1;
+                    end
+                end
+
                 default: begin
                     status_next[0] = 1'b1; // inexact
                 end
@@ -316,7 +335,9 @@ endmodule
 module ConstantROM (
     output wire [63:0] pi_val,
     output wire [63:0] e_val,
-    output wire [63:0] log2_val
+    output wire [63:0] log2_val,
+    output wire [63:0] phi_val,
+    output wire [63:0] gamma_val
 );
     // M_PI = 3.141592653589793
     assign pi_val = 64'h400921FB54442D18;
@@ -324,4 +345,8 @@ module ConstantROM (
     assign e_val  = 64'h4005BF0A8B145769;
     // M_LN2 = 0.6931471805599453
     assign log2_val = 64'h3FE62E42FEFA39EF;
+    // PHI = 1.618033988749895
+    assign phi_val = 64'h3FF9E3779B97F4A8;
+    // GAMMA = 0.5772156649015328
+    assign gamma_val = 64'h3FE2788CF26668E2;
 endmodule
