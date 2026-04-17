@@ -81,31 +81,64 @@ proc cyclotomic_to_complex {n coeffs} {
     return [list $re $im]
 }
 
-# Recursively generate all lattice points within a certain coefficient bound
-# We use a simple hypercube of coefficients [-B, B]^phi(n)
+# Calculate the algebraic norm of a cyclotomic integer
+proc cyclotomic_norm {n coeffs} {
+    set norm 1.0
+    set phi [totient $n]
+    set pi [expr {acos(-1)}]
+    # The norm is the product of all embeddings
+    # embeddings are evaluations at zeta_n^k for gcd(k, n) = 1
+    for {set k 1} {$k < $n} {incr k} {
+        if {[gcd $k $n] == 1} {
+            set re 0.0; set im 0.0
+            for {set i 0} {$i < [llength $coeffs]} {incr i} {
+                set a [lindex $coeffs $i]
+                set angle [expr {2.0 * $pi * $i * $k / $n}]
+                set re [expr {$re + $a * cos($angle)}]
+                set im [expr {$im + $a * sin($angle)}]
+            }
+            set norm [expr {$norm * sqrt($re*$re + $im*$im)}]
+        }
+    }
+    return $norm
+}
+
+proc gcd {a b} {
+    while {$b != 0} {
+        set t $b
+        set b [expr {$a % $b}]
+        set a $t
+    }
+    return $a
+}
+
+# Generate points within a "norm-ball" (heuristic: sum of absolute coefficients)
 proc generate_lattice_points {n bound} {
     set phi [totient $n]
     set points {}
-    set coeffs [lrepeat $phi -$bound]
+    set coeffs [lrepeat $phi 0]
 
-    while {1} {
-        lappend points [cyclotomic_to_complex $n $coeffs]
-
-        # Increment coeffs
-        set idx 0
-        while {$idx < $phi} {
-            set val [lindex $coeffs $idx]
-            if {$val < $bound} {
-                lset coeffs $idx [expr {$val + 1}]
-                break
-            } else {
-                lset coeffs $idx -$bound
-                incr idx
-            }
+    # We'll use a simple recursive search for points with sum(abs(coeffs)) <= bound
+    # to avoid the exponential explosion of the hypercube.
+    proc generate_recursive {n phi bound current_coeffs depth result_ptr} {
+        upvar $result_ptr res
+        if {$depth == $phi} {
+            lappend res [list [cyclotomic_to_complex $n $current_coeffs] \
+                              [cyclotomic_norm $n $current_coeffs]]
+            return
         }
-        if {$idx == $phi} break
+
+        # Heuristic bound for coefficients
+        for {set v -$bound} {$v <= $bound} {incr v} {
+            lappend current_coeffs $v
+            generate_recursive $n $phi $bound $current_coeffs [expr {$depth + 1}] res
+            set current_coeffs [lrange $current_coeffs 0 end-1]
+        }
     }
-    return $points
+
+    set res {}
+    generate_recursive $n $phi $bound {} 0 res
+    return $res
 }
 
 # --- GUI ---
@@ -148,23 +181,18 @@ proc draw_lattice {} {
     set b $::B_var
     if {$n < 1} { set n 1 }
 
-    set points [generate_lattice_points $n $b]
+    set results [generate_lattice_points $n $b]
 
-    # Draw points
-    foreach pt $points {
-        set c [to_canvas [lindex $pt 0] [lindex $pt 1]]
-        set r 2
-        .c create oval [expr {[lindex $c 0]-$r}] [expr {[lindex $c 1]-$r}] \
-                       [expr {[lindex $c 0]+$r}] [expr {[lindex $c 1]+$r}] \
-                       -fill blue -outline ""
+    set max_norm 0.1
+    foreach res $results {
+        set norm [lindex $res 1]
+        if {$norm > $max_norm} { set max_norm $norm }
     }
 
-    # Draw Voronoi-like connections (approximate by connecting nearest neighbors)
-    # For speed and clarity, let's just draw the points for now, or connect if n is small.
+    # Draw lines first
     if {$n <= 12} {
-        # Connect each point p to p + zeta_n^i
-        set phi [totient $n]
-        foreach pt $points {
+        foreach res $results {
+            set pt [lindex $res 0]
             set p_re [lindex $pt 0]
             set p_im [lindex $pt 1]
             set p_c [to_canvas $p_re $p_im]
@@ -173,9 +201,6 @@ proc draw_lattice {} {
                 set angle [expr {2.0 * acos(-1) * $i / $n}]
                 set n_re [expr {$p_re + cos($angle)}]
                 set n_im [expr {$p_im + sin($angle)}]
-                # We could check if (n_re, n_im) is in our point set,
-                # but it's faster to just draw the line if it's within bounds.
-                # To avoid double lines, only draw in "positive" directions.
                 if {$i < [expr {$n/2}]} {
                    set n_c [to_canvas $n_re $n_im]
                    .c create line [lindex $p_c 0] [lindex $p_c 1] \
@@ -186,7 +211,44 @@ proc draw_lattice {} {
         }
     }
 
-    .c raise all ;# Raise points above lines
+    # Draw points colored by norm
+    foreach res $results {
+        set pt [lindex $res 0]
+        set norm [lindex $res 1]
+        set c [to_canvas [lindex $pt 0] [lindex $pt 1]]
+        set r 2
+
+        set intensity [expr {int(255 * (1.0 - ($norm / $max_norm)))}]
+        if {$intensity < 0} {set intensity 0}
+        set color [format "#%02x%02x%02x" $intensity 0 [expr {255 - $intensity}]]
+
+        .c create oval [expr {[lindex $c 0]-$r}] [expr {[lindex $c 1]-$r}] \
+                       [expr {[lindex $c 0]+$r}] [expr {[lindex $c 1]+$r}] \
+                       -fill $color -outline ""
+    }
+}
+
+proc export_svg {filename} {
+    set f [open $filename w]
+    puts $f "<svg width='800' height='600' xmlns='http://www.w3.org/2000/svg' style='background: white;'>"
+
+    foreach id [.c find all] {
+        set type [.c type $id]
+        set coords [.c coords $id]
+        if {$type == "line"} {
+            set fill [.c itemcget $id -fill]
+            puts $f "  <line x1='[lindex $coords 0]' y1='[lindex $coords 1]' x2='[lindex $coords 2]' y2='[lindex $coords 3]' stroke='$fill' stroke-width='1' />"
+        } elseif {$type == "oval"} {
+            set fill [.c itemcget $id -fill]
+            set cx [expr {([lindex $coords 0] + [lindex $coords 2]) / 2.0}]
+            set cy [expr {([lindex $coords 1] + [lindex $coords 3]) / 2.0}]
+            set r [expr {([lindex $coords 2] - [lindex $coords 0]) / 2.0}]
+            puts $f "  <circle cx='$cx' cy='$cy' r='$r' fill='$fill' />"
+        }
+    }
+    puts $f "</svg>"
+    close $f
+    puts "SVG exported to $filename"
 }
 
 after 500 draw_lattice

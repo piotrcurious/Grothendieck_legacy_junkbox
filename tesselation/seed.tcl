@@ -23,7 +23,7 @@ proc apply_morphism {points type t} {
     foreach p $points {
         set x [lindex $p 0]; set y [lindex $p 1]
         if {$type == "Rotation"} {
-            set angle [expr {$t * acos(-1) / 180.0}]
+            set angle [expr {$t * acos(-1) / 90.0}]
             lappend res [list [expr {$x*cos($angle) - $y*sin($angle)}] \
                               [expr {$x*sin($angle) + $y*cos($angle)}]]
         } elseif {$type == "Scaling"} {
@@ -61,36 +61,79 @@ tk_optionMenu .ctrl.om TYPE_var Rotation Scaling Shear Nonlinear
 pack .ctrl.lm .ctrl.om -side left -padx 4
 
 set T 0
-set SEED {{0 0} {1 0} {1 1} {0 1} {0.5 1.5}} ;# A simple house shape
+set SEED_TYPE "House"
+tk_optionMenu .ctrl.oseed SEED_TYPE House Circle Star Monomial
+pack .ctrl.oseed -side left -padx 4
+
+proc get_seed {type} {
+    if {$type == "House"} {
+        return {{0 0} {1 0} {1 1} {0 1} {0.5 1.5}}
+    } elseif {$type == "Circle"} {
+        set pts {}
+        set pi [expr {acos(-1)}]
+        for {set i 0} {$i < 20} {incr i} {
+            set a [expr {$i * 2.0 * $pi / 20.0}]
+            lappend pts [list [expr {cos($a)}] [expr {sin($a)}]]
+        }
+        return $pts
+    } elseif {$type == "Star"} {
+        set pts {}
+        set pi [expr {acos(-1)}]
+        for {set i 0} {$i < 10} {incr i} {
+            set a [expr {$i * 2.0 * $pi / 10.0}]
+            set r [expr {$i % 2 == 0 ? 1.0 : 0.4}]
+            lappend pts [list [expr {$r * cos($a)}] [expr {$r * sin($a)}]]
+        }
+        return $pts
+    } elseif {$type == "Monomial"} {
+        # y = x^3 - x
+        set pts {}
+        for {set i -20} {$i <= 20} {incr i} {
+            set x [expr {$i / 10.0}]
+            lappend pts [list $x [expr {$x*$x*$x - $x}]]
+        }
+        return $pts
+    }
+    return {{0 0}}
+}
 
 proc animate {} {
-    global T SEED TYPE_var
+    global T SEED_TYPE TYPE_var
     .c delete all
+    set seed [get_seed $SEED_TYPE]
 
     set w [winfo width .c]; set h [winfo height .c]
     set scale 100.0
 
     # Draw original seed in light grey
     set orig_pts {}
-    foreach p $SEED {
+    foreach p $seed {
         foreach coord [to_canvas [lindex $p 0] [lindex $p 1] $w $h $scale] {
             lappend orig_pts $coord
         }
     }
-    .c create polygon $orig_pts -fill "" -outline "#eee" -dash {4 4}
+    if {$SEED_TYPE == "Monomial"} {
+        .c create line $orig_pts -fill "#eee" -dash {4 4}
+    } else {
+        .c create polygon $orig_pts -fill "" -outline "#eee" -dash {4 4}
+    }
 
     # Draw transformed seed
-    set trans_pts [apply_morphism $SEED $TYPE_var $T]
+    set trans_pts [apply_morphism $seed $TYPE_var $T]
     set poly_pts {}
     foreach p $trans_pts {
         foreach coord [to_canvas [lindex $p 0] [lindex $p 1] $w $h $scale] {
             lappend poly_pts $coord
         }
     }
-    .c create polygon $poly_pts -fill "#aef" -outline "black" -width 2
+    if {$SEED_TYPE == "Monomial"} {
+        .c create line $poly_pts -fill "#aef" -width 2
+    } else {
+        .c create polygon $poly_pts -fill "#aef" -outline "black" -width 2
+    }
 
     # Add some "traces" of the morphism
-    foreach p $SEED tp $trans_pts {
+    foreach p $seed tp $trans_pts {
         set c1 [to_canvas [lindex $p 0] [lindex $p 1] $w $h $scale]
         set c2 [to_canvas [lindex $tp 0] [lindex $tp 1] $w $h $scale]
         .c create line [lindex $c1 0] [lindex $c1 1] [lindex $c2 0] [lindex $c2 1] \
