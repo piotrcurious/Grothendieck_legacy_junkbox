@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <regex>
+#include <algorithm>
 
 class TranscendentalComplex {
 public:
@@ -40,6 +41,9 @@ public:
     // Apply morphism rules and pattern match
     TranscendentalComplex simplify(const std::vector<std::pair<std::string, std::string>>& morphisms) const {
         std::string simplifiedExpr = expression_;
+        // Remove spaces for more robust matching
+        simplifiedExpr.erase(std::remove(simplifiedExpr.begin(), simplifiedExpr.end(), ' '), simplifiedExpr.end());
+
         bool changed = true;
         while (changed) {
             changed = false;
@@ -111,6 +115,9 @@ int main() {
         {R"(e\^\(i\*pi\))", "-1"},
         {R"(e\^i\*pi)", "-1"},
         {R"(\(i\*pi\))", "i*pi"},
+        {R"(sin\(0\))", "0"},
+        {R"(cos\(0\))", "1"},
+        {R"(exp\(0\))", "1"},
         {R"(pi)", "3.14159265358979323846"},
         {R"(e)", "2.71828182845904523536"}
     };
