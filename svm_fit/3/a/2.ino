@@ -72,7 +72,8 @@ class PolynomialFitter {
 public:
     enum class BasisType {
         MONOMIAL,
-        LEGENDRE
+        LEGENDRE,
+        HYBRID_FOURIER
     };
 
     std::vector<Value> coefficients;
@@ -80,6 +81,7 @@ public:
 private:
     std::vector<std::vector<double>> R; // Upper triangular matrix from QR
     uint8_t degree = 0;
+    double omega = 0; // Fundamental frequency for Fourier terms
     Value tMid = 0;
     Value tHalfRange = 1;
     Value vMean = 0;
@@ -99,11 +101,10 @@ private:
         return vn * vStd + vMean;
     }
 
-    double evaluateBasis(uint8_t i, double x) const {
+    double evaluateBasis(uint8_t i, double x, Timestamp t_raw = 0) const {
         if (basis == BasisType::MONOMIAL) {
             return pow(x, i);
-        } else {
-            // Legendre polynomials via recurrence
+        } else if (basis == BasisType::LEGENDRE) {
             if (i == 0) return 1.0;
             if (i == 1) return x;
             double p0 = 1.0, p1 = x, p2 = 0;
@@ -113,14 +114,20 @@ private:
                 p1 = p2;
             }
             return p1;
+        } else {
+            // HYBRID_FOURIER: degree 0..d are poly, d+1 is sin(omega*t), d+2 is cos(omega*t)
+            if (i <= degree) return pow(x, i);
+            if (i == degree + 1) return sin(omega * (double)t_raw);
+            if (i == degree + 2) return cos(omega * (double)t_raw);
+            return 0;
         }
     }
 
 public:
     BasisType basis = BasisType::MONOMIAL;
-    PolynomialFitter() : coefficients(MAX_POLYNOMIAL_DEGREE + 1, 0.0) {}
+    PolynomialFitter() : coefficients(MAX_POLYNOMIAL_DEGREE + 3, 0.0) {}
 
-    bool fit(const std::deque<DataPoint>& data, uint8_t targetDegree, TransformType vTrans = TransformType::LINEAR, double lambda = DEFAULT_RIDGE_LAMBDA, const std::vector<double>* weights = nullptr, bool useLebesgueMeasure = false) {
+    bool fit(const std::deque<DataPoint>& data, uint8_t targetDegree, TransformType vTrans = TransformType::LINEAR, double lambda = DEFAULT_RIDGE_LAMBDA, const std::vector<double>* weights = nullptr, bool useLebesgueMeasure = false, double period = 0) {
         if (data.size() <= targetDegree) return false;
         degree = targetDegree;
 
@@ -164,6 +171,10 @@ public:
         vStd = sqrt(std::max(1e-9, (sumV2 / data.size()) - (vMean * vMean)));
 
         size_t k = targetDegree + 1;
+        if (basis == BasisType::HYBRID_FOURIER && period > 0) {
+            k += 2;
+            omega = 2.0 * M_PI / period;
+        }
         size_t m = data.size();
         size_t rows = m + k;
         std::vector<std::vector<double>> X(rows, std::vector<double>(k, 0.0));
@@ -185,7 +196,7 @@ public:
             double sqrtW = sqrt(std::max(0.0, w));
 
             for (size_t j = 0; j < k; j++) {
-                X[i][j] = sqrtW * evaluateBasis(j, x_norm);
+                X[i][j] = sqrtW * evaluateBasis(j, x_norm, data[i].t);
             }
             y_vec[i] = sqrtW * val_norm;
         }
@@ -199,8 +210,9 @@ public:
         return solveQR(X, y_vec, rows, k);
     }
 
-    bool fitRobust(const std::deque<DataPoint>& data, uint8_t targetDegree, TransformType vTrans = TransformType::LINEAR, int iterations = 5, bool useLebesgueMeasure = true) {
+    bool fitRobust(const std::deque<DataPoint>& data, uint8_t targetDegree, TransformType vTrans = TransformType::LINEAR, int iterations = 5, bool useLebesgueMeasure = true, double period = 0) {
         std::vector<double> initialWeights(data.size(), 1.0);
+        double adaptiveLambda = DEFAULT_RIDGE_LAMBDA;
 
         valTransform.type = vTrans;
         if (vTrans == TransformType::LOGARITHMIC || vTrans == TransformType::SQUARE_ROOT || vTrans == TransformType::LOGISTIC) {
@@ -237,10 +249,12 @@ public:
                         initialWeights[i] = 0.01;
                     }
                 }
+                // Adaptive Regularization: increase lambda with noise
+                adaptiveLambda = std::max(DEFAULT_RIDGE_LAMBDA, 1e-4 * mad);
             }
         }
 
-        if (!fit(data, targetDegree, vTrans, DEFAULT_RIDGE_LAMBDA, &initialWeights, useLebesgueMeasure)) return false;
+        if (!fit(data, targetDegree, vTrans, adaptiveLambda, &initialWeights, useLebesgueMeasure, period)) return false;
 
         for (int iter = 0; iter < iterations; iter++) {
             std::vector<double> residuals(data.size());
@@ -260,7 +274,7 @@ public:
                 if (std::abs(u) < 1.0) weights[i] = pow(1.0 - u * u, 2);
                 else weights[i] = 0;
             }
-            if (!fit(data, targetDegree, vTrans, DEFAULT_RIDGE_LAMBDA, &weights, useLebesgueMeasure)) break;
+            if (!fit(data, targetDegree, vTrans, adaptiveLambda, &weights, useLebesgueMeasure, period)) break;
         }
         return true;
     }
@@ -268,8 +282,10 @@ public:
     Value predict(Timestamp t) const {
         double x = normalizeTime(t);
         double y_norm = 0;
-        for (uint8_t i = 0; i <= degree; i++) {
-            y_norm += coefficients[i] * evaluateBasis(i, x);
+        size_t k = degree + 1;
+        if (basis == BasisType::HYBRID_FOURIER) k += 2;
+        for (uint8_t i = 0; i < k; i++) {
+            y_norm += coefficients[i] * evaluateBasis(i, x, t);
         }
         return valTransform.inverse(denormalizeValue(y_norm));
     }
@@ -278,9 +294,10 @@ public:
         mean = predict(t);
         double x_norm = normalizeTime(t);
         size_t k = degree + 1;
+        if (basis == BasisType::HYBRID_FOURIER) k += 2;
 
         std::vector<double> p(k);
-        for (size_t i = 0; i < k; i++) p[i] = evaluateBasis(i, x_norm);
+        for (size_t i = 0; i < k; i++) p[i] = evaluateBasis(i, x_norm, t);
 
         std::vector<double> z(k);
         for (size_t i = 0; i < k; i++) {
@@ -403,6 +420,61 @@ public:
 
 struct ResidualFitter;
 
+class PeriodicityDetector {
+public:
+    struct Result {
+        bool detected = false;
+        double period = 0;
+        double confidence = 0;
+    };
+
+    static Result detect(const std::deque<DataPoint>& data) {
+        if (data.size() < 20) return {false, 0, 0};
+
+        size_t n = data.size();
+        std::vector<double> vals;
+        double mean = 0;
+        for (const auto& p : data) {
+            vals.push_back(p.v);
+            mean += p.v;
+        }
+        mean /= n;
+
+        // Simple autocorrelation for various lags
+        int maxLag = n / 2;
+        std::vector<double> acf(maxLag, 0);
+        double var = 0;
+        for (double v : vals) var += (v - mean) * (v - mean);
+        if (var < 1e-9) return {false, 0, 0};
+
+        for (int lag = 1; lag < maxLag; lag++) {
+            double cov = 0;
+            for (size_t i = 0; i < n - lag; i++) {
+                cov += (vals[i] - mean) * (vals[i + lag] - mean);
+            }
+            acf[lag] = cov / var;
+        }
+
+        // Find peak in ACF
+        int bestLag = -1;
+        double maxAcf = 0.3; // Threshold
+        for (int lag = 5; lag < maxLag; lag++) {
+            if (acf[lag] > maxAcf) {
+                if (lag > 1 && acf[lag] > acf[lag-1] && (lag == maxLag-1 || acf[lag] > acf[lag+1])) {
+                    maxAcf = acf[lag];
+                    bestLag = lag;
+                }
+            }
+        }
+
+        if (bestLag > 0) {
+            double avgDt = (data.back().t - data.front().t) / (double)(n - 1);
+            return {true, bestLag * avgDt, maxAcf};
+        }
+        return {false, 0, 0};
+    }
+};
+
 class RegimeMonitor {
 public:
     uint8_t outlierCount = 0;
@@ -416,15 +488,22 @@ struct ResidualFitter {
     PolynomialFitter directFitter;
     bool isHierarchical = false;
     bool hasModel = false;
+    uint8_t lastBestDegree = 1;
 
     bool fit(const std::deque<DataPoint>& data) {
         hasModel = false;
         double bestOverallAICc = 1e30;
         TransformType types[] = {TransformType::LINEAR, TransformType::LOGARITHMIC, TransformType::EXPONENTIAL, TransformType::SQUARE_ROOT, TransformType::LOGISTIC};
 
+        PeriodicityDetector::Result periodResult = PeriodicityDetector::detect(data);
         for (auto type : types) {
-            uint8_t maxDegree = std::min((int)MAX_POLYNOMIAL_DEGREE, (int)data.size() - 2);
-            for (uint8_t d = 1; d <= maxDegree; d++) {
+            uint8_t maxPossible = std::min((int)MAX_POLYNOMIAL_DEGREE, (int)data.size() - 2);
+            // Search around last best degree for efficiency
+            uint8_t startD = std::max(1, lastBestDegree - 1);
+            uint8_t endD = std::min((int)maxPossible, lastBestDegree + 1);
+            if (data.size() < 20) { startD = 1; endD = maxPossible; }
+
+            for (uint8_t d = startD; d <= endD; d++) {
                 PolynomialFitter fitter;
                 fitter.basis = (type == TransformType::LINEAR) ? PolynomialFitter::BasisType::LEGENDRE : PolynomialFitter::BasisType::MONOMIAL;
                 if (fitter.fitRobust(data, d, type)) {
@@ -436,6 +515,20 @@ struct ResidualFitter {
                         hasModel = true;
                     }
                 }
+
+                if (type == TransformType::LINEAR && periodResult.detected) {
+                    fitter.basis = PolynomialFitter::BasisType::HYBRID_FOURIER;
+                    if (fitter.fitRobust(data, d, type, 5, true, periodResult.period)) {
+                        double aicc = fitter.calculateAICc(data);
+                        if (aicc < bestOverallAICc) {
+                            bestOverallAICc = aicc;
+                            directFitter = fitter;
+                            isHierarchical = false;
+                            hasModel = true;
+                        lastBestDegree = d;
+                        }
+                    }
+                }
             }
         }
 
@@ -443,6 +536,7 @@ struct ResidualFitter {
         if (tempBase.fit(data, 1, TransformType::LINEAR)) {
             std::deque<DataPoint> residuals;
             for (const auto& p : data) residuals.push_back({p.t, p.v - tempBase.predict(p.t)});
+            PeriodicityDetector::Result resPeriod = PeriodicityDetector::detect(residuals);
             for (auto type : types) {
                 uint8_t maxDegree = std::min((int)MAX_POLYNOMIAL_DEGREE, (int)data.size() - 3);
                 if (maxDegree < 1) continue;
@@ -457,6 +551,19 @@ struct ResidualFitter {
                             residualFitter = fitter;
                             isHierarchical = true;
                             hasModel = true;
+                        }
+                    }
+                    if (type == TransformType::LINEAR && resPeriod.detected) {
+                        fitter.basis = PolynomialFitter::BasisType::HYBRID_FOURIER;
+                        if (fitter.fitRobust(residuals, d, type, 5, true, resPeriod.period)) {
+                            double aicc = fitter.calculateAICc(residuals);
+                            if (aicc < bestOverallAICc) {
+                                bestOverallAICc = aicc;
+                                baseFitter = tempBase;
+                                residualFitter = fitter;
+                                isHierarchical = true;
+                                hasModel = true;
+                            }
                         }
                     }
                 }
