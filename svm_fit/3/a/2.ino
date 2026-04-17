@@ -22,7 +22,8 @@ struct DataPoint {
 enum class TransformType {
     LINEAR,
     LOGARITHMIC,
-    EXPONENTIAL
+    EXPONENTIAL,
+    SQUARE_ROOT
 };
 
 class Automorphism {
@@ -36,6 +37,8 @@ public:
                 return log(std::max(1e-9, x + offset));
             case TransformType::EXPONENTIAL:
                 return exp(x);
+            case TransformType::SQUARE_ROOT:
+                return sqrt(std::max(0.0, x + offset));
             case TransformType::LINEAR:
             default:
                 return x;
@@ -48,6 +51,8 @@ public:
                 return exp(y) - offset;
             case TransformType::EXPONENTIAL:
                 return log(std::max(1e-9, y));
+            case TransformType::SQUARE_ROOT:
+                return (y * y) - offset;
             case TransformType::LINEAR:
             default:
                 return y;
@@ -59,12 +64,12 @@ class PolynomialFitter {
 private:
     std::vector<Value> coefficients;
     uint8_t degree = 0;
-    Value tMin = 0;
-    Value tRange = 1;
+    Value tMid = 0;
+    Value tHalfRange = 1;
     Automorphism valTransform;
 
     double normalizeTime(Timestamp t) const {
-        return static_cast<double>(t - tMin) / tRange;
+        return (static_cast<double>(t) - tMid) / tHalfRange;
     }
 
 public:
@@ -74,19 +79,20 @@ public:
         if (data.size() <= targetDegree) return false;
         degree = targetDegree;
 
-        // Time normalization
-        tMin = data.front().t;
+        // Time normalization: mapping [tMin, tMax] to [-1, 1]
+        Value tMin = data.front().t;
         Value tMax = data.front().t;
         for (const auto& p : data) {
             if (p.t < tMin) tMin = p.t;
             if (p.t > tMax) tMax = p.t;
         }
-        tRange = tMax - tMin;
-        if (tRange < 1.0) tRange = 1.0;
+        tMid = (tMax + tMin) / 2.0;
+        tHalfRange = (tMax - tMin) / 2.0;
+        if (tHalfRange < 0.5) tHalfRange = 0.5;
 
         // Value Automorphism setup
         valTransform.type = vTrans;
-        if (vTrans == TransformType::LOGARITHMIC) {
+        if (vTrans == TransformType::LOGARITHMIC || vTrans == TransformType::SQUARE_ROOT) {
             Value minV = data[0].v;
             for (const auto& p : data) if (p.v < minV) minV = p.v;
             valTransform.offset = (minV <= 0) ? -minV + 1.0 : 0;
@@ -124,7 +130,37 @@ public:
 
     // Iteratively Reweighted Least Squares for robustness
     bool fitRobust(const std::deque<DataPoint>& data, uint8_t targetDegree, TransformType vTrans = TransformType::LINEAR, int iterations = 5) {
-        if (!fit(data, targetDegree, vTrans)) return false;
+        // Initial weights based on median-based outlier detection for better convergence
+        std::vector<double> initialWeights(data.size(), 1.0);
+
+        // Update transform parameters for initial pass
+        valTransform.type = vTrans;
+        if (vTrans == TransformType::LOGARITHMIC || vTrans == TransformType::SQUARE_ROOT) {
+            Value minV = data[0].v;
+            for (const auto& p : data) if (p.v < minV) minV = p.v;
+            valTransform.offset = (minV <= 0) ? -minV + 1.0 : 0;
+        }
+
+        if (data.size() >= 5) {
+            std::vector<double> vals;
+            for (const auto& p : data) vals.push_back(valTransform.forward(p.v));
+            std::sort(vals.begin(), vals.end());
+            double median = vals[vals.size() / 2];
+            std::vector<double> absDevs;
+            for (double v : vals) absDevs.push_back(std::abs(v - median));
+            std::sort(absDevs.begin(), absDevs.end());
+            double mad = absDevs[absDevs.size() / 2];
+            if (mad > 1e-6) {
+                for (size_t i = 0; i < data.size(); i++) {
+                    double v = valTransform.forward(data[i].v);
+                    if (std::abs(v - median) > 3.0 * 1.4826 * mad) {
+                        initialWeights[i] = 0.01; // Aggressively downweight initial outliers
+                    }
+                }
+            }
+        }
+
+        if (!fit(data, targetDegree, vTrans, DEFAULT_RIDGE_LAMBDA, &initialWeights)) return false;
 
         for (int iter = 0; iter < iterations; iter++) {
             std::vector<double> residuals(data.size());
@@ -165,12 +201,31 @@ public:
     }
 
     double calculateRMSE(const std::deque<DataPoint>& data) const {
-        double sumSqErr = 0;
+        double rss = calculateRSS(data);
+        return sqrt(rss / data.size());
+    }
+
+    double calculateRSS(const std::deque<DataPoint>& data) const {
+        double rss = 0;
         for (const auto& p : data) {
             double err = predict(p.t) - p.v;
-            sumSqErr += err * err;
+            rss += err * err;
         }
-        return sqrt(sumSqErr / data.size());
+        return rss;
+    }
+
+    // AICc: Akaike Information Criterion corrected for small sample sizes
+    double calculateAICc(const std::deque<DataPoint>& data) const {
+        size_t n = data.size();
+        size_t k = degree + 1; // Number of parameters
+        double rss = calculateRSS(data);
+        if (rss < 1e-12) rss = 1e-12;
+
+        double aic = n * log(rss / n) + 2 * k;
+        if (n > k + 1) {
+            aic += (2.0 * k * (k + 1)) / (n - k - 1);
+        }
+        return aic;
     }
 
 private:
@@ -230,27 +285,35 @@ void loop() {
         if (dataPoints.size() > MAX_DATA_POINTS) dataPoints.pop_front();
 
         if (dataPoints.size() >= MIN_DATA_POINTS) {
-            uint8_t degree = std::min((int)MAX_POLYNOMIAL_DEGREE, (int)dataPoints.size() / 5 + 1);
-
-            TransformType types[] = {TransformType::LINEAR, TransformType::LOGARITHMIC};
-            double bestRMSE = 1e30;
+            double bestMetric = 1e30;
             TransformType bestType = TransformType::LINEAR;
+            uint8_t bestDegree = 1;
+
+            TransformType types[] = {TransformType::LINEAR, TransformType::LOGARITHMIC, TransformType::SQUARE_ROOT};
 
             for (auto type : types) {
-                PolynomialFitter fitter;
-                if (fitter.fitRobust(dataPoints, degree, type)) {
-                    double rmse = fitter.calculateRMSE(dataPoints);
-                    if (rmse < bestRMSE) {
-                        bestRMSE = rmse;
-                        bestFitter = fitter;
-                        bestType = type;
+                uint8_t maxPossibleDegree = std::min((int)MAX_POLYNOMIAL_DEGREE, (int)dataPoints.size() - 2);
+                for (uint8_t d = 1; d <= maxPossibleDegree; d++) {
+                    PolynomialFitter fitter;
+                    if (fitter.fitRobust(dataPoints, d, type)) {
+                        double aicc = fitter.calculateAICc(dataPoints);
+                        if (aicc < bestMetric) {
+                            bestMetric = aicc;
+                            bestFitter = fitter;
+                            bestType = type;
+                            bestDegree = d;
+                        }
                     }
                 }
             }
 
-            Serial.printf("Best Fit: %s, Degree: %d, RMSE: %.4f, Prediction(now+5s): %.4f\n",
-                (bestType == TransformType::LINEAR ? "Linear" : "Log"),
-                degree, bestRMSE, bestFitter.predict(lastSampleTime + 5000));
+            const char* typeStr = "Linear";
+            if (bestType == TransformType::LOGARITHMIC) typeStr = "Log";
+            else if (bestType == TransformType::SQUARE_ROOT) typeStr = "Sqrt";
+
+            Serial.printf("Best Fit: %s, Degree: %d, AICc: %.2f, RMSE: %.4f, Pred(now+5s): %.4f\n",
+                typeStr, bestDegree, bestMetric, bestFitter.calculateRMSE(dataPoints),
+                bestFitter.predict(lastSampleTime + 5000));
         }
     }
 }

@@ -22,27 +22,36 @@ void run_scenario(const std::string& name, SignalGen signal_gen, int steps) {
         if (dataPoints.size() > MAX_DATA_POINTS) dataPoints.pop_front();
 
         if (dataPoints.size() >= MIN_DATA_POINTS) {
-            uint8_t degree = std::min((int)MAX_POLYNOMIAL_DEGREE, (int)dataPoints.size() / 5 + 1);
-
-            TransformType types[] = {TransformType::LINEAR, TransformType::LOGARITHMIC};
-            double bestRMSE = 1e30;
+            double bestMetric = 1e30;
             TransformType bestType = TransformType::LINEAR;
+            uint8_t bestDegree = 1;
+
+            TransformType types[] = {TransformType::LINEAR, TransformType::LOGARITHMIC, TransformType::SQUARE_ROOT};
 
             for (auto type : types) {
-                PolynomialFitter fitter;
-                if (fitter.fitRobust(dataPoints, degree, type)) {
-                    double rmse = fitter.calculateRMSE(dataPoints);
-                    if (rmse < bestRMSE) {
-                        bestRMSE = rmse;
-                        bestFitter = fitter;
-                        bestType = type;
+                uint8_t maxPossibleDegree = std::min((int)MAX_POLYNOMIAL_DEGREE, (int)dataPoints.size() - 2);
+                for (uint8_t d = 1; d <= maxPossibleDegree; d++) {
+                    PolynomialFitter fitter;
+                    if (fitter.fitRobust(dataPoints, d, type)) {
+                        double aicc = fitter.calculateAICc(dataPoints);
+                        if (aicc < bestMetric) {
+                            bestMetric = aicc;
+                            bestFitter = fitter;
+                            bestType = type;
+                            bestDegree = d;
+                        }
                     }
                 }
             }
+
             if (i % 10 == 0 || i == steps - 1) {
-                Serial.printf("Step %d: Best=%s, Degree=%d, RMSE=%.4f, Target(now+5s)=%.4f, Pred(now+5s)=%.4f\n",
-                    i, (bestType == TransformType::LINEAR ? "Lin" : "Log"),
-                    degree, bestRMSE, signal_gen(t_sec + 5.0), bestFitter.predict(now + 5000));
+                const char* typeStr = "Lin";
+                if (bestType == TransformType::LOGARITHMIC) typeStr = "Log";
+                else if (bestType == TransformType::SQUARE_ROOT) typeStr = "Sqrt";
+
+                Serial.printf("Step %d: Best=%s, Degree=%d, AICc=%.2f, RMSE=%.4f, Target(now+5s)=%.4f, Pred(now+5s)=%.4f\n",
+                    i, typeStr, bestDegree, bestMetric, bestFitter.calculateRMSE(dataPoints),
+                    signal_gen(t_sec + 5.0), bestFitter.predict(now + 5000));
             }
         }
         delay(500);
@@ -56,7 +65,10 @@ int main() {
     // 2. Exponential
     run_scenario("Exponential Growth", [](double t){ return 2.0 * exp(0.5 * t); }, 50);
 
-    // 3. Linear with Outliers
+    // 3. Quadratic (should be caught by Sqrt or higher degree Poly)
+    run_scenario("Quadratic Growth", [](double t){ return 10.0 + 0.5 * t * t; }, 60);
+
+    // 4. Linear with Outliers
     run_scenario("Linear with Outliers", [](double t){
         double v = 10.0 + 2.0 * t;
         // Deterministic outliers for test
