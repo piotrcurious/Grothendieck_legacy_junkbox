@@ -1,1 +1,29 @@
-should illustrate the concept of quantized field solutions but AI fails to determine axioms right. *sigh*
+# Weyl Algebra and Quantized Field Solutions
+
+This directory illustrates the concepts of Weyl algebra, non-commutativity, and quantized field solutions applied to image rotation and signal filtering.
+
+## 🌀 Weyl Rotation (Python)
+
+Located in `rotation/`, these scripts demonstrate how the non-commutativity of discrete translation operators (X and P) can be measured and used to improve the quality of discrete rotations.
+
+- **`rotation/Weyl_Rotation_Consolidated.py`**: The primary implementation featuring:
+  - `ModularWeylXOperator` & `ModularWeylPOperator`: Discrete row/column shift operators.
+  - `LemmaBasedCorrectionStrategy`: Uses the commutator norm $Q = \|[P, X]\|$ to scale the image.
+  - `WeylAlgebraBasedCorrectionStrategy`: Incorporates the commutator structure directly into the correction matrix.
+- **`rotation/test_weyl_rotation.py`**: Unit tests for the rotation operators and strategies.
+
+## 📡 Weyl Filter (Arduino/ESP32)
+
+Located in the root `Weyl/` directory, these files implement a frequency-domain filter based on quantized field equations.
+
+- **`Weyl_Filter_Consolidated.ino`**: Main Arduino sketch for ESP32.
+- **`Weyl_Filter_Utils.h`**: Core fixed-point arithmetic and field operator logic.
+- **`test_weyl_filter.cpp`**: Host-side C++ test suite to verify the filtering logic.
+
+### Concepts
+The filter applies a regularized field operator in the frequency domain:
+$P(F) = F - D + F \cdot (\nabla V)$
+where $D$ is the frequency gradient and $V(x)$ is a field potential.
+
+## 📁 Cleanup Note
+Older versions of filters (`filter*.ino`) and rotation demos (`demo*.py`) are kept for historical reference but are superseded by the consolidated versions.
