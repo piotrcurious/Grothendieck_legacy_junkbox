@@ -55,29 +55,29 @@ private:
     std::array<T, Size> buffer;
     uint8_t head = 0;
     uint8_t tail = 0;
-    bool full = false;
+    bool is_full = false;
 
 public:
     void push(const T& item) {
         buffer[head] = item;
-        if (full) tail = (tail + 1) % Size;
+        if (is_full) tail = (tail + 1) % Size;
         head = (head + 1) % Size;
-        full = head == tail;
+        is_full = head == tail;
     }
 
     std::optional<T> pop() {
         if (empty()) return std::nullopt;
         T item = buffer[tail];
-        full = false;
+        is_full = false;
         tail = (tail + 1) % Size;
         return item;
     }
 
-    bool empty() const { return !full && (head == tail); }
-    bool full() const { return full; }
+    bool empty() const { return !is_full && (head == tail); }
+    bool full() const { return is_full; }
     size_t size() const {
-        if (full) return Size;
-        return (head - tail) % Size;
+        if (is_full) return Size;
+        return (head + Size - tail) % Size;
     }
 };
 

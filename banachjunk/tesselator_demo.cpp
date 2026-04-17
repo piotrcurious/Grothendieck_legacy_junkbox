@@ -198,7 +198,7 @@ private:
             return {
                 state[0] * std::sin(t) + std::cos(state[1]),     // Nonlinear coupling
                 state[1] * std::exp(-t) + std::tanh(state[0]),   // Exponential interaction
-                state[2] * std::pow(t, 0.5) + std::log(1+t)      // Fractal-like behavior
+                state[2] * std::pow(std::abs(t), 0.5) + std::log(1 + std::abs(t))      // Fractal-like behavior
             };
         };
     }
