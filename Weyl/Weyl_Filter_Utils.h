@@ -25,7 +25,9 @@ static inline double fixed_to_double(int32_t q) {
   return ((double)q) / Q_ONE;
 }
 
-// Fixed‑point multiplication with basic saturation.
+/**
+ * Fixed-point multiplication with basic saturation.
+ */
 static inline int32_t q_mul(int32_t a, int32_t b) {
   int64_t temp = (int64_t)a * (int64_t)b;
   int64_t result = temp >> Q_SHIFT;
@@ -34,7 +36,9 @@ static inline int32_t q_mul(int32_t a, int32_t b) {
   return (int32_t)result;
 }
 
-// Fixed‑point division with rudimentary zero‑check.
+/**
+ * Fixed-point division with rudimentary zero‑check.
+ */
 static inline int32_t q_div(int32_t a, int32_t b) {
   if (b == 0) return (a >= 0 ? 2147483647 : -2147483648);
   int64_t temp = ((int64_t)a << Q_SHIFT);
@@ -94,6 +98,16 @@ static inline void fc_to_double(fixed_complex fc, double &r, double &i) {
 }
 
 // ***************************************************************************
+// Field Filter Configuration
+// ***************************************************************************
+
+struct FieldConfig {
+  int32_t lambda;     // Field strength parameter
+  int32_t eps;        // Regularization constant
+  int32_t grad_weight; // Weight of the gradient term
+};
+
+// ***************************************************************************
 // FFT and Sampling Setup
 // ***************************************************************************
 
@@ -110,9 +124,9 @@ extern fixed_complex fixedF[BUFFER_SIZE];
  * processFrequencyDomain()
  *
  * Implements a regularized field operator in the frequency domain.
- * This illustrates concepts from Weyl algebra and field theory applied to signal processing.
+ * This version uses second-order finite differences for interior points.
  */
-void processFrequencyDomain() {
+inline void processFrequencyDomain(const FieldConfig& config) {
   // 1. Convert FFT results to fixed‑point
   for (int i = 0; i < BUFFER_SIZE; i++) {
     fixedF[i] = fc_from_double(realBuffer[i], imagBuffer[i]);
@@ -120,13 +134,11 @@ void processFrequencyDomain() {
 
   // 2. Constants for field equations
   int32_t deltaNorm = double_to_fixed(1.0 / BUFFER_SIZE);
-  int32_t lambda = double_to_fixed(0.3);  // Field strength parameter
-  int32_t eps = double_to_fixed(0.01);    // Small regularization constant
 
   // 3. Compute the field gradient (finite difference) D for each frequency bin
   fixed_complex D[BUFFER_SIZE];
 
-  // Boundary: Bin 0 (DC)
+  // Boundary: Bin 0 (DC) - First-order forward difference
   if (BUFFER_SIZE > 1) {
     fixed_complex diff = fc_sub(fixedF[1], fixedF[0]);
     int32_t scale = q_div(Q_ONE, deltaNorm);
@@ -135,14 +147,26 @@ void processFrequencyDomain() {
     D[0] = {0, 0};
   }
 
-  // Interior points: Central difference
+  // Interior points: Second-order central difference for first derivative:
+  // f'(x) ≈ (-f(x+2h) + 8f(x+h) - 8f(x-h) + f(x-2h)) / 12h
+  // For simplicity and to avoid too many boundary issues, we use 4-point central difference where possible
   for (int i = 1; i < BUFFER_SIZE - 1; i++) {
-    fixed_complex diff = fc_sub(fixedF[i+1], fixedF[i-1]);
-    int32_t scale = q_div(Q_ONE, q_mul(deltaNorm, double_to_fixed(2.0)));
-    D[i] = fc_mul_scalar(diff, scale);
+    if (i >= 2 && i < BUFFER_SIZE - 2) {
+      // 4-point central difference
+      fixed_complex term1 = fc_mul_scalar(fc_sub(fixedF[i+1], fixedF[i-1]), double_to_fixed(8.0));
+      fixed_complex term2 = fc_sub(fixedF[i+2], fixedF[i-2]);
+      fixed_complex diff = fc_sub(term1, term2);
+      int32_t scale = q_div(Q_ONE, q_mul(deltaNorm, double_to_fixed(12.0)));
+      D[i] = fc_mul_scalar(diff, scale);
+    } else {
+      // Standard 2-point central difference
+      fixed_complex diff = fc_sub(fixedF[i+1], fixedF[i-1]);
+      int32_t scale = q_div(Q_ONE, q_mul(deltaNorm, double_to_fixed(2.0)));
+      D[i] = fc_mul_scalar(diff, scale);
+    }
   }
 
-  // Boundary: Nyquist frequency
+  // Boundary: Nyquist frequency - First-order backward difference
   if (BUFFER_SIZE > 1) {
     fixed_complex diff = fc_sub(fixedF[BUFFER_SIZE-1], fixedF[BUFFER_SIZE-2]);
     int32_t scale = q_div(Q_ONE, deltaNorm);
@@ -163,19 +187,19 @@ void processFrequencyDomain() {
 
     // Field potential: V(x) = x² - x + λ
     int32_t x_sq = q_mul(x, x);
-    int32_t V = x_sq - x + lambda;
+    int32_t V = x_sq - x + config.lambda;
 
     // Field gradient: ∇V = 2x - 1
     int32_t grad_V = q_mul(double_to_fixed(2.0), x) - Q_ONE;
 
-    // Regularized field operator: P = F - D + F·(∇V)
-    fixed_complex grad_term = fc_mul_scalar(fixedF[i], grad_V);
+    // Regularized field operator: P = F - D + F·(∇V) * weight
+    fixed_complex grad_term = fc_mul_scalar(fixedF[i], q_mul(grad_V, config.grad_weight));
     fixed_complex P = fc_sub(fixedF[i], D[i]);
     P = fc_add(P, grad_term);
 
     // Attenuation function: H(x) = 1/(1 + V² + ε)
     int32_t V_sq = q_mul(V, V);
-    int32_t denom = Q_ONE + V_sq + eps;
+    int32_t denom = Q_ONE + V_sq + config.eps;
     int32_t attenuation = q_div(Q_ONE, denom);
 
     // Final coefficient
@@ -189,6 +213,18 @@ void processFrequencyDomain() {
     realBuffer[i] = r;
     imagBuffer[i] = im;
   }
+}
+
+/**
+ * Overload for backward compatibility or simple use.
+ */
+inline void processFrequencyDomain() {
+  FieldConfig defaultConfig = {
+    double_to_fixed(0.3),  // lambda
+    double_to_fixed(0.01), // eps
+    Q_ONE                  // grad_weight = 1.0
+  };
+  processFrequencyDomain(defaultConfig);
 }
 
 #endif // WEYL_FILTER_UTILS_H

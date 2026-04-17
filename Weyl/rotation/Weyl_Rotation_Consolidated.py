@@ -175,7 +175,7 @@ class LemmaBasedCorrectionStrategy(CorrectionStrategy):
         scale = 1.0 / (1.0 + self.correction_factor * Q)
         self._last_q = Q
         self._last_scale = scale
-        return np.eye(matrix.shape[0], dtype=float) * scale
+        return np.eye(matrix.shape[0], dtype=complex) * scale
 
 
 class EnhancedLemmaBasedCorrectionStrategy(CorrectionStrategy):
@@ -201,7 +201,7 @@ class EnhancedLemmaBasedCorrectionStrategy(CorrectionStrategy):
         self._last_effective_q = q_metrics['effective_q']
         self._last_scale = scale
 
-        return np.eye(matrix.shape[0], dtype=float) * scale
+        return np.eye(matrix.shape[0], dtype=complex) * scale
 
 
 class WeylAlgebraBasedCorrectionStrategy(CorrectionStrategy):
@@ -232,17 +232,47 @@ class WeylAlgebraBasedCorrectionStrategy(CorrectionStrategy):
         self._last_scale = basic_scale
 
         dim = matrix.shape[0]
-        # We only take the real part of the commutator for the correction matrix
-        # to keep the correction matrix real-valued for image processing.
-        correction = np.eye(dim, dtype=float) * basic_scale
+        correction = np.eye(dim, dtype=complex) * basic_scale
 
         if Q > 0:
-            norm_commutator_real = np.real(commutator) / Q
+            norm_commutator = commutator / Q
             contribution_scale = (1 - basic_scale) * self.commutator_weight * angle_factor
-            correction += norm_commutator_real * contribution_scale
+            correction += norm_commutator * contribution_scale
 
         return correction
 
+class SymplecticCorrectionStrategy(CorrectionStrategy):
+    """
+    Uses a phase-aware correction based on the symplectic structure.
+    Constructs a correction matrix that tries to 'un-twist' the phase introduced by non-commutativity.
+    """
+    def __init__(self, correction_factor: float = 0.01, phase_weight: float = 0.5) -> None:
+        self.correction_factor = correction_factor
+        self.phase_weight = phase_weight
+
+    def get_correction_matrix(self, matrix: NDArray, angle_deg: float, weyl_x: Operator, weyl_p: Operator) -> NDArray:
+        px_matrix = weyl_x(matrix)
+        p_of_x = weyl_p(px_matrix)
+        xp_matrix = weyl_p(matrix)
+        x_of_p = weyl_x(xp_matrix)
+        commutator = p_of_x - x_of_p
+
+        Q = float(np.linalg.norm(commutator, 'fro'))
+
+        # Base scaling
+        scale = 1.0 / (1.0 + self.correction_factor * Q)
+
+        dim = matrix.shape[0]
+        correction = np.eye(dim, dtype=complex) * scale
+
+        if Q > 0:
+            # Phase-aware part: use the complex commutator to introduce corrective phases
+            phase_correction = np.exp(-1j * self.phase_weight * np.angle(commutator + 1e-12))
+            # Weight by normalized magnitude to avoid noise
+            mag_weight = np.abs(commutator) / Q
+            correction += phase_correction * mag_weight * (1 - scale)
+
+        return correction
 
 class RandomNoiseCorrectionStrategy(CorrectionStrategy):
     """Adds random noise to the identity matrix."""
@@ -251,8 +281,8 @@ class RandomNoiseCorrectionStrategy(CorrectionStrategy):
 
     def get_correction_matrix(self, matrix: NDArray, angle_deg: float, weyl_x: Operator, weyl_p: Operator) -> NDArray:
         dim = matrix.shape[0]
-        noise = (np.random.rand(dim, dim) - 0.5) * self.noise_factor
-        return np.eye(dim, dtype=float) + noise
+        noise = (np.random.rand(dim, dim) - 0.5 + 1j*(np.random.rand(dim, dim) - 0.5)) * self.noise_factor
+        return np.eye(dim, dtype=complex) + noise
 
 ##############################################
 # Rotation and Application                   #
@@ -260,12 +290,13 @@ class RandomNoiseCorrectionStrategy(CorrectionStrategy):
 
 def rotate_matrix_around_center(matrix: NDArray, angle_degrees: float) -> NDArray:
     """Rotates a 2D matrix around its center using scipy.ndimage.rotate."""
+    # Ensure we handle complex matrices correctly
     return scipy.ndimage.rotate(matrix, angle=angle_degrees, reshape=False, mode='constant', cval=0.0, order=1)
 
 
 def apply_corrected_rotation(matrix: NDArray, C: NDArray, angle_degrees: float) -> NDArray:
     """Applies correction C then rotates: Result = Rotate(C @ matrix)."""
-    corrected_matrix = C @ matrix
+    corrected_matrix = C @ matrix.astype(complex)
     return rotate_matrix_around_center(corrected_matrix, angle_degrees)
 
 ##############################################
@@ -304,8 +335,9 @@ def create_shape_matrix(shape_type: str, dim: int) -> NDArray:
 
 def calculate_rotation_quality(original: NDArray, standard_rotated: NDArray, corrected_rotated: NDArray) -> Dict[str, float]:
     """Calculates metrics: overlap and difference norm."""
-    overlap_std = float(np.sum(original * standard_rotated))
-    overlap_corr = float(np.sum(original * corrected_rotated))
+    # Use magnitude for overlap if inputs are complex
+    overlap_std = float(np.sum(np.abs(original) * np.abs(standard_rotated)))
+    overlap_corr = float(np.sum(np.abs(original) * np.abs(corrected_rotated)))
     diff_norm = float(np.linalg.norm(corrected_rotated - standard_rotated, 'fro'))
     return {
         'overlap_standard': overlap_std,
@@ -356,15 +388,20 @@ def display_matrices_graphical(original: NDArray, standard_rotated: NDArray, cor
                                metrics: Dict[str, float]) -> plt.Figure:
     """Displays original, standard rotated, and corrected rotated matrices."""
     fig, axes = plt.subplots(1, 3, figsize=(18, 6.5))
-    vmax = max(original.max(), standard_rotated.max(), corrected_rotated.max(), 1e-6)
 
-    axes[0].imshow(original, cmap='gray', vmin=0, vmax=vmax)
+    orig_abs = np.abs(original)
+    std_abs = np.abs(standard_rotated)
+    corr_abs = np.abs(corrected_rotated)
+
+    vmax = max(orig_abs.max(), std_abs.max(), corr_abs.max(), 1e-6)
+
+    axes[0].imshow(orig_abs, cmap='gray', vmin=0, vmax=vmax)
     axes[0].set_title("Original Shape")
 
-    axes[1].imshow(standard_rotated, cmap='gray', vmin=0, vmax=vmax)
+    axes[1].imshow(std_abs, cmap='gray', vmin=0, vmax=vmax)
     axes[1].set_title(f"Standard Rotation\nOverlap: {metrics['overlap_standard']:.3f}")
 
-    axes[2].imshow(corrected_rotated, cmap='gray', vmin=0, vmax=vmax)
+    axes[2].imshow(corr_abs, cmap='gray', vmin=0, vmax=vmax)
     axes[2].set_title(f"Corrected ({strategy_info})\nOverlap: {metrics['overlap_corrected']:.3f}")
 
     for ax in axes: ax.axis('off')
@@ -395,7 +432,8 @@ if __name__ == "__main__":
     strategies = [
         LemmaBasedCorrectionStrategy(correction_factor=0.01),
         EnhancedLemmaBasedCorrectionStrategy(correction_factor=0.01, angle_sensitivity=0.5),
-        WeylAlgebraBasedCorrectionStrategy(correction_factor=0.01, commutator_weight=0.2)
+        WeylAlgebraBasedCorrectionStrategy(correction_factor=0.01, commutator_weight=0.2),
+        SymplecticCorrectionStrategy(correction_factor=0.01, phase_weight=0.5)
     ]
 
     standard_rotated = rotate_matrix_around_center(initial_matrix, ANGLE_DEG)
