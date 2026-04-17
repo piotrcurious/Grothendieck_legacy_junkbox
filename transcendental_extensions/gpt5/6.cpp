@@ -201,9 +201,112 @@ bool labelToValue(const string &lbl, cplx &out) {
     if (lbl=="π" || lbl=="pi") { out = cplx(M_PI,0); return true; }
     if (lbl=="e") { out = cplx(exp(1.0),0); return true; }
     if (lbl=="i") { out = cplx(0,1); return true; }
+    if (lbl=="φ" || lbl=="phi") { out = cplx((1.0 + sqrt(5.0)) / 2.0, 0); return true; }
+    if (lbl=="γ" || lbl=="gamma") { out = cplx(0.5772156649015328, 0); return true; }
     if (lbl=="0") { out = cplx(0,0); return true; }
     if (lbl=="1") { out = cplx(1,0); return true; }
     return false;
+}
+
+inline ExprPtr PHI() { return C(0,0,"φ"); }
+inline ExprPtr GAMMA() { return C(0,0,"γ"); }
+
+// ---------------------- Parser ----------------------
+
+struct Parser {
+    string input;
+    size_t pos = 0;
+
+    Parser(string in) : input(move(in)) {}
+
+    char peek() { return pos < input.size() ? input[pos] : 0; }
+    char get() { return pos < input.size() ? input[pos++] : 0; }
+
+    void skipWhitespace() {
+        while (isspace(peek())) get();
+    }
+
+    ExprPtr parseExpression() {
+        ExprPtr left = parseTerm();
+        skipWhitespace();
+        while (peek() == '+' || peek() == '-') {
+            char op = get();
+            ExprPtr right = parseTerm();
+            if (op == '+') left = ADD({left, right});
+            else left = ADD({left, U("neg", right)});
+            skipWhitespace();
+        }
+        return left;
+    }
+
+    ExprPtr parseTerm() {
+        ExprPtr left = parseFactor();
+        skipWhitespace();
+        while (peek() == '*' || peek() == '/') {
+            char op = get();
+            ExprPtr right = parseFactor();
+            if (op == '*') left = MUL({left, right});
+            else left = MUL({left, P(right, C(-1))}); // x / y = x * y^-1
+            skipWhitespace();
+        }
+        return left;
+    }
+
+    ExprPtr parseFactor() {
+        ExprPtr left = parsePrimary();
+        skipWhitespace();
+        if (peek() == '^') {
+            get();
+            ExprPtr right = parseFactor();
+            return P(left, right);
+        }
+        return left;
+    }
+
+    ExprPtr parsePrimary() {
+        skipWhitespace();
+        char c = peek();
+        if (c == '-') {
+            get();
+            return U("neg", parsePrimary());
+        }
+        if (c == '(') {
+            get();
+            ExprPtr e = parseExpression();
+            skipWhitespace();
+            if (get() != ')') throw runtime_error("Expected ')'");
+            return e;
+        }
+        if (isdigit(c) || c == '.') {
+            string s;
+            while (isdigit(peek()) || peek() == '.') s += get();
+            return C(stod(s));
+        }
+        if (isalpha(c) || (unsigned char)c >= 0x80) { // allow greek letters
+            string s;
+            // Basic support for UTF-8 labels (like π, φ, γ)
+            while (isalnum(peek()) || peek() == '_' || (unsigned char)peek() >= 0x80) s += get();
+            skipWhitespace();
+            if (peek() == '(') {
+                get();
+                ExprPtr arg = parseExpression();
+                skipWhitespace();
+                if (get() != ')') throw runtime_error("Expected ')' for function " + s);
+                return U(s, arg);
+            }
+            if (s == "pi" || s == "π") return PI();
+            if (s == "e") return EE();
+            if (s == "i") return II();
+            if (s == "phi" || s == "φ") return PHI();
+            if (s == "gamma" || s == "γ") return GAMMA();
+            return V(s);
+        }
+        throw runtime_error("Unexpected character: " + string(1, c));
+    }
+};
+
+ExprPtr parse(string s) {
+    return Parser(move(s)).parseExpression();
 }
 
 // ---------------------- Numeric evaluation ----------------------
@@ -442,6 +545,9 @@ ExprPtr diff(const ExprPtr &e, const string &var) {
             } else if (e->label == "cos") {
                 // d/dx cos(u) = -sin(u) * du/dx
                 return simplify(MUL({U("neg", U("sin", e->left)), du}), rules);
+            } else if (e->label == "sqrt") {
+                // d/dx sqrt(u) = 1/(2*sqrt(u)) * du/dx
+                return simplify(MUL({P(C(2), C(-1)), P(e, C(-1)), du}), rules);
             } else if (e->label == "neg") {
                 return simplify(U("neg", du), rules);
             }
@@ -751,6 +857,10 @@ vector<Rule> defaultRules() {
     // x * 1 -> x
     rules.emplace_back(MUL({W("x"), ONE(), Wstar("rest")}), MUL({W("x"), Wstar("rest")}));
 
+    // sin(x)^2 + cos(x)^2 -> 1
+    rules.emplace_back(ADD({Wstar("pre"), P(U("sin", W("x")), C(2)), P(U("cos", W("x")), C(2)), Wstar("post")}),
+                       ADD({Wstar("pre"), ONE(), Wstar("post")}));
+
     return rules;
 }
 
@@ -848,6 +958,19 @@ int main() {
     ExprPtr expr10 = U("log", P(V("x"), C(3,0,"3"))); // log(x^3)
     cout << "Original Expr: " << expr10->toString() << "\n";
     cout << "d/dx Result:   " << diff(expr10, "x")->toString() << "\n";
+
+    cout << "\n--- Parser Test ---\n";
+    string s1 = "sin(x^2 + 3*x + pi)";
+    cout << "Parsing: " << s1 << "\n";
+    ExprPtr ps1 = parse(s1);
+    cout << "Parsed:  " << ps1->toString() << "\n";
+    cout << "d/dx:    " << diff(ps1, "x")->toString() << "\n";
+
+    cout << "\n--- Identity Test ---\n";
+    string s2 = "sin(y)^2 + cos(y)^2";
+    cout << "Parsing: " << s2 << "\n";
+    ExprPtr ps2 = simplify(parse(s2), rules);
+    cout << "Simplified: " << ps2->toString() << "\n";
 
     return 0;
 }
