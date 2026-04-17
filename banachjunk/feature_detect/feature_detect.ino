@@ -60,9 +60,9 @@ public:
   };
   
   // Detect features in a window of signal data
-  int detectFeatures(DataPoint* signal, int signalSize, Feature* features) {
+  int detectFeatures(const DataPoint* signal, int signalSize, Feature* features) {
     int featureCount = 0;
-    float* windowValues = new float[WINDOW_SIZE];
+    float windowValues[WINDOW_SIZE];
     
     // Slide window through signal
     for (int i = 0; i <= signalSize - WINDOW_SIZE && featureCount < MAX_FEATURES; i++) {
@@ -79,7 +79,8 @@ public:
       // Feature detection criteria using Banach space properties
       if (checkConvergence(l2Norm)) {
         // Analyze relationship between norms to classify feature
-        float normRatio = l1Norm / (l2Norm * sqrt(WINDOW_SIZE));
+        float l2Norm_scaled = l2Norm * sqrt(WINDOW_SIZE);
+        float normRatio = (l2Norm_scaled > 1e-9) ? (l1Norm / l2Norm_scaled) : 0;
         
         Feature newFeature;
         newFeature.timestamp = signal[i + WINDOW_SIZE/2].timestamp;
@@ -88,9 +89,9 @@ public:
         
         if (normRatio > 1.5) {
           newFeature.type = "spike";
-        } else if (lInfNorm / l2Norm > 2.0) {
+        } else if (l2Norm > 1e-9 && (lInfNorm / l2Norm > 2.0)) {
           newFeature.type = "step";
-        } else if (normRatio < 0.8) {
+        } else if (normRatio < 0.8 && normRatio > 0) {
           newFeature.type = "oscillation";
         } else {
           newFeature.type = "transition";
@@ -103,7 +104,6 @@ public:
       }
     }
     
-    delete[] windowValues;
     return featureCount;
   }
 };

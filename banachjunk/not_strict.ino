@@ -25,45 +25,65 @@ private:
         };
     }
 
-    // Least squares method for polynomial fitting
+    // Least squares method for polynomial fitting using Gaussian elimination
     PolynomialCoefficients fitPolynomial(const std::vector<float>& data) {
         int n = data.size();
-        float sumX = 0, sumX2 = 0, sumX3 = 0, sumX4 = 0;
-        float sumY = 0, sumXY = 0, sumX2Y = 0, sumX3Y = 0;
+        const int m = 4; // cubic fit: a*x^3 + b*x^2 + c*x + d
+        double matrix[m][m];
+        double rhs[m];
 
-        for (int i = 0; i < n; ++i) {
-            float x = i;
-            float y = data[i];
-            
-            sumX += x;
-            sumX2 += x * x;
-            sumX3 += x * x * x;
-            sumX4 += x * x * x * x;
-            
-            sumY += y;
-            sumXY += x * y;
-            sumX2Y += x * x * y;
-            sumX3Y += x * x * x * y;
+        for (int i = 0; i < m; i++) {
+            rhs[i] = 0;
+            for (int j = 0; j < m; j++) {
+                matrix[i][j] = 0;
+            }
         }
 
-        // Solve using matrix method (simplified)
-        // This is a rudimentary implementation and might need numerical optimization
-        float det = n * sumX2 * sumX4 + sumX * sumX3 * sumX2 + sumX2 * sumX * sumX3 
-                    - sumX2 * sumX2 * sumX2 - n * sumX3 * sumX3 - sumX * sumX * sumX4;
+        for (int i = 0; i < n; i++) {
+            double x = i;
+            double y = data[i];
+            double x_pow[2 * m - 1];
+            x_pow[0] = 1.0;
+            for (int p = 1; p < 2 * m - 1; p++) x_pow[p] = x_pow[p-1] * x;
 
-        PolynomialCoefficients coeffs;
-        coeffs.a = (sumY * sumX2 * sumX4 + sumX * sumX3Y * sumX2 + sumX2Y * sumX * sumX3 
-                    - sumX2Y * sumX2 * sumX2 - sumY * sumX3 * sumX3 - sumX * sumX * sumX3Y) / det;
-        
-        coeffs.b = (n * sumX3Y * sumX4 + sumY * sumX3 * sumX2 + sumX * sumX2Y * sumX3 
-                    - sumX * sumX3Y * sumX2 - n * sumX3 * sumX3Y - sumY * sumX * sumX4) / det;
-        
-        coeffs.c = (n * sumX2 * sumX3Y + sumX * sumX2Y * sumX4 + sumY * sumX * sumX3 
-                    - sumY * sumX2 * sumX3 - n * sumX * sumX3Y - sumX2Y * sumX * sumX2) / det;
-        
-        coeffs.d = sumY / n;
+            for (int r = 0; r < m; r++) {
+                for (int c = 0; c < m; c++) {
+                    matrix[r][c] += x_pow[(m-1-r) + (m-1-c)];
+                }
+                rhs[r] += y * x_pow[m-1-r];
+            }
+        }
 
-        return coeffs;
+        // Gaussian elimination with pivoting
+        for (int i = 0; i < m; i++) {
+            int pivot = i;
+            for (int j = i + 1; j < m; j++) {
+                if (std::abs(matrix[j][i]) > std::abs(matrix[pivot][i])) pivot = j;
+            }
+            for (int k = i; k < m; k++) std::swap(matrix[i][k], matrix[pivot][k]);
+            std::swap(rhs[i], rhs[pivot]);
+
+            if (std::abs(matrix[i][i]) < 1e-9) continue;
+
+            for (int j = i + 1; j < m; j++) {
+                double factor = matrix[j][i] / matrix[i][i];
+                rhs[j] -= factor * rhs[i];
+                for (int k = i; k < m; k++) matrix[j][k] -= factor * matrix[i][k];
+            }
+        }
+
+        float coeffs_arr[m];
+        for (int i = m - 1; i >= 0; i--) {
+            if (std::abs(matrix[i][i]) < 1e-9) {
+                coeffs_arr[i] = 0;
+            } else {
+                double sum = 0;
+                for (int j = i + 1; j < m; j++) sum += matrix[i][j] * coeffs_arr[j];
+                coeffs_arr[i] = (rhs[i] - sum) / matrix[i][i];
+            }
+        }
+
+        return {coeffs_arr[0], coeffs_arr[1], coeffs_arr[2], coeffs_arr[3]};
     }
 
     // Compute rate of change using Galois field properties

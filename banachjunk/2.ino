@@ -78,18 +78,56 @@ private:
         }
     };
 
-    // Compute Generalized Polynomial Fitting
+    // Compute Generalized Polynomial Fitting using Least Squares
     GeneralizedPolynomial fitGeneralizedPolynomial(int order) {
-        GeneralizedPolynomial poly;
-        poly.coefficients.resize(order + 1, 0);
+        int n = dataBuffer.size();
+        int m = order + 1;
+        std::vector<std::vector<double>> matrix(m, std::vector<double>(m, 0.0));
+        std::vector<double> rhs(m, 0.0);
 
-        // Complex polynomial fitting using Galois field properties
-        for (int j = 0; j <= order; ++j) {
-            float sum = 0;
-            for (size_t i = 0; i < dataBuffer.size(); ++i) {
-                sum += pow(i, j) * dataBuffer[i].toFloat();
+        for (int i = 0; i < n; ++i) {
+            double x = i;
+            double y = dataBuffer[i].toFloat();
+            for (int r = 0; r < m; ++r) {
+                for (int c = 0; c < m; ++c) {
+                    matrix[r][c] += pow(x, r + c);
+                }
+                rhs[r] += y * pow(x, r);
             }
-            poly.coefficients[j] = sum / dataBuffer.size();
+        }
+
+        // Solve using Gaussian elimination
+        for (int i = 0; i < m; ++i) {
+            int pivot = i;
+            for (int j = i + 1; j < m; ++j) {
+                if (abs(matrix[j][i]) > abs(matrix[pivot][i])) pivot = j;
+            }
+            std::swap(matrix[i], matrix[pivot]);
+            std::swap(rhs[i], rhs[pivot]);
+
+            if (abs(matrix[i][i]) < 1e-9) continue;
+
+            for (int j = i + 1; j < m; ++j) {
+                double factor = matrix[j][i] / matrix[i][i];
+                rhs[j] -= factor * rhs[i];
+                for (int k = i; k < m; ++k) {
+                    matrix[j][k] -= factor * matrix[i][k];
+                }
+            }
+        }
+
+        GeneralizedPolynomial poly;
+        poly.coefficients.resize(m, 0);
+        for (int i = m - 1; i >= 0; --i) {
+            if (abs(matrix[i][i]) < 1e-9) {
+                poly.coefficients[i] = 0;
+            } else {
+                double sum = 0;
+                for (int j = i + 1; j < m; ++j) {
+                    sum += matrix[i][j] * poly.coefficients[j];
+                }
+                poly.coefficients[i] = (rhs[i] - sum) / matrix[i][i];
+            }
         }
 
         return poly;

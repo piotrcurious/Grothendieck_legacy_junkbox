@@ -140,7 +140,10 @@ private:
             denominator2 += diff2 * diff2;
         }
         
-        return numerator / std::sqrt(denominator1 * denominator2);
+        T denom = std::sqrt(denominator1 * denominator2);
+        if (std::abs(denom) < 1e-9) return T(0);
+
+        return numerator / denom;
     }
 
 public:
