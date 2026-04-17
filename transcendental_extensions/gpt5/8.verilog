@@ -86,6 +86,10 @@ module SymbolicFPU (
     reg [7:0]  status_next;
     reg        done_next;
 
+    // Symbolic "Look-Aside" Signals
+    reg [71:0] exact_result;
+    reg        exact_hit;
+
     // High-precision constant values from a ROM
     wire [63:0] PI_VAL, E_VAL, LOG2_VAL, PHI_VAL, GAMMA_VAL;
     ConstantROM constant_rom (
@@ -110,277 +114,165 @@ module SymbolicFPU (
 
     // Combinational Logic: The core of the SFPU
     always @(*) begin
-        // Default assignments
+        // Default Look-Aside
+        exact_hit = 1'b0;
+        exact_result = {`TYPE_NAN, `SYM_NONE, 64'd0};
+
+        case (opcode)
+            `OP_FADD: begin
+                if (type_b == `TYPE_ZERO) begin
+                    exact_hit = 1'b1; exact_result = operand_a;
+                end else if (type_a == `TYPE_ZERO) begin
+                    exact_hit = 1'b1; exact_result = operand_b;
+                end else if (((type_a == `TYPE_HYBRID) || (type_a == `TYPE_SYMBOLIC)) &&
+                             ((type_b == `TYPE_HYBRID) || (type_b == `TYPE_SYMBOLIC)) &&
+                             (symbol_a == symbol_b)) begin
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_HYBRID, symbol_a, coeff_a + coeff_b};
+                end
+            end
+
+            `OP_FSUB: begin
+                if (type_b == `TYPE_ZERO) begin
+                    exact_hit = 1'b1; exact_result = operand_a;
+                end else if (((type_a == `TYPE_HYBRID) || (type_a == `TYPE_SYMBOLIC)) &&
+                             ((type_b == `TYPE_HYBRID) || (type_b == `TYPE_SYMBOLIC)) &&
+                             (symbol_a == symbol_b)) begin
+                    exact_hit = 1'b1;
+                    exact_result = {`TYPE_HYBRID, symbol_a, coeff_a - coeff_b};
+                end
+            end
+
+            `OP_FMUL: begin
+                if (type_a == `TYPE_ZERO || type_b == `TYPE_ZERO) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                end else if (type_a == `TYPE_SYMBOLIC && type_b == `TYPE_NORMAL) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_HYBRID, symbol_a, coeff_b};
+                end else if (type_a == `TYPE_NORMAL && type_b == `TYPE_SYMBOLIC) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_HYBRID, symbol_b, coeff_a};
+                end else if (type_a == `TYPE_HYBRID && type_b == `TYPE_NORMAL) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_HYBRID, symbol_a, coeff_a * coeff_b};
+                end else if (type_a == `TYPE_NORMAL && type_b == `TYPE_HYBRID) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_HYBRID, symbol_b, coeff_a * coeff_b};
+                end else if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_I &&
+                             type_b == `TYPE_SYMBOLIC && symbol_b == `SYM_I) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_NEG_ONE};
+                end else if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_PI &&
+                             type_b == `TYPE_SYMBOLIC && symbol_b == `SYM_I) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_HYBRID, `SYM_I, PI_VAL};
+                end else if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_I &&
+                             type_b == `TYPE_SYMBOLIC && symbol_b == `SYM_PI) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_HYBRID, `SYM_I, PI_VAL};
+                end
+            end
+
+            `OP_FEXP: begin
+                if (type_a == `TYPE_ZERO) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
+                end else if (type_a == `TYPE_NORMAL && coeff_a == FP_ONE) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_SYMBOLIC, `SYM_E, FP_ONE};
+                end else if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_LOG2) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_NORMAL, `SYM_NONE, 64'h4000000000000000};
+                end else if (type_a == `TYPE_HYBRID && symbol_a == `SYM_I && coeff_a == PI_VAL) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_NEG_ONE};
+                end
+            end
+
+            `OP_FSIN: begin
+                if (type_a == `TYPE_ZERO) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                } else if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_PI) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                end
+            end
+
+            `OP_FCOS: begin
+                if (type_a == `TYPE_ZERO) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
+                end else if ((type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_PI) ||
+                             (type_a == `TYPE_HYBRID && symbol_a == `SYM_PI && coeff_a == FP_ONE)) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_NEG_ONE};
+                end else if (type_a == `TYPE_HYBRID && symbol_a == `SYM_PI && coeff_a == 64'h4000000000000000) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
+                end
+            end
+
+            `OP_FSQRT: begin
+                if (type_a == `TYPE_ZERO) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                } else if (type_a == `TYPE_NORMAL && coeff_a == FP_ONE) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
+                end
+            end
+
+            `OP_FSINH: begin
+                if (type_a == `TYPE_ZERO) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                end
+            end
+
+            `OP_FCOSH: begin
+                if (type_a == `TYPE_ZERO) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
+                end
+            end
+
+            `OP_FASIN: begin
+                if (type_a == `TYPE_ZERO) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                end else if (type_a == `TYPE_NORMAL && coeff_a == FP_ONE) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_HYBRID, `SYM_PI, 64'h3FE0000000000000};
+                end
+            end
+
+            `OP_FACOS: begin
+                if (type_a == `TYPE_NORMAL && coeff_a == FP_ONE) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                end else if (type_a == `TYPE_ZERO) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_HYBRID, `SYM_PI, 64'h3FE0000000000000};
+                end
+            end
+
+            `OP_FTAN: begin
+                if (type_a == `TYPE_ZERO) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                end else if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_PI) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                end
+            end
+
+            `OP_FATAN: begin
+                if (type_a == `TYPE_ZERO) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                }
+            end
+
+            `OP_FTANH: begin
+                if (type_a == `TYPE_ZERO) begin
+                    exact_hit = 1'b1; exact_result = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
+                }
+            end
+        endcase
+
+        // Main Control logic
         done_next = 1'b0;
         result_next = {`TYPE_NAN, `SYM_NONE, 64'd0};
         status_next = 8'd0;
 
         if (start) begin
             done_next = 1'b1;
-
-            case (opcode)
-                `OP_FADD: begin
-                    // Rule: A + 0 -> A
-                    if (type_b == `TYPE_ZERO) begin
-                        result_next = operand_a;
-                    end
-                    // Rule: 0 + B -> B
-                    else if (type_a == `TYPE_ZERO) begin
-                        result_next = operand_b;
-                    end
-                    // Rule: (C1*S) + (C2*S) -> (C1+C2)*S
-                    else if (((type_a == `TYPE_HYBRID) || (type_a == `TYPE_SYMBOLIC)) &&
-                             ((type_b == `TYPE_HYBRID) || (type_b == `TYPE_SYMBOLIC)) &&
-                             (symbol_a == symbol_b)) begin
-
-                        // If SYMBOLIC, implicit coeff is 1.0
-                        // result_next = {`TYPE_HYBRID, symbol_a, fp_add(coeff_a_eff, coeff_b_eff)};
-                        result_next = {`TYPE_HYBRID, symbol_a, coeff_a + coeff_b};
-                    end
-                    else begin
-                        // Fallback: Numerical Path
-                        status_next[0] = 1'b1; // inexact
-                    end
-                end
-
-                `OP_FSUB: begin
-                    // Rule: A - 0 -> A
-                    if (type_b == `TYPE_ZERO) begin
-                        result_next = operand_a;
-                    end
-                    // Rule: (C1*S) - (C2*S) -> (C1-C2)*S
-                    else if (((type_a == `TYPE_HYBRID) || (type_a == `TYPE_SYMBOLIC)) &&
-                             ((type_b == `TYPE_HYBRID) || (type_b == `TYPE_SYMBOLIC)) &&
-                             (symbol_a == symbol_b)) begin
-                        result_next = {`TYPE_HYBRID, symbol_a, coeff_a - coeff_b};
-                    end
-                    else begin
-                        status_next[0] = 1'b1; // inexact
-                    end
-                end
-
-                `OP_FMUL: begin
-                    // Rule: A * 0 -> 0
-                    if (type_a == `TYPE_ZERO || type_b == `TYPE_ZERO) begin
-                        result_next = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
-                    end
-                    // Rule: Symbolic * Normal -> Hybrid
-                    else if (type_a == `TYPE_SYMBOLIC && type_b == `TYPE_NORMAL) begin
-                        result_next = {`TYPE_HYBRID, symbol_a, coeff_b};
-                    end
-                    else if (type_a == `TYPE_NORMAL && type_b == `TYPE_SYMBOLIC) begin
-                        result_next = {`TYPE_HYBRID, symbol_b, coeff_a};
-                    end
-                    // Rule: Hybrid * Normal -> Hybrid
-                    else if (type_a == `TYPE_HYBRID && type_b == `TYPE_NORMAL) begin
-                        result_next = {`TYPE_HYBRID, symbol_a, coeff_a * coeff_b};
-                    end
-                    else if (type_a == `TYPE_NORMAL && type_b == `TYPE_HYBRID) begin
-                        result_next = {`TYPE_HYBRID, symbol_b, coeff_a * coeff_b};
-                    end
-                    // Rule: i * i -> -1
-                    else if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_I &&
-                             type_b == `TYPE_SYMBOLIC && symbol_b == `SYM_I) begin
-                        result_next = {`TYPE_NORMAL, `SYM_NONE, FP_NEG_ONE};
-                    end
-                    // Rule: pi * i -> Hybrid(i, pi_val)
-                    else if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_PI &&
-                             type_b == `TYPE_SYMBOLIC && symbol_b == `SYM_I) begin
-                        result_next = {`TYPE_HYBRID, `SYM_I, PI_VAL};
-                    end
-                    else if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_I &&
-                             type_b == `TYPE_SYMBOLIC && symbol_b == `SYM_PI) begin
-                        result_next = {`TYPE_HYBRID, `SYM_I, PI_VAL};
-                    end
-                    else begin
-                        status_next[0] = 1'b1; // inexact
-                    end
-                end
-
-                `OP_FDIV: begin
-                    // Rule: A / 1 -> A
-                    if (type_b == `TYPE_NORMAL && coeff_b == FP_ONE) begin
-                        result_next = operand_a;
-                    end
-                    // Rule: 0 / A -> 0
-                    else if (type_a == `TYPE_ZERO && type_b != `TYPE_ZERO) begin
-                        result_next = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
-                    end
-                    // Rule: A / 0 -> INF/NAN
-                    else if (type_b == `TYPE_ZERO) begin
-                        result_next = {`TYPE_NAN, `SYM_NONE, FP_ZERO};
-                        status_next[1] = 1'b1; // div by zero
-                    end
-                    else begin
-                        status_next[0] = 1'b1; // inexact
-                    end
-                end
-
-                `OP_FLOG: begin // Natural log
-                    // Rule: log(e) -> 1
-                    if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_E) begin
-                        result_next = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
-                    end
-                    // Rule: log(1) -> 0
-                    else if (type_a == `TYPE_NORMAL && coeff_a == FP_ONE) begin
-                        result_next = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
-                    end
-                    else begin
-                        status_next[0] = 1'b1;
-                    end
-                end
-                
-                `OP_FEXP: begin
-                    // Rule: exp(0) -> 1
-                    if (type_a == `TYPE_ZERO) begin
-                        result_next = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
-                    end
-                    // Rule: exp(1) -> e
-                    else if (type_a == `TYPE_NORMAL && coeff_a == FP_ONE) begin
-                        result_next = {`TYPE_SYMBOLIC, `SYM_E, FP_ONE};
-                    end
-                    // Rule: exp(log(X)) -> X (simplified as exp(SYM_LOG2) -> 2.0 etc)
-                    else if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_LOG2) begin
-                        result_next = {`TYPE_NORMAL, `SYM_NONE, 64'h4000000000000000}; // 2.0
-                    end
-                    // Rule: exp(i*pi) -> -1
-                    else if (type_a == `TYPE_HYBRID && symbol_a == `SYM_I && coeff_a == PI_VAL) begin
-                        result_next = {`TYPE_NORMAL, `SYM_NONE, FP_NEG_ONE};
-                    end
-                    else begin
-                        status_next[0] = 1'b1;
-                    end
-                end
-
-                `OP_FSIN: begin
-                    // Rule: sin(0) -> 0
-                    if (type_a == `TYPE_ZERO) begin
-                        result_next = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
-                    end
-                    // Rule: sin(pi) -> 0
-                    else if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_PI) begin
-                        result_next = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
-                    end
-                    else begin
-                        status_next[0] = 1'b1;
-                    end
-                end
-
-                `OP_FCOS: begin
-                    // Rule: cos(0) -> 1
-                    if (type_a == `TYPE_ZERO) begin
-                        result_next = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
-                    end
-                    // Rule: cos(pi) -> -1
-                    else if ((type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_PI) ||
-                             (type_a == `TYPE_HYBRID && symbol_a == `SYM_PI && coeff_a == FP_ONE)) begin
-                        result_next = {`TYPE_NORMAL, `SYM_NONE, FP_NEG_ONE};
-                    end
-                    // Rule: cos(2*pi) -> 1
-                    else if (type_a == `TYPE_HYBRID && symbol_a == `SYM_PI && coeff_a == 64'h4000000000000000) begin // 2.0
-                        result_next = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
-                    end
-                    else begin
-                        status_next[0] = 1'b1;
-                    end
-                end
-
-                `OP_FTAN: begin
-                    // Rule: tan(0) -> 0
-                    if (type_a == `TYPE_ZERO) begin
-                        result_next = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
-                    end
-                    // Rule: tan(pi) -> 0
-                    else if (type_a == `TYPE_SYMBOLIC && symbol_a == `SYM_PI) begin
-                        result_next = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
-                    end
-                    else begin
-                        status_next[0] = 1'b1;
-                    end
-                end
-
-                `OP_FATAN: begin
-                    // Rule: atan(0) -> 0
-                    if (type_a == `TYPE_ZERO) begin
-                        result_next = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
-                    end
-                    // Rule: atan(inf) -> pi/2 (conceptual)
-                    else if (type_a == `TYPE_INF) begin
-                        result_next = {`TYPE_HYBRID, `SYM_PI, 64'h3FE0000000000000}; // 0.5 * PI
-                    end
-                    else begin
-                        status_next[0] = 1'b1;
-                    end
-                end
-
-                `OP_FSQRT: begin
-                    // Rule: sqrt(0) -> 0
-                    if (type_a == `TYPE_ZERO) begin
-                        result_next = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
-                    end
-                    // Rule: sqrt(1) -> 1
-                    else if (type_a == `TYPE_NORMAL && coeff_a == FP_ONE) begin
-                        result_next = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
-                    end
-                    else begin
-                        status_next[0] = 1'b1;
-                    end
-                end
-
-                `OP_FSINH: begin
-                    // Rule: sinh(0) -> 0
-                    if (type_a == `TYPE_ZERO) begin
-                        result_next = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
-                    end
-                    else begin
-                        status_next[0] = 1'b1;
-                    end
-                end
-
-                `OP_FCOSH: begin
-                    // Rule: cosh(0) -> 1
-                    if (type_a == `TYPE_ZERO) begin
-                        result_next = {`TYPE_NORMAL, `SYM_NONE, FP_ONE};
-                    end
-                    else begin
-                        status_next[0] = 1'b1;
-                    end
-                end
-
-                `OP_FASIN: begin
-                    // Rule: asin(0) -> 0
-                    if (type_a == `TYPE_ZERO) begin
-                        result_next = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
-                    end
-                    // Rule: asin(1) -> pi/2
-                    else if (type_a == `TYPE_NORMAL && coeff_a == FP_ONE) begin
-                        result_next = {`TYPE_HYBRID, `SYM_PI, 64'h3FE0000000000000}; // 0.5 * PI
-                    end
-                    else begin
-                        status_next[0] = 1'b1;
-                    end
-                end
-
-                `OP_FACOS: begin
-                    // Rule: acos(1) -> 0
-                    if (type_a == `TYPE_NORMAL && coeff_a == FP_ONE) begin
-                        result_next = {`TYPE_ZERO, `SYM_NONE, FP_ZERO};
-                    end
-                    // Rule: acos(0) -> pi/2
-                    else if (type_a == `TYPE_ZERO) begin
-                        result_next = {`TYPE_HYBRID, `SYM_PI, 64'h3FE0000000000000}; // 0.5 * PI
-                    end
-                    else begin
-                        status_next[0] = 1'b1;
-                    end
-                end
-
-                default: begin
-                    status_next[0] = 1'b1; // inexact
-                end
-            endcase
-        end else begin
-            done_next = 1'b0;
+            if (exact_hit) begin
+                result_next = exact_result;
+            end else begin
+                // Numerical fallback path (Approximation Path)
+                status_next[0] = 1'b1; // inexact
+                /*
+                 * Concept: Integrated CORDIC Engine
+                 * For opcodes like FSIN, FCOS, FATAN, the SFPU would
+                 * invoke a hardware CORDIC unit to compute
+                 * high-precision numerical approximations.
+                 */
+            end
         end
     end
 
@@ -394,14 +286,9 @@ module ConstantROM (
     output wire [63:0] phi_val,
     output wire [63:0] gamma_val
 );
-    // M_PI = 3.141592653589793
     assign pi_val = 64'h400921FB54442D18;
-    // M_E = 2.718281828459045
     assign e_val  = 64'h4005BF0A8B145769;
-    // M_LN2 = 0.6931471805599453
     assign log2_val = 64'h3FE62E42FEFA39EF;
-    // PHI = 1.618033988749895
     assign phi_val = 64'h3FF9E3779B97F4A8;
-    // GAMMA = 0.5772156649015328
     assign gamma_val = 64'h3FE2788CF26668E2;
 endmodule

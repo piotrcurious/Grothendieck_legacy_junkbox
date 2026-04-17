@@ -117,6 +117,77 @@ struct Expr {
         return "?";
     }
 
+    // LaTeX output
+    string toLaTeX() const {
+        switch (kind) {
+            case Kind::CONST:
+                if (label == "π") return "\\pi";
+                if (label == "φ") return "\\phi";
+                if (label == "γ") return "\\gamma";
+                if (!label.empty()) return label;
+                {
+                    if (abs(value.imag()) < EPS) {
+                        string s = to_string(value.real());
+                        s.erase(s.find_last_not_of('0') + 1, std::string::npos);
+                        if (s.back() == '.') s.pop_back();
+                        return s;
+                    }
+                    ostringstream os; os << "(" << value.real() << (value.imag()>=0?"+":"") << value.imag() << "i)";
+                    return os.str();
+                }
+            case Kind::VAR: return label;
+            case Kind::UNARY:
+                if (label == "neg") return "-" + left->toLaTeX();
+                if (label == "sqrt") return "\\sqrt{" + left->toLaTeX() + "}";
+                return "\\" + label + "{" + left->toLaTeX() + "}";
+            case Kind::POW:
+                if (right->kind == Kind::CONST && abs(right->value.real() + 1.0) < EPS && abs(right->value.imag()) < EPS)
+                    return "\\frac{1}{" + left->toLaTeX() + "}";
+                return "{" + left->toLaTeX() + "}^{" + right->toLaTeX() + "}";
+            case Kind::NARY: {
+                if (nop == NaryOp::MUL) {
+                    // Check for fractions in multiplication
+                    vector<ExprPtr> num, den;
+                    for (auto &o : ops) {
+                        if (o->kind == Kind::POW && o->right->kind == Kind::CONST && o->right->value.real() < 0) {
+                            auto d_node = make_shared<Expr>();
+                            d_node->kind = Kind::POW;
+                            d_node->left = o->left;
+                            d_node->right = make_shared<Expr>();
+                            d_node->right->kind = Kind::CONST;
+                            d_node->right->value = {-o->right->value.real(), -o->right->value.imag()};
+                            den.push_back(d_node);
+                        } else {
+                            num.push_back(o);
+                        }
+                    }
+                    if (!den.empty()) {
+                        string s_num = (num.empty() ? "1" : "");
+                        for (size_t i=0; i<num.size(); ++i) {
+                            if (i) s_num += " ";
+                            s_num += num[i]->toLaTeX();
+                        }
+                        string s_den = "";
+                        for (size_t i=0; i<den.size(); ++i) {
+                            if (i) s_den += " ";
+                            s_den += den[i]->toLaTeX();
+                        }
+                        return "\\frac{" + s_num + "}{" + s_den + "}";
+                    }
+                }
+                string op = (nop==NaryOp::ADD? " + " : " ");
+                string s = "(";
+                for (size_t i=0;i<ops.size();++i) {
+                    if (i) s += op;
+                    s += ops[i]->toLaTeX();
+                }
+                s += ")";
+                return s;
+            }
+        }
+        return "?";
+    }
+
     // structural key used for canonicalization & interning
     static string normalizeKey(Expr &e) {
         // produce a canonical string key and store in key_cache
@@ -324,6 +395,12 @@ struct Parser {
 ExprPtr parse(string s) {
     return Parser(move(s)).parseExpression();
 }
+
+// forward
+ExprPtr diff(const ExprPtr &e, const string &var);
+ExprPtr substitute_var(const ExprPtr &e, const string &var, const ExprPtr &val);
+ExprPtr taylor_series(const ExprPtr &e, const string &var, double center, int order);
+cplx solve_newton(const ExprPtr &e, const string &var, cplx guess, int iterations = 10);
 
 // ---------------------- Numeric evaluation ----------------------
 cplx evaluate(const ExprPtr &e) {
@@ -582,6 +659,9 @@ ExprPtr diff(const ExprPtr &e, const string &var) {
             } else if (e->label == "atan") {
                 // d/dx atan(u) = 1/(1+u^2) * du
                 return simplify(MUL({P(ADD({ONE(), P(e->left, C(2))}), C(-1)), du}), rules);
+            } else if (e->label == "tan") {
+                // d/dx tan(u) = (1 + tan^2(u)) * du
+                return simplify(MUL({ADD({ONE(), P(e, C(2))}), du}), rules);
             } else if (e->label == "neg") {
                 return simplify(U("neg", du), rules);
             }
@@ -907,6 +987,21 @@ vector<Rule> defaultRules() {
     rules.emplace_back(ADD({Wstar("pre"), P(U("cos", W("x")), C(2)), P(U("sin", W("x")), C(2)), Wstar("post")}),
                        ADD({Wstar("pre"), ONE(), Wstar("post")}));
 
+    // log(a * b) -> log(a) + log(b)
+    rules.emplace_back(U("log", MUL({W("a"), W("b"), Wstar("rest")})),
+                       ADD({U("log", W("a")), U("log", MUL({W("b"), Wstar("rest")}))}));
+
+    // log(a^b) -> b * log(a)
+    rules.emplace_back(U("log", P(W("a"), W("b"))),
+                       MUL({W("b"), U("log", W("a"))}));
+
+    // exp(x) * exp(y) -> exp(x + y)
+    rules.emplace_back(MUL({Wstar("pre"), U("exp", W("x")), U("exp", W("y")), Wstar("post")}),
+                       MUL({Wstar("pre"), U("exp", ADD({W("x"), W("y")})), Wstar("post")}));
+
+    // sqrt(x) -> x^0.5
+    rules.emplace_back(U("sqrt", W("x")), P(W("x"), C(0.5)));
+
     return rules;
 }
 
@@ -1034,5 +1129,84 @@ int main() {
     cout << "Parsing: " << s5 << "\n";
     cout << "d/dx:     " << diff(parse(s5), "x")->toString() << "\n";
 
+    cout << "\n--- Partial Derivative Test ---\n";
+    string s6 = "x^2 + x*y + y^2";
+    cout << "Parsing: " << s6 << "\n";
+    ExprPtr ps6 = parse(s6);
+    cout << "d/dx:     " << diff(ps6, "x")->toString() << "\n";
+    cout << "d/dy:     " << diff(ps6, "y")->toString() << "\n";
+
+    cout << "\n--- Taylor Series Test ---\n";
+    string s7 = "sin(x)";
+    cout << "Expanding " << s7 << " around 0 to order 5:\n";
+    ExprPtr ts1 = taylor_series(parse(s7), "x", 0.0, 5);
+    cout << "Result: " << ts1->toString() << "\n";
+    cout << "LaTeX:  " << ts1->toLaTeX() << "\n";
+
+    cout << "\n--- Newton-Raphson Solver Test ---\n";
+    string s8 = "x - cos(x)";
+    cout << "Solving " << s8 << " = 0 with guess 0.5:\n";
+    cplx root = solve_newton(parse(s8), "x", 0.5);
+    cout << "Root: " << root.real() << " + " << root.imag() << "i\n";
+    cout << "Verification: " << evaluate(substitute_var(parse(s8), "x", C(root.real(), root.imag()))) << "\n";
+
     return 0;
+}
+
+// ---------------------- Taylor Series ----------------------
+
+// simple factorial
+double fact(int n) {
+    double r = 1.0;
+    for (int i=2; i<=n; ++i) r *= i;
+    return r;
+}
+
+// Evaluate expression by replacing a variable with a constant
+ExprPtr substitute_var(const ExprPtr &e, const string &var, const ExprPtr &val) {
+    if (!e) return nullptr;
+    if (e->kind == Kind::VAR && e->label == var) return val;
+    if (e->kind == Kind::UNARY) return U(e->label, substitute_var(e->left, var, val));
+    if (e->kind == Kind::POW) return P(substitute_var(e->left, var, val), substitute_var(e->right, var, val));
+    if (e->kind == Kind::NARY) {
+        vector<ExprPtr> new_ops;
+        for (auto &o : e->ops) new_ops.push_back(substitute_var(o, var, val));
+        return N(e->nop, new_ops);
+    }
+    return e; // CONST
+}
+
+ExprPtr taylor_series(const ExprPtr &e, const string &var, double center, int order) {
+    auto rules = defaultRules();
+    vector<ExprPtr> terms;
+    ExprPtr cur = e;
+    ExprPtr center_node = C(center);
+
+    for (int n=0; n<=order; ++n) {
+        // f^(n)(center) / n! * (x - center)^n
+        ExprPtr coeff_val = simplify(substitute_var(cur, var, center_node), rules);
+        if (abs(evaluate(coeff_val)) > EPS) {
+            ExprPtr term = coeff_val;
+            if (n > 0) {
+                ExprPtr x_minus_c = ADD({V(var), U("neg", center_node)});
+                term = MUL({term, P(x_minus_c, C(n))});
+            }
+            term = MUL({term, C(1.0 / fact(n))});
+            terms.push_back(simplify(term, rules));
+        }
+        cur = diff(cur, var);
+    }
+    return simplify(N(NaryOp::ADD, terms), rules);
+}
+
+cplx solve_newton(const ExprPtr &e, const string &var, cplx guess, int iterations) {
+    ExprPtr d = diff(e, var);
+    cplx x = guess;
+    for (int i=0; i<iterations; ++i) {
+        cplx fx = evaluate(substitute_var(e, var, C(x.real(), x.imag())));
+        cplx dfx = evaluate(substitute_var(d, var, C(x.real(), x.imag())));
+        if (abs(dfx) < EPS) break;
+        x = x - fx / dfx;
+    }
+    return x;
 }
