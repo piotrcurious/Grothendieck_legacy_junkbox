@@ -38,6 +38,9 @@ struct Expr {
     NaryOp nop;
     vector<ExprPtr> ops;
 
+    // is this node or any child a pattern wildcard?
+    bool is_pattern = false;
+
     // structural key cached (for interning/comparison)
     mutable string key_cache;
 
@@ -49,6 +52,7 @@ struct Expr {
         p->kind = Kind::CONST;
         p->value = v;
         p->label = lbl;
+        if (!lbl.empty() && lbl[0] == '?') p->is_pattern = true;
         normalizeKey(*p);
         return p;
     }
@@ -56,6 +60,7 @@ struct Expr {
         auto p = make_shared<Expr>();
         p->kind = Kind::VAR;
         p->label = name;
+        if (!name.empty() && name[0] == '?') p->is_pattern = true;
         normalizeKey(*p);
         return p;
     }
@@ -64,6 +69,7 @@ struct Expr {
         p->kind = Kind::UNARY;
         p->label = fname;
         p->left = move(arg);
+        if (p->left && p->left->is_pattern) p->is_pattern = true;
         normalizeKey(*p);
         return p;
     }
@@ -72,6 +78,7 @@ struct Expr {
         p->kind = Kind::POW;
         p->left = move(a);
         p->right = move(b);
+        if ((p->left && p->left->is_pattern) || (p->right && p->right->is_pattern)) p->is_pattern = true;
         normalizeKey(*p);
         return p;
     }
@@ -80,6 +87,7 @@ struct Expr {
         p->kind = Kind::NARY;
         p->nop = op;
         p->ops = move(operands);
+        for (auto &o : p->ops) if (o && o->is_pattern) p->is_pattern = true;
         normalizeKey(*p);
         return p;
     }
@@ -136,9 +144,11 @@ struct Expr {
             // if ops already set, gather from them
             for (auto &c: e.ops) gather(c);
             // produce canonical order (sort by key - stable)
-            sort(flat.begin(), flat.end(), [](const ExprPtr &a, const ExprPtr &b){
-                return a->key_cache < b->key_cache;
-            });
+            if (!e.is_pattern) {
+                sort(flat.begin(), flat.end(), [](const ExprPtr &a, const ExprPtr &b){
+                    return a->key_cache < b->key_cache;
+                });
+            }
             // replace operands with canonical flat list
             e.ops = move(flat);
             // build key
@@ -191,7 +201,13 @@ MorphMap& morphisms() {
         {"exp", [](const cplx &z){ return exp(z); }},
         {"log", [](const cplx &z){ return log(z); }},
         {"sqrt",[](const cplx &z){ return sqrt(z); }},
-        {"neg", [](const cplx &z){ return -z; }}
+        {"neg", [](const cplx &z){ return -z; }},
+        {"sinh",[](const cplx &z){ return sinh(z); }},
+        {"cosh",[](const cplx &z){ return cosh(z); }},
+        {"tanh",[](const cplx &z){ return tanh(z); }},
+        {"asin",[](const cplx &z){ return asin(z); }},
+        {"acos",[](const cplx &z){ return acos(z); }},
+        {"atan",[](const cplx &z){ return atan(z); }},
     };
     return mm;
 }
@@ -548,6 +564,24 @@ ExprPtr diff(const ExprPtr &e, const string &var) {
             } else if (e->label == "sqrt") {
                 // d/dx sqrt(u) = 1/(2*sqrt(u)) * du/dx
                 return simplify(MUL({P(C(2), C(-1)), P(e, C(-1)), du}), rules);
+            } else if (e->label == "sinh") {
+                // d/dx sinh(u) = cosh(u) * du
+                return simplify(MUL({U("cosh", e->left), du}), rules);
+            } else if (e->label == "cosh") {
+                // d/dx cosh(u) = sinh(u) * du
+                return simplify(MUL({U("sinh", e->left), du}), rules);
+            } else if (e->label == "tanh") {
+                // d/dx tanh(u) = sech^2(u) * du = (1 - tanh^2(u)) * du
+                return simplify(MUL({ADD({ONE(), U("neg", P(e, C(2)))}), du}), rules);
+            } else if (e->label == "asin") {
+                // d/dx asin(u) = 1/sqrt(1-u^2) * du
+                return simplify(MUL({P(ADD({ONE(), U("neg", P(e->left, C(2)))}), C(-0.5)), du}), rules);
+            } else if (e->label == "acos") {
+                // d/dx acos(u) = -1/sqrt(1-u^2) * du
+                return simplify(MUL({U("neg", P(ADD({ONE(), U("neg", P(e->left, C(2)))}), C(-0.5))), du}), rules);
+            } else if (e->label == "atan") {
+                // d/dx atan(u) = 1/(1+u^2) * du
+                return simplify(MUL({P(ADD({ONE(), P(e->left, C(2))}), C(-1)), du}), rules);
             } else if (e->label == "neg") {
                 return simplify(U("neg", du), rules);
             }
@@ -621,7 +655,11 @@ ExprPtr substituteIntoNary(NaryOp op, const vector<ExprPtr> &repl_ops, const Bin
         // return neutral element
         return (op==NaryOp::ADD? ZERO() : ONE());
     }
-    if (out.size()==1) return out[0];
+    if (out.size()==1) {
+        // Ensure we don't return null if out[0] was somehow null (shouldn't happen with valid logic)
+        if (out[0]) return out[0];
+        return (op==NaryOp::ADD? ZERO() : ONE());
+    }
     return N(op, out);
 }
 
@@ -833,6 +871,14 @@ vector<Rule> defaultRules() {
     rules.emplace_back(ADD({ZERO(), W("x")}), W("x"));
     // x - 0 -> x
     rules.emplace_back(N(NaryOp::ADD, {W("x"), U("neg", ZERO())}), W("x"));
+    // x - x -> 0 (Canonical order: neg(x) comes before x)
+    rules.emplace_back(ADD({Wstar("pre"), U("neg", W("x")), W("x"), Wstar("post")}),
+                       ADD({Wstar("pre"), Wstar("post")}));
+    // x / x -> 1 (Canonical order: x^-1 comes before x)
+    rules.emplace_back(MUL({Wstar("pre"), P(W("x"), C(-1, 0, "-1")), W("x"), Wstar("post")}),
+                       MUL({Wstar("pre"), Wstar("post")}));
+    // neg(neg(x)) -> x
+    rules.emplace_back(U("neg", U("neg", W("x"))), W("x"));
     // x^a * x^b -> x^(a+b)
     rules.emplace_back(MUL({Wstar("pre"), P(W("x"), W("a")), P(W("x"), W("b")), Wstar("post")}),
                        MUL({Wstar("pre"), P(W("x"), ADD({W("a"), W("b")})), Wstar("post")}));
@@ -857,8 +903,8 @@ vector<Rule> defaultRules() {
     // x * 1 -> x
     rules.emplace_back(MUL({W("x"), ONE(), Wstar("rest")}), MUL({W("x"), Wstar("rest")}));
 
-    // sin(x)^2 + cos(x)^2 -> 1
-    rules.emplace_back(ADD({Wstar("pre"), P(U("sin", W("x")), C(2)), P(U("cos", W("x")), C(2)), Wstar("post")}),
+    // cos(x)^2 + sin(x)^2 -> 1 (Canonical order: cos < sin)
+    rules.emplace_back(ADD({Wstar("pre"), P(U("cos", W("x")), C(2)), P(U("sin", W("x")), C(2)), Wstar("post")}),
                        ADD({Wstar("pre"), ONE(), Wstar("post")}));
 
     return rules;
@@ -971,6 +1017,22 @@ int main() {
     cout << "Parsing: " << s2 << "\n";
     ExprPtr ps2 = simplify(parse(s2), rules);
     cout << "Simplified: " << ps2->toString() << "\n";
+
+    cout << "\n--- Cancellation Test ---\n";
+    string s3 = "(x + y) - x";
+    cout << "Parsing: " << s3 << "\n";
+    ExprPtr ps3 = simplify(parse(s3), rules);
+    cout << "Simplified: " << ps3->toString() << "\n";
+
+    cout << "\n--- Hyperbolic/Inverse Test ---\n";
+    string s4 = "sinh(x) + cosh(x)";
+    cout << "Parsing: " << s4 << "\n";
+    ExprPtr ps4 = parse(s4);
+    cout << "d/dx:     " << diff(ps4, "x")->toString() << "\n";
+
+    string s5 = "atan(x)";
+    cout << "Parsing: " << s5 << "\n";
+    cout << "d/dx:     " << diff(parse(s5), "x")->toString() << "\n";
 
     return 0;
 }
