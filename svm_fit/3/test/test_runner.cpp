@@ -115,5 +115,10 @@ int main() {
         else return (10.0 + 2.0 * 15.0) * exp(0.1 * (t - 15.0));
     }, 80);
 
+    // 10. Periodic Trend
+    run_scenario("Periodic Trend", [](double t){
+        return 10.0 + 1.0 * t + 5.0 * sin(2.0 * M_PI * t / 5.0);
+    }, 100);
+
     return 0;
 }
