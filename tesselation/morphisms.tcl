@@ -127,16 +127,41 @@ proc draw {} {
     set cx [expr {$w / 2.0}]; set cy [expr {$h / 2.0}]
     set scale 100.0
 
-    foreach p $m_points {
-        set x [expr {$cx + [cre $p] * $scale}]
-        set y [expr {$cy - [cim $p] * $scale}]
+    # Visualizing the Morphism: Draw source and target
+    # Source fractal in half-transparency or dimmer colors
+    foreach p $points {
+        set x [expr {$cx/2.0 + [cre $p] * $scale * 0.5}]
+        set y [expr {$cy + [cim $p] * $scale * 0.5}]
+        .c create oval [expr {$x-1}] [expr {$y-1}] [expr {$x+1}] [expr {$y+1}] \
+                       -fill "#444" -outline ""
+    }
+    .c create text [expr {$cx/2.0}] [expr {$cy + 150}] -text "Source Scheme" -fill white
+
+    # Target (morphism applied)
+    foreach p $m_points p_orig $points {
+        set x [expr {$cx*1.5 + [cre $p] * $scale * 0.5}]
+        set y [expr {$cy - [cim $p] * $scale * 0.5}]
         set r 1
-        # Color based on original point's magnitude
-        set dist [c_abs $p]
+        set dist [c_abs $p_orig]
         set color [expr {int($dist * 100) % 256}]
         set hex_col [format "#%02x%02x%02x" $color [expr {255-$color}] [expr {($color*2)%256}]]
         .c create oval [expr {$x-$r}] [expr {$y-$r}] [expr {$x+$r}] [expr {$y+$r}] \
                        -fill $hex_col -outline ""
+    }
+    .c create text [expr {$cx*1.5}] [expr {$cy + 150}] -text "Target (via $::MORPH_var)" -fill white
+
+    # Draw a few arrows to show the mapping
+    for {set i 0} {$i < 20} {incr i} {
+        set idx [expr {int(rand()*[llength $points])}]
+        set p1 [lindex $points $idx]
+        set p2 [lindex $m_points $idx]
+
+        set s_x [expr {$cx/2.0 + [cre $p1] * $scale * 0.5}]
+        set s_y [expr {$cy + [cim $p1] * $scale * 0.5}]
+        set t_x [expr {$cx*1.5 + [cre $p2] * $scale * 0.5}]
+        set t_y [expr {$cy - [cim $p2] * $scale * 0.5}]
+
+        .c create line $s_x $s_y $t_x $t_y -arrow last -fill "#555" -dash {2 2}
     }
 }
 
