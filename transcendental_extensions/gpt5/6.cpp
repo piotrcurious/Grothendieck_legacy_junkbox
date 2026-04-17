@@ -470,12 +470,11 @@ ExprPtr substitute(const ExprPtr &repl, const Bindings &B) {
         if (it != B.seq.end()) {
             // if seq bound to single element and we are substitute in non-nary context, return that element
             if (it->second.size()==1) return it->second[0];
-            // otherwise we are substituting a sequence into non-nary context: wrap as MUL of elements (or ADD?) - ambiguous.
-            // We choose to wrap as MUL(...) if each item is a factor, but it's ambiguous: leave as N-ary MUL by default
-            return N(NaryOp::MUL, it->second);
+            // otherwise we are substituting a sequence into non-nary context: wrap as ADD of elements (default)
+            return N(NaryOp::ADD, it->second);
         }
         // unbound -> represent empty sequence as neutral element
-        return ONE();
+        return ZERO();
     }
 
     // otherwise normal recursive substitute
@@ -680,18 +679,18 @@ int main() {
     cout << "Simplified:            " << simplify(logexp, rules)->toString() << "\n\n";
 
     // Example 3: associative/commutative matching with sequence wildcard
-    // Pattern: ( ?a + ?+rest ) -> rewrite to ( ?+rest + ?a ) is trivial but demonstrates sequence matching.
-    // Let's make expression: (1 + 2 + 3 + x)
-    ExprPtr expr = ADD({ C(1,0,"1"), C(2,0,"2"), C(3,0,"3"), V("x") });
+    // Pattern: ( ?a + ?+rest ) -> rewrite to ( ?+rest + ?a )
+    // Note: canonicalization (sorting) will restore the order, but this shows sequence matching.
+    ExprPtr expr = ADD({ C(1,0,"1"), V("x"), V("y") });
     cout << "Original sum: " << expr->toString() << "\n";
     // Pattern that captures first element as ?a and rest as ?+rest
     ExprPtr pat = ADD({ W("a"), Wplus("rest") });
-    ExprPtr repl = ADD({ Wplus("rest"), W("a") }); // rotates first element to end
-    // apply single rule
+    // Replacement: we keep it as an ADD to ensure it splices correctly
+    ExprPtr repl = ADD({ Wplus("rest"), W("a") });
+
     Rule rotate = {pat, repl};
     ExprPtr rotated = applyRuleOnce(expr, rotate);
-    cout << "After one rotation (applyRuleOnce): " << rotated->toString() << "\n";
-    // repeatedly rotate until fixed point (but canonical sorting will often keep canonical order)
+    cout << "After rotate rule (should match and rebuild): " << rotated->toString() << "\n";
     cout << "\n";
 
     // Example 4: combine constant folding and n-ary product: (2 * 3 * x * 1) -> (6 * x)
@@ -729,11 +728,12 @@ int main() {
     ExprPtr cospi = U("cos", PI());
     cout << "cos(pi) -> " << simplify(cospi, rules)->toString() << "\n";
 
-    // Example 7: show sequence wildcard used inside replacement splicing constants
+    // Example 7: show sequence wildcard used inside replacement splicing
     ExprPtr sum2 = ADD({ V("a"), V("b"), V("c"), C(0,0,"0") });
     cout << "Original sum2: " << sum2->toString() << "\n";
-    // rule: ( ?+prefix , 0 ) -> ( ?+prefix )  (strip trailing zero)
-    Rule stripZero = { ADD({ Wplus("prefix"), ZERO() }), Wplus("prefix") };
+    // rule: ( ?+prefix + 0 ) -> ( ?+prefix )  (strip trailing zero)
+    // We wrap the replacement in ADD to ensure proper splicing
+    Rule stripZero = { ADD({ Wplus("prefix"), ZERO() }), ADD({ Wplus("prefix") }) };
     ExprPtr stripped = applyRuleOnce(sum2, stripZero);
     cout << "After strip zero: " << stripped->toString() << "\n";
 

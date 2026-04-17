@@ -1,0 +1,109 @@
+`timescale 1ns / 1ps
+
+module tb_SymbolicFPU;
+
+    reg clk;
+    reg reset;
+    reg start;
+    reg [4:0] opcode;
+    reg [71:0] operand_a;
+    reg [71:0] operand_b;
+
+    wire done;
+    wire [71:0] result;
+    wire [7:0] status_flags;
+
+    SymbolicFPU uut (
+        .clk(clk),
+        .reset(reset),
+        .start(start),
+        .opcode(opcode),
+        .operand_a(operand_a),
+        .operand_b(operand_b),
+        .done(done),
+        .result(result),
+        .status_flags(status_flags)
+    );
+
+    // Clock generation
+    initial begin
+        clk = 0;
+        forever #5 clk = ~clk;
+    end
+
+    // Helper task to display SNH values
+    task display_snh;
+        input [71:0] val;
+        begin
+            case (val[71:68])
+                4'b0000: $write("NORMAL");
+                4'b0001: $write("SYMBOLIC");
+                4'b0010: $write("HYBRID");
+                4'b0100: $write("ZERO");
+                4'b1000: $write("INF");
+                4'b1111: $write("NAN");
+                default: $write("UNKNOWN");
+            endcase
+            $write(" ");
+            case (val[67:64])
+                4'b0001: $write("PI");
+                4'b0010: $write("E");
+                4'b0011: $write("I");
+                4'b0100: $write("LOG2");
+                default: $write("NONE");
+            endcase
+            $write(" Coeff: %h\n", val[63:0]);
+        end
+    endtask
+
+    initial begin
+        // Initialize
+        reset = 1;
+        start = 0;
+        opcode = 0;
+        operand_a = 0;
+        operand_b = 0;
+
+        #20 reset = 0;
+        #20;
+
+        // Test 1: exp(i * pi)
+        // Note: SFPU doesn't have a single exp(i*pi) rule, but we can test components.
+        // Actually, we can test cos(pi) -> -1
+        $display("Test 1: cos(pi)");
+        start = 1;
+        opcode = 5'b10100; // OP_FCOS
+        operand_a = {4'b0001, 4'b0001, 64'h3FF0000000000000}; // SYMBOLIC PI, coeff 1.0
+        #10;
+        start = 0;
+        wait(done);
+        $write("Result: "); display_snh(result);
+        #20;
+
+        // Test 2: (2 * pi) + (3 * pi) -> 5 * pi
+        $display("Test 2: 2*pi + 3*pi");
+        start = 1;
+        opcode = 5'b00001; // OP_FADD
+        operand_a = {4'b0010, 4'b0001, 64'h4000000000000000}; // HYBRID PI, coeff 2.0
+        operand_b = {4'b0010, 4'b0001, 64'h4008000000000000}; // HYBRID PI, coeff 3.0
+        #10;
+        start = 0;
+        wait(done);
+        $write("Result: "); display_snh(result);
+        #20;
+
+        // Test 3: exp(log(2)) -> 2.0
+        $display("Test 3: exp(log2)");
+        start = 1;
+        opcode = 5'b10010; // OP_FEXP
+        operand_a = {4'b0001, 4'b0100, 64'h3FF0000000000000}; // SYMBOLIC LOG2
+        #10;
+        start = 0;
+        wait(done);
+        $write("Result: "); display_snh(result);
+        #20;
+
+        $finish;
+    end
+
+endmodule
