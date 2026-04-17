@@ -33,18 +33,29 @@ proc generate_fractal {beta digits depth} {
     set inv_beta [list [expr {[cre $beta]/([cre $beta]**2 + [cim $beta]**2)}] \
                        [expr {-[cim $beta]/([cre $beta]**2 + [cim $beta]**2)}]]
 
+    set grid_size 0.001
+
     for {set i 0} {$i < $depth} {incr i} {
+        array set seen {}
         set next_points {}
         foreach p $points {
             foreach d $digits {
                 # next_p = (p + d) / beta
-                set next_points [lappend next_points [c_mul [c_add $p $d] $inv_beta]]
+                set np [c_mul [c_add $p $d] $inv_beta]
+                # Grid-based deduplication
+                set gx [expr {int([cre $np] / $grid_size)}]
+                set gy [expr {int([cim $np] / $grid_size)}]
+                set key "$gx,$gy"
+                if {![info exists seen($key)]} {
+                    lappend next_points $np
+                    set seen($key) 1
+                }
             }
         }
         set points $next_points
-        # Deduplicate and limit points for performance
-        if {[llength $points] > 5000} {
-            set points [lrange $points 0 5000]
+        # Limit points for performance if still too many
+        if {[llength $points] > 8000} {
+            set points [lrange $points 0 8000]
         }
     }
     return $points
@@ -54,6 +65,12 @@ proc generate_fractal {beta digits depth} {
 
 # A morphism can be a linear map or a nonlinear map like z -> z^2
 proc apply_morphism {points type {beta {1.5 0.5}}} {
+    if {$type == "Composition"} {
+        # Apply square then ScaleFunctor
+        set p1 [apply_morphism $points "square" $beta]
+        return [apply_morphism $p1 "ScaleFunctor" $beta]
+    }
+
     set result {}
     foreach p $points {
         set x [cre $p]; set y [cim $p]
@@ -93,7 +110,7 @@ set DIGITS_var "0,1,-1,i,-i"
 
 label .ctrl.lm -text "Morphism:"
 set MORPH_var "identity"
-tk_optionMenu .ctrl.om MORPH_var identity square exp conjugate ScaleFunctor
+tk_optionMenu .ctrl.om MORPH_var identity square exp conjugate ScaleFunctor Composition
 pack .ctrl.lb .ctrl.eb .ctrl.ld .ctrl.ed .ctrl.lm .ctrl.om -side left -padx 4
 
 button .ctrl.draw -text "Draw" -command draw

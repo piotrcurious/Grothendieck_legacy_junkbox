@@ -60,6 +60,10 @@ set TYPE_var "Rotation"
 tk_optionMenu .ctrl.om TYPE_var Rotation Scaling Shear Nonlinear
 pack .ctrl.lm .ctrl.om -side left -padx 4
 
+set FLOW_var 0
+checkbutton .ctrl.flow -text "Show Flow" -variable FLOW_var
+pack .ctrl.flow -side left -padx 4
+
 set T 0
 set SEED_TYPE "House"
 tk_optionMenu .ctrl.oseed SEED_TYPE House Circle Star Monomial
@@ -97,9 +101,15 @@ proc get_seed {type} {
     return {{0 0}}
 }
 
+array set TRAJECTORIES {}
+
 proc animate {} {
-    global T SEED_TYPE TYPE_var
-    .c delete all
+    global T SEED_TYPE TYPE_var FLOW_var
+    if {!$FLOW_var} {
+        .c delete all
+        array unset ::TRAJECTORIES
+        array set ::TRAJECTORIES {}
+    }
     set seed [get_seed $SEED_TYPE]
 
     set w [winfo width .c]; set h [winfo height .c]
@@ -149,6 +159,22 @@ proc animate {} {
         # Draw tangent vector showing stretch/rotation
         .c create line [lindex $c2 0] [lindex $c2 1] [lindex $c2_eps 0] [lindex $c2_eps 1] \
                        -fill "blue" -width 1
+
+        # Phase space flow: store and draw trajectories
+        if {$FLOW_var} {
+            # Find the trajectory for this point index
+            set idx [lsearch -exact $seed $p]
+            if {$idx != -1} {
+                if {![info exists ::TRAJECTORIES($idx)]} { set ::TRAJECTORIES($idx) {} }
+                lappend ::TRAJECTORIES($idx) [lindex $c2 0] [lindex $c2 1]
+                if {[llength $::TRAJECTORIES($idx)] > 100} {
+                    set ::TRAJECTORIES($idx) [lrange $::TRAJECTORIES($idx) 2 end]
+                }
+                if {[llength $::TRAJECTORIES($idx)] >= 4} {
+                    .c create line $::TRAJECTORIES($idx) -fill "#fcc" -width 1
+                }
+            }
+        }
     }
 
     set T [expr {$T + 1}]
