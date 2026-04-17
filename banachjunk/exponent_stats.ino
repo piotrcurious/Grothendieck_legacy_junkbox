@@ -105,6 +105,7 @@ private:
     struct StatisticalDescriptors {
         std::vector<T> mean;
         std::vector<T> variance;
+        std::vector<T> stdDev;
         std::vector<T> skewness;
         std::vector<T> kurtosis;
         std::vector<T> entropy;
@@ -115,6 +116,7 @@ private:
         StatisticalDescriptors metrics;
         metrics.mean.resize(Dimension, 0);
         metrics.variance.resize(Dimension, 0);
+        metrics.stdDev.resize(Dimension, 0);
         metrics.skewness.resize(Dimension, 0);
         metrics.kurtosis.resize(Dimension, 0);
         metrics.entropy.resize(Dimension, 0);
@@ -122,6 +124,7 @@ private:
         // Compute for each dimension
         for (size_t dim = 0; dim < Dimension; ++dim) {
             const auto& dimData = statisticalData[dim];
+            if (dimData.empty()) continue;
             
             // Mean
             T sum = std::accumulate(dimData.begin(), dimData.end(), T(0));
@@ -139,13 +142,14 @@ private:
             
             variance /= dimData.size();
             metrics.variance[dim] = variance;
+            T sdev = std::sqrt(variance);
+            metrics.stdDev[dim] = sdev;
 
             // Skewness
-            T stdDev = std::sqrt(variance);
-            metrics.skewness[dim] = (abs(stdDev) > 1e-9) ? (m3 / dimData.size()) / std::pow(stdDev, 3) : 0;
+            metrics.skewness[dim] = (abs(sdev) > 1e-9) ? (m3 / dimData.size()) / std::pow(sdev, 3) : 0;
 
             // Kurtosis
-            metrics.kurtosis[dim] = (abs(variance) > 1e-9) ? (m4 / dimData.size()) / std::pow(variance, 2) - 3 : 0;
+            metrics.kurtosis[dim] = (abs(variance) > 1e-9) ? (m4 / dimData.size()) / (variance * variance) - 3 : 0;
 
             // Entropy (Shannon Information Entropy) using a simple histogram
             T entropy = 0;
@@ -198,6 +202,23 @@ public:
         }
     }
 
+    // Compute covariance between two dimensions
+    T computeCovariance(size_t dim1, size_t dim2) {
+        if (dim1 >= Dimension || dim2 >= Dimension) return 0;
+        const auto& data1 = statisticalData[dim1];
+        const auto& data2 = statisticalData[dim2];
+        if (data1.size() != data2.size() || data1.empty()) return 0;
+
+        T mean1 = std::accumulate(data1.begin(), data1.end(), T(0)) / data1.size();
+        T mean2 = std::accumulate(data2.begin(), data2.end(), T(0)) / data2.size();
+
+        T covar = 0;
+        for (size_t i = 0; i < data1.size(); ++i) {
+            covar += (data1[i] - mean1) * (data2[i] - mean2);
+        }
+        return covar / data1.size();
+    }
+
     // Comprehensive Statistical Banach Space Analysis
     void performStatisticalAnalysis() {
         if (statisticalData.empty()) return;
@@ -211,10 +232,19 @@ public:
         for (size_t dim = 0; dim < Dimension; ++dim) {
             Serial.printf("\nDimension %d:\n", dim);
             Serial.printf("  Mean: %f\n", static_cast<float>(metrics.mean[dim]));
+            Serial.printf("  StdDev: %f\n", static_cast<float>(metrics.stdDev[dim]));
             Serial.printf("  Variance: %f\n", static_cast<float>(metrics.variance[dim]));
             Serial.printf("  Skewness: %f\n", static_cast<float>(metrics.skewness[dim]));
             Serial.printf("  Kurtosis: %f\n", static_cast<float>(metrics.kurtosis[dim]));
             Serial.printf("  Entropy: %f\n", static_cast<float>(metrics.entropy[dim]));
+        }
+
+        Serial.println("\nCovariance Matrix:");
+        for (size_t i = 0; i < Dimension; ++i) {
+            for (size_t j = 0; j < Dimension; ++j) {
+                Serial.printf("%f ", static_cast<float>(computeCovariance(i, j)));
+            }
+            Serial.println();
         }
     }
 };
