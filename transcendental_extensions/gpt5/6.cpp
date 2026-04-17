@@ -188,6 +188,18 @@ struct Expr {
         return "?";
     }
 
+    // variable discovery
+    void getVariables(unordered_set<string> &vars) const {
+        if (kind == Kind::VAR) {
+            if (!label.empty() && label[0] != '?') vars.insert(label);
+        } else if (kind == Kind::UNARY || kind == Kind::POW) {
+            if (left) left->getVariables(vars);
+            if (right) right->getVariables(vars);
+        } else if (kind == Kind::NARY) {
+            for (auto &o : ops) o->getVariables(vars);
+        }
+    }
+
     // structural key used for canonicalization & interning
     static string normalizeKey(Expr &e) {
         // produce a canonical string key and store in key_cache
@@ -398,6 +410,8 @@ ExprPtr parse(string s) {
 
 // forward
 ExprPtr diff(const ExprPtr &e, const string &var);
+ExprPtr integrate(const ExprPtr &e, const string &var);
+cplx definite_integrate(const ExprPtr &e, const string &var, double a, double b);
 ExprPtr substitute_var(const ExprPtr &e, const string &var, const ExprPtr &val);
 ExprPtr taylor_series(const ExprPtr &e, const string &var, double center, int order);
 cplx solve_newton(const ExprPtr &e, const string &var, cplx guess, int iterations = 10);
@@ -940,6 +954,16 @@ vector<Rule> defaultRules() {
     rules.emplace_back(U("sin", ZERO()), ZERO());
     // cos(0) -> 1
     rules.emplace_back(U("cos", ZERO()), ONE());
+    // tan(0) -> 0
+    rules.emplace_back(U("tan", ZERO()), ZERO());
+    // log(1) -> 0
+    rules.emplace_back(U("log", ONE()), ZERO());
+    // log(e) -> 1
+    rules.emplace_back(U("log", EE()), ONE());
+    // sqrt(1) -> 1
+    rules.emplace_back(U("sqrt", ONE()), ONE());
+    // sqrt(0) -> 0
+    rules.emplace_back(U("sqrt", ZERO()), ZERO());
     // x * 1 -> x  and 1 * x -> x  (but with n-ary canonicalization these will be handled by constant folding; still add safe rules)
     rules.emplace_back(MUL({W("x"), ONE()}), W("x"));
     rules.emplace_back(MUL({ONE(), W("x")}), W("x"));
@@ -999,8 +1023,23 @@ vector<Rule> defaultRules() {
     rules.emplace_back(MUL({Wstar("pre"), U("exp", W("x")), U("exp", W("y")), Wstar("post")}),
                        MUL({Wstar("pre"), U("exp", ADD({W("x"), W("y")})), Wstar("post")}));
 
+    // exp(log(x)) -> x
+    rules.emplace_back(U("exp", U("log", W("x"))), W("x"));
+
+    // log(exp(x)) -> x
+    rules.emplace_back(U("log", U("exp", W("x"))), W("x"));
+
+    // a^b * a^c -> a^(b+c)
+    rules.emplace_back(MUL({Wstar("pre"), P(W("a"), W("b")), P(W("a"), W("c")), Wstar("post")}),
+                       MUL({Wstar("pre"), P(W("a"), ADD({W("b"), W("c")})), Wstar("post")}));
+
+    // x/x -> 1 handled by NARY MUL canonicalization with x^-1
+
     // sqrt(x) -> x^0.5
     rules.emplace_back(U("sqrt", W("x")), P(W("x"), C(0.5)));
+
+    // i^2 -> -1
+    rules.emplace_back(P(II(), C(2)), C(-1, 0, "-1"));
 
     return rules;
 }
@@ -1113,6 +1152,11 @@ int main() {
     ExprPtr ps2 = simplify(parse(s2), rules);
     cout << "Simplified: " << ps2->toString() << "\n";
 
+    cout << "\n--- Complex Identity Test ---\n";
+    string s14 = "i^2";
+    cout << "Expression: " << s14 << "\n";
+    cout << "Simplified: " << simplify(parse(s14), rules)->toString() << "\n";
+
     cout << "\n--- Cancellation Test ---\n";
     string s3 = "(x + y) - x";
     cout << "Parsing: " << s3 << "\n";
@@ -1149,6 +1193,44 @@ int main() {
     cplx root = solve_newton(parse(s8), "x", 0.5);
     cout << "Root: " << root.real() << " + " << root.imag() << "i\n";
     cout << "Verification: " << evaluate(substitute_var(parse(s8), "x", C(root.real(), root.imag()))) << "\n";
+
+    cout << "\n--- Integration Test ---\n";
+    string s9 = "x^2 + cos(x) + 1";
+    cout << "Integrating: " << s9 << "\n";
+    ExprPtr is1 = integrate(parse(s9), "x");
+    cout << "Result: " << is1->toString() << "\n";
+
+    cout << "\n--- Variable Discovery Test ---\n";
+    string s10 = "x^2 + y*z + sin(w)";
+    cout << "Expression: " << s10 << "\n";
+    unordered_set<string> vars;
+    parse(s10)->getVariables(vars);
+    cout << "Variables: ";
+    for (auto &v : vars) cout << v << " ";
+    cout << "\n";
+
+    cout << "\n--- Advanced Integration Test ---\n";
+    string s11 = "2 * a * x";
+    cout << "Integrating " << s11 << " wrt x:\n";
+    cout << "Result: " << integrate(parse(s11), "x")->toString() << "\n";
+
+    string s11b = "cos(2*x)";
+    cout << "Integrating " << s11b << " wrt x:\n";
+    cout << "Result: " << integrate(parse(s11b), "x")->toString() << "\n";
+
+    cout << "\n--- Simplification Identity Test ---\n";
+    string s12 = "exp(log(x + y))";
+    cout << "Expression: " << s12 << "\n";
+    cout << "Simplified: " << simplify(parse(s12), rules)->toString() << "\n";
+
+    string s13 = "x^a * x^b";
+    cout << "Expression: " << s13 << "\n";
+    cout << "Simplified: " << simplify(parse(s13), rules)->toString() << "\n";
+
+    cout << "\n--- Definite Integration Test ---\n";
+    string s15 = "x^2";
+    cout << "Integrating " << s15 << " from 0 to 3:\n";
+    cout << "Result: " << definite_integrate(parse(s15), "x", 0, 3).real() << "\n";
 
     return 0;
 }
@@ -1209,4 +1291,84 @@ cplx solve_newton(const ExprPtr &e, const string &var, cplx guess, int iteration
         x = x - fx / dfx;
     }
     return x;
+}
+
+ExprPtr integrate(const ExprPtr &e, const string &var) {
+    if (!e) return nullptr;
+    auto rules = defaultRules();
+    switch (e->kind) {
+        case Kind::CONST:
+            return simplify(MUL({e, V(var)}), rules);
+        case Kind::VAR:
+            if (e->label == var) return simplify(MUL({C(0.5), P(V(var), C(2))}), rules);
+            else return simplify(MUL({e, V(var)}), rules);
+        case Kind::UNARY:
+            if (e->label == "sin") {
+                // int sin(ax) dx = -1/a * cos(ax)
+                unordered_set<string> v; e->left->getVariables(v);
+                if (v.size() == 1 && v.count(var)) {
+                    ExprPtr da = diff(e->left, var);
+                    unordered_set<string> v2; da->getVariables(v2);
+                    if (v2.empty()) return simplify(MUL({U("neg", P(da, C(-1))), U("cos", e->left)}), rules);
+                }
+            }
+            if (e->label == "cos") {
+                unordered_set<string> v; e->left->getVariables(v);
+                if (v.size() == 1 && v.count(var)) {
+                    ExprPtr da = diff(e->left, var);
+                    unordered_set<string> v2; da->getVariables(v2);
+                    if (v2.empty()) return simplify(MUL({P(da, C(-1)), U("sin", e->left)}), rules);
+                }
+            }
+            if (e->label == "exp") {
+                unordered_set<string> v; e->left->getVariables(v);
+                if (v.size() == 1 && v.count(var)) {
+                    ExprPtr da = diff(e->left, var);
+                    unordered_set<string> v2; da->getVariables(v2);
+                    if (v2.empty()) return simplify(MUL({P(da, C(-1)), e}), rules);
+                }
+            }
+            if (e->label == "log") {
+                if (e->left->kind == Kind::VAR && e->left->label == var)
+                    return simplify(ADD({MUL({V(var), U("log", V(var))}), U("neg", V(var))}), rules);
+            }
+            break;
+        case Kind::POW:
+            if (e->left->kind == Kind::VAR && e->left->label == var && e->right->kind == Kind::CONST) {
+                double n = e->right->value.real();
+                if (abs(n + 1.0) < EPS) return simplify(U("log", V(var)), rules);
+                return simplify(MUL({C(1.0/(n+1.0)), P(V(var), C(n+1.0))}), rules);
+            }
+            break;
+        case Kind::NARY:
+            if (e->nop == NaryOp::ADD) {
+                vector<ExprPtr> terms;
+                for (auto &o : e->ops) terms.push_back(integrate(o, var));
+                return simplify(N(NaryOp::ADD, terms), rules);
+            } else if (e->nop == NaryOp::MUL) {
+                // Linear property: pull out constants wrt var
+                vector<ExprPtr> const_terms, var_terms;
+                for (auto &o : e->ops) {
+                    unordered_set<string> v;
+                    o->getVariables(v);
+                    if (v.count(var)) var_terms.push_back(o);
+                    else const_terms.push_back(o);
+                }
+                if (!const_terms.empty()) {
+                    ExprPtr C_total = simplify(N(NaryOp::MUL, const_terms), rules);
+                    if (var_terms.empty()) return simplify(MUL({C_total, V(var)}), rules);
+                    ExprPtr V_total = (var_terms.size() == 1 ? var_terms[0] : N(NaryOp::MUL, var_terms));
+                    return simplify(MUL({C_total, integrate(V_total, var)}), rules);
+                }
+            }
+            break;
+    }
+    throw runtime_error("Integration not implemented for this expression");
+}
+
+cplx definite_integrate(const ExprPtr &e, const string &var, double a, double b) {
+    ExprPtr indef = integrate(e, var);
+    cplx val_b = evaluate(substitute_var(indef, var, C(b)));
+    cplx val_a = evaluate(substitute_var(indef, var, C(a)));
+    return val_b - val_a;
 }

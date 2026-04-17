@@ -41,8 +41,20 @@ def main():
             os.remove(executable)
 
     print("\n=== Verilog SFPU Verification ===")
-    print("Verilog simulation tools (iverilog/vvp) are not available in this environment.")
-    print("The Verilog code (8.verilog) and testbench (tb_sfpu.verilog) have been created and manually reviewed.")
+    sim_compile = run_cmd(["iverilog", "-g2012", "8.verilog", "tb_sfpu.verilog", "-o", "sfpu.vvp"])
+    if sim_compile.returncode == 0:
+        sim_run = run_cmd(["vvp", "sfpu.vvp"])
+        if sim_run.returncode == 0:
+            print("Simulation Output:")
+            print(sim_run.stdout)
+        else:
+            all_passed = False
+            print("Verilog simulation failed.")
+        if os.path.exists("sfpu.vvp"):
+            os.remove("sfpu.vvp")
+    else:
+        all_passed = False
+        print("Verilog compilation failed.")
 
     if all_passed:
         print("\nSUCCESS: All C++ tests passed.")
