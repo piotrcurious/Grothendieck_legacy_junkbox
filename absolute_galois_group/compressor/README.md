@@ -12,7 +12,7 @@ This project implements experimental data compression techniques that combine fi
 - `compressor1.py`: Python-based explorations of these algorithms.
 - `transformation_params.h`: Shared parameters for transformations.
 - `compressor1.md` through `compressor7b.md`: Detailed walkthroughs, code examples, and theoretical justifications for the approach.
-- `01/`, `02/`, `py01/`, `py02/`: Various iterations and experiments in C++ and Python.
+- `01/`, `02/`, `02_fix/`, `02_fix_crop/`, `py01/`, `py02/`: Various iterations and experiments in C++ and Python exploring quadtree decomposition, morphism-based compression, and dictionary learning.
 
 ## State
 Conceptual prototype. Demonstrates the integration of neural sequence prediction with algebraic field theory for non-traditional compression.
