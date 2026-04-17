@@ -12,7 +12,6 @@
 
 #define SAMPLE_RATE 5000   // Hz
 #define ADC_PIN     34     // ESP32 ADC Input Pin
-#define BUFFER_SIZE 128    // Must be a power of 2
 
 // Global buffers defined in Weyl_Filter_Utils.h
 double realBuffer[BUFFER_SIZE];
