@@ -49,9 +49,12 @@ void run_scenario(const std::string& name, SignalGen signal_gen, int steps) {
                 if (bestType == TransformType::LOGARITHMIC) typeStr = "Log";
                 else if (bestType == TransformType::SQUARE_ROOT) typeStr = "Sqrt";
 
-                Serial.printf("Step %d: Best=%s, Degree=%d, AICc=%.2f, RMSE=%.4f, Target(now+5s)=%.4f, Pred(now+5s)=%.4f\n",
+                double mean, lower, upper;
+                bestFitter.predictWithInterval(now + 5000, mean, lower, upper);
+
+                Serial.printf("Step %d: Best=%s, Degree=%d, AICc=%.2f, RMSE=%.4f, Target=%.4f, Pred=%.4f [%.4f, %.4f]\n",
                     i, typeStr, bestDegree, bestMetric, bestFitter.calculateRMSE(dataPoints),
-                    signal_gen(t_sec + 5.0), bestFitter.predict(now + 5000));
+                    signal_gen(t_sec + 5.0), mean, lower, upper);
             }
         }
         delay(500);
@@ -75,6 +78,21 @@ int main() {
         if (((int)(t * 2)) % 20 == 0 && t > 1.0) v += 50.0;
         return v;
     }, 100);
+
+    // 5. Non-uniform sampling
+    run_scenario("Non-uniform Sampling", [](double t){
+        static double last_t = -1;
+        static double acc_t = 0;
+        if (last_t < 0) last_t = t;
+        acc_t += (t - last_t) * (random(50, 150) / 100.0);
+        last_t = t;
+        return 5.0 + 1.5 * acc_t;
+    }, 60);
+
+    // 6. Step Change
+    run_scenario("Step Change", [](double t){
+        return (t < 15.0) ? 10.0 : 30.0;
+    }, 80);
 
     return 0;
 }
