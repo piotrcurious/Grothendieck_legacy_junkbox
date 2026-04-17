@@ -132,16 +132,53 @@ proc animate {} {
         .c create polygon $poly_pts -fill "#aef" -outline "black" -width 2
     }
 
-    # Add some "traces" of the morphism
+    # Add some "traces" of the morphism and Jacobian visualization
     foreach p $seed tp $trans_pts {
         set c1 [to_canvas [lindex $p 0] [lindex $p 1] $w $h $scale]
         set c2 [to_canvas [lindex $tp 0] [lindex $tp 1] $w $h $scale]
         .c create line [lindex $c1 0] [lindex $c1 1] [lindex $c2 0] [lindex $c2 1] \
                        -arrow last -fill "red" -dash {2 2}
+
+        # Local deformation (Jacobian) approximation:
+        # We transform a small circle around the point.
+        set eps 0.1
+        set p_eps [list [expr {[lindex $p 0] + $eps}] [lindex $p 1]]
+        set tp_eps [lindex [apply_morphism [list $p_eps] $TYPE_var $T] 0]
+
+        set c2_eps [to_canvas [lindex $tp_eps 0] [lindex $tp_eps 1] $w $h $scale]
+        # Draw tangent vector showing stretch/rotation
+        .c create line [lindex $c2 0] [lindex $c2 1] [lindex $c2_eps 0] [lindex $c2_eps 1] \
+                       -fill "blue" -width 1
     }
 
     set T [expr {$T + 1}]
     after 40 animate
+}
+
+proc export_svg {filename} {
+    set f [open $filename w]
+    puts $f "<svg width='800' height='600' xmlns='http://www.w3.org/2000/svg' style='background: white;'>"
+    foreach id [.c find all] {
+        set type [.c type $id]
+        set coords [.c coords $id]
+        if {$type == "line"} {
+            set fill [.c itemcget $id -fill]
+            puts $f "  <line x1='[lindex $coords 0]' y1='[lindex $coords 1]' x2='[lindex $coords 2]' y2='[lindex $coords 3]' stroke='$fill' stroke-width='1' />"
+        } elseif {$type == "polygon"} {
+            set fill [.c itemcget $id -fill]
+            set outline [.c itemcget $id -outline]
+            puts $f "  <polygon points='[join $coords ,]' fill='$fill' stroke='$outline' />"
+        }
+    }
+    puts $f "</svg>"
+    close $f
+}
+
+if {[lsearch -exact $argv "--headless"] != -1} {
+    update
+    animate
+    export_svg "seed.svg"
+    exit
 }
 
 after 500 animate

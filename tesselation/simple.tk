@@ -124,7 +124,8 @@ proc generate_lattice_points {n bound} {
         upvar $result_ptr res
         if {$depth == $phi} {
             lappend res [list [cyclotomic_to_complex $n $current_coeffs] \
-                              [cyclotomic_norm $n $current_coeffs]]
+                              [cyclotomic_norm $n $current_coeffs] \
+                              $current_coeffs]
             return
         }
 
@@ -163,6 +164,11 @@ set S_var 60
 button .ctrl.draw -text "Project Lattice" -command draw_lattice
 pack .ctrl.ln .ctrl.en .ctrl.lb .ctrl.eb .ctrl.ls .ctrl.es .ctrl.draw -side left -padx 4
 
+label .ctrl.lg -text "Galois k:"
+set GALOIS_k 1
+tk_optionMenu .ctrl.gk GALOIS_k 1
+pack .ctrl.lg .ctrl.gk -side left -padx 4
+
 canvas .c -width 800 -height 600 -bg white
 pack .c -side top -fill both -expand 1
 
@@ -175,9 +181,32 @@ proc to_canvas {re im} {
     return [list $x $y]
 }
 
+# Get elements of the Galois group (Z/nZ)*
+proc get_galois_elements {n} {
+    set elements {}
+    for {set k 1} {$k < $n} {incr k} {
+        if {[gcd $k $n] == 1} { lappend elements $k }
+    }
+    return $elements
+}
+
+proc update_galois_menu {n} {
+    set m [.ctrl.gk cget -menu]
+    $m delete 0 end
+    foreach k [get_galois_elements $n] {
+        $m add radiobutton -label $k -variable GALOIS_k -command draw_lattice
+    }
+    # Ensure current k is valid for new n
+    set elements [get_galois_elements $n]
+    if {[lsearch -exact $elements $::GALOIS_k] == -1} {
+        set ::GALOIS_k [lindex $elements 0]
+    }
+}
+
 proc draw_lattice {} {
     .c delete all
     set n $::N_var
+    update_galois_menu $n
     set b $::B_var
     if {$n < 1} { set n 1 }
 
@@ -215,6 +244,7 @@ proc draw_lattice {} {
     foreach res $results {
         set pt [lindex $res 0]
         set norm [lindex $res 1]
+        set coeffs [lindex $res 2]
         set c [to_canvas [lindex $pt 0] [lindex $pt 1]]
         set r 2
 
@@ -222,9 +252,27 @@ proc draw_lattice {} {
         if {$intensity < 0} {set intensity 0}
         set color [format "#%02x%02x%02x" $intensity 0 [expr {255 - $intensity}]]
 
-        .c create oval [expr {[lindex $c 0]-$r}] [expr {[lindex $c 1]-$r}] \
+        set id [.c create oval [expr {[lindex $c 0]-$r}] [expr {[lindex $c 1]-$r}] \
                        [expr {[lindex $c 0]+$r}] [expr {[lindex $c 1]+$r}] \
-                       -fill $color -outline ""
+                       -fill $color -outline "" -tags "point"]
+
+        # Galois Action: sigma_k(zeta^i) = zeta^(i*k)
+        # We compute the position of sigma_k(pt)
+        set k $::GALOIS_k
+        if {$k > 1} {
+            set sk_re 0.0; set sk_im 0.0
+            set pi [expr {acos(-1)}]
+            for {set i 0} {$i < [llength $coeffs]} {incr i} {
+                set a [lindex $coeffs $i]
+                if {$a == 0} continue
+                set angle [expr {2.0 * $pi * $i * $k / $n}]
+                set sk_re [expr {$sk_re + $a * cos($angle)}]
+                set sk_im [expr {$sk_im + $a * sin($angle)}]
+            }
+            set sk_c [to_canvas $sk_re $sk_im]
+            .c create line [lindex $c 0] [lindex $c 1] [lindex $sk_c 0] [lindex $sk_c 1] \
+                           -fill "#faa" -arrow last -dash {2 2} -tags "galois"
+        }
     }
 }
 
@@ -249,6 +297,13 @@ proc export_svg {filename} {
     puts $f "</svg>"
     close $f
     puts "SVG exported to $filename"
+}
+
+if {[lsearch -exact $argv "--headless"] != -1} {
+    update
+    draw_lattice
+    export_svg "simple.svg"
+    exit
 }
 
 after 500 draw_lattice
