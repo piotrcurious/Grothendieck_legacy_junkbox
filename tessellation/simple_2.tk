@@ -81,13 +81,12 @@ proc cyclotomic_to_complex {n coeffs} {
     return [list $re $im]
 }
 
-# Calculate the algebraic norm of a cyclotomic integer
+# Calculate the Minkowski norm (sum of squared magnitudes of all embeddings)
 proc cyclotomic_norm {n coeffs} {
-    set norm 1.0
+    set norm_sq 0.0
     set phi [totient $n]
     set pi [expr {acos(-1)}]
-    # The norm is the product of all embeddings
-    # embeddings are evaluations at zeta_n^k for gcd(k, n) = 1
+    # Minkowski embedding maps the cyclotomic integer to R^phi
     for {set k 1} {$k < $n} {incr k} {
         if {[gcd $k $n] == 1} {
             set re 0.0; set im 0.0
@@ -97,10 +96,10 @@ proc cyclotomic_norm {n coeffs} {
                 set re [expr {$re + $a * cos($angle)}]
                 set im [expr {$im + $a * sin($angle)}]
             }
-            set norm [expr {$norm * sqrt($re*$re + $im*$im)}]
+            set norm_sq [expr {$norm_sq + $re*$re + $im*$im}]
         }
     }
-    return $norm
+    return [expr {sqrt($norm_sq)}]
 }
 
 proc gcd {a b} {
@@ -161,6 +160,11 @@ label .ctrl.ls -text "Scale:"
 entry .ctrl.es -textvariable S_var -width 4
 set S_var 60
 
+label .ctrl.lm -text "Mode:"
+set MODE_var "Lattice"
+tk_optionMenu .ctrl.om MODE_var Lattice Spectral
+pack .ctrl.lm .ctrl.om -side left -padx 4
+
 button .ctrl.draw -text "Project Lattice" -command draw_lattice
 pack .ctrl.ln .ctrl.en .ctrl.lb .ctrl.eb .ctrl.ls .ctrl.es .ctrl.draw -side left -padx 4
 
@@ -211,6 +215,11 @@ proc draw_lattice {} {
     if {$n < 1} { set n 1 }
 
     set results [generate_lattice_points $n $b]
+
+    if {$::MODE_var == "Spectral"} {
+        draw_spectral $n $results
+        return
+    }
 
     set max_norm 0.1
     foreach res $results {
@@ -273,6 +282,30 @@ proc draw_lattice {} {
             .c create line [lindex $c 0] [lindex $c 1] [lindex $sk_c 0] [lindex $sk_c 1] \
                            -fill "#faa" -arrow last -dash {2 2} -tags "galois"
         }
+    }
+}
+
+proc draw_spectral {n results} {
+    # Spectral analysis (Bragg peaks)
+    # For a projected lattice, the diffraction pattern is the set of points
+    # where the density is high. Here we visualize the "intensity" of peaks.
+    set w [winfo width .c]; set h [winfo height .c]
+    set cx [expr {$w / 2.0}]; set cy [expr {$h / 2.0}]
+
+    foreach res $results {
+        set pt [lindex $res 0]
+        set norm [lindex $res 1]
+
+        # In a quasicrystal, intensity is related to the "internal" coordinates
+        # We approximate this by the inverse of the Minkowski norm.
+        set intensity [expr {1.0 / ($norm + 0.1)}]
+        set r [expr {$intensity * 5}]
+        if {$r > 10} {set r 10}
+
+        set c [to_canvas [lindex $pt 0] [lindex $pt 1]]
+        .c create oval [expr {[lindex $c 0]-$r}] [expr {[lindex $c 1]-$r}] \
+                       [expr {[lindex $c 0]+$r}] [expr {[lindex $c 1]+$r}] \
+                       -fill "#f80" -outline ""
     }
 }
 
