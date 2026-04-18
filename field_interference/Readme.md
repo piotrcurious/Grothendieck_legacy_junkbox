@@ -56,6 +56,13 @@ Visualizes the resonance of $\mathbb{Q}(\alpha)$ for transcendental $\alpha$ (li
 
 ![Transcendental Explorer](docs/images/transcendental_explorer.png)
 
+- **Vectorized Engine**: High-performance NumPy implementation capable of simulating millions of elements in real-time.
+- **Custom Bases**: Supports arbitrary complex bases and mathematical expressions (e.g., `exp(1j*pi/4)`).
+- **Complexity Analysis**: Visualizes the "simplest" representation of field elements using L1-coefficient complexity heatmaps.
+- **Rational Convergents**: Overlays continued fraction convergents to show the rational skeleton of the extension.
+
+![Transcendental Complexity](docs/images/transcendental_complexity.png)
+
 ---
 
 ## Requirements
