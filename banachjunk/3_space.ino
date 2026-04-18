@@ -61,17 +61,27 @@ private:
         return metrics;
     }
 
-    // L-p Norm Computation
+    // L-p Norm Computation with numerical scaling
     T computeLpNorm(int p) {
         if (dimensionalData.empty()) return T(0);
         
         T accumulator = 0;
         for (const auto& dimension : dimensionalData) {
+            if (dimension.empty()) continue;
+
+            // Find max absolute value for scaling to prevent overflow
+            T maxVal = 0;
+            for (const auto& value : dimension) {
+                maxVal = std::max(maxVal, std::abs(value));
+            }
+
+            if (maxVal < 1e-9) continue;
+
             T dimensionNorm = 0;
             for (const auto& value : dimension) {
-                dimensionNorm += std::pow(std::abs(value), p);
+                dimensionNorm += std::pow(std::abs(value) / maxVal, p);
             }
-            accumulator += std::pow(dimensionNorm, 1.0/p);
+            accumulator += maxVal * std::pow(dimensionNorm, 1.0/p);
         }
         
         return accumulator / dimensionalData.size();

@@ -80,6 +80,7 @@ inline void delay(unsigned long ms) {}
 inline unsigned long millis() { return 0; }
 
 #define F(s) s
+#define PI 3.14159265358979323846
 
 inline long random(long max) {
     static std::mt19937 gen(0);

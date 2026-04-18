@@ -60,15 +60,17 @@ private:
     std::array<T, Size> buffer;
     size_t head = 0;
     size_t tail = 0;
-    bool full = false;
+    bool is_full = false;
 
 public:
     void push(const T& item) {
         buffer[head] = item;
         head = (head + 1) % Size;
-        if (head == tail) {
-            full = true;
+        if (is_full) {
             tail = (tail + 1) % Size;
+        }
+        if (head == tail) {
+            is_full = true;
         }
     }
 
@@ -76,15 +78,16 @@ public:
         if (empty()) return std::nullopt;
         T item = buffer[tail];
         tail = (tail + 1) % Size;
-        full = false;
+        is_full = false;
         return item;
     }
 
-    bool empty() const { return !full && (head == tail); }
-    bool full() const { return full; }
+    bool empty() const { return !is_full && (head == tail); }
+    bool full() const { return is_full; }
     size_t size() const {
-        if (full) return Size;
-        return (head - tail) % Size;
+        if (is_full) return Size;
+        if (head >= tail) return head - tail;
+        return Size + head - tail;
     }
 };
 
@@ -169,15 +172,11 @@ public:
     }
 
     uint8_t multiply(uint8_t a, uint8_t b) const {
-        if (a == 0 || b == 0) return 0;
-        if (logTable[a].empty() || logTable[b].empty()) return 0;
-        int sum = logTable[a][0] + logTable[b][0];
-        return expTable[sum % (prime - 1)];
+        return (static_cast<uint32_t>(a) * b) % prime;
     }
 
     uint8_t divide(uint8_t a, uint8_t b) const {
         if (b == 0) throw Error("Division by zero");
-        if (a == 0) return 0;
         return multiply(a, inverseTable[b]);
     }
 
@@ -186,16 +185,15 @@ public:
             if (base == 0) throw Error("Zero cannot be raised to negative power");
             return power(inverseTable[base], -exp);
         }
-        if (exp == 0) return 1;
-        if (base == 0) return 0;
-
-        uint8_t result = 1;
-        while (exp > 0) {
-            if (exp & 1) result = multiply(result, base);
-            base = multiply(base, base);
-            exp >>= 1;
+        uint32_t res = 1;
+        uint32_t b = base % prime;
+        uint32_t e = static_cast<uint32_t>(exp);
+        while (e > 0) {
+            if (e & 1) res = (res * b) % prime;
+            b = (b * b) % prime;
+            e >>= 1;
         }
-        return result;
+        return static_cast<uint8_t>(res);
     }
 
     int getPrime() const { return prime; }

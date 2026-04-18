@@ -49,15 +49,26 @@ private:
             double timeStep = (finalTime - initialTime) / steps;
 
             for (size_t i = 1; i < steps; ++i) {
-                double currentTime = initialTime + i * timeStep;
+                double t = initialTime + (i-1) * timeStep;
                 
-                // Compute differential evolution
-                auto derivative = differentialOperator(currentState, currentTime);
+                // Runge-Kutta 4th Order (RK4) Step
+                auto k1 = differentialOperator(currentState, t);
                 
-                // Apply norm-specific transformation
-                for (size_t dim = 0; dim < Dimension; ++dim) {
-                    currentState[dim] += derivative[dim] * 
-                        normalizationFactor(currentState[dim], normType);
+                std::vector<FieldType> s2(Dimension);
+                for(size_t d=0; d<Dimension; ++d) s2[d] = currentState[d] + k1[d] * timeStep * 0.5;
+                auto k2 = differentialOperator(s2, t + timeStep * 0.5);
+
+                std::vector<FieldType> s3(Dimension);
+                for(size_t d=0; d<Dimension; ++d) s3[d] = currentState[d] + k2[d] * timeStep * 0.5;
+                auto k3 = differentialOperator(s3, t + timeStep * 0.5);
+
+                std::vector<FieldType> s4(Dimension);
+                for(size_t d=0; d<Dimension; ++d) s4[d] = currentState[d] + k3[d] * timeStep;
+                auto k4 = differentialOperator(s4, t + timeStep);
+
+                for (size_t d = 0; d < Dimension; ++d) {
+                    FieldType slope = (k1[d] + 2.0*k2[d] + 2.0*k3[d] + k4[d]) / 6.0;
+                    currentState[d] += slope * timeStep * normalizationFactor(currentState[d], normType);
                 }
 
                 // Store normalized state
@@ -86,7 +97,7 @@ private:
                     std::transform(
                         state.begin(), state.end(), normalized.begin(),
                         [magnitude](FieldType val) { 
-                            return magnitude > 0 ? val / magnitude : val; 
+                            return magnitude > 1e-9 ? val / magnitude : val;
                         }
                     );
                     break;
@@ -100,7 +111,7 @@ private:
                     std::transform(
                         state.begin(), state.end(), normalized.begin(),
                         [magnitude](FieldType val) { 
-                            return magnitude > 0 ? val / magnitude : val; 
+                            return magnitude > 1e-9 ? val / magnitude : val;
                         }
                     );
                     break;
@@ -117,7 +128,7 @@ private:
                     std::transform(
                         state.begin(), state.end(), normalized.begin(),
                         [magnitude](FieldType val) { 
-                            return magnitude > 0 ? val / magnitude : val; 
+                            return magnitude > 1e-9 ? val / magnitude : val;
                         }
                     );
                     break;
@@ -137,7 +148,7 @@ private:
                     std::transform(
                         state.begin(), state.end(), normalized.begin(),
                         [magnitude](FieldType val) { 
-                            return magnitude > 0 ? val / magnitude : val; 
+                            return magnitude > 1e-9 ? val / magnitude : val;
                         }
                     );
                     break;
@@ -156,7 +167,7 @@ private:
                     std::transform(
                         state.begin(), state.end(), normalized.begin(),
                         [weightedMagnitude](FieldType val) { 
-                            return weightedMagnitude > 0 ? val / weightedMagnitude : val; 
+                            return weightedMagnitude > 1e-9 ? val / weightedMagnitude : val;
                         }
                     );
                     break;
@@ -171,17 +182,18 @@ private:
             FieldType value, 
             NormType normType
         ) {
+            double abs_val = std::abs(value);
             switch (normType) {
                 case NormType::EUCLIDEAN:
-                    return std::sqrt(1 + value * value);
+                    return std::sqrt(1.0 + static_cast<double>(value) * value);
                 case NormType::MANHATTAN:
-                    return 1 + std::abs(value);
+                    return 1.0 + abs_val;
                 case NormType::CHEBYSHEV:
-                    return std::max(1.0, std::abs(value));
+                    return std::max(1.0, abs_val);
                 case NormType::FRACTIONAL:
-                    return std::pow(1 + std::abs(value), 1.5);
+                    return std::pow(1.0 + abs_val, 1.5);
                 case NormType::WEIGHTED:
-                    return 1 + std::log(1 + std::abs(value));
+                    return 1.0 + std::log(1.0 + abs_val);
                 default:
                     return 1.0;
             }

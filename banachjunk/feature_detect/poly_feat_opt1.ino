@@ -77,7 +77,8 @@ public:
     bool full() const { return is_full; }
     size_t size() const {
         if (is_full) return Size;
-        return (head + Size - tail) % Size;
+        if (head >= tail) return head - tail;
+        return Size + head - tail;
     }
 };
 
@@ -260,15 +261,17 @@ private:
 
     // Efficient noise estimation using moving median
     float estimateNoiseLevel(const DataPoint* data, size_t n) {
-        if (n < Config::NUM_SAMPLES_FOR_NOISE) return 0.0f;
+        if (n < 2) return 0.0f;
+        size_t count = std::min(n - 1, static_cast<size_t>(Config::NUM_SAMPLES_FOR_NOISE));
         
-        std::array<float, Config::NUM_SAMPLES_FOR_NOISE> diffs;
-        for (size_t i = 1; i < n && i < Config::NUM_SAMPLES_FOR_NOISE; i++) {
-            diffs[i-1] = std::abs(data[i].value - data[i-1].value);
+        std::vector<float> diffs;
+        diffs.reserve(count);
+        for (size_t i = 1; i <= count; i++) {
+            diffs.push_back(std::abs(data[i].value - data[i-1].value));
         }
         
-        size_t mid = Config::NUM_SAMPLES_FOR_NOISE / 2;
-        std::nth_element(diffs.begin(), diffs.begin() + mid, diffs.begin() + n - 1);
+        size_t mid = diffs.size() / 2;
+        std::nth_element(diffs.begin(), diffs.begin() + mid, diffs.end());
         return diffs[mid] * 1.4826f;
     }
 
@@ -388,24 +391,25 @@ private:
 
     // Fixed-point autocorrelation calculation
     int32_t calculateFixedPointAutocorrelation(const uint8_t* values, size_t n) {
+        if (n < 2) return 0;
         constexpr int FIXED_POINT_SHIFT = 16;
-        int32_t sum = 0;
+        int64_t sum = 0;
         int32_t mean = 0;
         
         // Calculate mean using fixed-point arithmetic
         for (size_t i = 0; i < n; i++) {
             mean += values[i];
         }
-        mean = (mean << FIXED_POINT_SHIFT) / n;
+        mean = (static_cast<int64_t>(mean) << FIXED_POINT_SHIFT) / n;
 
         // Calculate autocorrelation with lag 1
         for (size_t i = 1; i < n; i++) {
-            int32_t diff1 = (values[i] << FIXED_POINT_SHIFT) - mean;
-            int32_t diff2 = (values[i-1] << FIXED_POINT_SHIFT) - mean;
+            int64_t diff1 = (static_cast<int64_t>(values[i]) << FIXED_POINT_SHIFT) - mean;
+            int64_t diff2 = (static_cast<int64_t>(values[i-1]) << FIXED_POINT_SHIFT) - mean;
             sum += (diff1 * diff2) >> FIXED_POINT_SHIFT;
         }
 
-        return sum / (n - 1);
+        return static_cast<int32_t>(sum / (n - 1));
     }
 
     // Optimized extremum detection
@@ -444,7 +448,8 @@ private:
     bool shouldAddFeature(const Feature& newFeature) {
         if (numPreviousFeatures == 0) return true;
         
-        const Feature& lastFeature = previousFeatures[(numPreviousFeatures - 1) % Config::MAX_FEATURES];
+        uint8_t lastIdx = (numPreviousFeatures - 1) % Config::MAX_FEATURES;
+        const Feature& lastFeature = previousFeatures[lastIdx];
         
         // Use bit operations for quick comparison
         bool valueChange = std::abs(newFeature.value - lastFeature.value) > Config::MIN_SIGNIFICANCE;
@@ -457,8 +462,10 @@ private:
     // Efficient previous feature management
     void addToPreviousFeatures(const Feature& feature) {
         previousFeatures[numPreviousFeatures % Config::MAX_FEATURES] = feature;
-        if (numPreviousFeatures < Config::MAX_FEATURES) {
-            numPreviousFeatures++;
+        numPreviousFeatures++;
+        // Allow counter to wrap or cap it if we only care about last N
+        if (numPreviousFeatures > 2 * Config::MAX_FEATURES) {
+            numPreviousFeatures = Config::MAX_FEATURES + (numPreviousFeatures % Config::MAX_FEATURES);
         }
     }
 };

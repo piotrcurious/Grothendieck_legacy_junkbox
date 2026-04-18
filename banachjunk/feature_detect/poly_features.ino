@@ -50,19 +50,25 @@ public:
   }
 
   uint8_t multiply(uint8_t a, uint8_t b) const {
-    if (a == 0 || b == 0) return 0;
-    if (logTable[a].empty() || logTable[b].empty()) return 0;
-    int sum = logTable[a][0] + logTable[b][0];
-    return expTable[sum % (prime - 1)];
+    return (static_cast<uint32_t>(a) * b) % prime;
+  }
+
+  uint8_t divide(uint8_t a, uint8_t b) const {
+    if (b == 0) return 0; // Should handle as error or check before call
+    return multiply(a, power(b, prime - 2));
   }
 
   uint8_t power(uint8_t base, int exp) const {
-    if (exp == 0) return 1;
-    if (base == 0) return 0;
-    if (logTable[base].empty()) return 0;
-    
-    long long result = (long long)logTable[base][0] * exp;
-    return expTable[result % (prime - 1)];
+    if (exp < 0) return power(power(base, prime - 2), -exp);
+    uint32_t res = 1;
+    uint32_t b = base % prime;
+    uint32_t e = static_cast<uint32_t>(exp);
+    while (e > 0) {
+      if (e & 1) res = (res * b) % prime;
+      b = (b * b) % prime;
+      e >>= 1;
+    }
+    return static_cast<uint8_t>(res);
   }
 };
 
@@ -106,33 +112,43 @@ private:
   }
 
   // Fit polynomial to data points using Lagrange interpolation over GF
-  // This calculates the coefficients for the Lagrange basis
+  // This calculates the actual coefficients of the polynomial in standard form
   GFPolynomial fitPolynomial(const std::vector<uint8_t>& x, const std::vector<uint8_t>& y) {
-    int n = x.size();
-    int degree = std::min(n - 1, MAX_POLY_DEGREE);
-    std::vector<uint8_t> coeffs(degree + 1, 0);
+    int n = std::min(static_cast<int>(x.size()), MAX_POLY_DEGREE + 1);
+    std::vector<uint8_t> resultCoeffs(n, 0);
     
-    // Simplification: We just want an estimate of the polynomial complexity
-    // For full Lagrange interpolation coefficients we would need more complex basis expansion
-    // Here we use a heuristic based on successive differences to estimate degree/complexity
-    int effectiveDegree = 0;
-    std::vector<uint8_t> currentDiffs = y;
-    for (int d = 1; d <= MAX_POLY_DEGREE; d++) {
-        bool allZero = true;
-        std::vector<uint8_t> nextDiffs;
-        for (size_t i = 1; i < currentDiffs.size(); i++) {
-            uint8_t diff = gf.subtract(currentDiffs[i], currentDiffs[i-1]);
-            if (diff != 0) allZero = false;
-            nextDiffs.push_back(diff);
+    for (int i = 0; i < n; i++) {
+      // Build basis polynomial L_i(x)
+      std::vector<uint8_t> basisPoly = {1};
+      uint8_t denominator = 1;
+
+      for (int j = 0; j < n; j++) {
+        if (i == j) continue;
+
+        // Multiply basisPoly by (x - x_j)
+        std::vector<uint8_t> nextBasis(basisPoly.size() + 1, 0);
+        for (size_t k = 0; k < basisPoly.size(); k++) {
+          // x * basisPoly[k] * x^k = basisPoly[k] * x^(k+1)
+          nextBasis[k+1] = gf.add(nextBasis[k+1], basisPoly[k]);
+          // -x_j * basisPoly[k] * x^k
+          uint8_t term = gf.multiply(basisPoly[k], gf.subtract(0, x[j]));
+          nextBasis[k] = gf.add(nextBasis[k], term);
         }
-        if (allZero) break;
-        effectiveDegree = d;
-        currentDiffs = nextDiffs;
-        if (currentDiffs.size() < 2) break;
+        basisPoly = nextBasis;
+        denominator = gf.multiply(denominator, gf.subtract(x[i], x[j]));
+      }
+
+      // Multiply basisPoly by y_i / denominator
+      uint8_t factor = gf.divide(y[i], denominator);
+      for (size_t k = 0; k < basisPoly.size(); k++) {
+        uint8_t term = gf.multiply(basisPoly[k], factor);
+        if (k < resultCoeffs.size()) {
+            resultCoeffs[k] = gf.add(resultCoeffs[k], term);
+        }
+      }
     }
 
-    coeffs.resize(effectiveDegree + 1, 1); // Mock coefficients to represent complexity
-    return GFPolynomial(coeffs);
+    return GFPolynomial(resultCoeffs);
   }
 
   // Calculate algebraic variety dimension
