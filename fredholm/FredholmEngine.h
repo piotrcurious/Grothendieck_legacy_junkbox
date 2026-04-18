@@ -146,6 +146,15 @@ inline void computeSVD(Matrix A, Matrix& U, std::vector<double>& S, Matrix& V) {
         S[i] = std::sqrt(norm);
         for (int k = 0; k < n; k++) U(k, i) = (S[i] > 1e-15) ? A(k, i) / S[i] : 0;
     }
+    // Sort singular values and corresponding vectors
+    for (int i = 0; i < n - 1; i++) {
+        for (int j = i + 1; j < n; j++) {
+            if (S[j] > S[i]) {
+                std::swap(S[i], S[j]);
+                for (int k = 0; k < n; k++) { std::swap(U(k, i), U(k, j)); std::swap(V(k, i), V(k, j)); }
+            }
+        }
+    }
 }
 
 enum class SolverStatus { SUCCESS, SINGULAR_MATRIX, NO_CONVERGENCE };
@@ -176,7 +185,9 @@ public:
     static double estimateConditionNumber(double a, double b, double lambda, KernelFunc K, int n = 16) {
         Quadrature q = Quadrature::GaussLegendreN(n, a, b); int N = q.points.size(); Matrix A(N, N);
         for (int i = 0; i < N; ++i) for (int j = 0; j < N; ++j) { double delta = (i == j) ? 1.0 : 0.0; A(i, j) = delta - lambda * q.weights[j] * K(q.points[i], q.points[j]); }
-        Matrix AtA = A.transpose() * A; return std::sqrt(powerIteration(AtA));
+        Matrix U(N, N), V(N, N); std::vector<double> S; computeSVD(A, U, S, V);
+        if (S.empty() || std::abs(S.back()) < 1e-15) return 1e15;
+        return S.front() / S.back();
     }
     static std::vector<double> solveVolterra(double a, double b, double lambda, KernelFunc K, SourceFunc f, int n_steps = 100) {
         double h = (b - a) / n_steps; std::vector<double> x(n_steps + 1); std::vector<double> phi(n_steps + 1); for (int i = 0; i <= n_steps; i++) x[i] = a + i * h;
