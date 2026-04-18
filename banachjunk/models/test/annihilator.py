@@ -38,9 +38,10 @@ class HyperdimensionalOntologicalModel:
         for i in range(self.complexity_depth):
             for j in range(self.complexity_depth):
                 # Non-linear generative potential
+                rand_val = np.random.standard_normal() + 1j * np.random.standard_normal()
                 self.ontological_generators['quantum_potentiality'][i, j] = (
                     np.exp(1j * np.pi * (i - j)) *
-                    (np.random.standard_normal() + 1j * np.random.standard_normal()) * self.quantum_ontological_constants['symmetry_breaking_scale']
+                    rand_val * self.quantum_ontological_constants['symmetry_breaking_scale']
                 )
 
         # Topological invariance computation
