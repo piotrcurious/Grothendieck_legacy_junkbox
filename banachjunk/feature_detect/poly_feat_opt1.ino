@@ -278,6 +278,21 @@ private:
             }
         }
 
+        // Pruning higher-order terms to reduce sensitivity to discretization noise
+        if (n > 2) {
+            bool all_negligible = true;
+            for(int i = 2; i < n; ++i) {
+                // Term is negligible if it's very close to 0 in the field
+                if(resultCoeffs[i] > 1 && resultCoeffs[i] < (Config::FIELD_PRIME - 1)) {
+                    all_negligible = false;
+                    break;
+                }
+            }
+            if(all_negligible) {
+                for(int i = 2; i < n; ++i) resultCoeffs[i] = 0;
+            }
+        }
+
         return GFPolynomial(resultCoeffs, gf);
     }
 

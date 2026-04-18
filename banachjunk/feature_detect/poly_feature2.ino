@@ -367,6 +367,21 @@ private:
             }
         }
 
+        // Pruning higher-order terms if they are insignificant compared to constant/linear
+        // (Heuristic for GF discretization noise reduction)
+        if (n > 2) {
+            bool all_small = true;
+            for(int i = 2; i < n; ++i) {
+                if(resultCoeffs[i] > 2 && resultCoeffs[i] < (Config::FIELD_PRIME - 2)) {
+                    all_small = false;
+                    break;
+                }
+            }
+            if(all_small) {
+                for(int i = 2; i < n; ++i) resultCoeffs[i] = 0;
+            }
+        }
+
         return GFPolynomial(resultCoeffs, gf);
     }
 
