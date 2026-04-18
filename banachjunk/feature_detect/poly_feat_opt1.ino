@@ -236,32 +236,40 @@ private:
     }
 
     // Memory-efficient polynomial fitting using Lagrange interpolation over GF
-    GFPolynomial fitPolynomial(const uint8_t* x, const uint8_t* y, size_t n) {
-        int degree_limit = std::min(static_cast<int>(n), Config::MAX_POLY_DEGREE + 1);
-        std::vector<uint8_t> resultCoeffs(degree_limit, 0);
+    // Uses points distributed across the window for better representation
+    GFPolynomial fitPolynomial(const uint8_t* x, const uint8_t* y, size_t n_total) {
+        int n = std::min(static_cast<int>(n_total), Config::MAX_POLY_DEGREE + 1);
+        std::vector<uint8_t> resultCoeffs(n, 0);
 
-        for (int i = 0; i < degree_limit; i++) {
+        // Selection of representative points
+        std::vector<uint8_t> sx(n), sy(n);
+        for(int i = 0; i < n; ++i) {
+            int idx = (n > 1) ? (i * (n_total - 1) / (n - 1)) : 0;
+            sx[i] = x[idx];
+            sy[i] = y[idx];
+        }
+
+        for (int i = 0; i < n; i++) {
             // Build basis polynomial L_i(x)
             std::vector<uint8_t> basisPoly = {1};
             uint8_t denominator = 1;
 
-            for (int j = 0; j < degree_limit; j++) {
+            for (int j = 0; j < n; j++) {
                 if (i == j) continue;
 
                 // Multiply basisPoly by (x - x_j)
                 std::vector<uint8_t> nextBasis(basisPoly.size() + 1, 0);
                 for (size_t k = 0; k < basisPoly.size(); k++) {
                     nextBasis[k + 1] = gf.add(nextBasis[k + 1], basisPoly[k]);
-                    uint8_t term = gf.multiply(basisPoly[k], gf.subtract(0, x[j]));
+                    uint8_t term = gf.multiply(basisPoly[k], gf.subtract(0, sx[j]));
                     nextBasis[k] = gf.add(nextBasis[k], term);
                 }
                 basisPoly = nextBasis;
-                denominator = gf.multiply(denominator, gf.subtract(x[i], x[j]));
+                denominator = gf.multiply(denominator, gf.subtract(sx[i], sx[j]));
             }
 
-            // Multiply basisPoly by y_i / denominator
             if (denominator == 0) continue;
-            uint8_t factor = gf.divide(y[i], denominator);
+            uint8_t factor = gf.divide(sy[i], denominator);
             for (size_t k = 0; k < basisPoly.size(); k++) {
                 uint8_t term = gf.multiply(basisPoly[k], factor);
                 if (k < resultCoeffs.size()) {
@@ -364,7 +372,7 @@ std::vector<Feature> detectAndUpdateFeatures() {
             }
 
             // Efficient feature classification using bit manipulation
-            uint8_t featureType = classifyFeature(fitted, varietyDim, windowY.data(), windowSize);
+            uint8_t featureType = classifyFeature(fitted, varietyDim, windowData.data(), windowSize);
             newFeature.typeIndex = featureType;
 
             // Calculate confidence using optimized noise comparison
@@ -386,9 +394,9 @@ std::vector<Feature> detectAndUpdateFeatures() {
 
 private:
     // Optimized feature classification using bit operations
-    uint8_t classifyFeature(const GFPolynomial& poly, int varietyDim, const uint8_t* values, size_t n) {
+    uint8_t classifyFeature(const GFPolynomial& poly, int varietyDim, const DataPoint* data, size_t n) {
         // Calculate autocorrelation efficiently using fixed-point arithmetic
-        int32_t autocorr = calculateFixedPointAutocorrelation(values, n);
+        int32_t autocorr = calculateFixedPointAutocorrelation(data, n);
         
         uint8_t degree = poly.getDegree();
         uint8_t type = 7; // Default to unknown
@@ -412,27 +420,42 @@ private:
         return type;
     }
 
-    // Fixed-point autocorrelation calculation
-    int32_t calculateFixedPointAutocorrelation(const uint8_t* values, size_t n) {
+    // Fixed-point autocorrelation calculation with dt weighting
+    int32_t calculateFixedPointAutocorrelation(const DataPoint* data, size_t n) {
         if (n < 2) return 0;
         constexpr int FIXED_POINT_SHIFT = 16;
-        int64_t sum = 0;
+        int64_t weightedSum = 0;
+        int64_t totalDt_fp = 0;
         int32_t mean = 0;
         
-        // Calculate mean using fixed-point arithmetic
-        for (size_t i = 0; i < n; i++) {
-            mean += values[i];
+        // Calculate Lebesgue-weighted mean using fixed-point
+        for (size_t i = 0; i < n - 1; i++) {
+            int32_t dt_fp = static_cast<int32_t>((data[i+1].timestamp - data[i].timestamp) * (1 << 10));
+            if (dt_fp <= 0) continue;
+            mean += ((floatToGF(data[i].value) + floatToGF(data[i+1].value)) >> 1) * dt_fp;
+            totalDt_fp += dt_fp;
         }
-        mean = (static_cast<int64_t>(mean) << FIXED_POINT_SHIFT) / n;
-
-        // Calculate autocorrelation with lag 1
-        for (size_t i = 1; i < n; i++) {
-            int64_t diff1 = (static_cast<int64_t>(values[i]) << FIXED_POINT_SHIFT) - mean;
-            int64_t diff2 = (static_cast<int64_t>(values[i-1]) << FIXED_POINT_SHIFT) - mean;
-            sum += (diff1 * diff2) >> FIXED_POINT_SHIFT;
+        if (totalDt_fp > 0) {
+            mean = (static_cast<int64_t>(mean) << (FIXED_POINT_SHIFT - 10)) / totalDt_fp;
+        } else {
+            mean = static_cast<int64_t>(floatToGF(data[0].value)) << FIXED_POINT_SHIFT;
         }
 
-        return static_cast<int32_t>(sum / (n - 1));
+        // Calculate autocorrelation with lag 1, dt weighted
+        int64_t integral = 0;
+        totalDt_fp = 0;
+        for (size_t i = 1; i < n - 1; i++) {
+            int32_t dt_fp = static_cast<int32_t>((data[i+1].timestamp - data[i].timestamp) * (1 << 10));
+            if (dt_fp <= 0) continue;
+
+            int64_t d1 = (static_cast<int64_t>(floatToGF(data[i].value)) << FIXED_POINT_SHIFT) - mean;
+            int64_t d2 = (static_cast<int64_t>(floatToGF(data[i-1].value)) << FIXED_POINT_SHIFT) - mean;
+
+            integral += ((d1 * d2) >> FIXED_POINT_SHIFT) * dt_fp;
+            totalDt_fp += dt_fp;
+        }
+
+        return (totalDt_fp > 0) ? static_cast<int32_t>(integral / totalDt_fp) : 0;
     }
 
     // Optimized extremum detection

@@ -10,6 +10,8 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 class HybridQuantumAlgebraicSolver:
     def __init__(self, N=200, L=10.0, hbar=1.0, m=1.0):
+        if N < 5:
+            raise ValueError("Grid size N must be at least 5 for stable Laplacian.")
         self.N = N
         self.L = L
         self.dx = L / N
@@ -79,8 +81,22 @@ class HybridQuantumAlgebraicSolver:
         res = minimize(self.inference_loss, initial_guess,
                        args=(data_densities, psi0, dt, steps),
                        method='L-BFGS-B',
-                       bounds=[(0, 5), (0, 5)]) # Add bounds for physical parameters
+                       bounds=[(0.01, 5), (0.01, 5)]) # Add bounds for physical parameters
         return res
+
+    def check_annihilator(self, theta):
+        """Checks if the parameters theta satisfy the discovered annihilator (invariant)."""
+        rho, kappa = theta
+        # From Groebner basis: -rho**2 - y**4 + kappa*rho*y**2 = 0
+        # We check if there exists real y such that this holds.
+        # This requires kappa*rho >= 2*|rho|.
+        # Since theta bounds are (0.01, 5), rho is positive.
+        discriminant = (kappa * rho)**2 - 4 * rho**2
+        if discriminant < -1e-7:
+            return False, f"No real latent state y exists for theta={theta}. Discriminant={discriminant}"
+        y2_plus = (kappa * rho + np.sqrt(max(0, discriminant))) / 2
+        y2_minus = (kappa * rho - np.sqrt(max(0, discriminant))) / 2
+        return True, f"Latent state y^2 solutions: {y2_plus}, {y2_minus}"
 
 def main():
     solver = HybridQuantumAlgebraicSolver()
@@ -92,7 +108,7 @@ def main():
     logging.info("2. Numerical Time Evolution (Crank-Nicolson)")
     psi0 = np.exp(-solver.x_grid**2) + 0j
     psi0 /= np.linalg.norm(psi0)
-    theta_true = (1.0, 0.5)
+    theta_true = (1.0, 2.5) # rho=1.0, kappa=2.5 satisfies rho*kappa >= 2*rho
     dt = 0.05
     steps = 20
 
@@ -104,6 +120,10 @@ def main():
     data_densities = np.abs(traj)**2
     res = solver.estimate_parameters(data_densities, psi0, dt, steps, [0.8, 0.3])
     logging.info(f"Estimated parameters: {res.x} (True: {theta_true})")
+
+    logging.info("4. Annihilator Check")
+    valid, msg = solver.check_annihilator(res.x)
+    logging.info(f"Annihilator valid: {valid}. {msg}")
 
 if __name__ == "__main__":
     main()

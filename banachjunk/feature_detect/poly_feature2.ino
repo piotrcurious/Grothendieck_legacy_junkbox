@@ -324,11 +324,20 @@ private:
     }
 
     // Fit polynomial to data points using Lagrange interpolation over GF
-    // This calculates the actual coefficients of the polynomial in standard form
+    // Uses points distributed across the window for better representation
     GFPolynomial fitPolynomial(const std::vector<uint8_t>& x, const std::vector<uint8_t>& y) {
-        int n = std::min(static_cast<int>(x.size()), Config::MAX_POLY_DEGREE + 1);
-        std::vector<uint8_t> resultCoeffs(n, 0);
+        int n_total = x.size();
+        int n = std::min(n_total, Config::MAX_POLY_DEGREE + 1);
 
+        // Selection of representative points
+        std::vector<uint8_t> sx(n), sy(n);
+        for(int i = 0; i < n; ++i) {
+            int idx = (n > 1) ? (i * (n_total - 1) / (n - 1)) : 0;
+            sx[i] = x[idx];
+            sy[i] = y[idx];
+        }
+
+        std::vector<uint8_t> resultCoeffs(n, 0);
         for (int i = 0; i < n; i++) {
             // Build basis polynomial L_i(x)
             std::vector<uint8_t> basisPoly = {1};
@@ -340,19 +349,16 @@ private:
                 // Multiply basisPoly by (x - x_j)
                 std::vector<uint8_t> nextBasis(basisPoly.size() + 1, 0);
                 for (size_t k = 0; k < basisPoly.size(); k++) {
-                    // x * basisPoly[k] * x^k = basisPoly[k] * x^(k+1)
                     nextBasis[k + 1] = gf.add(nextBasis[k + 1], basisPoly[k]);
-                    // -x_j * basisPoly[k] * x^k
-                    uint8_t term = gf.multiply(basisPoly[k], gf.subtract(0, x[j]));
+                    uint8_t term = gf.multiply(basisPoly[k], gf.subtract(0, sx[j]));
                     nextBasis[k] = gf.add(nextBasis[k], term);
                 }
                 basisPoly = nextBasis;
-                denominator = gf.multiply(denominator, gf.subtract(x[i], x[j]));
+                denominator = gf.multiply(denominator, gf.subtract(sx[i], sx[j]));
             }
 
-            // Multiply basisPoly by y_i / denominator
             if (denominator == 0) continue;
-            uint8_t factor = gf.divide(y[i], denominator);
+            uint8_t factor = gf.divide(sy[i], denominator);
             for (size_t k = 0; k < basisPoly.size(); k++) {
                 uint8_t term = gf.multiply(basisPoly[k], factor);
                 if (k < resultCoeffs.size()) {
