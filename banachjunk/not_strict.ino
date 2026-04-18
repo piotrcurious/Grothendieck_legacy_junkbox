@@ -98,6 +98,11 @@ private:
     }
 
 public:
+    // Clear data buffer
+    void reset() {
+        dataBuffer.clear();
+    }
+
     // Add data to buffer
     void addData(float dataPoint) {
         dataBuffer.push_back(dataPoint);
@@ -108,6 +113,11 @@ public:
         }
     }
 
+    // Evaluate fitted polynomial at index x
+    float evaluate(const PolynomialCoefficients& poly, float x) {
+        return poly.a * x * x * x + poly.b * x * x + poly.c * x + poly.d;
+    }
+
     // Analyze data using Banach space concepts
     void analyzeBanachSpace() {
         if (dataBuffer.size() < 4) return;  // Need minimum 4 points for 3rd order polynomial
@@ -115,6 +125,14 @@ public:
         // Fit polynomial
         PolynomialCoefficients poly = fitPolynomial(dataBuffer);
         
+        // Compute Standard Error of Estimate
+        float rss = 0;
+        for (size_t i = 0; i < dataBuffer.size(); i++) {
+            float err = dataBuffer[i] - evaluate(poly, i);
+            rss += err * err;
+        }
+        float see = std::sqrt(rss / (dataBuffer.size() - 4));
+
         // Compute derivative
         PolynomialCoefficients derivative = computeDerivative(poly);
         
@@ -127,6 +145,7 @@ public:
         Serial.printf("Quadratic Term: %f\n", poly.b);
         Serial.printf("Linear Term: %f\n", poly.c);
         Serial.printf("Constant Term: %f\n", poly.d);
+        Serial.printf("Std Error of Estimate: %f\n", see);
         
         Serial.println("\nDerivative:");
         Serial.printf("Cubic Term: %f\n", derivative.a);

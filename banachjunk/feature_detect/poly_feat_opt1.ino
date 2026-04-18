@@ -425,23 +425,14 @@ private:
         return rootCount == 1;
     }
 
-    // Efficient confidence calculation using bit manipulation
+    // Efficient confidence calculation
     float calculateConfidence(const Feature& feature, float noiseLevel) {
-        if (noiseLevel <= 0.0f) return 1.0f;
+        if (noiseLevel <= 1e-9f) return 1.0f;
         
-        // Use fast inverse square root approximation
-        float x = noiseLevel * 3.0f;
-        const float x2 = x * 0.5F;
-        const float threehalfs = 1.5F;
-        
-        union {
-            float f;
-            uint32_t i;
-        } conv = { .f = x };
-        conv.i = 0x5f3759df - (conv.i >> 1);
-        conv.f *= threehalfs - (x2 * conv.f * conv.f);
-        
-        return std::min(1.0f, std::abs(feature.value) * conv.f);
+        // Confidence scale based on signal-to-noise ratio
+        // Using standard sqrt for accuracy and portability on ESP32
+        float scale = 1.0f / std::sqrt(noiseLevel * 3.0f);
+        return std::min(1.0f, std::abs(feature.value) * scale);
     }
 
     // Optimized feature comparison

@@ -98,7 +98,18 @@ public:
           newFeature.type = "transition";
         }
         
-        features[featureCount++] = newFeature;
+        // Add feature if it's significantly different from previous
+        bool significantlyDifferent = (featureCount == 0);
+        if (!significantlyDifferent) {
+            const auto& last = features[featureCount-1];
+            significantlyDifferent = (abs(last.strength - newFeature.strength) > EPSILON) ||
+                                     (last.type != newFeature.type) ||
+                                     (abs(last.value - newFeature.value) > 0.1);
+        }
+
+        if (significantlyDifferent) {
+            features[featureCount++] = newFeature;
+        }
         
         // Skip overlapping windows
         i += WINDOW_SIZE/2;
