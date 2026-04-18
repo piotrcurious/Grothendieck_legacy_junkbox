@@ -14,7 +14,7 @@ using namespace Fredholm;
 const int SCREEN_WIDTH = 1200;
 const int SCREEN_HEIGHT = 850;
 
-enum class AppMode { THEORY, COMPENSATOR, BVP, DEBLUR, SPECTRAL, VOLTERRA, ALTERNATIVE, NEUMANN, GALERKIN };
+enum class AppMode { THEORY, COMPENSATOR, BVP, DEBLUR, SPECTRAL, VOLTERRA, ALTERNATIVE, NEUMANN, GALERKIN, KINDS };
 
 class UI {
 public:
@@ -111,7 +111,7 @@ int main() {
     UI ui(font);
     float sigma = 0.2f, lambda = 0.5f, sourceFreq = 2.0f, jitter = 0.1f, compLambda = 0.8f, potential = 5.0f, alpha = 0.05f, eigenIndex = 0.0f, kernelType = 0.0f, neumannIters = 0.0f;
     ui.addButton("Theory", AppMode::THEORY, 20, 20); ui.addButton("Comp", AppMode::COMPENSATOR, 120, 20); ui.addButton("BVP", AppMode::BVP, 220, 20); ui.addButton("Deblur", AppMode::DEBLUR, 320, 20);
-    ui.addButton("Spectral", AppMode::SPECTRAL, 420, 20); ui.addButton("Volterra", AppMode::VOLTERRA, 520, 20); ui.addButton("Alt", AppMode::ALTERNATIVE, 620, 20); ui.addButton("Neumann", AppMode::NEUMANN, 720, 20); ui.addButton("Galerkin", AppMode::GALERKIN, 820, 20);
+    ui.addButton("Spectral", AppMode::SPECTRAL, 420, 20); ui.addButton("Volterra", AppMode::VOLTERRA, 520, 20); ui.addButton("Alt", AppMode::ALTERNATIVE, 620, 20); ui.addButton("Neumann", AppMode::NEUMANN, 720, 20); ui.addButton("Galerkin", AppMode::GALERKIN, 820, 20); ui.addButton("Kinds", AppMode::KINDS, 920, 20);
 
     bool quit = false; SDL_Event e; Fredholm::AdaptiveCompensator<double> compensator; auto startTime = std::chrono::steady_clock::now();
 
@@ -128,6 +128,7 @@ int main() {
         else if (ui.currentMode == AppMode::ALTERNATIVE) { ui.addSlider("Lambda", &lambda, 0.0f, 2.0f, 50, 120); ui.addSlider("Sigma", &sigma, 0.1f, 1.0f, 50, 190); }
         else if (ui.currentMode == AppMode::NEUMANN) { ui.addSlider("Iters", &neumannIters, 0.0f, 20.0f, 50, 120); ui.addSlider("Lambda", &lambda, -1.5f, 1.5f, 50, 190); ui.addSlider("Sigma", &sigma, 0.1f, 1.0f, 50, 260); }
         else if (ui.currentMode == AppMode::GALERKIN) { ui.addSlider("Degree", &eigenIndex, 0.0f, 8.0f, 50, 120); ui.addSlider("Lambda", &lambda, -1.0f, 1.0f, 50, 190); }
+        else if (ui.currentMode == AppMode::KINDS) { ui.addSlider("Sigma", &sigma, 0.01f, 1.0f, 50, 120); ui.addSlider("Freq", &sourceFreq, 0.1f, 5.0f, 50, 190); }
 
         int gx = 450, gy = 100, gw = 700, gh = 300; SDL_SetRenderDrawColor(renderer, 35, 35, 40, 255); SDL_Rect gr = {gx, gy, gw, gh}; SDL_RenderFillRect(renderer, &gr);
 
@@ -137,6 +138,11 @@ int main() {
         std::stringstream statSS; statSS << "Stability Index: " << std::fixed << std::setprecision(3) << condNum;
         SDL_Surface* statSurf = TTF_RenderText_Blended(font, statSS.str().c_str(), {150, 200, 255, 255});
         if(statSurf){ SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, statSurf); SDL_Rect tr = {20, 800, statSurf->w, statSurf->h}; SDL_RenderCopy(renderer, tex, NULL, &tr); SDL_FreeSurface(statSurf); SDL_DestroyTexture(tex); }
+
+        if (condNum > 5.0) {
+            SDL_Surface* warnSurf = TTF_RenderText_Blended(font, "DIVERGENCE RISK: HIGH", {255, 100, 100, 255});
+            if(warnSurf){ SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, warnSurf); SDL_Rect tr = {20, 820, warnSurf->w, warnSurf->h}; SDL_RenderCopy(renderer, tex, NULL, &tr); SDL_FreeSurface(warnSurf); SDL_DestroyTexture(tex); }
+        }
 
         // Legend
         int lx = 850, ly = 420;
@@ -160,7 +166,7 @@ int main() {
             for(int i=0; i<(int)neumannIters; i++) phi_prev = Solver::neumannStep(phi_prev, 0, 1, lambda, K_theory, f, N);
             std::vector<double> phi_v; for(int i=0; i<=100; i++) phi_v.push_back(Solver::interpolateFredholm(i/100.0, 0, 1, lambda, K_theory, f, phi_prev, N));
             drawGraph(renderer, gx, gy, gw, gh, phi_v, {255, 255, 100, 255}, -5, 5, font);
-            const char* desc[] = {"Neumann Series: Iterative Solving", "phi_{n+1} = f + lambda * K * phi_n", "Shows the successive approximation process."};
+            const char* desc[] = {"Neumann Series: phi_{n+1} = f + lambda K phi_n", "Visualizes iterative convergence of the balance.", "Successive approximations approach the global equilibrium."};
             int ty = 420; for(auto t : desc){ SDL_Surface* s = TTF_RenderText_Blended(font, t, {200,200,200,255}); if(s){ SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, s); SDL_Rect tr = {450, ty, s->w, s->h}; SDL_RenderCopy(renderer, tex, NULL, &tr); ty += 25; SDL_FreeSurface(s); SDL_DestroyTexture(tex); } }
         } else if (ui.currentMode == AppMode::VOLTERRA) {
             auto K = [&](double x, double y) { return std::sin(x - y); };
@@ -175,7 +181,7 @@ int main() {
             int idx = std::clamp((int)eigenIndex, 0, N-1); std::vector<double> ev_v; for(int i=0; i<N; i++) ev_v.push_back(evecs[idx][i]);
             drawGraph(renderer, gx, gy, gw, gh, ev_v, {100, 255, 255, 255}, -1, 1, font);
             std::stringstream ss; ss << "Eigenvalue: " << evals[idx];
-            const char* desc[] = {"Spectral Mode: Kernel Eigenfunctions", ss.str().c_str()};
+            const char* desc[] = {"Spectral Mode: K phi = mu phi", ss.str().c_str(), "Eigenfunctions represent the 'natural modes' of the kernel.", "Large eigenvalues correspond to smoother features."};
             int ty = 420; for(auto t : desc){ SDL_Surface* s = TTF_RenderText_Blended(font, t, {200,200,200,255}); if(s){ SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, s); SDL_Rect tr = {450, ty, s->w, s->h}; SDL_RenderCopy(renderer, tex, NULL, &tr); ty += 25; SDL_FreeSurface(s); SDL_DestroyTexture(tex); } }
         } else if (ui.currentMode == AppMode::COMPENSATOR) {
             auto now = std::chrono::steady_clock::now(); float t = std::chrono::duration<float>(now - startTime).count();
@@ -234,6 +240,26 @@ int main() {
             drawGraph(renderer, gx, gy, gw, gh, phi_v, {100, 255, 100, 255}, -2, 2, font);
             const char* desc[] = {"Galerkin Method: Legendre Polynomial Expansion", "phi(x) approx sum c_j P_j(x)", "Projecting the equation onto a finite-dimensional basis."};
             int ty = 420; for(auto t : desc){ SDL_Surface* s = TTF_RenderText_Blended(font, t, {200,200,200,255}); if(s){ SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, s); SDL_Rect tr = {450, ty, s->w, s->h}; SDL_RenderCopy(renderer, tex, NULL, &tr); ty += 25; SDL_FreeSurface(s); SDL_DestroyTexture(tex); } }
+        } else if (ui.currentMode == AppMode::KINDS) {
+            auto f = [&](double x) { return std::sin(sourceFreq * M_PI * x); };
+            int N = 16; std::vector<std::vector<double>> A1(N, std::vector<double>(N)); std::vector<double> B1(N);
+            Quadrature q = Quadrature::GaussLegendre16();
+            for(int i=0; i<N; i++) {
+                for(int j=0; j<N; j++) A1[i][j] = q.weights[j] * K_theory(0.5*q.points[i]+0.5, 0.5*q.points[j]+0.5);
+                B1[i] = f(0.5*q.points[i]+0.5);
+            }
+            std::vector<double> phi_nodes_1st; Fredholm::solveLinearSystem(A1, B1, phi_nodes_1st);
+            std::vector<double> phi_v_1st;
+            for(int i=0; i<=100; i++) {
+                double x = i/100.0, val = 0;
+                if(!phi_nodes_1st.empty()){
+                    for(int j=0; j<N; j++) val += q.weights[j]*K_theory(x, 0.5*q.points[j]+0.5)*phi_nodes_1st[j];
+                }
+                phi_v_1st.push_back(val);
+            }
+            drawGraph(renderer, gx, gy, gw, gh, phi_v_1st, {255, 100, 255, 255}, -2, 2, font);
+            const char* desc[] = {"Fredholm 1st Kind: K phi = f", "Purple: Reconstructed f from solved phi", "Note the extreme sensitivity and oscillation (ill-posedness)."};
+            int ty = 420; for(auto t : desc){ SDL_Surface* s = TTF_RenderText_Blended(font, t, {200,200,200,255}); if(s){ SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, s); SDL_Rect tr = {450, ty, s->w, s->h}; SDL_RenderCopy(renderer, tex, NULL, &tr); ty += 25; SDL_FreeSurface(s); SDL_DestroyTexture(tex); } }
         } else if (ui.currentMode == AppMode::ALTERNATIVE) {
             auto K = [&](double x, double y) { double d = x - y; return std::exp(-d*d / (2*sigma*sigma)); };
             auto f = [&](double x) { return 1.0; };
@@ -244,7 +270,29 @@ int main() {
             drawGraph(renderer, gx, gy, gw, gh, phi_v, {100, 255, 100, 255}, -graphRange, graphRange, font);
         }
 
-        ui.draw(renderer); SDL_RenderPresent(renderer); SDL_Delay(16);
+        ui.draw(renderer);
+
+        // Data Probing / Mouse Hover
+        int mx, my; SDL_GetMouseState(&mx, &my);
+        if (mx >= gx && mx <= gx + gw && my >= gy && my <= gy + gh) {
+            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 100);
+            SDL_RenderDrawLine(renderer, mx, gy, mx, gy + gh);
+            SDL_RenderDrawLine(renderer, gx, my, gx + gw, my);
+            double vx = (double)(mx - gx) / gw;
+            // Capture the min/max range for the current mode to show 'y'
+            double v_min = -2.0, v_max = 2.0;
+            if (ui.currentMode == AppMode::VOLTERRA) { v_min = -10.0; v_max = 10.0; }
+            else if (ui.currentMode == AppMode::BVP) { v_min = -0.5; v_max = 0.5; }
+            else if (ui.currentMode == AppMode::ALTERNATIVE) { v_min = -10.0; v_max = 10.0; } // Dynamic range really, but fixed for probing
+            else if (ui.currentMode == AppMode::SPECTRAL) { v_min = -1.0; v_max = 1.0; }
+
+            double vy = v_min + (double)(gy + gh - my) / gh * (v_max - v_min);
+            std::stringstream ss; ss << std::fixed << std::setprecision(3) << "(" << vx << ", " << vy << ")";
+            SDL_Surface* s = TTF_RenderText_Blended(font, ss.str().c_str(), {255, 255, 255, 255});
+            if(s){ SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, s); SDL_Rect tr = {mx + 10, my - 20, s->w, s->h}; SDL_RenderCopy(renderer, tex, NULL, &tr); SDL_FreeSurface(s); SDL_DestroyTexture(tex); }
+        }
+
+        SDL_RenderPresent(renderer); SDL_Delay(16);
     }
     TTF_CloseFont(font); SDL_DestroyRenderer(renderer); SDL_DestroyWindow(window); TTF_Quit(); SDL_Quit(); return 0;
 }

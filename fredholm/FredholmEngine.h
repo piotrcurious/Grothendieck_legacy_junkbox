@@ -125,7 +125,8 @@ inline SolverStatus solveLinearSystem(std::vector<std::vector<double>>& A, std::
         double maxEl = std::abs(A[i][i]); int maxRow = i;
         for (int k = i + 1; k < n; k++) if (std::abs(A[k][i]) > maxEl) { maxEl = std::abs(A[k][i]); maxRow = k; }
         if (maxEl < eps) return SolverStatus::SINGULAR_MATRIX;
-        std::swap(A[maxRow], A[i]); std::swap(b[maxRow], b[i]);
+        std::swap(A[maxRow], A[i]);
+        std::swap(b[maxRow], b[i]);
         for (int k = i + 1; k < n; k++) {
             double c = -A[k][i] / A[i][i];
             for (int j = i; j < n; j++) if (i == j) A[k][j] = 0; else A[k][j] += c * A[i][j];
@@ -167,9 +168,7 @@ public:
         Matrix At = A.transpose();
         Matrix AtA = At * A;
         double max_sing_sq = powerIteration(AtA);
-        // To find the smallest singular value, we'd need inverse power iteration or full SVD.
-        // For educational suite, we'll approximate with ratio of max sing to a small epsilon or min pivot
-        return std::sqrt(max_sing_sq); // Simplification: just show magnitude of max singular value as stability proxy
+        return std::sqrt(max_sing_sq);
     }
 
     static std::vector<double> solveVolterra(double a, double b, double lambda, KernelFunc K, SourceFunc f, int n_steps = 100) {
@@ -212,6 +211,51 @@ public:
             p0 = p1; p1 = pn;
         }
         return pn;
+    }
+
+    // Optimized Galerkin matrix construction
+    static std::vector<double> solveGalerkinOptimized(double a, double b, double lambda, KernelFunc K, SourceFunc f, int degree) {
+        int N = degree + 1;
+        std::vector<std::vector<double>> A(N, std::vector<double>(N));
+        std::vector<double> B(N);
+        Quadrature q = Quadrature::GaussLegendre16();
+
+        // Pre-evaluate basis functions at quadrature points
+        std::vector<std::vector<double>> basis_evals(N, std::vector<double>(16));
+        for(int i=0; i<N; i++) {
+            for(int k=0; k<16; k++) {
+                basis_evals[i][k] = legendreP(i, q.points[k]);
+            }
+        }
+
+        for(int i=0; i<N; i++) {
+            for(int j=0; j<N; j++) {
+                double integral = 0;
+                for(int n1=0; n1<16; n1++) {
+                    double x_val = 0.5 * (b - a) * q.points[n1] + 0.5 * (a + b);
+                    double w1_scaled = q.weights[n1] * 0.5 * (b - a);
+                    for(int n2=0; n2<16; n2++) {
+                        double y_val = 0.5 * (b - a) * q.points[n2] + 0.5 * (a + b);
+                        double w2_scaled = q.weights[n2] * 0.5 * (b - a);
+                        integral += w1_scaled * w2_scaled * basis_evals[i][n1] * K(x_val, y_val) * basis_evals[j][n2];
+                    }
+                }
+                // Integral of P_i * P_j is 2/(2i+1) on [-1, 1]
+                // We are on [a, b], so we need to scale the mass matrix accordingly
+                double orth = (i == j) ? (b - a) / (2.0 * i + 1.0) : 0.0;
+                A[i][j] = orth - lambda * integral;
+            }
+            double b_int = 0;
+            for(int n=0; n<16; n++) {
+                double x_val = 0.5 * (b - a) * q.points[n] + 0.5 * (a + b);
+                double w_scaled = q.weights[n] * 0.5 * (b - a);
+                b_int += w_scaled * f(x_val) * basis_evals[i][n];
+            }
+            B[i] = b_int;
+        }
+        std::vector<double> coeffs;
+        if(solveLinearSystem(A, B, coeffs) != SolverStatus::SUCCESS) return {};
+        return coeffs;
     }
 };
 
