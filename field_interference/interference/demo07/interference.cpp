@@ -134,8 +134,8 @@ string companion_matrix_to_csv(const vector<double> &M) {
 cd eval_poly_at_alpha(const vector<int> &coeffs, const cd &alpha) {
   cd acc(0, 0), powa(1, 0);
   for (int c : coeffs) {
-    acc += powa * *(double)c;
-    powa * *= alpha;
+    acc += powa * (double)c;
+    powa *= alpha;
   }
   return acc;
 }
@@ -588,7 +588,7 @@ int main(int argc, char **argv) {
       gl);
 
   Fl_Check_Button *cb_edges =
-      new Fl_Check_Button(1020, 210, 200, 20, "Show Con * nections");
+      new Fl_Check_Button(1020, 210, 200, 20, "Show Connections");
   cb_edges->value(1);
   cb_edges->callback(
       [](Fl_Widget *w, void *v) {
@@ -627,14 +627,20 @@ int main(int argc, char **argv) {
     for (char ch : s) {
       if (ch == ',' || ch == ' ') {
         if (!tmp.empty()) {
-          try { coeffs.push_back(stoi(tmp)); } catch (...) { /* skip invalid int */ }
+          try {
+            coeffs.push_back(stoi(tmp));
+          } catch () {
+          }
           tmp.clear();
         }
       } else
         tmp.push_back(ch);
     }
     if (!tmp.empty())
-      try { coeffs.push_back(stoi(tmp)); } catch (...) { /* skip invalid int */ }
+      try {
+        coeffs.push_back(stoi(tmp));
+      } catch () {
+      }
     if (coeffs.size() < 2)
       return;
 

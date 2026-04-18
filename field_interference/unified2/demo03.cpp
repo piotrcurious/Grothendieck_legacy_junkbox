@@ -10,7 +10,25 @@
 // unified_galois_visual_with_extensions.cpp -o unified_galois_visual
 //    -lfltk -lfltk_gl -lGL -lGLU -lm
 
-#include <FL/Fl.H> #include <FL/Fl_Window.H> #include <FL/Fl_Group.H> #include <FL/Fl_Button.H> #include <FL/Fl_Choice.H> #include <FL/Fl_Value_Slider.H> #include <FL/Fl_Box.H> #include <FL/Fl_Gl_Window.H> #include <FL/Fl_Check_Button.H> #include <FL/Fl_Input.H> #include <FL/gl.h> #include <vector> #include <string> #include <cmath> #include <complex> #include <random> #include <sstream> #include <algorithm> #include <iostream>
+#include <FL/Fl.H>
+#include <FL/Fl_Box.H>
+#include <FL/Fl_Button.H>
+#include <FL/Fl_Check_Button.H>
+#include <FL/Fl_Choice.H>
+#include <FL/Fl_Gl_Window.H>
+#include <FL/Fl_Group.H>
+#include <FL/Fl_Input.H>
+#include <FL/Fl_Value_Slider.H>
+#include <FL/Fl_Window.H>
+#include <FL/gl.h>
+#include <algorithm>
+#include <cmath>
+#include <complex>
+#include <iostream>
+#include <random>
+#include <sstream>
+#include <string>
+#include <vector>
 
 using namespace std;
 using cd = complex<double>;
@@ -19,15 +37,25 @@ static inline double clamp01(double x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
 
 // Durand-Kerner root solver (returns vector of complex roots) vector<cd>
 // durand_kerner(const vector<cd>& coeffs, int max_iters=300, double tol=1e-12){
-// int n = (int)coeffs.size()-1; vector<cd> roots; if(n <= 0) return roots;
+int n = (int)coeffs.size() - 1;
+vector<cd> roots;
+if (n <= 0)
+  return roots;
 // roots.resize(n); double radius = 0.5 + 0.5 * pow(2.0, 1.0/max(1,n)); for(int
 // i=0;i<n;++i) roots[i] = polar(radius, 2.0 * M_PI * i/n); for(int iter=0;
 // iter<max_iters; ++iter){ double max_change = 0.0; for(int i=0;i<n;++i){ cd xi
 // = roots[i]; cd p = coeffs[n]; for(int k=n-1;k>=0;--k) p = p*xi + coeffs[k];
-// cd prod = 1.0; for(int j=0;j<n;++j) if(j!=i) prod *= (xi - roots[j]);
-// if(abs(prod) < 1e-18) prod = 1e-18; cd delta = p / prod; roots[i] -= delta;
+cd prod = 1.0;
+for (int j = 0; j < n; ++j)
+  if (j != i)
+    prod *= (xi - roots[j]);
+if (abs(prod) < 1e-18)
+  prod = 1e-18;
+cd delta = p / prod;
+roots[i] -= delta;
 // max_change = max(max_change, abs(delta)); } if(max_change < tol) break; }
-// return roots; }
+return roots;
+}
 
 // Separable Gaussian blur kernel generator vector<double>
 // gaussian_kernel(double sigma, int &ksize_out){ if(sigma <= 0.0) { ksize_out =
@@ -35,7 +63,8 @@ static inline double clamp01(double x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
 // radius + 1; vector<double> k(ksize); double s2 = sigma * sigma; double sum =
 // 0.0; for(int i=-radius;i<=radius;++i){ double v = exp(-(i * i)/(2.0*s2));
 // k[i+radius] = v; sum += v; } for(auto &x : k) x /= sum; ksize_out = ksize;
-// return k; }
+return k;
+}
 
 void separable_blur(vector<double> &grid, int res, double sigma) {
   if (sigma <= 0.0)
@@ -68,11 +97,11 @@ void separable_blur(vector<double> &grid, int res, double sigma) {
   // Map complex plane [-2,2]^2 to grid inline bool map_to_grid(const cd &z, int
   // &ix, int &iy, int grid_res){ double re=z.real(), im=z.imag(); double
   // xmin=-2, xmax=2, ymin=-2, ymax=2; if(re<xmin||re>xmax||im<ymin||im>ymax)
-  // return false; ix = (int)floor((re-xmin)/(xmax - xmin)(grid_res-1)+0.5); iy
-  // = (int)floor((im-ymin)/(ymax-ymin)(grid_res-1)+0.5);
+  // return false; ix = (int)floor((re-xmin)/(xmax-xmin)(grid_res-1)+0.5); iy =
+  // (int)floor((im-ymin)/(ymax-ymin)(grid_res-1)+0.5);
   // ix=max(0,min(grid_res-1,ix)); iy=max(0,min(grid_res-1,iy)); return true; }
 
-  // Companion matrix builder for monic polynomial x^n + c_{n-1} x^{n-1} + ... +
+  // Companion matrix builder for monic polynomial x^n + c_{n-1} x^{n-1} +   +
   // c0 vector<double> companion_matrix(const vector<int>& coeffs){ int n =
   // (int)coeffs.size()-1; vector<double> M(n * n,0.0); for(int i=1;i<n;++i) M[i
   // * n + (i-1)] = 1.0; for(int i=0;i<n;++i){ double a = (i <
@@ -83,8 +112,8 @@ void separable_blur(vector<double> &grid, int res, double sigma) {
     cd acc(0, 0);
     cd powa(1, 0);
     for (size_t i = 0; i < coeffs.size(); ++i) {
-      acc += powa * *(double)coeffs[i];
-      powa * *= alpha;
+      acc += powa * (double)coeffs[i];
+      powa *= alpha;
     }
     return acc;
   }
