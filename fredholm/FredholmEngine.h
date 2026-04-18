@@ -27,9 +27,8 @@ struct Quadrature {
     }
 
     static Quadrature GaussLegendreN(int n, double a, double b) {
-        // For simplicity in this suite, we provide a few fixed sizes
-        // but scale them to [a, b]
-        Quadrature q = GaussLegendre8(); // Default to 8 points
+        // Simple scaling of 8-point quadrature
+        Quadrature q = GaussLegendre8();
         for (size_t i = 0; i < q.points.size(); ++i) {
             double p = q.points[i];
             q.points[i] = 0.5 * (b - a) * p + 0.5 * (a + b);
@@ -45,7 +44,6 @@ struct Quadrature {
 inline bool solveLinearSystem(std::vector<std::vector<double>>& A, std::vector<double>& b, std::vector<double>& x) {
     int n = b.size();
     for (int i = 0; i < n; i++) {
-        // Search for maximum in this column
         double maxEl = std::abs(A[i][i]);
         int maxRow = i;
         for (int k = i + 1; k < n; k++) {
@@ -55,29 +53,23 @@ inline bool solveLinearSystem(std::vector<std::vector<double>>& A, std::vector<d
             }
         }
 
-        // Swap maximum row with current row (column by column)
         std::swap(A[maxRow], A[i]);
         std::swap(b[maxRow], b[i]);
 
-        // Make all rows below this one 0 in current column
         for (int k = i + 1; k < n; k++) {
-            if (std::abs(A[i][i]) < 1e-12) return false;
+            if (std::abs(A[i][i]) < 1e-15) return false;
             double c = -A[k][i] / A[i][i];
             for (int j = i; j < n; j++) {
-                if (i == j) {
-                    A[k][j] = 0;
-                } else {
-                    A[k][j] += c * A[i][j];
-                }
+                if (i == j) A[k][j] = 0;
+                else A[k][j] += c * A[i][j];
             }
             b[k] += c * b[i];
         }
     }
 
-    // Solve equation Ax=b for an upper triangular matrix A
     x.resize(n);
     for (int i = n - 1; i >= 0; i--) {
-        if (std::abs(A[i][i]) < 1e-12) return false;
+        if (std::abs(A[i][i]) < 1e-15) return false;
         x[i] = b[i] / A[i][i];
         for (int k = i - 1; k >= 0; k--) {
             b[k] -= A[k][i] * x[i];
@@ -113,13 +105,10 @@ public:
         }
 
         std::vector<double> phi_nodes;
-        if (!solveLinearSystem(A, B, phi_nodes)) {
-            return {};
-        }
+        if (!solveLinearSystem(A, B, phi_nodes)) return {};
         return phi_nodes;
     }
 
-    // Interpolate solution at any point x
     static double interpolate(double x, double a, double b, double lambda,
                               KernelFunc K, SourceFunc f,
                               const std::vector<double>& phi_nodes,
@@ -131,18 +120,20 @@ public:
         }
         return f(x) + lambda * integral;
     }
+
+    // Helper for Fredholm equation of the 1st kind (via Tikhonov Regularization):
+    // integral K(x,y) phi(y) dy = f(x)
+    // Minimizing ||K phi - f||^2 + alpha ||phi||^2
+    // Leads to: alpha*phi(x) + integral L(x,y) phi(y) dy = g(x)
+    // where L(x,y) = integral K(z,x) K(z,y) dz and g(x) = integral K(z,x) f(z) dz
 };
 
-/**
- * @brief Adaptive Fredholm Compensator for Signal/Quantization processing
- */
 template<typename T>
 class AdaptiveCompensator {
 private:
     struct Params {
         T kernelWidth = T(0.1);
         T lambda = T(0.9);
-        T damping = T(0.95);
     } params;
 
     std::vector<T> history;
@@ -158,14 +149,11 @@ public:
         history.push_back(input);
         if (history.size() > maxHistory) history.erase(history.begin());
 
-        // Simple Fredholm-like smoothing kernel
         auto K = [this](T x, T y) {
             T diff = x - y;
             return std::exp(-diff * diff / (2 * params.kernelWidth * params.kernelWidth));
         };
 
-        // We treat the input as the 'source' f(x) and look for a 'smoothed' phi(x)
-        // In a real-time context, we often use a simplified one-step correction
         T integral = 0;
         T totalWeight = 0;
         for (T h : history) {
@@ -175,7 +163,6 @@ public:
         }
 
         if (totalWeight < 1e-9) return input;
-
         T smoothed = integral / totalWeight;
         return input * (1.0 - params.lambda) + smoothed * params.lambda;
     }

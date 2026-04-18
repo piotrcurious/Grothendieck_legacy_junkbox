@@ -16,7 +16,9 @@ const int SCREEN_HEIGHT = 800;
 
 enum class AppMode {
     THEORY,
-    APPLICATION
+    COMPENSATOR,
+    BVP,
+    DEBLUR
 };
 
 class UI {
@@ -38,6 +40,7 @@ public:
     std::vector<Slider> sliders;
     std::vector<Button> buttons;
     TTF_Font* font;
+    AppMode currentMode = AppMode::THEORY;
 
     UI(TTF_Font* f) : font(f) {}
 
@@ -46,7 +49,7 @@ public:
     }
 
     void addButton(std::string label, AppMode mode, int x, int y) {
-        buttons.push_back({label, mode, {x, y, 150, 40}});
+        buttons.push_back({label, mode, {x, y, 140, 40}});
     }
 
     void handleEvent(SDL_Event& e) {
@@ -82,22 +85,20 @@ public:
 
     void draw(SDL_Renderer* ren) {
         for (auto& s : sliders) {
-            // Label
             SDL_Color white = {255, 255, 255, 255};
             std::stringstream ss;
             ss << s.label << ": " << std::fixed << std::setprecision(2) << *s.value;
             SDL_Surface* surf = TTF_RenderText_Blended(font, ss.str().c_str(), white);
-            SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, surf);
-            SDL_Rect tr = {s.rect.x, s.rect.y - 25, surf->w, surf->h};
-            SDL_RenderCopy(ren, tex, NULL, &tr);
-            SDL_FreeSurface(surf);
-            SDL_DestroyTexture(tex);
+            if (surf) {
+                SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, surf);
+                SDL_Rect tr = {s.rect.x, s.rect.y - 25, surf->w, surf->h};
+                SDL_RenderCopy(ren, tex, NULL, &tr);
+                SDL_FreeSurface(surf);
+                SDL_DestroyTexture(tex);
+            }
 
-            // Track
             SDL_SetRenderDrawColor(ren, 100, 100, 100, 255);
             SDL_RenderFillRect(ren, &s.rect);
-
-            // Handle
             float pct = (*s.value - s.min) / (s.max - s.min);
             SDL_Rect hr = {s.rect.x + (int)(pct * s.rect.w) - 5, s.rect.y - 5, 10, 30};
             SDL_SetRenderDrawColor(ren, 200, 200, 200, 255);
@@ -115,15 +116,15 @@ public:
 
             SDL_Color white = {255, 255, 255, 255};
             SDL_Surface* surf = TTF_RenderText_Blended(font, b.label.c_str(), white);
-            SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, surf);
-            SDL_Rect tr = {b.rect.x + (b.rect.w - surf->w)/2, b.rect.y + (b.rect.h - surf->h)/2, surf->w, surf->h};
-            SDL_RenderCopy(ren, tex, NULL, &tr);
-            SDL_FreeSurface(surf);
-            SDL_DestroyTexture(tex);
+            if (surf) {
+                SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, surf);
+                SDL_Rect tr = {b.rect.x + (b.rect.w - surf->w)/2, b.rect.y + (b.rect.h - surf->h)/2, surf->w, surf->h};
+                SDL_RenderCopy(ren, tex, NULL, &tr);
+                SDL_FreeSurface(surf);
+                SDL_DestroyTexture(tex);
+            }
         }
     }
-
-    AppMode currentMode = AppMode::THEORY;
 };
 
 void drawGraph(SDL_Renderer* ren, int x, int y, int w, int h,
@@ -135,6 +136,8 @@ void drawGraph(SDL_Renderer* ren, int x, int y, int w, int h,
         int x2 = x + ((i + 1) * w) / (data.size() - 1);
         int y1 = y + h - (int)((data[i] - minV) / (maxV - minV) * h);
         int y2 = y + h - (int)((data[i+1] - minV) / (maxV - minV) * h);
+        y1 = std::clamp(y1, y, y + h);
+        y2 = std::clamp(y2, y, y + h);
         SDL_RenderDrawLine(ren, x1, y1, x2, y2);
     }
 }
@@ -147,30 +150,26 @@ int main() {
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 
-    TTF_Font* font = TTF_OpenFont("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 18);
+    TTF_Font* font = TTF_OpenFont("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16);
     if (!font) return 1;
 
     UI ui(font);
     float sigma = 0.2f;
     float lambda = 0.5f;
     float sourceFreq = 2.0f;
-    ui.addSlider("Kernel Sigma", &sigma, 0.01f, 1.0f, 50, 100);
-    ui.addSlider("Lambda", &lambda, -2.0f, 2.0f, 50, 170);
-    ui.addSlider("Source Freq", &sourceFreq, 0.1f, 10.0f, 50, 240);
-    ui.addButton("Theory Mode", AppMode::THEORY, 50, 20);
-    ui.addButton("App Mode", AppMode::APPLICATION, 210, 20);
-
-    // For Application mode
     float jitter = 0.1f;
     float compLambda = 0.8f;
-    ui.addSlider("Jitter/Noise", &jitter, 0.0f, 0.5f, 50, 400); // Only shown in App mode
-    ui.addSlider("Comp Lambda", &compLambda, 0.0f, 1.0f, 50, 470);
+    float potential = 5.0f;
+    float alpha = 0.05f;
+
+    ui.addButton("Theory", AppMode::THEORY, 20, 20);
+    ui.addButton("Compensator", AppMode::COMPENSATOR, 170, 20);
+    ui.addButton("BVP", AppMode::BVP, 320, 20);
+    ui.addButton("Deblur", AppMode::DEBLUR, 470, 20);
 
     bool quit = false;
     SDL_Event e;
-
     Fredholm::AdaptiveCompensator<double> compensator;
-
     auto startTime = std::chrono::steady_clock::now();
 
     while (!quit) {
@@ -182,161 +181,185 @@ int main() {
         SDL_SetRenderDrawColor(renderer, 20, 20, 25, 255);
         SDL_RenderClear(renderer);
 
+        ui.sliders.clear();
         if (ui.currentMode == AppMode::THEORY) {
-            // Solve Fredholm Equation
-            // phi(x) = sin(freq * x) + lambda * integral_0^1 exp(-(x-y)^2/2sigma^2) phi(y) dy
+            ui.addSlider("Kernel Sigma", &sigma, 0.01f, 1.0f, 50, 120);
+            ui.addSlider("Lambda", &lambda, -2.0f, 2.0f, 50, 190);
+            ui.addSlider("Source Freq", &sourceFreq, 0.1f, 10.0f, 50, 260);
+        } else if (ui.currentMode == AppMode::COMPENSATOR) {
+            ui.addSlider("Jitter/Noise", &jitter, 0.0f, 0.5f, 50, 120);
+            ui.addSlider("Comp Lambda", &compLambda, 0.0f, 1.0f, 50, 190);
+        } else if (ui.currentMode == AppMode::BVP) {
+            ui.addSlider("Potential V", &potential, 0.0f, 20.0f, 50, 120);
+            ui.addSlider("Source Freq", &sourceFreq, 0.1f, 5.0f, 50, 190);
+        } else if (ui.currentMode == AppMode::DEBLUR) {
+            ui.addSlider("Blur Sigma", &sigma, 0.01f, 0.5f, 50, 120);
+            ui.addSlider("Alpha (Reg)", &alpha, 0.001f, 0.2f, 50, 190);
+        }
+
+        if (ui.currentMode == AppMode::THEORY) {
             auto K = [&](double x, double y) {
-                double d = x - y;
-                return std::exp(-d*d / (2*sigma*sigma));
+                double d = x - y; return std::exp(-d*d / (2*sigma*sigma));
             };
             auto f = [&](double x) { return std::sin(sourceFreq * M_PI * x); };
+            auto phi_nodes = Solver::solve(0, 1, lambda, K, f, 32);
 
-            int N = 32;
-            auto phi_nodes = Solver::solve(0, 1, lambda, K, f, N);
-
-            std::vector<double> x_vals, f_vals, phi_vals;
-            int plotN = 100;
-            for (int i = 0; i <= plotN; ++i) {
-                double x = (double)i / plotN;
-                x_vals.push_back(x);
+            std::vector<double> f_vals, phi_vals;
+            for (int i = 0; i <= 100; ++i) {
+                double x = (double)i / 100.0;
                 f_vals.push_back(f(x));
-                if (!phi_nodes.empty())
-                    phi_vals.push_back(Solver::interpolate(x, 0, 1, lambda, K, f, phi_nodes, N));
-                else
-                    phi_vals.push_back(0);
+                phi_vals.push_back(phi_nodes.empty() ? 0 : Solver::interpolate(x, 0, 1, lambda, K, f, phi_nodes, 32));
             }
-
-            // Draw Graphs
-            int gx = 400, gy = 100, gw = 700, gh = 300;
+            int gx = 450, gy = 100, gw = 700, gh = 300;
             SDL_SetRenderDrawColor(renderer, 40, 40, 45, 255);
-            SDL_Rect graphRect = {gx, gy, gw, gh};
-            SDL_RenderFillRect(renderer, &graphRect);
-
+            SDL_Rect gr = {gx, gy, gw, gh}; SDL_RenderFillRect(renderer, &gr);
             drawGraph(renderer, gx, gy, gw, gh, f_vals, {255, 100, 100, 255}, -2, 2);
             drawGraph(renderer, gx, gy, gw, gh, phi_vals, {100, 255, 100, 255}, -2, 2);
 
-            // Draw axis labels for the graph
-            SDL_Color textColor = {180, 180, 180, 255};
-            SDL_Surface* s_min = TTF_RenderText_Blended(font, "-2.0", textColor);
-            SDL_Texture* t_min = SDL_CreateTextureFromSurface(renderer, s_min);
-            SDL_Rect r_min = {gx - s_min->w - 5, gy + gh - s_min->h, s_min->w, s_min->h};
-            SDL_RenderCopy(renderer, t_min, NULL, &r_min);
-            SDL_FreeSurface(s_min); SDL_DestroyTexture(t_min);
-
-            SDL_Surface* s_max = TTF_RenderText_Blended(font, "2.0", textColor);
-            SDL_Texture* t_max = SDL_CreateTextureFromSurface(renderer, s_max);
-            SDL_Rect r_max = {gx - s_max->w - 5, gy, s_max->w, s_max->h};
-            SDL_RenderCopy(renderer, t_max, NULL, &r_max);
-            SDL_FreeSurface(s_max); SDL_DestroyTexture(t_max);
-
             // Draw Kernel Heatmap
-            int kx = 400, ky = 450, kw = 300, kh = 300;
-            for (int i = 0; i < 50; ++i) {
-                for (int j = 0; j < 50; ++j) {
-                    double val = K((double)i/50.0, (double)j/50.0);
+            int kx = 450, ky = 450, kw = 200, kh = 200;
+            for (int i = 0; i < 40; ++i) {
+                for (int j = 0; j < 40; ++j) {
+                    double val = K((double)i/40.0, (double)j/40.0);
                     Uint8 c = (Uint8)(val * 255);
                     SDL_SetRenderDrawColor(renderer, c, c/2, 255-c, 255);
-                    SDL_Rect r = {kx + i*6, ky + j*6, 6, 6};
+                    SDL_Rect r = {kx + i*5, ky + j*5, 5, 5};
                     SDL_RenderFillRect(renderer, &r);
                 }
             }
 
-            // Explanation Text
-            SDL_Color white = {200, 200, 200, 255};
-            const char* theoryText[] = {
-                "Fredholm Equation of the Second Kind:",
-                "phi(x) = f(x) + lambda * Integral[ K(x,y) phi(y) dy ]",
-                "",
-                "Red Graph: f(x) - The input 'source' signal.",
-                "Green Graph: phi(x) - The output 'balanced' signal.",
-                "Heatmap: K(x,y) - The interaction kernel.",
-                "",
-                "Theory:",
-                "Fredholm theory describes how local interactions",
-                "(defined by the kernel) reach a global equilibrium.",
-                "In Application, we use this to 'smooth' noise while",
-                "preserving the structure of the signal."
-            };
+            const char* desc[] = {"General Fredholm Equation:", "phi(x) = f(x) + lambda * Integral[ K(x,y) phi(y) dy ]", "",
+                                 "Red: Source f(x), Green: Solution phi(x)",
+                                 "Heatmap: Interaction Kernel K(x,y)"};
             int ty = 450;
-            for (const char* t : theoryText) {
-                SDL_Surface* s = TTF_RenderText_Blended(font, t, white);
-                if (s) {
+            for (auto t : desc) {
+                SDL_Surface* s = TTF_RenderText_Blended(font, t, {200,200,200,255});
+                if(s) {
                     SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, s);
-                    if (tex) {
-                        SDL_Rect tr = {720, ty, s->w, s->h};
-                        SDL_RenderCopy(renderer, tex, NULL, &tr);
-                        SDL_DestroyTexture(tex);
-                    }
-                    SDL_FreeSurface(s);
+                    SDL_Rect tr = {450, ty, s->w, s->h}; SDL_RenderCopy(renderer, tex, NULL, &tr);
+                    ty += 25; SDL_FreeSurface(s); SDL_DestroyTexture(tex);
                 }
-                ty += 25;
             }
-
-        } else {
-            // Application Mode: Quantization Jitter Reduction
+        } else if (ui.currentMode == AppMode::COMPENSATOR) {
             auto now = std::chrono::steady_clock::now();
             float t = std::chrono::duration<float>(now - startTime).count();
-
-            float rawAngle = t * 1.0f;
-            float noisyAngle = rawAngle + ((rand() % 1000) / 1000.0f - 0.5f) * jitter;
-
-            // Quantize noisy angle to simulate low precision
-            float qLevels = 16.0f;
-            float quantizedAngle = std::floor(noisyAngle * qLevels) / qLevels;
-
+            float raw = t * 1.0f;
+            float noisy = raw + ((rand() % 1000) / 1000.0f - 0.5f) * jitter;
+            float quantized = std::floor(noisy * 16.0f) / 16.0f;
             compensator.setParams(0.1, compLambda);
-            float correctedAngle = compensator.compensate(quantizedAngle);
+            float corrected = compensator.compensate(quantized);
 
-            // Draw two circles with lines
-            int cx1 = 500, cy1 = 300, r = 100;
-            int cx2 = 800, cy2 = 300;
-
-            auto drawPointer = [&](int cx, int cy, float angle, const char* label) {
-                SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
-                // Draw circle
-                for(int i=0; i<360; i++) {
-                    float a = i * M_PI / 180.0;
-                    SDL_RenderDrawPoint(renderer, cx + r*cos(a), cy + r*sin(a));
-                }
-                // Draw Line
+            auto drawPtr = [&](int cx, int cy, float angle, const char* lbl) {
+                int r = 80; SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
+                for(int i=0; i<360; i++) SDL_RenderDrawPoint(renderer, cx + r*cos(i*M_PI/180), cy + r*sin(i*M_PI/180));
                 SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
                 SDL_RenderDrawLine(renderer, cx, cy, cx + r*cos(angle), cy + r*sin(angle));
-
-                SDL_Color white = {255, 255, 255, 255};
-                SDL_Surface* s = TTF_RenderText_Blended(font, label, white);
-                SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, s);
-                SDL_Rect tr = {cx - s->w/2, cy + r + 20, s->w, s->h};
-                SDL_RenderCopy(renderer, tex, NULL, &tr);
-                SDL_FreeSurface(s);
-                SDL_DestroyTexture(tex);
-            };
-
-            drawPointer(cx1, cy1, quantizedAngle, "Quantized + Noisy");
-            drawPointer(cx2, cy2, correctedAngle, "Fredholm Compensated");
-
-            // Text
-            const char* appText[] = {
-                "Application: Noise & Quantization Smoothing",
-                "Fredholm operators act as advanced filters.",
-                "By treating the signal as an integral manifold,",
-                "we can recover smoothness lost to quantization.",
-                "",
-                "Adjust 'Jitter' to see the input destabilize.",
-                "Adjust 'Comp Lambda' to see Fredholm recovery."
-            };
-            int ty = 500;
-            for (const char* txt : appText) {
-                SDL_Surface* s = TTF_RenderText_Blended(font, txt, {200,200,200,255});
-                if (s) {
+                SDL_Surface* s = TTF_RenderText_Blended(font, lbl, {255,255,255,255});
+                if(s){
                     SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, s);
-                    if (tex) {
-                        SDL_Rect tr = {400, ty, s->w, s->h};
-                        SDL_RenderCopy(renderer, tex, NULL, &tr);
-                        SDL_DestroyTexture(tex);
-                    }
-                    SDL_FreeSurface(s);
+                    SDL_Rect tr = {cx - s->w/2, cy + r + 10, s->w, s->h}; SDL_RenderCopy(renderer, tex, NULL, &tr);
+                    SDL_FreeSurface(s); SDL_DestroyTexture(tex);
                 }
-                ty += 25;
+            };
+            drawPtr(550, 300, quantized, "Quantized");
+            drawPtr(850, 300, corrected, "Corrected");
+        } else if (ui.currentMode == AppMode::BVP) {
+            // -u'' + V u = f  => u(x) + integral G(x,y) V(y) u(y) dy = integral G(x,y) f(y) dy
+            auto G = [](double x, double y) { return (x < y) ? x * (1.0 - y) : y * (1.0 - x); };
+            auto V = [&](double x) { return (double)potential; };
+            auto f = [&](double x) { return std::sin(sourceFreq * M_PI * x); };
+
+            // F(x) = integral G(x,y) f(y) dy
+            auto F = [&](double x) {
+                double sum = 0; int n = 32;
+                Quadrature q = Quadrature::GaussLegendreN(n, 0, 1);
+                for(int i=0; i<n; i++) sum += q.weights[i] * G(x, q.points[i]) * f(q.points[i]);
+                return sum;
+            };
+            auto K = [&](double x, double y) { return G(x, y) * V(y); };
+            auto phi_nodes = Solver::solve(0, 1, -1.0, K, F, 32);
+
+            std::vector<double> u_vals, f_scaled;
+            for(int i=0; i<=100; i++){
+                double x = i/100.0;
+                f_scaled.push_back(f(x)*0.1); // Scale for vis
+                u_vals.push_back(phi_nodes.empty() ? 0 : Solver::interpolate(x, 0, 1, -1.0, K, F, phi_nodes, 32));
+            }
+            int gx = 450, gy = 100, gw = 700, gh = 300;
+            SDL_SetRenderDrawColor(renderer, 40, 40, 45, 255);
+            SDL_Rect gr = {gx, gy, gw, gh}; SDL_RenderFillRect(renderer, &gr);
+            drawGraph(renderer, gx, gy, gw, gh, f_scaled, {255, 100, 100, 255}, -0.5, 0.5);
+            drawGraph(renderer, gx, gy, gw, gh, u_vals, {100, 255, 100, 255}, -0.5, 0.5);
+
+            const char* desc[] = {"Boundary Value Problem (BVP):", "-u''(x) + V(x)u(x) = f(x), u(0)=u(1)=0", "",
+                                 "Green's Function G(x,y) converts the ODE to a Fredholm Eq.",
+                                 "Green: Deflection u(x), Red: Force f(x)"};
+            int ty = 450;
+            for(auto t : desc){
+                SDL_Surface* s = TTF_RenderText_Blended(font, t, {200,200,200,255});
+                if(s){
+                    SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, s);
+                    SDL_Rect tr = {450, ty, s->w, s->h}; SDL_RenderCopy(renderer, tex, NULL, &tr);
+                    ty += 25; SDL_FreeSurface(s); SDL_DestroyTexture(tex);
+                }
+            }
+        } else if (ui.currentMode == AppMode::DEBLUR) {
+            // Blurred b = K s. Solve via Tikhonov: (alpha I + K* K) s = K* b
+            auto K_base = [&](double x, double y) {
+                double d = x - y; return std::exp(-d*d / (2*sigma*sigma));
+            };
+            auto s_orig = [&](double x) { return (x > 0.4 && x < 0.6) ? 1.0 : 0.0; };
+
+            // Generate blurred signal b(x)
+            auto b_func = [&](double x) {
+                double sum = 0; int n = 32; Quadrature q = Quadrature::GaussLegendreN(n, 0, 1);
+                for(int i=0; i<n; i++) sum += q.weights[i] * K_base(x, q.points[i]) * s_orig(q.points[i]);
+                return sum;
+            };
+
+            // K* b = integral K(y,x) b(y) dy
+            auto Kb_func = [&](double x) {
+                double sum = 0; int n = 32; Quadrature q = Quadrature::GaussLegendreN(n, 0, 1);
+                for(int i=0; i<n; i++) sum += q.weights[i] * K_base(q.points[i], x) * b_func(q.points[i]);
+                return sum;
+            };
+            // K*K (x,y) = integral K(z,x) K(z,y) dz
+            auto KK_func = [&](double x, double y) {
+                double sum = 0; int n = 32; Quadrature q = Quadrature::GaussLegendreN(n, 0, 1);
+                for(int i=0; i<n; i++) sum += q.weights[i] * K_base(q.points[i], x) * K_base(q.points[i], y);
+                return sum;
+            };
+
+            // Equation: alpha s(x) + integral KK(x,y) s(y) dy = Kb(x)
+            // => s(x) = (1/alpha) Kb(x) - (1/alpha) integral KK(x,y) s(y) dy
+            // This is s = f + lambda integral L s  with f = Kb/alpha, lambda = -1/alpha, L = KK
+            auto f_reg = [&](double x) { return Kb_func(x) / alpha; };
+            auto phi_nodes = Solver::solve(0, 1, -1.0/alpha, KK_func, f_reg, 32);
+
+            std::vector<double> orig_v, blur_v, deblur_v;
+            for(int i=0; i<=100; i++){
+                double x = i/100.0;
+                orig_v.push_back(s_orig(x));
+                blur_v.push_back(b_func(x));
+                deblur_v.push_back(phi_nodes.empty() ? 0 : Solver::interpolate(x, 0, 1, -1.0/alpha, KK_func, f_reg, phi_nodes, 32));
+            }
+            int gx = 450, gy = 100, gw = 700, gh = 300;
+            SDL_SetRenderDrawColor(renderer, 40, 40, 45, 255);
+            SDL_Rect gr = {gx, gy, gw, gh}; SDL_RenderFillRect(renderer, &gr);
+            drawGraph(renderer, gx, gy, gw, gh, orig_v, {80, 80, 80, 255}, -0.2, 1.2);
+            drawGraph(renderer, gx, gy, gw, gh, blur_v, {255, 100, 100, 255}, -0.2, 1.2);
+            drawGraph(renderer, gx, gy, gw, gh, deblur_v, {100, 255, 100, 255}, -0.2, 1.2);
+
+            const char* desc[] = {"Signal Deblurring (Deconvolution):", "Ill-posed problem solved via Tikhonov Regularization.", "",
+                                 "Red: Blurred signal, Green: Recovered signal", "Grey: Original signal (square pulse)"};
+            int ty = 450;
+            for(auto t : desc){
+                SDL_Surface* s = TTF_RenderText_Blended(font, t, {200,200,200,255});
+                if(s){
+                    SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, s);
+                    SDL_Rect tr = {450, ty, s->w, s->h}; SDL_RenderCopy(renderer, tex, NULL, &tr);
+                    ty += 25; SDL_FreeSurface(s); SDL_DestroyTexture(tex);
+                }
             }
         }
 
@@ -345,11 +368,7 @@ int main() {
         SDL_Delay(16);
     }
 
-    TTF_CloseFont(font);
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(window);
-    TTF_Quit();
-    SDL_Quit();
-
+    TTF_CloseFont(font); SDL_DestroyRenderer(renderer); SDL_DestroyWindow(window);
+    TTF_Quit(); SDL_Quit();
     return 0;
 }
