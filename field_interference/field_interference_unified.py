@@ -78,7 +78,7 @@ class UnifiedFieldExplorer:
                         Z[iy, ix] += 1
         Z_blur = gaussian_filter(Z, sigma=sigma)
         self.ax.imshow(Z_blur, extent=[-2, 2, -2, 2], origin='lower', cmap='magma', norm=LogNorm(vmin=0.1))
-        self.ax.set_title("Field Interference: Algebraic Number Density in $\mathbb{C}$", color='white', fontsize=15)
+        self.ax.set_title(r"Field Interference: Algebraic Number Density in $\mathbb{C}$", color='white', fontsize=15)
 
     def draw_finite(self, p, n):
         # Ensure p is prime (simple check for visualization)
@@ -86,16 +86,21 @@ class UnifiedFieldExplorer:
         p = min(primes, key=lambda x:abs(x-p))
         
         elements = []
+        # We'll use a more structured embedding for GF(p^n)
+        # Using a primitive element or just a basis approach
+        basis = [1.0]
+        if n > 1:
+            # Eisenstein-like or Roots of Unity basis for nice 2D spread
+            for j in range(1, n):
+                basis.append(np.exp(1j * 2 * np.pi * j / n))
+
         for i in range(p**n):
             val = 0
             temp = i
             for j in range(n):
                 c = temp % p
                 temp //= p
-                if n == 2:
-                    val += c * (1 if j == 0 else 1j)
-                else:
-                    val += c * np.exp(1j * 2 * np.pi * j / n)
+                val += c * basis[j]
             elements.append(val)
         
         re = [e.real for e in elements]
@@ -103,14 +108,15 @@ class UnifiedFieldExplorer:
         self.ax.scatter(re, im, c=np.abs(elements), cmap='cool', s=100, edgecolors='white', zorder=3)
         self.ax.scatter(re[:p], im[:p], color='yellow', s=150, edgecolors='red', label=f'Base Field GF({p})')
         
-        # Lattice lines
+        # Lattice lines (additive structure)
         for i in range(len(elements)):
             for j in range(i + 1, len(elements)):
-                if np.isclose(np.abs(elements[i] - elements[j]), 1.0, atol=0.1):
+                diff = elements[i] - elements[j]
+                if any(np.isclose(np.abs(diff), np.abs(b), atol=1e-5) for b in basis):
                     self.ax.plot([elements[i].real, elements[j].real], [elements[i].imag, elements[j].imag], 
                                  color='#00d4ff', alpha=0.2, lw=0.5)
         
-        self.ax.set_title(f"Finite Field Extension: $GF({p}^{n})$ over $GF({p})$", color='white', fontsize=15)
+        self.ax.set_title(rf"Finite Field Extension: $GF({p}^{n})$ over $GF({p})$", color='white', fontsize=15)
         self.ax.legend(facecolor='#111111', labelcolor='white')
         self.ax.set_aspect('equal')
 

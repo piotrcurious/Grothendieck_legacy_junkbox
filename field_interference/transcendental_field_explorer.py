@@ -49,6 +49,13 @@ class TranscendentalFieldExplorer:
             label.set_color('white')
         self.base_radio.on_clicked(self.change_base)
         self.ax_base.set_visible(False)
+
+        # Custom Base Textbox
+        self.ax_custom = self.fig.add_axes([0.02, 0.5, 0.1, 0.05], facecolor='#111111')
+        self.txt_custom = TextBox(self.ax_custom, 'Custom Base: ', initial='np.sqrt(2) + np.pi*1j')
+        self.txt_custom.label.set_color('white')
+        self.txt_custom.on_submit(self.set_custom_base)
+        self.ax_custom.set_visible(False)
         
         # Sliders
         self.ax_s1 = self.fig.add_axes([0.25, 0.12, 0.5, 0.02], facecolor='#222222')
@@ -67,6 +74,7 @@ class TranscendentalFieldExplorer:
     def change_mode(self, label):
         self.mode = label
         self.ax_base.set_visible(self.mode == 'Transcendental')
+        self.ax_custom.set_visible(self.mode == 'Transcendental')
         if self.mode == 'Algebraic':
             self.s1.label.set_text('Max Degree ')
             self.s2.label.set_text('Max Coeff ')
@@ -85,6 +93,15 @@ class TranscendentalFieldExplorer:
         self.current_base_name = label
         self.current_base_val = self.bases[label]
         self.update(None)
+
+    def set_custom_base(self, text):
+        try:
+            val = eval(text, {"np": np, "complex": complex})
+            self.current_base_name = "Custom"
+            self.current_base_val = complex(val)
+            self.update(None)
+        except Exception as e:
+            print(f"Error evaluating custom base: {e}")
 
     def draw_transcendental(self, deg, coeff_range, sigma):
         """
@@ -115,8 +132,8 @@ class TranscendentalFieldExplorer:
         Z_blur = gaussian_filter(Z, sigma=sigma)
         self.ax.imshow(Z_blur, extent=[x_range[0], x_range[1], y_range[0], y_range[1]], 
                         origin='lower', cmap='plasma', norm=LogNorm(vmin=0.1))
-        self.ax.set_title(f"Transcendental Field Interference: $\mathbb{{Q}}({self.current_base_name})$\n"
-                          f"Structure of Polynomials in {self.current_base_name}", color='white', fontsize=14)
+        self.ax.set_title(rf"Transcendental Field Interference: $\mathbb{{Q}}({self.current_base_name})$" + "\n"
+                          rf"Structure of Polynomials in {self.current_base_name}", color='white', fontsize=14)
 
     def draw_algebraic(self, deg, coeff, sigma):
         res = 400
@@ -136,7 +153,7 @@ class TranscendentalFieldExplorer:
                         Z[iy, ix] += 1
         Z_blur = gaussian_filter(Z, sigma=sigma)
         self.ax.imshow(Z_blur, extent=[-2, 2, -2, 2], origin='lower', cmap='magma', norm=LogNorm(vmin=0.1))
-        self.ax.set_title("Field Interference: Algebraic Number Density in $\mathbb{C}$", color='white', fontsize=15)
+        self.ax.set_title(r"Field Interference: Algebraic Number Density in $\mathbb{C}$", color='white', fontsize=15)
 
     def draw_finite(self, p, n):
         primes = [2, 3, 5, 7, 11, 13, 17, 19]
