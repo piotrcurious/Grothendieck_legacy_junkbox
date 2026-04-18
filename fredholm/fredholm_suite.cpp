@@ -146,6 +146,16 @@ public:
         auto K = [&](double x, double y) { double d = x - y; return std::exp(-d*d / (2*sigma*sigma)); };
         for(int i=0; i<N; i++) for(int j=0; j<N; j++) M(i, j) = q.weights[j] * K(0.5*q.points[i]+0.5, 0.5*q.points[j]+0.5);
         std::vector<double> evals; std::vector<std::vector<double>> evecs; Fredholm::computeEigen(M, evals, evecs);
+
+        // Complex Plane Visualization
+        int cx = 20, cy = 450, cs = 200;
+        SDL_SetRenderDrawColor(ren, 40, 40, 45, 255); SDL_Rect cr = {cx, cy, cs, cs}; SDL_RenderFillRect(ren, &cr);
+        SDL_SetRenderDrawColor(ren, 80, 80, 85, 255); SDL_RenderDrawLine(ren, cx, cy + cs/2, cx + cs, cy + cs/2); SDL_RenderDrawLine(ren, cx + cs/2, cy, cx + cs/2, cy + cs);
+        for(double ev : evals) {
+            int px = cx + cs/2 + (int)(ev * cs/2); int py = cy + cs/2;
+            SDL_SetRenderDrawColor(ren, 255, 255, 100, 255); SDL_Rect r = {px-2, py-2, 4, 4}; SDL_RenderFillRect(ren, &r);
+        }
+
         int idx = std::clamp((int)index, 0, N-1); std::vector<double> ev_v; for(int i=0; i<N; i++) ev_v.push_back(evecs[idx][i]);
         drawGraph(ren, gx, gy, gw, gh, ev_v, {100, 255, 255, 255}, -1, 1, cache);
         std::stringstream ss; ss << "Eigenvalue: " << evals[idx];
@@ -280,26 +290,40 @@ public:
 class KindsDemo : public FredholmDemo {
 public:
     void setupSliders(UI& ui, float& sigma, float& lambda, float& freq, float& jitter, float& compLambda, float& potential, float& alpha, float& index, float& kType, float& nIters) override {
-        ui.addSlider("Sigma", &sigma, 0.01f, 1.0f, 50, 120); ui.addSlider("Freq", &freq, 0.1f, 5.0f, 50, 190);
+        ui.addSlider("Sigma", &sigma, 0.01f, 1.0f, 50, 120); ui.addSlider("Alpha", &alpha, 1e-6f, 1e-1f, 50, 190);
     }
     void render(SDL_Renderer* ren, TextureCache& cache, int gx, int gy, int gw, int gh, float sigma, float lambda, float freq, float jitter, float compLambda, float potential, float alpha, float index, float kType, float nIters, std::chrono::steady_clock::time_point start, AdaptiveCompensator<double>& comp) override {
         auto K = [&](double x, double y) { double d = x - y; return std::exp(-d*d / (2*sigma*sigma)); };
         auto f = [&](double x) { return std::sin(freq * M_PI * x); };
-        int N = 16; std::vector<std::vector<double>> A(N, std::vector<double>(N)); std::vector<double> B(N);
-        Quadrature q = Quadrature::GaussLegendre16();
-        for(int i=0; i<N; i++) {
-            for(int j=0; j<N; j++) A[i][j] = q.weights[j] * K(0.5*q.points[i]+0.5, 0.5*q.points[j]+0.5);
-            B[i] = f(0.5*q.points[i]+0.5);
-        }
-        std::vector<double> phi_nodes; Fredholm::solveLinearSystem(A, B, phi_nodes);
+        auto phi_nodes = Solver::solveFirstKind(0, 1, K, f, 16, alpha);
         std::vector<double> phi_v;
         for(int i=0; i<=100; i++) {
-            double x = i/100.0, val = 0; if(!phi_nodes.empty()) for(int j=0; j<N; j++) val += q.weights[j]*K(x, 0.5*q.points[j]+0.5)*phi_nodes[j];
+            double x = i/100.0, val = 0;
+            for(int j=0; j<16; j++) {
+                double y_j = 0.5 * Quadrature::GaussLegendre16().points[j] + 0.5;
+                double w_j = 0.5 * Quadrature::GaussLegendre16().weights[j];
+                val += w_j * K(x, y_j) * phi_nodes[j];
+            }
             phi_v.push_back(val);
         }
-        drawGraph(ren, gx, gy, gw, gh, phi_v, {255, 100, 255, 255}, -2, 2, cache);
+        std::vector<double> f_v; for(int i=0; i<=100; i++) f_v.push_back(f(i/100.0));
+        drawGraph(ren, gx, gy, gw, gh, f_v, {255, 100, 100, 255}, -1.5, 1.5, cache);
+        drawGraph(ren, gx, gy, gw, gh, phi_v, {255, 100, 255, 255}, -1.5, 1.5, cache);
+
+        // SVD Visualization
+        int sx = 20, sy = 450, ss = 200;
+        SDL_SetRenderDrawColor(ren, 40, 40, 45, 255); SDL_Rect sr = {sx, sy, ss, ss}; SDL_RenderFillRect(ren, &sr);
+        Fredholm::Matrix M(16, 16);
+        for(int i=0; i<16; i++) for(int j=0; j<16; j++) M(i,j) = 0.5 * Quadrature::GaussLegendre16().weights[j] * K(0.5*Quadrature::GaussLegendre16().points[i]+0.5, 0.5*Quadrature::GaussLegendre16().points[j]+0.5);
+        Fredholm::Matrix U(16, 16), V(16, 16); std::vector<double> S; Fredholm::computeSVD(M, U, S, V);
+        for(size_t i=0; i<S.size(); i++) {
+            int h = (int)(std::log10(std::max(1e-10, S[i])) + 10) * 10;
+            SDL_SetRenderDrawColor(ren, 100, 255, 100, 255);
+            SDL_Rect r = {sx + (int)i*12, sy + ss - h, 10, h}; SDL_RenderFillRect(ren, &r);
+        }
+        cache.renderText("Singular Value Decay (Log Scale)", {200,200,200,255}, sx, sy + ss + 10);
     }
-    std::string getEquation() const override { return "Fredholm Equation of the First Kind: integral[ K(x,y) phi(y) dy ] = f(x)"; }
+    std::string getEquation() const override { return "First Kind: K*phi = f (Ill-posed). Tikhonov: (K*K + alpha*I)phi = K*f"; }
 };
 
 int main() {

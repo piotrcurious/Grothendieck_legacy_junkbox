@@ -59,12 +59,24 @@ void testFredholm() {
     std::cout << "  Passed!" << std::endl;
 }
 
+void testSVD() {
+    std::cout << "Testing SVD (Diagonal Matrix)..." << std::endl;
+    Fredholm::Matrix M(2, 2);
+    M(0, 0) = 5.0; M(1, 1) = 3.0;
+    Fredholm::Matrix U(2, 2), V(2, 2); std::vector<double> S;
+    computeSVD(M, U, S, V);
+    assert(std::abs(S[0] - 5.0) < 1e-7);
+    assert(std::abs(S[1] - 3.0) < 1e-7);
+    std::cout << "  Passed!" << std::endl;
+}
+
 int main() {
     try {
         testLinearSolver();
         testVolterra();
         testEigen();
         testFredholm();
+        testSVD();
         std::cout << "\nAll Engine Tests Passed Successfully!" << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "Test failed: " << e.what() << std::endl;

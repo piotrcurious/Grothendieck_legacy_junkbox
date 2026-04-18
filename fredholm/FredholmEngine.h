@@ -52,6 +52,8 @@ struct Matrix {
     static Matrix Identity(int n) { Matrix res(n, n); for (int i = 0; i < n; i++) res(i, i) = 1.0; return res; }
     Matrix transpose() const { Matrix res(cols, rows); for(int i=0; i<rows; i++) for(int j=0; j<cols; j++) res(j, i) = (*this)(i, j); return res; }
     Matrix operator*(const Matrix& other) const { Matrix res(rows, other.cols); for(int i=0; i<rows; i++) for(int k=0; k<cols; k++) { double val = (*this)(i, k); for(int j=0; j<other.cols; j++) res(i, j) += val * other(k, j); } return res; }
+    Matrix operator-(const Matrix& other) const { Matrix res(rows, cols); for(int i=0; i<rows*cols; i++) res.data[i] = data[i] - other.data[i]; return res; }
+    double norm() const { double s = 0; for(double x : data) s += x*x; return std::sqrt(s); }
 };
 
 inline void hessenberg(Matrix& A, Matrix& Q_total) {
@@ -116,6 +118,36 @@ inline double powerIteration(const Matrix& A, int iters = 50) {
     return std::abs(lambda);
 }
 
+inline void computeSVD(Matrix A, Matrix& U, std::vector<double>& S, Matrix& V) {
+    int n = A.rows; U = Matrix::Identity(n); V = Matrix::Identity(n);
+    for (int iter = 0; iter < 50; iter++) {
+        double max_err = 0;
+        for (int i = 0; i < n; i++) {
+            for (int j = i + 1; j < n; j++) {
+                double aii = 0, ajj = 0, aij = 0;
+                for (int k = 0; k < n; k++) { aii += A(k, i)*A(k, i); ajj += A(k, j)*A(k, j); aij += A(k, i)*A(k, j); }
+                if (std::abs(aij) > 1e-15) {
+                    double tau = (ajj - aii) / (2.0 * aij);
+                    double t = (tau >= 0 ? 1.0 : -1.0) / (std::abs(tau) + std::sqrt(1.0 + tau*tau));
+                    double c = 1.0 / std::sqrt(1.0 + t*t); double s = c * t;
+                    for (int k = 0; k < n; k++) {
+                        double v1 = A(k, i), v2 = A(k, j); A(k, i) = c*v1 - s*v2; A(k, j) = s*v1 + c*v2;
+                        v1 = V(k, i); v2 = V(k, j); V(k, i) = c*v1 - s*v2; V(k, j) = s*v1 + c*v2;
+                    }
+                    max_err = std::max(max_err, std::abs(aij));
+                }
+            }
+        }
+        if (max_err < 1e-15) break;
+    }
+    S.resize(n);
+    for (int i = 0; i < n; i++) {
+        double norm = 0; for (int k = 0; k < n; k++) norm += A(k, i)*A(k, i);
+        S[i] = std::sqrt(norm);
+        for (int k = 0; k < n; k++) U(k, i) = (S[i] > 1e-15) ? A(k, i) / S[i] : 0;
+    }
+}
+
 enum class SolverStatus { SUCCESS, SINGULAR_MATRIX, NO_CONVERGENCE };
 
 inline SolverStatus solveLinearSystem(std::vector<std::vector<double>>& A, std::vector<double>& b, std::vector<double>& x) {
@@ -162,6 +194,22 @@ public:
         return phi_next;
     }
     static double legendreP(int n, double x) { if(n == 0) return 1.0; if(n == 1) return x; double p0 = 1.0, p1 = x, pn = 0; for(int i=2; i<=n; i++) { pn = ((2.0*i - 1.0)*x*p1 - (i - 1.0)*p0) / (double)i; p0 = p1; p1 = pn; } return pn; }
+    static std::vector<double> solveFirstKind(double a, double b, KernelFunc K, SourceFunc f, int n = 16, double alpha = 1e-4) {
+        Quadrature q = Quadrature::GaussLegendreN(n, a, b); int N = q.points.size();
+        Matrix A(N, N); std::vector<double> B(N);
+        for(int i=0; i<N; i++) {
+            for(int j=0; j<N; j++) A(i, j) = q.weights[j] * K(q.points[i], q.points[j]);
+            B[i] = f(q.points[i]);
+        }
+        Matrix At = A.transpose(); Matrix AtA = At * A;
+        for(int i=0; i<N; i++) AtA(i, i) += alpha;
+        std::vector<std::vector<double>> AA(N, std::vector<double>(N)); std::vector<double> BB(N, 0.0);
+        for(int i=0; i<N; i++) {
+            for(int j=0; j<N; j++) AA[i][j] = AtA(i, j);
+            for(int j=0; j<N; j++) BB[i] += At(i, j) * B[j];
+        }
+        std::vector<double> phi; solveLinearSystem(AA, BB, phi); return phi;
+    }
     static std::vector<double> solveGalerkinOptimized(double a, double b, double lambda, KernelFunc K, SourceFunc f, int degree) {
         int N = degree + 1; std::vector<std::vector<double>> A(N, std::vector<double>(N)); std::vector<double> B(N); Quadrature q = Quadrature::GaussLegendre16();
         std::vector<std::vector<double>> basis_evals(N, std::vector<double>(16)); for(int i=0; i<N; i++) for(int k=0; k<16; k++) basis_evals[i][k] = legendreP(i, q.points[k]);
