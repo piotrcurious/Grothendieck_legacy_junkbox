@@ -1,0 +1,74 @@
+#include "FredholmEngine.h"
+#include <iostream>
+#include <cassert>
+#include <cmath>
+#include <vector>
+
+using namespace Fredholm;
+
+void testLinearSolver() {
+    std::cout << "Testing Linear Solver..." << std::endl;
+    std::vector<std::vector<double>> A = {{3, 1}, {1, 2}};
+    std::vector<double> B = {9, 8};
+    std::vector<double> X;
+    SolverStatus status = solveLinearSystem(A, B, X);
+    assert(status == SolverStatus::SUCCESS);
+    assert(std::abs(X[0] - 2.0) < 1e-9);
+    assert(std::abs(X[1] - 3.0) < 1e-9);
+    std::cout << "  Passed!" << std::endl;
+}
+
+void testVolterra() {
+    std::cout << "Testing Volterra Solver (phi = 1 + integral[0,x] phi)..." << std::endl;
+    auto K = [](double x, double y) { return 1.0; };
+    auto f = [](double x) { return 1.0; };
+    auto phi = Solver::solveVolterra(0, 1, 1.0, K, f, 100);
+    // Exact solution is phi(x) = exp(x)
+    double error = std::abs(phi.back() - std::exp(1.0));
+    std::cout << "  exp(1) approx: " << phi.back() << ", error: " << error << std::endl;
+    assert(error < 1e-3);
+    std::cout << "  Passed!" << std::endl;
+}
+
+void testEigen() {
+    std::cout << "Testing Eigen Solver (Symmetric 2x2)..." << std::endl;
+    Fredholm::Matrix M(2, 2);
+    M(0, 0) = 2; M(0, 1) = 1;
+    M(1, 0) = 1; M(1, 1) = 2;
+    std::vector<double> evals;
+    std::vector<std::vector<double>> evecs;
+    computeEigen(M, evals, evecs);
+    // Eigenvalues should be 3 and 1
+    std::cout << "  Evals: " << evals[0] << ", " << evals[1] << std::endl;
+    assert((std::abs(evals[0] - 3.0) < 1e-7 && std::abs(evals[1] - 1.0) < 1e-7) ||
+           (std::abs(evals[0] - 1.0) < 1e-7 && std::abs(evals[1] - 3.0) < 1e-7));
+    std::cout << "  Passed!" << std::endl;
+}
+
+void testFredholm() {
+    std::cout << "Testing Fredholm Solver..." << std::endl;
+    // phi(x) = 1 + 0.5 * integral[0,1] xy phi(y) dy
+    auto K = [](double x, double y) { return x * y; };
+    auto f = [](double x) { return 1.0; };
+    auto nodes = Solver::solveFredholm(0, 1, 0.5, K, f, 16);
+    // Analytical solution: phi(x) = 1 + (3/10)x
+    double val = Solver::interpolateFredholm(0.5, 0, 1, 0.5, K, f, nodes, 16);
+    double expected = 1.0 + 0.3 * 0.5;
+    std::cout << "  phi(0.5) approx: " << val << ", expected: " << expected << std::endl;
+    assert(std::abs(val - expected) < 1e-7);
+    std::cout << "  Passed!" << std::endl;
+}
+
+int main() {
+    try {
+        testLinearSolver();
+        testVolterra();
+        testEigen();
+        testFredholm();
+        std::cout << "\nAll Engine Tests Passed Successfully!" << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Test failed: " << e.what() << std::endl;
+        return 1;
+    }
+    return 0;
+}
