@@ -10,18 +10,19 @@ This directory contains a research-grade visualization and interactive education
   - **Optimized Galerkin Solver**: High-speed basis expansion method using pre-calculated Legendre polynomial values.
   - **Neumann Series**: Iterative step functionality for visualizing convergence paths.
   - **Spectral Engine**: QR algorithm for eigenvalue/eigenfunction decomposition.
-  - **Stability Analysis**: Real-time Condition Number proxy estimation via Power Iteration.
+  - **SVD Engine**: Jacobi rotation method for Singular Value Decomposition, essential for analyzing ill-posed problems.
+  - **Stability Analysis**: Real-time Condition Number proxy estimation and Singular Value decay analysis.
 - **fredholm_suite.cpp**: A sophisticated 10-mode interactive SDL2 application:
   - **Theory**: Basic integral equations with Gaussian/Lorentzian kernel selection.
   - **Comp**: Real-time signal jitter and quantization noise reduction.
   - **BVP**: Solving Boundary Value Problems via Green's functions.
   - **Deblur**: Signal restoration from ill-posed blurring using Tikhonov Regularization.
-  - **Spectral**: Visualization of kernel natural modes.
+  - **Spectral**: Visualization of kernel natural modes and complex plane eigenvalue distribution.
   - **Volterra**: Modeling causal history-dependent evolution.
   - **Alt**: Demonstrating resonance near characteristic values.
   - **Neumann**: Visualizing iterative successive approximations.
   - **Galerkin**: Optimized global polynomial expansion approach.
-  - **Kinds**: Direct comparison of 1st-kind ($K\phi = f$) vs 2nd-kind ($\phi - \lambda K\phi = f$) formulations.
+  - **Kinds**: Demonstrating the ill-posedness of 1st-kind equations ($K\phi = f$) and their resolution via Tikhonov Regularization ($[K^*K + \alpha I]\phi = K^*f$), complemented by a log-scale SVD chart.
 
 ## Building and Running
 
