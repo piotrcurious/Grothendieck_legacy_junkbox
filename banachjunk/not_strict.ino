@@ -6,6 +6,7 @@ class BanachSpaceAnalyzer {
 private:
     // Buffer for storing input data
     std::vector<float> dataBuffer;
+    std::vector<float> timestamps;
     
     // Polynomial coefficients for 3rd order approximation
     struct PolynomialCoefficients {
@@ -25,7 +26,7 @@ private:
         };
     }
 
-    // Least squares method for polynomial fitting using Gaussian elimination
+    // Least squares method for polynomial fitting using Lebesgue-weighted Gaussian elimination
     PolynomialCoefficients fitPolynomial(const std::vector<float>& data) {
         int n = data.size();
         const int m = 4; // cubic fit: a*x^3 + b*x^2 + c*x + d
@@ -40,17 +41,27 @@ private:
         }
 
         for (int i = 0; i < n; i++) {
-            double x = i;
+            double x = timestamps[i];
             double y = data[i];
+
+            double dt = 1.0;
+            if (n > 1) {
+                if (i == 0) dt = timestamps[1] - timestamps[0];
+                else if (i == n - 1) dt = timestamps[n-1] - timestamps[n-2];
+                else dt = (timestamps[i+1] - timestamps[i-1]) / 2.0;
+            }
+            if (dt < 0) dt = 0;
+
             double x_pow[2 * m - 1];
             x_pow[0] = 1.0;
+            // Incremental multiplication for power calculation
             for (int p = 1; p < 2 * m - 1; p++) x_pow[p] = x_pow[p-1] * x;
 
             for (int r = 0; r < m; r++) {
                 for (int c = 0; c < m; c++) {
-                    matrix[r][c] += x_pow[(m-1-r) + (m-1-c)];
+                    matrix[r][c] += dt * x_pow[(m-1-r) + (m-1-c)];
                 }
-                rhs[r] += y * x_pow[m-1-r];
+                rhs[r] += dt * y * x_pow[m-1-r];
             }
         }
 
@@ -101,16 +112,19 @@ public:
     // Clear data buffer
     void reset() {
         dataBuffer.clear();
+        timestamps.clear();
     }
 
     // Add data to buffer
-    void addData(float dataPoint) {
-        dataBuffer.push_back(dataPoint);
-        
-        // Limit buffer size to prevent memory overflow
-        if (dataBuffer.size() > 100) {
-            dataBuffer.erase(dataBuffer.begin());
+    void addData(float dataPoint, float timestamp = -1.0) {
+        if (timestamp < 0) {
+            timestamp = timestamps.empty() ? 0 : timestamps.back() + 1.0;
         }
+        timestamps.push_back(timestamp);
+        if (timestamps.size() > 100) timestamps.erase(timestamps.begin());
+
+        dataBuffer.push_back(dataPoint);
+        if (dataBuffer.size() > 100) dataBuffer.erase(dataBuffer.begin());
     }
 
     // Evaluate fitted polynomial at index x
@@ -125,11 +139,19 @@ public:
         // Fit polynomial
         PolynomialCoefficients poly = fitPolynomial(dataBuffer);
         
-        // Compute Standard Error of Estimate
+        // Compute Standard Error of Estimate (weighted)
         float rss = 0;
+        float total_dt = 0;
         for (size_t i = 0; i < dataBuffer.size(); i++) {
-            float err = dataBuffer[i] - evaluate(poly, i);
-            rss += err * err;
+            float dt = 1.0;
+            if (dataBuffer.size() > 1) {
+                if (i == 0) dt = timestamps[1] - timestamps[0];
+                else if (i == dataBuffer.size() - 1) dt = timestamps[i] - timestamps[i-1];
+                else dt = (timestamps[i+1] - timestamps[i-1]) / 2.0;
+            }
+            float err = dataBuffer[i] - evaluate(poly, timestamps[i]);
+            rss += dt * err * err;
+            total_dt += dt;
         }
         float see = std::sqrt(rss / (dataBuffer.size() - 4));
 

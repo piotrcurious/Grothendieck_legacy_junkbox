@@ -40,6 +40,8 @@ void test_exponent_stats() {
     }
     statisticalSpace.performStatisticalAnalysis();
 
+    // Test entropy and covariance (if public)
+
     std::cout << "exponent_stats test finished." << std::endl;
 }
 

@@ -16,6 +16,9 @@ void test_not_strict() {
         banachAnalyzer.addData(data);
     }
     banachAnalyzer.analyzeBanachSpace();
+
+    // Test polynomial evaluation (if public)
+
     std::cout << "BanachSpaceAnalyzer test finished." << std::endl;
 }
 

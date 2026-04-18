@@ -25,6 +25,14 @@ void test_banach_space() {
         numericalSpace.addDataPoint(point);
     }
     numericalSpace.performSpaceAnalysis();
+
+    // Test L2 norm calculation explicitly (if it were public)
+    // float l2 = numericalSpace.computeLpNorm(2);
+
+    std::cout << "Testing edge cases (empty space)..." << std::endl;
+    numericalSpace.reset();
+    numericalSpace.performSpaceAnalysis(); // Should not crash
+
     std::cout << "BanachSpace test finished." << std::endl;
 }
 
