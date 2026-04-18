@@ -149,18 +149,22 @@ private:
     float computeSpectralCharacteristic() {
         if (dataBuffer.size() < 2) return 0;
 
-        // Compute spectral characteristics using Galois field operations
-        GaloisField<P> spectralAccumulator(1);
+        // Compute spectral characteristics as the mean absolute difference in the field
+        // This avoids product-induced saturation/zeroing
+        int totalDiff = 0;
         for (size_t i = 1; i < dataBuffer.size(); ++i) {
-            // Complex transformation using field multiplication
-            spectralAccumulator = spectralAccumulator * 
-                GaloisField<P>(abs(dataBuffer[i].getValue() - dataBuffer[i-1].getValue()));
+            totalDiff += abs(dataBuffer[i].getValue() - dataBuffer[i-1].getValue());
         }
 
-        return spectralAccumulator.toFloat();
+        return static_cast<float>(totalDiff) / (dataBuffer.size() - 1);
     }
 
 public:
+    // Clear data buffer
+    void reset() {
+        dataBuffer.clear();
+    }
+
     // Add data point to buffer
     void addDataPoint(float value) {
         // Convert to Galois Field representation

@@ -12,14 +12,13 @@ all: $(TEST_BINS)
 	$(CXX) $(CXXFLAGS) $< $(SRCS) -o $@
 
 test: $(TEST_BINS)
-	./test_2
-	./test_3
-	./test_not_strict
-	./test_feature_detect
-	./test_exponent_stats
-	./test_poly_features
-	./test_poly_feat_opt1
-	./test_poly_feature2
+	@echo "Running tests..."
+	@for bin in $(TEST_BINS); do \
+		echo "------------------------------------------------"; \
+		./$$bin || exit 1; \
+	done
+	@echo "------------------------------------------------"
+	@echo "All tests passed successfully!"
 
 clean:
 	rm -f $(TEST_BINS)

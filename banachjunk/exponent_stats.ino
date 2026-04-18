@@ -80,6 +80,10 @@ private:
     }
 
 public:
+    void reset() {
+        rawData.clear();
+    }
+
     void addDataPoint(T value) {
         rawData.push_back(value);
         
@@ -109,6 +113,7 @@ private:
         std::vector<T> skewness;
         std::vector<T> kurtosis;
         std::vector<T> entropy;
+        std::vector<T> totalVariation;
     };
 
     // Compute Comprehensive Statistical Metrics
@@ -120,6 +125,7 @@ private:
         metrics.skewness.resize(Dimension, 0);
         metrics.kurtosis.resize(Dimension, 0);
         metrics.entropy.resize(Dimension, 0);
+        metrics.totalVariation.resize(Dimension, 0);
 
         // Compute for each dimension
         for (size_t dim = 0; dim < Dimension; ++dim) {
@@ -173,12 +179,23 @@ private:
                 }
             }
             metrics.entropy[dim] = entropy;
+
+            // Total Variation (measure of signal "wiggliness")
+            T tv = 0;
+            for (size_t i = 1; i < dimData.size(); ++i) {
+                tv += std::abs(dimData[i] - dimData[i-1]);
+            }
+            metrics.totalVariation[dim] = tv;
         }
 
         return metrics;
     }
 
 public:
+    void reset() {
+        statisticalData.clear();
+    }
+
     // Add multi-dimensional statistical data point
     void addStatisticalDataPoint(const std::vector<T>& point) {
         if (point.size() != Dimension) {
@@ -237,6 +254,7 @@ public:
             Serial.printf("  Skewness: %f\n", static_cast<float>(metrics.skewness[dim]));
             Serial.printf("  Kurtosis: %f\n", static_cast<float>(metrics.kurtosis[dim]));
             Serial.printf("  Entropy: %f\n", static_cast<float>(metrics.entropy[dim]));
+            Serial.printf("  Total Variation: %f\n", static_cast<float>(metrics.totalVariation[dim]));
         }
 
         Serial.println("\nCovariance Matrix:");

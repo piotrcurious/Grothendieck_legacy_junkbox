@@ -157,6 +157,11 @@ private:
     }
 
 public:
+    // Clear data buffers
+    void reset() {
+        dimensionalData.clear();
+    }
+
     // Add multi-dimensional data point
     void addDataPoint(const std::vector<T>& point) {
         if (point.size() != Dimension) {
@@ -190,11 +195,18 @@ public:
         // Projection Demonstrations
         std::vector<T> sampleDimension = dimensionalData[0];
         
-        // Linear Projection
-        std::vector<std::vector<T>> transformationMatrix(
-            Dimension, 
-            std::vector<T>(sampleDimension.size(), 1.0)
-        );
+        // Linear Projection using a more descriptive transformation matrix
+        // We project the dimension onto a lower space that highlights differences
+        std::vector<std::vector<T>> transformationMatrix(Dimension);
+        for (size_t r = 0; r < Dimension; ++r) {
+            transformationMatrix[r].resize(sampleDimension.size());
+            for (size_t c = 0; c < sampleDimension.size(); ++c) {
+                // Mix of weighted average and finite difference patterns
+                transformationMatrix[r][c] = (r == 0) ? (1.0 / sampleDimension.size()) :
+                                            ((c % (r + 1) == 0) ? 1.0 : -1.0);
+            }
+        }
+
         std::vector<T> linearProjectedSpace = 
             TransformationOperators::linearProjection(
                 sampleDimension, 
