@@ -98,6 +98,40 @@ class HybridQuantumAlgebraicSolver:
         y2_minus = (kappa * rho - np.sqrt(max(0, discriminant))) / 2
         return True, f"Latent state y^2 solutions: {y2_plus}, {y2_minus}"
 
+class TwoLevelLindbladSolver:
+    def __init__(self, omega=1.0, gamma=0.1):
+        self.omega = omega
+        self.gamma = gamma
+        self.sigma_z = np.array([[1, 0], [0, -1]])
+        self.sigma_x = np.array([[0, 1], [1, 0]])
+        # |0> is ground [1,0]^T, |1> is excited [0,1]^T
+        self.sigma_p = np.array([[0, 0], [1, 0]]) # Raising: |0> -> |1>
+        self.sigma_m = np.array([[0, 1], [0, 0]]) # Lowering: |1> -> |0>
+
+    def lindbladian(self, rho):
+        """Computes the Lindbladian for a 2-level system."""
+        H = 0.5 * self.omega * self.sigma_z
+        # Hamiltonian part: -i[H, rho]
+        comm = -1j * (H @ rho - rho @ H)
+        # Dissipation part (lowering)
+        L = self.sigma_m
+        L_dag = L.T.conj()
+        diss = self.gamma * (L @ rho @ L_dag - 0.5 * (L_dag @ L @ rho + rho @ L_dag @ L))
+        return comm + diss
+
+    def solve_dynamics(self, rho0, dt, steps):
+        """Evolves the density matrix using RK4."""
+        rho = rho0.copy()
+        trajectory = [rho]
+        for _ in range(steps):
+            k1 = self.lindbladian(rho)
+            k2 = self.lindbladian(rho + 0.5 * dt * k1)
+            k3 = self.lindbladian(rho + 0.5 * dt * k2)
+            k4 = self.lindbladian(rho + dt * k3)
+            rho = rho + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+            trajectory.append(rho)
+        return np.array(trajectory)
+
 def main():
     solver = HybridQuantumAlgebraicSolver()
 
@@ -124,6 +158,15 @@ def main():
     logging.info("4. Annihilator Check")
     valid, msg = solver.check_annihilator(res.x)
     logging.info(f"Annihilator valid: {valid}. {msg}")
+
+    logging.info("5. Two-Level System (Lindblad) Evolution")
+    tls = TwoLevelLindbladSolver(omega=2.0, gamma=0.5)
+    rho0 = np.array([[0, 0], [0, 1]]) # Excited state
+    steps_tls = 50
+    dt_tls = 0.1
+    traj_tls = tls.solve_dynamics(rho0, dt_tls, steps_tls)
+    ground_pops = [np.real(r[0,0]) for r in traj_tls]
+    logging.info(f"TLS Evolution: Ground state pop after {steps_tls} steps: {ground_pops[-1]:.4f}")
 
 if __name__ == "__main__":
     main()

@@ -76,8 +76,9 @@ public:
 
 extern SerialMock Serial;
 
-inline void delay(unsigned long ms) {}
-inline unsigned long millis() { return 0; }
+void delay(unsigned long ms);
+unsigned long millis();
+unsigned long micros();
 
 #define F(s) s
 #define PI 3.14159265358979323846

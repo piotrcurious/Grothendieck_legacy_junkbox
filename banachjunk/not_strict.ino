@@ -113,6 +113,44 @@ private:
         return maxDelta;
     }
 
+    // Legendre Polynomials (shifted to [t_min, t_max])
+    float P(int n, float t, float t_min, float t_max) {
+        if (t_max <= t_min) return 0;
+        // Map t to [-1, 1]
+        float x = (2.0f * t - (t_max + t_min)) / (t_max - t_min);
+        if (n == 0) return 1.0f;
+        if (n == 1) return x;
+        if (n == 2) return 0.5f * (3.0f * x * x - 1.0f);
+        if (n == 3) return 0.5f * (5.0f * x * x * x - 3.0f * x);
+        return 0;
+    }
+
+    // Project signal onto Orthogonal Basis (Legendre) using Lebesgue-weighted integration
+    std::vector<float> projectLegendre(int max_degree = 3) {
+        if (dataBuffer.size() < 2) return {};
+        float t_min = timestamps.front();
+        float t_max = timestamps.back();
+        std::vector<float> coeffs(max_degree + 1, 0);
+
+        for (int n = 0; n <= max_degree; ++n) {
+            float integral = 0;
+            float norm_sq = 0;
+            for (size_t i = 0; i < dataBuffer.size(); ++i) {
+                float dt = 1.0;
+                if (dataBuffer.size() > 1) {
+                    if (i == 0) dt = timestamps[1] - timestamps[0];
+                    else if (i == dataBuffer.size() - 1) dt = timestamps[i] - timestamps[i-1];
+                    else dt = (timestamps[i+1] - timestamps[i-1]) / 2.0;
+                }
+                float pn = P(n, timestamps[i], t_min, t_max);
+                integral += dt * dataBuffer[i] * pn;
+                norm_sq += dt * pn * pn;
+            }
+            if (norm_sq > 1e-9) coeffs[n] = integral / norm_sq;
+        }
+        return coeffs;
+    }
+
 public:
     // Clear data buffer
     void reset() {
@@ -180,6 +218,13 @@ public:
         Serial.printf("Linear Term: %f\n", derivative.c);
         
         Serial.printf("\nRate of Change: %f\n", rateOfChange);
+
+        // Orthogonal Projection
+        std::vector<float> legendreCoeffs = projectLegendre(3);
+        Serial.println("\nLegendre Coefficients (Shifted Basis):");
+        for (size_t i = 0; i < legendreCoeffs.size(); ++i) {
+            Serial.printf("P%zu: %f\n", i, legendreCoeffs[i]);
+        }
     }
 };
 
