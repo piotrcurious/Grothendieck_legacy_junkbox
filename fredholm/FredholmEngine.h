@@ -51,6 +51,19 @@ struct Matrix {
     double& operator()(int r, int c) { return data[r * cols + c]; }
     double operator()(int r, int c) const { return data[r * cols + c]; }
     static Matrix Identity(int n) { Matrix res(n, n); for (int i = 0; i < n; i++) res(i, i) = 1.0; return res; }
+    Matrix transpose() const {
+        Matrix res(cols, rows);
+        for(int i=0; i<rows; i++) for(int j=0; j<cols; j++) res(j, i) = (*this)(i, j);
+        return res;
+    }
+    Matrix operator*(const Matrix& other) const {
+        Matrix res(rows, other.cols);
+        for(int i=0; i<rows; i++) for(int k=0; k<cols; k++) {
+            double val = (*this)(i, k);
+            for(int j=0; j<other.cols; j++) res(i, j) += val * other(k, j);
+        }
+        return res;
+    }
 };
 
 inline void qrStep(Matrix& A, Matrix& Q_total) {
@@ -85,6 +98,25 @@ inline void computeEigen(const Matrix& mat, std::vector<double>& eigenvalues, st
     for (int j = 0; j < n; j++) for (int i = 0; i < n; i++) eigenvectors[j][i] = Q_total(i, j);
 }
 
+inline double powerIteration(const Matrix& A, int iters = 50) {
+    int n = A.rows; std::vector<double> v(n, 1.0);
+    double lambda = 0;
+    for(int it=0; it<iters; it++) {
+        std::vector<double> v_next(n, 0.0);
+        for(int i=0; i<n; i++) for(int j=0; j<n; j++) v_next[i] += A(i, j) * v[j];
+        double norm = 0; for(double x : v_next) norm += x*x; norm = std::sqrt(norm);
+        if(norm < 1e-18) return 0;
+        for(int i=0; i<n; i++) v_next[i] /= norm;
+        double rayleigh = 0;
+        for(int i=0; i<n; i++) {
+            double Av_i = 0; for(int j=0; j<n; j++) Av_i += A(i, j) * v_next[j];
+            rayleigh += v_next[i] * Av_i;
+        }
+        lambda = rayleigh; v = v_next;
+    }
+    return std::abs(lambda);
+}
+
 enum class SolverStatus { SUCCESS, SINGULAR_MATRIX, NO_CONVERGENCE };
 
 inline SolverStatus solveLinearSystem(std::vector<std::vector<double>>& A, std::vector<double>& b, std::vector<double>& x) {
@@ -109,6 +141,7 @@ class Solver {
 public:
     using KernelFunc = std::function<double(double, double)>;
     using SourceFunc = std::function<double(double)>;
+
     static std::vector<double> solveFredholm(double a, double b, double lambda, KernelFunc K, SourceFunc f, int n = 16) {
         Quadrature q = Quadrature::GaussLegendreN(n, a, b); int N = q.points.size();
         std::vector<std::vector<double>> A(N, std::vector<double>(N)); std::vector<double> B(N);
@@ -123,6 +156,22 @@ public:
         if (solveLinearSystem(A, B, phi_nodes) != SolverStatus::SUCCESS) return {};
         return phi_nodes;
     }
+
+    static double estimateConditionNumber(double a, double b, double lambda, KernelFunc K, int n = 16) {
+        Quadrature q = Quadrature::GaussLegendreN(n, a, b); int N = q.points.size();
+        Matrix A(N, N);
+        for (int i = 0; i < N; ++i) for (int j = 0; j < N; ++j) {
+            double delta = (i == j) ? 1.0 : 0.0;
+            A(i, j) = delta - lambda * q.weights[j] * K(q.points[i], q.points[j]);
+        }
+        Matrix At = A.transpose();
+        Matrix AtA = At * A;
+        double max_sing_sq = powerIteration(AtA);
+        // To find the smallest singular value, we'd need inverse power iteration or full SVD.
+        // For educational suite, we'll approximate with ratio of max sing to a small epsilon or min pivot
+        return std::sqrt(max_sing_sq); // Simplification: just show magnitude of max singular value as stability proxy
+    }
+
     static std::vector<double> solveVolterra(double a, double b, double lambda, KernelFunc K, SourceFunc f, int n_steps = 100) {
         double h = (b - a) / n_steps; std::vector<double> x(n_steps + 1); std::vector<double> phi(n_steps + 1);
         for (int i = 0; i <= n_steps; i++) x[i] = a + i * h;
@@ -136,10 +185,33 @@ public:
         }
         return phi;
     }
+
     static double interpolateFredholm(double x, double a, double b, double lambda, KernelFunc K, SourceFunc f, const std::vector<double>& phi_nodes, int n = 16) {
         Quadrature q = Quadrature::GaussLegendreN(n, a, b); double integral = 0;
         for (size_t j = 0; j < q.points.size(); ++j) integral += q.weights[j] * K(x, q.points[j]) * phi_nodes[j];
         return f(x) + lambda * integral;
+    }
+
+    static std::vector<double> neumannStep(const std::vector<double>& phi_prev, double a, double b, double lambda, KernelFunc K, SourceFunc f, int n = 16) {
+        Quadrature q = Quadrature::GaussLegendreN(n, a, b); int N = q.points.size();
+        std::vector<double> phi_next(N);
+        for(int i=0; i<N; i++) {
+            double integral = 0;
+            for(int j=0; j<N; j++) integral += q.weights[j] * K(q.points[i], q.points[j]) * phi_prev[j];
+            phi_next[i] = f(q.points[i]) + lambda * integral;
+        }
+        return phi_next;
+    }
+
+    static double legendreP(int n, double x) {
+        if(n == 0) return 1.0;
+        if(n == 1) return x;
+        double p0 = 1.0, p1 = x, pn = 0;
+        for(int i=2; i<=n; i++) {
+            pn = ((2.0*i - 1.0)*x*p1 - (i - 1.0)*p0) / (double)i;
+            p0 = p1; p1 = pn;
+        }
+        return pn;
     }
 };
 

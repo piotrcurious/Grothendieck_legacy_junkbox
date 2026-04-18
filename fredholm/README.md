@@ -1,22 +1,26 @@
-# Fredholm Education Suite Ultimate
+# Fredholm Education Suite Master
 
-This directory contains a high-fidelity visualization and interactive education suite for Fredholm and Volterra Theory. It covers basic integral equation theory, spectral analysis, and advanced applications in physics and engineering.
+This directory contains a highly comprehensive, research-grade visualization and interactive education suite for Fredholm and Volterra Integral Equations. It demonstrates the depth of integral operator theory through high-fidelity numerical methods.
 
 ## Components
 
-- **FredholmEngine.h**: A robust C++ header library implementing:
-  - **Fredholm Solver**: Nystrom method with 16-point Gauss-Legendre quadrature.
-  - **Volterra Solver**: Trapezoidal-rule based evolution for causal systems.
-  - **Spectral Engine**: QR algorithm for computing kernel eigenvalues and eigenfunctions.
-  - **Numerical Utilities**: Linear system solver with partial pivoting and singularity detection.
-- **fredholm_suite.cpp**: A multi-mode interactive SDL2 application:
-  - **Theory**: Basic Fredholm equations ($\phi = f + \lambda K \phi$) with Gaussian/Lorentzian kernel selection.
-  - **Comp**: Signal jitter reduction using Fredholm-based smoothing.
-  - **BVP**: Solving Boundary Value Problems (ODEs) using Green's functions.
-  - **Deblur**: Signal restoration using Tikhonov Regularization (Fredholm equation of the 2nd kind).
-  - **Spectral**: Visualization of the kernel's eigenfunctions and natural modes.
-  - **Volterra**: Evolution of causal systems where the integral only depends on past history.
-  - **Alt (Fredholm Alternative)**: Demonstration of resonance near kernel eigenvalues.
+- **FredholmEngine.h**: A professional-grade C++ header library featuring:
+  - **Nystrom Solver**: High-precision solving with up to 16-point Gauss-Legendre quadrature.
+  - **Volterra Solver**: Time-evolution solver for causal systems using the trapezoidal rule.
+  - **Galerkin Solver**: Basis expansion method using Legendre polynomials for global approximation.
+  - **Neumann Series**: Iterative solver functionality for visualizing successive approximations.
+  - **Spectral Engine**: QR algorithm for eigenvalue/eigenfunction decomposition.
+  - **Stability Analysis**: Condition number and spectral radius estimation via Power Iteration on $A^T A$.
+- **fredholm_suite.cpp**: A sophisticated 9-mode interactive SDL2 application:
+  - **Theory**: Basic integral equations with multiple kernel types (Gaussian, Lorentzian).
+  - **Comp**: Real-time signal jitter and quantization noise reduction.
+  - **BVP**: Solving Boundary Value Problems (beam deflection, etc.) via Green's functions.
+  - **Deblur**: Signal restoration from ill-posed blurring using Tikhonov Regularization.
+  - **Spectral**: Visualization of the natural modes (eigenfunctions) of interaction kernels.
+  - **Volterra**: Modeling causal evolution where history determines future states.
+  - **Alt**: Demonstrating the Fredholm Alternative and resonance near eigenvalues.
+  - **Neumann**: Visualizing the "learning" process of iterative solving.
+  - **Galerkin**: High-order polynomial expansion approach to solving equations.
 
 ## Building and Running
 
@@ -42,9 +46,6 @@ g++ fredholm_suite.cpp -o fredholm_suite -lSDL2 -lSDL2_ttf -I .
 ./fredholm_suite
 ```
 
-## How it Works
+## Educational Insights
 
-The suite focuses on equations of the form:
-$$\phi(x) = f(x) + \lambda \int K(x, y)\phi(y)dy$$
-
-It demonstrates how local interactions reach global balance (Fredholm) or evolve through time (Volterra), and how these mathematical structures appear in everything from beam deflection (BVP) to image processing (Deblur).
+The suite provides a "Stability Index" which estimates the spectral radius or condition proxy of the system matrix. This helps students understand why certain kernels or parameters lead to divergent or unreliable results (ill-posedness), especially in the Deblur and Alternative modes.

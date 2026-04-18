@@ -14,7 +14,7 @@ using namespace Fredholm;
 const int SCREEN_WIDTH = 1200;
 const int SCREEN_HEIGHT = 850;
 
-enum class AppMode { THEORY, COMPENSATOR, BVP, DEBLUR, SPECTRAL, VOLTERRA, ALTERNATIVE };
+enum class AppMode { THEORY, COMPENSATOR, BVP, DEBLUR, SPECTRAL, VOLTERRA, ALTERNATIVE, NEUMANN, GALERKIN };
 
 class UI {
 public:
@@ -32,7 +32,7 @@ public:
     }
 
     void addButton(std::string label, AppMode mode, int x, int y) {
-        buttons.push_back({label, mode, {x, y, 100, 40}});
+        buttons.push_back({label, mode, {x, y, 95, 40}});
     }
 
     void handleEvent(SDL_Event& e) {
@@ -103,20 +103,15 @@ void drawGraph(SDL_Renderer* ren, int x, int y, int w, int h, const std::vector<
 
 int main() {
     if (SDL_Init(SDL_INIT_VIDEO) < 0 || TTF_Init() < 0) return 1;
-    SDL_Window* window = SDL_CreateWindow("Fredholm Education Suite Ultimate", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
+    SDL_Window* window = SDL_CreateWindow("Fredholm Theory Education Suite Master", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     TTF_Font* font = TTF_OpenFont("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14);
     if (!font) return 1;
 
     UI ui(font);
-    float sigma = 0.2f, lambda = 0.5f, sourceFreq = 2.0f, jitter = 0.1f, compLambda = 0.8f, potential = 5.0f, alpha = 0.05f, eigenIndex = 0.0f, kernelType = 0.0f;
-    ui.addButton("Theory", AppMode::THEORY, 20, 20);
-    ui.addButton("Comp", AppMode::COMPENSATOR, 125, 20);
-    ui.addButton("BVP", AppMode::BVP, 230, 20);
-    ui.addButton("Deblur", AppMode::DEBLUR, 335, 20);
-    ui.addButton("Spectral", AppMode::SPECTRAL, 440, 20);
-    ui.addButton("Volterra", AppMode::VOLTERRA, 545, 20);
-    ui.addButton("Alt", AppMode::ALTERNATIVE, 650, 20);
+    float sigma = 0.2f, lambda = 0.5f, sourceFreq = 2.0f, jitter = 0.1f, compLambda = 0.8f, potential = 5.0f, alpha = 0.05f, eigenIndex = 0.0f, kernelType = 0.0f, neumannIters = 0.0f;
+    ui.addButton("Theory", AppMode::THEORY, 20, 20); ui.addButton("Comp", AppMode::COMPENSATOR, 120, 20); ui.addButton("BVP", AppMode::BVP, 220, 20); ui.addButton("Deblur", AppMode::DEBLUR, 320, 20);
+    ui.addButton("Spectral", AppMode::SPECTRAL, 420, 20); ui.addButton("Volterra", AppMode::VOLTERRA, 520, 20); ui.addButton("Alt", AppMode::ALTERNATIVE, 620, 20); ui.addButton("Neumann", AppMode::NEUMANN, 720, 20); ui.addButton("Galerkin", AppMode::GALERKIN, 820, 20);
 
     bool quit = false; SDL_Event e; Fredholm::AdaptiveCompensator<double> compensator; auto startTime = std::chrono::steady_clock::now();
 
@@ -124,27 +119,48 @@ int main() {
         while (SDL_PollEvent(&e)) { if (e.type == SDL_QUIT) quit = true; ui.handleEvent(e); }
         SDL_SetRenderDrawColor(renderer, 20, 20, 25, 255); SDL_RenderClear(renderer);
         ui.sliders.clear();
-        if (ui.currentMode == AppMode::THEORY) { ui.addSlider("Sigma", &sigma, 0.01f, 1.0f, 50, 120); ui.addSlider("Lambda", &lambda, -2.0f, 2.0f, 50, 190); ui.addSlider("Freq", &sourceFreq, 0.1f, 10.0f, 50, 260); ui.addSlider("Kernel (0-G, 1-L)", &kernelType, 0.0f, 1.0f, 50, 330); }
+        if (ui.currentMode == AppMode::THEORY) { ui.addSlider("Sigma", &sigma, 0.01f, 1.0f, 50, 120); ui.addSlider("Lambda", &lambda, -2.0f, 2.0f, 50, 190); ui.addSlider("Freq", &sourceFreq, 0.1f, 10.0f, 50, 260); ui.addSlider("Kernel", &kernelType, 0.0f, 1.0f, 50, 330); }
         else if (ui.currentMode == AppMode::COMPENSATOR) { ui.addSlider("Noise", &jitter, 0.0f, 0.5f, 50, 120); ui.addSlider("Lambda", &compLambda, 0.0f, 1.0f, 50, 190); }
         else if (ui.currentMode == AppMode::BVP) { ui.addSlider("Potential", &potential, 0.0f, 20.0f, 50, 120); ui.addSlider("Freq", &sourceFreq, 0.1f, 5.0f, 50, 190); }
         else if (ui.currentMode == AppMode::DEBLUR) { ui.addSlider("Sigma", &sigma, 0.01f, 0.5f, 50, 120); ui.addSlider("Alpha", &alpha, 0.001f, 0.2f, 50, 190); }
-        else if (ui.currentMode == AppMode::SPECTRAL) { ui.addSlider("Sigma", &sigma, 0.01f, 1.0f, 50, 120); ui.addSlider("Index", &eigenIndex, 0.0f, 7.0f, 50, 190); }
+        else if (ui.currentMode == AppMode::SPECTRAL) { ui.addSlider("Sigma", &sigma, 0.01f, 1.0f, 50, 120); ui.addSlider("Index", &eigenIndex, 0.0f, 15.0f, 50, 190); }
         else if (ui.currentMode == AppMode::VOLTERRA) { ui.addSlider("Lambda", &lambda, -5.0f, 5.0f, 50, 120); ui.addSlider("Freq", &sourceFreq, 0.1f, 5.0f, 50, 190); }
         else if (ui.currentMode == AppMode::ALTERNATIVE) { ui.addSlider("Lambda", &lambda, 0.0f, 2.0f, 50, 120); ui.addSlider("Sigma", &sigma, 0.1f, 1.0f, 50, 190); }
+        else if (ui.currentMode == AppMode::NEUMANN) { ui.addSlider("Iters", &neumannIters, 0.0f, 20.0f, 50, 120); ui.addSlider("Lambda", &lambda, -1.5f, 1.5f, 50, 190); ui.addSlider("Sigma", &sigma, 0.1f, 1.0f, 50, 260); }
+        else if (ui.currentMode == AppMode::GALERKIN) { ui.addSlider("Degree", &eigenIndex, 0.0f, 8.0f, 50, 120); ui.addSlider("Lambda", &lambda, -1.0f, 1.0f, 50, 190); }
 
         int gx = 450, gy = 100, gw = 700, gh = 300; SDL_SetRenderDrawColor(renderer, 35, 35, 40, 255); SDL_Rect gr = {gx, gy, gw, gh}; SDL_RenderFillRect(renderer, &gr);
 
+        auto K_theory = [&](double x, double y) { double d = x - y; return (kernelType < 0.5) ? std::exp(-d*d / (2*sigma*sigma)) : 1.0 / (1.0 + (d*d)/(sigma*sigma)); };
+
+        double condNum = Solver::estimateConditionNumber(0, 1, lambda, K_theory, 16);
+        std::stringstream statSS; statSS << "Stability Index: " << std::fixed << std::setprecision(3) << condNum;
+        SDL_Surface* statSurf = TTF_RenderText_Blended(font, statSS.str().c_str(), {150, 200, 255, 255});
+        if(statSurf){ SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, statSurf); SDL_Rect tr = {20, 800, statSurf->w, statSurf->h}; SDL_RenderCopy(renderer, tex, NULL, &tr); SDL_FreeSurface(statSurf); SDL_DestroyTexture(tex); }
+
+        // Legend
+        int lx = 850, ly = 420;
+        auto drawLegend = [&](SDL_Color c, const char* label) {
+            SDL_Rect r = {lx, ly, 15, 15}; SDL_SetRenderDrawColor(renderer, c.r, c.g, c.b, c.a); SDL_RenderFillRect(renderer, &r);
+            SDL_Surface* s = TTF_RenderText_Blended(font, label, {200, 200, 200, 255});
+            if(s){ SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, s); SDL_Rect tr = {lx + 20, ly, s->w, s->h}; SDL_RenderCopy(renderer, tex, NULL, &tr); SDL_FreeSurface(s); SDL_DestroyTexture(tex); }
+            ly += 25;
+        };
+
         if (ui.currentMode == AppMode::THEORY) {
-            auto K = [&](double x, double y) {
-                double d = x - y;
-                if (kernelType < 0.5) return std::exp(-d*d / (2*sigma*sigma)); // Gaussian
-                else return 1.0 / (1.0 + (d*d)/(sigma*sigma)); // Lorentzian
-            };
+            drawLegend({255, 100, 100, 255}, "Source f(x)"); drawLegend({100, 255, 100, 255}, "Solution phi(x)");
             auto f = [&](double x) { return std::sin(sourceFreq * M_PI * x); };
-            auto phi_nodes = Solver::solveFredholm(0, 1, lambda, K, f, 32);
-            std::vector<double> f_v, phi_v; for (int i = 0; i <= 100; ++i) { double x = i/100.0; f_v.push_back(f(x)); phi_v.push_back(phi_nodes.empty() ? 0 : Solver::interpolateFredholm(x, 0, 1, lambda, K, f, phi_nodes, 32)); }
+            auto phi_nodes = Solver::solveFredholm(0, 1, lambda, K_theory, f, 16);
+            std::vector<double> f_v, phi_v; for (int i = 0; i <= 100; ++i) { double x = i/100.0; f_v.push_back(f(x)); phi_v.push_back(phi_nodes.empty() ? 0 : Solver::interpolateFredholm(x, 0, 1, lambda, K_theory, f, phi_nodes, 16)); }
             drawGraph(renderer, gx, gy, gw, gh, f_v, {255, 100, 100, 255}, -2, 2, font); drawGraph(renderer, gx, gy, gw, gh, phi_v, {100, 255, 100, 255}, -2, 2, font);
-            const char* desc[] = {"Theory: phi(x) = f(x) + lambda * Integral[ K(x,y) phi(y) dy ]", "Red: Source f(x), Green: Solution phi(x)", "This mode shows how an integral operator transforms an input signal."};
+        } else if (ui.currentMode == AppMode::NEUMANN) {
+            auto f = [&](double x) { return std::sin(sourceFreq * M_PI * x); };
+            int N = 16; std::vector<double> phi_prev(N, 0.0);
+            for(int i=0; i<N; i++) phi_prev[i] = f(Quadrature::GaussLegendre16().points[i] * 0.5 + 0.5); // Initial guess = f
+            for(int i=0; i<(int)neumannIters; i++) phi_prev = Solver::neumannStep(phi_prev, 0, 1, lambda, K_theory, f, N);
+            std::vector<double> phi_v; for(int i=0; i<=100; i++) phi_v.push_back(Solver::interpolateFredholm(i/100.0, 0, 1, lambda, K_theory, f, phi_prev, N));
+            drawGraph(renderer, gx, gy, gw, gh, phi_v, {255, 255, 100, 255}, -5, 5, font);
+            const char* desc[] = {"Neumann Series: Iterative Solving", "phi_{n+1} = f + lambda * K * phi_n", "Shows the successive approximation process."};
             int ty = 420; for(auto t : desc){ SDL_Surface* s = TTF_RenderText_Blended(font, t, {200,200,200,255}); if(s){ SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, s); SDL_Rect tr = {450, ty, s->w, s->h}; SDL_RenderCopy(renderer, tex, NULL, &tr); ty += 25; SDL_FreeSurface(s); SDL_DestroyTexture(tex); } }
         } else if (ui.currentMode == AppMode::VOLTERRA) {
             auto K = [&](double x, double y) { return std::sin(x - y); };
@@ -152,18 +168,14 @@ int main() {
             auto phi = Solver::solveVolterra(0, 2, lambda, K, f, 100);
             std::vector<double> f_v; for(int i=0; i<=100; i++) f_v.push_back(f(i*2.0/100.0));
             drawGraph(renderer, gx, gy, gw, gh, f_v, {255, 100, 100, 255}, -10, 10, font); drawGraph(renderer, gx, gy, gw, gh, phi, {100, 255, 100, 255}, -10, 10, font);
-            const char* desc[] = {"Volterra Mode: phi(x) = f(x) + lambda * Integral[a to x] K(x,y) phi(y) dy", "Causal system behavior. The integral depends only on history."};
-            int ty = 420; for(auto t : desc){ SDL_Surface* s = TTF_RenderText_Blended(font, t, {200,200,200,255}); if(s){ SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, s); SDL_Rect tr = {450, ty, s->w, s->h}; SDL_RenderCopy(renderer, tex, NULL, &tr); ty += 25; SDL_FreeSurface(s); SDL_DestroyTexture(tex); } }
         } else if (ui.currentMode == AppMode::SPECTRAL) {
             int N = 16; Fredholm::Matrix M(N, N); Quadrature q = Quadrature::GaussLegendre16();
-            auto K = [&](double x, double y) { double d = x - y; return std::exp(-d*d / (2*sigma*sigma)); };
-            for(int i=0; i<N; i++) for(int j=0; j<N; j++) M(i, j) = q.weights[j] * K(q.points[i], q.points[j]);
+            for(int i=0; i<N; i++) for(int j=0; j<N; j++) M(i, j) = q.weights[j] * K_theory(q.points[i], q.points[j]);
             std::vector<double> evals; std::vector<std::vector<double>> evecs; Fredholm::computeEigen(M, evals, evecs);
-            int idx = std::clamp((int)eigenIndex, 0, N-1);
-            std::vector<double> ev_v; for(int i=0; i<N; i++) ev_v.push_back(evecs[idx][i]);
+            int idx = std::clamp((int)eigenIndex, 0, N-1); std::vector<double> ev_v; for(int i=0; i<N; i++) ev_v.push_back(evecs[idx][i]);
             drawGraph(renderer, gx, gy, gw, gh, ev_v, {100, 255, 255, 255}, -1, 1, font);
             std::stringstream ss; ss << "Eigenvalue: " << evals[idx];
-            const char* desc[] = {"Spectral Mode: Analyzing Kernel Eigenfunctions", ss.str().c_str(), "Eigenfunctions represent the 'natural modes' of the kernel.", "Large eigenvalues correspond to smoother, more dominant features."};
+            const char* desc[] = {"Spectral Mode: Kernel Eigenfunctions", ss.str().c_str()};
             int ty = 420; for(auto t : desc){ SDL_Surface* s = TTF_RenderText_Blended(font, t, {200,200,200,255}); if(s){ SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, s); SDL_Rect tr = {450, ty, s->w, s->h}; SDL_RenderCopy(renderer, tex, NULL, &tr); ty += 25; SDL_FreeSurface(s); SDL_DestroyTexture(tex); } }
         } else if (ui.currentMode == AppMode::COMPENSATOR) {
             auto now = std::chrono::steady_clock::now(); float t = std::chrono::duration<float>(now - startTime).count();
@@ -179,8 +191,8 @@ int main() {
             auto G = [](double x, double y) { return (x < y) ? x * (1.0 - y) : y * (1.0 - x); };
             auto V = [&](double x) { return (double)potential; }; auto f = [&](double x) { return std::sin(sourceFreq * M_PI * x); };
             auto F = [&](double x) { double sum = 0; int n = 32; Quadrature q = Quadrature::GaussLegendreN(n, 0, 1); for(int i=0; i<n; i++) sum += q.weights[i] * G(x, q.points[i]) * f(q.points[i]); return sum; };
-            auto phi_nodes = Solver::solveFredholm(0, 1, -1.0, [&](double x, double y){return G(x,y)*V(y);}, F, 32);
-            std::vector<double> u_v, f_s; for(int i=0; i<=100; i++){ double x = i/100.0; f_s.push_back(f(x)*0.1); u_v.push_back(phi_nodes.empty() ? 0 : Solver::interpolateFredholm(x, 0, 1, -1.0, [&](double x, double y){return G(x,y)*V(y);}, F, phi_nodes, 32)); }
+            auto phi_nodes = Solver::solveFredholm(0, 1, -1.0, [&](double x, double y){return G(x,y)*V(y);}, F, 16);
+            std::vector<double> u_v, f_s; for(int i=0; i<=100; i++){ double x = i/100.0; f_s.push_back(f(x)*0.1); u_v.push_back(phi_nodes.empty() ? 0 : Solver::interpolateFredholm(x, 0, 1, -1.0, [&](double x, double y){return G(x,y)*V(y);}, F, phi_nodes, 16)); }
             drawGraph(renderer, gx, gy, gw, gh, f_s, {255, 100, 100, 255}, -0.5, 0.5, font); drawGraph(renderer, gx, gy, gw, gh, u_v, {100, 255, 100, 255}, -0.5, 0.5, font);
         } else if (ui.currentMode == AppMode::DEBLUR) {
             auto K_b = [&](double x, double y) { double d = x - y; return std::exp(-d*d / (2*sigma*sigma)); };
@@ -188,23 +200,48 @@ int main() {
             auto b_f = [&](double x) { double sum = 0; int n = 32; Quadrature q = Quadrature::GaussLegendreN(n, 0, 1); for(int i=0; i<n; i++) sum += q.weights[i] * K_b(x, q.points[i]) * s_o(q.points[i]); return sum; };
             auto Kb_f = [&](double x) { double sum = 0; int n = 32; Quadrature q = Quadrature::GaussLegendreN(n, 0, 1); for(int i=0; i<n; i++) sum += q.weights[i] * K_b(q.points[i], x) * b_f(q.points[i]); return sum; };
             auto KK_f = [&](double x, double y) { double sum = 0; int n = 32; Quadrature q = Quadrature::GaussLegendreN(n, 0, 1); for(int i=0; i<n; i++) sum += q.weights[i] * K_b(q.points[i], x) * K_b(q.points[i], y); return sum; };
-            auto phi_nodes = Solver::solveFredholm(0, 1, -1.0/alpha, KK_f, [&](double x){return Kb_f(x)/alpha;}, 32);
-            std::vector<double> o_v, b_v, d_v; for(int i=0; i<=100; i++){ double x = i/100.0; o_v.push_back(s_o(x)); b_v.push_back(b_f(x)); d_v.push_back(phi_nodes.empty() ? 0 : Solver::interpolateFredholm(x, 0, 1, -1.0/alpha, KK_f, [&](double x){return Kb_f(x)/alpha;}, phi_nodes, 32)); }
+            auto phi_nodes = Solver::solveFredholm(0, 1, -1.0/alpha, KK_f, [&](double x){return Kb_f(x)/alpha;}, 16);
+            std::vector<double> o_v, b_v, d_v; for(int i=0; i<=100; i++){ double x = i/100.0; o_v.push_back(s_o(x)); b_v.push_back(b_f(x)); d_v.push_back(phi_nodes.empty() ? 0 : Solver::interpolateFredholm(x, 0, 1, -1.0/alpha, KK_f, [&](double x){return Kb_f(x)/alpha;}, phi_nodes, 16)); }
             drawGraph(renderer, gx, gy, gw, gh, o_v, {80, 80, 80, 255}, -0.2, 1.2, font); drawGraph(renderer, gx, gy, gw, gh, b_v, {255, 100, 100, 255}, -0.2, 1.2, font); drawGraph(renderer, gx, gy, gw, gh, d_v, {100, 255, 100, 255}, -0.2, 1.2, font);
+        } else if (ui.currentMode == AppMode::GALERKIN) {
+            int degree = (int)eigenIndex + 1;
+            std::vector<std::vector<double>> A(degree, std::vector<double>(degree));
+            std::vector<double> B(degree);
+            auto K = [&](double x, double y) {
+                double d = x - y;
+                return (kernelType < 0.5) ? std::exp(-d*d / (2*sigma*sigma)) : 1.0 / (1.0 + (d*d)/(sigma*sigma));
+            };
+            auto f = [&](double x) { return std::sin(sourceFreq * M_PI * x); };
+            Quadrature q = Quadrature::GaussLegendre16();
+            for(int i=0; i<degree; i++) {
+                for(int j=0; j<degree; j++) {
+                    double integral = 0;
+                    for(int n1=0; n1<16; n1++) for(int n2=0; n2<16; n2++)
+                        integral += q.weights[n1]*q.weights[n2]*Solver::legendreP(i, q.points[n1])*K(0.5*q.points[n1]+0.5, 0.5*q.points[n2]+0.5)*Solver::legendreP(j, q.points[n2]);
+                    A[i][j] = (i==j ? 1.0/(2.0*i+1.0) : 0.0) - lambda * 0.25 * integral;
+                }
+                double b_int = 0;
+                for(int n=0; n<16; n++) b_int += q.weights[n] * f(0.5*q.points[n]+0.5) * Solver::legendreP(i, q.points[n]);
+                B[i] = 0.5 * b_int;
+            }
+            std::vector<double> coeffs; Fredholm::solveLinearSystem(A, B, coeffs);
+            std::vector<double> phi_v;
+            for(int i=0; i<=100; i++) {
+                double x = (double)i/100.0, val = 0;
+                for(int j=0; j<(int)coeffs.size(); j++) val += coeffs[j] * Solver::legendreP(j, 2.0*x - 1.0);
+                phi_v.push_back(val);
+            }
+            drawGraph(renderer, gx, gy, gw, gh, phi_v, {100, 255, 100, 255}, -2, 2, font);
+            const char* desc[] = {"Galerkin Method: Legendre Polynomial Expansion", "phi(x) approx sum c_j P_j(x)", "Projecting the equation onto a finite-dimensional basis."};
+            int ty = 420; for(auto t : desc){ SDL_Surface* s = TTF_RenderText_Blended(font, t, {200,200,200,255}); if(s){ SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, s); SDL_Rect tr = {450, ty, s->w, s->h}; SDL_RenderCopy(renderer, tex, NULL, &tr); ty += 25; SDL_FreeSurface(s); SDL_DestroyTexture(tex); } }
         } else if (ui.currentMode == AppMode::ALTERNATIVE) {
             auto K = [&](double x, double y) { double d = x - y; return std::exp(-d*d / (2*sigma*sigma)); };
             auto f = [&](double x) { return 1.0; };
             auto phi_nodes = Solver::solveFredholm(0, 1, lambda, K, f, 16);
             std::vector<double> phi_v; double maxVal = 0;
-            for(int i=0; i<=100; i++){
-                double x = i/100.0;
-                double val = phi_nodes.empty() ? 0 : Solver::interpolateFredholm(x, 0, 1, lambda, K, f, phi_nodes, 16);
-                phi_v.push_back(val); if(std::abs(val) > maxVal) maxVal = std::abs(val);
-            }
+            for(int i=0; i<=100; i++){ double x = i/100.0; double val = phi_nodes.empty() ? 0 : Solver::interpolateFredholm(x, 0, 1, lambda, K, f, phi_nodes, 16); phi_v.push_back(val); if(std::abs(val) > maxVal) maxVal = std::abs(val); }
             double graphRange = std::max(2.0, maxVal * 1.1);
             drawGraph(renderer, gx, gy, gw, gh, phi_v, {100, 255, 100, 255}, -graphRange, graphRange, font);
-            const char* desc[] = {"Fredholm Alternative: Resonance Near Eigenvalues", "As lambda approaches 1/eigenvalue, the solution magnitude grows.", "This demonstrates the system's sensitivity to characteristic values."};
-            int ty = 420; for(auto t : desc){ SDL_Surface* s = TTF_RenderText_Blended(font, t, {200,200,200,255}); if(s){ SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, s); SDL_Rect tr = {450, ty, s->w, s->h}; SDL_RenderCopy(renderer, tex, NULL, &tr); ty += 25; SDL_FreeSurface(s); SDL_DestroyTexture(tex); } }
         }
 
         ui.draw(renderer); SDL_RenderPresent(renderer); SDL_Delay(16);
