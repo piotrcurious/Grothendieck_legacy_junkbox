@@ -432,7 +432,7 @@ int main(int argc, char **argv) {
         while (getline(ss, t, ',')) {
           try {
             co.push_back(stoi(t));
-          } catch () {
+          } catch (...) {
           }
         }
         if (co.size() < 2)

@@ -67,6 +67,41 @@ bool is_zero(const GFElement &a) {
   return true;
 }
 
+bool is_one(const GFElement &a) {
+  if (a[0] != 1)
+    return false;
+  for (size_t i = 1; i < a.size(); ++i)
+    if (a[i] != 0)
+      return false;
+  return true;
+}
+
+GFElement find_primitive_element(int p, int n, const vector<int> &g) {
+  int total = pow(p, n);
+  for (int i = 1; i < total; ++i) {
+    GFElement alpha(n);
+    int temp = i;
+    for (int j = 0; j < n; ++j) {
+      alpha[j] = temp % p;
+      temp /= p;
+    }
+    if (is_zero(alpha) || is_one(alpha))
+      continue;
+
+    GFElement current = alpha;
+    int count = 1;
+    while (count < total) {
+      if (is_one(current))
+        break;
+      current = multiply(current, alpha, g, p);
+      count++;
+    }
+    if (count == total - 1)
+      return alpha;
+  }
+  return {0, 1}; // Fallback to x
+}
+
 class GaloisGL : public Fl_Gl_Window {
 public:
   int p = 3;
@@ -135,16 +170,29 @@ public:
     glEnd();
 
     // 2. Multiplicative Cycle (Generator orbit)
-    GFElement alpha = {0, 1};   // x
+    GFElement alpha = find_primitive_element(p, n, g);
     GFElement current = {1, 0}; // 1
+    if (n > 2)
+      current.assign(n, 0), current[0] = 1;
+
     glBegin(GL_LINE_STRIP);
     glColor4f(1.0f, 0.8f, 0.0f, 0.6f);
     for (int i = 0; i < total; ++i) {
       cd z = map_to_2d(current);
       glVertex2f(z.real(), z.imag());
-      current = multiply(current, alpha, g, p);
-      if (is_zero(current))
+      GFElement next = multiply(current, alpha, g, p);
+      if (is_one(next)) {
+        // Close the loop
+        cd z0 = map_to_2d({1, 0});
+        if (n > 2) {
+          GFElement one(n, 0);
+          one[0] = 1;
+          z0 = map_to_2d(one);
+        }
+        glVertex2f(z0.real(), z0.imag());
         break;
+      }
+      current = next;
     }
     glEnd();
 
@@ -164,10 +212,44 @@ public:
 };
 
 int main() {
-  Fl_Window *win = new Fl_Window(
-      900, 900, "Galois Theory: Additive vs Multiplicative Interference");
+  Fl_Window *win = new Fl_Window(1100, 900, "Galois Theory: Additive vs Multiplicative Interference");
   GaloisGL *gl = new GaloisGL(10, 10, 880, 880);
+
+  Fl_Group *panel = new Fl_Group(900, 10, 190, 880);
+  panel->box(FL_UP_BOX);
+
+  Fl_Value_Slider *s_p = new Fl_Value_Slider(910, 40, 170, 25, "Prime p");
+  s_p->type(FL_HOR_NICE_SLIDER);
+  s_p->bounds(2, 7);
+  s_p->step(1);
+  s_p->value(3);
+  s_p->callback([](Fl_Widget *w, void *v) {
+    GaloisGL *g = (GaloisGL *)v;
+    int val = (int)((Fl_Value_Slider *)w)->value();
+    // Simple prime check
+    if (val == 4) val = 3;
+    if (val == 6) val = 5;
+    g->p = val;
+    g->redraw();
+  }, gl);
+
+  Fl_Value_Slider *s_n = new Fl_Value_Slider(910, 90, 170, 25, "Extension n");
+  s_n->type(FL_HOR_NICE_SLIDER);
+  s_n->bounds(1, 4);
+  s_n->step(1);
+  s_n->value(2);
+  s_n->callback([](Fl_Widget *w, void *v) {
+    GaloisGL *g = (GaloisGL *)v;
+    g->n = (int)((Fl_Value_Slider *)w)->value();
+    g->redraw();
+  }, gl);
+
+  Fl_Box *info = new Fl_Box(910, 150, 170, 100, "Yellow line: Multiplicative orbit\nBlue lines: Additive lattice");
+  info->align(FL_ALIGN_WRAP | FL_ALIGN_INSIDE | FL_ALIGN_TOP);
+
+  panel->end();
   win->end();
+  win->resizable(gl);
   win->show();
   return Fl::run();
 }

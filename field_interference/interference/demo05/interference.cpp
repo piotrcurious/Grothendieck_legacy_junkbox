@@ -709,7 +709,7 @@ int main(int argc, char **argv) {
             if (!tmp.empty()) {
               try {
                 coeffs.push_back(stoi(tmp));
-              } catch () {
+              } catch (...) {
               }
               tmp.clear();
             }
@@ -720,7 +720,7 @@ int main(int argc, char **argv) {
         if (!tmp.empty())
           try {
             coeffs.push_back(stoi(tmp));
-          } catch () {
+          } catch (...) {
           }
 
         if (coeffs.size() < 2) {

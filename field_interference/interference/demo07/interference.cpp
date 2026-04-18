@@ -232,6 +232,7 @@ public:
   vector<unsigned char> image;
   std::mt19937 rng;
   bool dirty_compute = true;
+  GLuint tex_id = 0;
 
   // Algebra Data
   vector<int> adjoin_coeffs;
@@ -330,9 +331,16 @@ public:
       glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
       glEnable(GL_BLEND);
       glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      if (tex_id == 0)
+        glGenTextures(1, &tex_id);
     }
     if (dirty_compute && mode_algebraic) {
       compute_algebraic();
+      glBindTexture(GL_TEXTURE_2D, tex_id);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, grid_res, grid_res, 0, GL_RGB,
+                   GL_UNSIGNED_BYTE, image.data());
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
       dirty_compute = false;
     }
     glClearColor(0.04f, 0.04f, 0.05f, 1.0f);
@@ -357,50 +365,21 @@ public:
   }
 
   void render_algebraic_view() {
-    // We draw algebraic view using fixed raster, but we can also use points for
-    // zoomed detail
-    if (view_zoom > 5.0) {
-      glPointSize(2.0f);
-      glBegin(GL_POINTS);
-      for (int y = 0; y < grid_res; y += 2) {
-        for (int x = 0; x < grid_res; x += 2) {
-          double v = heat[y * grid_res + x];
-          if (v > 0) {
-            unsigned char r, g, b;
-            magma_colormap(v / 10.0, r, g, b); // simple scale
-            glColor3ub(r, g, b);
-            glVertex2f((float)x / grid_res * 4 - 2,
-                       (float)y / grid_res * 4 - 2);
-          }
-        }
-      }
-      glEnd();
-    } else {
-      // Standard texture-like draw
-      glPushMatrix();
-      glLoadIdentity(); // Reset modelview for screen-aligned quad
-      glMatrixMode(GL_PROJECTION);
-      glPushMatrix();
-      glLoadIdentity();
-      // Re-apply ortho relative to screen for the static image
-      glOrtho(-1, 1, -1, 1, -1, 1);
-
-      // Map the centered 4x4 algebraic space to the screen
-      double s_x = (view_x) / 2.0;
-      double s_y = (view_y) / 2.0;
-
-      glRasterPos2f(-1.0f, -1.0f);
-      glPixelZoom((float)w() / grid_res * view_zoom,
-                  (float)h() / grid_res * view_zoom);
-      // This is a simplification; for true panning of pixel data,
-      // one would typically use a Texture.
-      glDrawPixels(grid_res, grid_res, GL_RGB, GL_UNSIGNED_BYTE, image.data());
-
-      glMatrixMode(GL_PROJECTION);
-      glPopMatrix();
-      glMatrixMode(GL_MODELVIEW);
-      glPopMatrix();
-    }
+    // Improved logic using hardware textures for smooth panning and zooming
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, tex_id);
+    glColor4f(1, 1, 1, 1);
+    glBegin(GL_QUADS);
+    glTexCoord2f(0, 0);
+    glVertex2f(-2, -2);
+    glTexCoord2f(1, 0);
+    glVertex2f(2, -2);
+    glTexCoord2f(1, 1);
+    glVertex2f(2, 2);
+    glTexCoord2f(0, 1);
+    glVertex2f(-2, 2);
+    glEnd();
+    glDisable(GL_TEXTURE_2D);
   }
 
   void render_finite_view() {
@@ -629,7 +608,7 @@ int main(int argc, char **argv) {
         if (!tmp.empty()) {
           try {
             coeffs.push_back(stoi(tmp));
-          } catch () {
+          } catch (...) {
           }
           tmp.clear();
         }
@@ -639,7 +618,7 @@ int main(int argc, char **argv) {
     if (!tmp.empty())
       try {
         coeffs.push_back(stoi(tmp));
-      } catch () {
+      } catch (...) {
       }
     if (coeffs.size() < 2)
       return;
