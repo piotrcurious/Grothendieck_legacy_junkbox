@@ -53,23 +53,27 @@ template<typename T, size_t Size>
 class CircularBuffer {
 private:
     std::array<T, Size> buffer;
-    uint8_t head = 0;
-    uint8_t tail = 0;
+    size_t head = 0;
+    size_t tail = 0;
     bool is_full = false;
 
 public:
     void push(const T& item) {
         buffer[head] = item;
-        if (is_full) tail = (tail + 1) % Size;
         head = (head + 1) % Size;
-        is_full = head == tail;
+        if (is_full) {
+            tail = (tail + 1) % Size;
+        }
+        if (head == tail) {
+            is_full = true;
+        }
     }
 
     std::optional<T> pop() {
         if (empty()) return std::nullopt;
         T item = buffer[tail];
-        is_full = false;
         tail = (tail + 1) % Size;
+        is_full = false;
         return item;
     }
 
@@ -231,23 +235,42 @@ private:
         return (2.0f * value / (Config::FIELD_PRIME - 1.0f)) - 1.0f;
     }
 
-    // Memory-efficient polynomial fitting
+    // Memory-efficient polynomial fitting using Lagrange interpolation over GF
     GFPolynomial fitPolynomial(const uint8_t* x, const uint8_t* y, size_t n) {
-        std::vector<uint8_t> coeffs(std::min(n, static_cast<size_t>(Config::MAX_POLY_DEGREE + 1)), 0);
-        
-        for (size_t i = 0; i < coeffs.size(); i++) {
-            uint8_t term = y[i];
-            for (size_t j = 0; j < coeffs.size(); j++) {
-                if (i != j) {
-                    uint8_t diff = gf.subtract(x[i], x[j]);
-                    if (diff == 0) continue;
-                    term = gf.multiply(term, gf.multiply(x[j], gf.power(diff, Config::FIELD_PRIME - 2)));
+        int degree_limit = std::min(static_cast<int>(n), Config::MAX_POLY_DEGREE + 1);
+        std::vector<uint8_t> resultCoeffs(degree_limit, 0);
+
+        for (int i = 0; i < degree_limit; i++) {
+            // Build basis polynomial L_i(x)
+            std::vector<uint8_t> basisPoly = {1};
+            uint8_t denominator = 1;
+
+            for (int j = 0; j < degree_limit; j++) {
+                if (i == j) continue;
+
+                // Multiply basisPoly by (x - x_j)
+                std::vector<uint8_t> nextBasis(basisPoly.size() + 1, 0);
+                for (size_t k = 0; k < basisPoly.size(); k++) {
+                    nextBasis[k + 1] = gf.add(nextBasis[k + 1], basisPoly[k]);
+                    uint8_t term = gf.multiply(basisPoly[k], gf.subtract(0, x[j]));
+                    nextBasis[k] = gf.add(nextBasis[k], term);
+                }
+                basisPoly = nextBasis;
+                denominator = gf.multiply(denominator, gf.subtract(x[i], x[j]));
+            }
+
+            // Multiply basisPoly by y_i / denominator
+            if (denominator == 0) continue;
+            uint8_t factor = gf.divide(y[i], denominator);
+            for (size_t k = 0; k < basisPoly.size(); k++) {
+                uint8_t term = gf.multiply(basisPoly[k], factor);
+                if (k < resultCoeffs.size()) {
+                    resultCoeffs[k] = gf.add(resultCoeffs[k], term);
                 }
             }
-            coeffs[i] = term;
         }
-        
-        return GFPolynomial(coeffs, gf);
+
+        return GFPolynomial(resultCoeffs, gf);
     }
 
     // Optimized variety dimension calculation using bitset

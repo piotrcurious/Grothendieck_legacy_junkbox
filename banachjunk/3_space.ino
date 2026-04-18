@@ -94,21 +94,25 @@ public:
         return accumulator / dimensionalData.size();
     }
 
-    // Completeness Metric using Cauchy-like convergence proxy
+    // Completeness Metric using a Lebesgue-measure-aware Cauchy-like convergence proxy
     T computeCompleteness() {
-        if (dimensionalData.empty()) return T(0);
+        if (dimensionalData.empty() || timestamps.size() < 2) return T(0);
+        T totalMeasure = timestamps.back() - timestamps.front();
+        if (std::abs(totalMeasure) < 1e-9) return T(0);
         
         T completenessScore = 0;
         for (const auto& dimension : dimensionalData) {
             if (dimension.size() < 2) continue;
 
-            // Analyze the decay of differences (Cauchy-like sequence property)
+            // Analyze the decay of differences weighted by their time intervals
             T cauchySum = 0;
             for (size_t i = 1; i < dimension.size(); ++i) {
-                // Weight later differences more for "convergence" check
-                cauchySum += std::abs(dimension[i] - dimension[i-1]) / static_cast<T>(i);
+                T dt = timestamps[i] - timestamps[i-1];
+                if (dt <= 0) continue;
+                // Normalize by time index to check for late-sequence stability
+                cauchySum += (std::abs(dimension[i] - dimension[i-1]) / dt) / static_cast<T>(i);
             }
-            completenessScore += 1.0 / (1.0 + cauchySum);
+            completenessScore += 1.0 / (1.0 + cauchySum / totalMeasure);
         }
         
         return completenessScore / dimensionalData.size();
@@ -182,6 +186,8 @@ public:
             timestamp = timestamps.empty() ? 0 : timestamps.back() + 1.0;
         }
         
+        // Buffer management: For small N=100, vector::erase(begin) is acceptable on ESP32,
+        // but we ensure consistent size across dimensions.
         timestamps.push_back(timestamp);
         if (timestamps.size() > 100) timestamps.erase(timestamps.begin());
 

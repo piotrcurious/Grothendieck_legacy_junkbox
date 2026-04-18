@@ -255,38 +255,54 @@ public:
     }
 };
 
-// Statistical utilities
+// Statistical utilities using Lebesgue-style weighting
 class Statistics {
 public:
-    static float calculateMean(const std::vector<float>& values) {
-        if (values.empty()) return 0.0f;
-        float sum = 0.0f;
-        for (float value : values) sum += value;
-        return sum / values.size();
+    static float calculateMean(const std::vector<float>& values, const std::vector<float>& timestamps) {
+        if (values.empty() || timestamps.size() < 2) return 0.0f;
+        float integral = 0.0f;
+        float totalDt = timestamps.back() - timestamps.front();
+        if (totalDt < 1e-9f) return values[0];
+
+        for (size_t i = 0; i < values.size() - 1; i++) {
+            float dt = timestamps[i + 1] - timestamps[i];
+            integral += (values[i] + values[i + 1]) / 2.0f * dt;
+        }
+        return integral / totalDt;
     }
 
-    static float calculateVariance(const std::vector<float>& values) {
-        if (values.size() < 2) return 0.0f;
-        float mean = calculateMean(values);
-        float sumSquares = 0.0f;
-        for (float value : values) {
-            float diff = value - mean;
-            sumSquares += diff * diff;
+    static float calculateVariance(const std::vector<float>& values, const std::vector<float>& timestamps) {
+        if (values.size() < 2 || timestamps.size() < 2) return 0.0f;
+        float mean = calculateMean(values, timestamps);
+        float integral = 0.0f;
+        float totalDt = timestamps.back() - timestamps.front();
+        if (totalDt < 1e-9f) return 0.0f;
+
+        for (size_t i = 0; i < values.size() - 1; i++) {
+            float dt = timestamps[i + 1] - timestamps[i];
+            float d1 = values[i] - mean;
+            float d2 = values[i + 1] - mean;
+            integral += (d1 * d1 + d2 * d2) / 2.0f * dt;
         }
-        return sumSquares / (values.size() - 1);
+        return integral / totalDt;
     }
 
-    static float calculateAutocorrelation(const std::vector<float>& values, int lag) {
-        if (values.size() <= lag) return 0.0f;
-        float mean = calculateMean(values);
-        float variance = calculateVariance(values);
-        if (variance == 0.0f) return 0.0f;
+    static float calculateAutocorrelation(const std::vector<float>& values, const std::vector<float>& timestamps, int lag) {
+        if (values.size() <= lag || timestamps.size() <= lag) return 0.0f;
+        float mean = calculateMean(values, timestamps);
+        float variance = calculateVariance(values, timestamps);
+        if (variance < 1e-9f) return 0.0f;
 
-        float sum = 0.0f;
-        for (size_t i = 0; i < values.size() - lag; i++) {
-            sum += (values[i] - mean) * (values[i + lag] - mean);
+        float integral = 0.0f;
+        float totalDt = 0.0f;
+        for (size_t i = 0; i < values.size() - lag - 1; i++) {
+            float dt = timestamps[i + 1] - timestamps[i];
+            float d1 = (values[i] - mean) * (values[i + lag] - mean);
+            float d2 = (values[i + 1] - mean) * (values[i + lag + 1] - mean);
+            integral += (d1 + d2) / 2.0f * dt;
+            totalDt += dt;
         }
-        return sum / ((values.size() - lag) * variance);
+        return (totalDt > 1e-9f) ? (integral / totalDt) / variance : 0.0f;
     }
 };
 
@@ -307,33 +323,45 @@ private:
         return (2.0f * value / (Config::FIELD_PRIME - 1.0f)) - 1.0f;
     }
 
+    // Fit polynomial to data points using Lagrange interpolation over GF
+    // This calculates the actual coefficients of the polynomial in standard form
     GFPolynomial fitPolynomial(const std::vector<uint8_t>& x, const std::vector<uint8_t>& y) {
         int n = std::min(static_cast<int>(x.size()), Config::MAX_POLY_DEGREE + 1);
-        std::vector<uint8_t> coeffs(n, 0);
+        std::vector<uint8_t> resultCoeffs(n, 0);
 
-        // Improved Lagrange interpolation with error checking
-        try {
-            for (int i = 0; i < n; i++) {
-                uint8_t term = y[i];
-                for (int j = 0; j < n; j++) {
-                    if (i != j) {
-                        uint8_t denominator = gf.subtract(x[i], x[j]);
-                        if (denominator == 0) throw Error("Interpolation points must be distinct");
-                        term = gf.multiply(term, 
-                               gf.multiply(x[j], 
-                               gf.power(denominator, Config::FIELD_PRIME - 2)));
-                    }
+        for (int i = 0; i < n; i++) {
+            // Build basis polynomial L_i(x)
+            std::vector<uint8_t> basisPoly = {1};
+            uint8_t denominator = 1;
+
+            for (int j = 0; j < n; j++) {
+                if (i == j) continue;
+
+                // Multiply basisPoly by (x - x_j)
+                std::vector<uint8_t> nextBasis(basisPoly.size() + 1, 0);
+                for (size_t k = 0; k < basisPoly.size(); k++) {
+                    // x * basisPoly[k] * x^k = basisPoly[k] * x^(k+1)
+                    nextBasis[k + 1] = gf.add(nextBasis[k + 1], basisPoly[k]);
+                    // -x_j * basisPoly[k] * x^k
+                    uint8_t term = gf.multiply(basisPoly[k], gf.subtract(0, x[j]));
+                    nextBasis[k] = gf.add(nextBasis[k], term);
                 }
-                coeffs[i] = term;
+                basisPoly = nextBasis;
+                denominator = gf.multiply(denominator, gf.subtract(x[i], x[j]));
             }
-        } catch (const Error& e) {
-            // Fallback to linear fit on error
-            coeffs.resize(2);
-            coeffs[0] = y[0];
-            coeffs[1] = gf.subtract(y[1], y[0]);
+
+            // Multiply basisPoly by y_i / denominator
+            if (denominator == 0) continue;
+            uint8_t factor = gf.divide(y[i], denominator);
+            for (size_t k = 0; k < basisPoly.size(); k++) {
+                uint8_t term = gf.multiply(basisPoly[k], factor);
+                if (k < resultCoeffs.size()) {
+                    resultCoeffs[k] = gf.add(resultCoeffs[k], term);
+                }
+            }
         }
 
-        return GFPolynomial(coeffs, gf);
+        return GFPolynomial(resultCoeffs, gf);
     }
 
     int calculateVarietyDimension(const std::vector<uint8_t>& values) {
@@ -426,8 +454,14 @@ public:
             auto derivative = fitted.derivative();
             
             // Calculate additional metrics for classification
+            std::vector<float> windowY_float;
+            for(auto y : windowY) windowY_float.push_back(static_cast<float>(y));
+            std::vector<float> windowT_float;
+            for(auto d : windowData) windowT_float.push_back(d.timestamp);
+
             float autocorr = Statistics::calculateAutocorrelation(
-                std::vector<float>(windowY.begin(), windowY.end()), 
+                windowY_float,
+                windowT_float,
                 Config::WINDOW_SIZE / 4
             );
 

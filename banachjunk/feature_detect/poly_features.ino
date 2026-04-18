@@ -54,7 +54,13 @@ public:
   }
 
   uint8_t divide(uint8_t a, uint8_t b) const {
-    if (b == 0) return 0; // Should handle as error or check before call
+    if (b == 0) {
+#ifdef ARDUINO
+        return 0; // Standard fallback for embedded
+#else
+        throw std::runtime_error("Galois Field division by zero");
+#endif
+    }
     return multiply(a, power(b, prime - 2));
   }
 

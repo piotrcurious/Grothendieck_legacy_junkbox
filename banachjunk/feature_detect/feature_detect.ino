@@ -17,22 +17,32 @@ private:
   // Store the norm history for convergence checking
   float previousNorm = 0;
   
-  // Calculate L1 norm (Manhattan distance)
-  float calculateL1Norm(float* vector, int size) {
-    float sum = 0;
-    for (int i = 0; i < size; i++) {
-      sum += abs(vector[i]);
+  // Calculate L1 norm (Manhattan distance) using Lebesgue-style weighting
+  float calculateL1Norm(const DataPoint* signal, int startIdx, int size) {
+    float integral = 0;
+    float totalDt = 0;
+    for (int i = 0; i < size - 1; i++) {
+      float dt = signal[startIdx + i + 1].timestamp - signal[startIdx + i].timestamp;
+      if (dt <= 0) continue;
+      integral += (abs(signal[startIdx + i].value) + abs(signal[startIdx + i + 1].value)) / 2.0 * dt;
+      totalDt += dt;
     }
-    return sum;
+    return (totalDt > 1e-9) ? (integral / totalDt) * size : 0;
   }
   
-  // Calculate L2 norm (Euclidean distance)
-  float calculateL2Norm(float* vector, int size) {
-    float sum = 0;
-    for (int i = 0; i < size; i++) {
-      sum += vector[i] * vector[i];
+  // Calculate L2 norm (Euclidean distance) using Lebesgue-style weighting
+  float calculateL2Norm(const DataPoint* signal, int startIdx, int size) {
+    float integral = 0;
+    float totalDt = 0;
+    for (int i = 0; i < size - 1; i++) {
+      float dt = signal[startIdx + i + 1].timestamp - signal[startIdx + i].timestamp;
+      if (dt <= 0) continue;
+      float v1 = signal[startIdx + i].value;
+      float v2 = signal[startIdx + i + 1].value;
+      integral += (v1 * v1 + v2 * v2) / 2.0 * dt;
+      totalDt += dt;
     }
-    return sqrt(sum);
+    return (totalDt > 1e-9) ? sqrt(integral / totalDt) * sqrt(size) : 0;
   }
   
   // Calculate Lp norm for p=infinity (Maximum norm)
@@ -66,14 +76,14 @@ public:
     
     // Slide window through signal
     for (int i = 0; i <= signalSize - WINDOW_SIZE && featureCount < MAX_FEATURES; i++) {
-      // Fill analysis window
+      // Fill analysis window (still needed for L-inf and compatibility)
       for (int j = 0; j < WINDOW_SIZE; j++) {
         windowValues[j] = signal[i + j].value;
       }
       
-      // Calculate different norms
-      float l1Norm = calculateL1Norm(windowValues, WINDOW_SIZE);
-      float l2Norm = calculateL2Norm(windowValues, WINDOW_SIZE);
+      // Calculate different norms using Lebesgue weighting
+      float l1Norm = calculateL1Norm(signal, i, WINDOW_SIZE);
+      float l2Norm = calculateL2Norm(signal, i, WINDOW_SIZE);
       float lInfNorm = calculateLInfNorm(windowValues, WINDOW_SIZE);
       
       // Feature detection criteria using Banach space properties

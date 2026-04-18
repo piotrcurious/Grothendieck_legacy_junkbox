@@ -26,8 +26,8 @@ private:
         };
     }
 
-    // Least squares method for polynomial fitting using Lebesgue-weighted Gaussian elimination
-    PolynomialCoefficients fitPolynomial(const std::vector<float>& data) {
+    // Least squares method for polynomial fitting using Lebesgue-weighted Ridge Regression
+    PolynomialCoefficients fitPolynomial(const std::vector<float>& data, double lambda = 1e-4) {
         int n = data.size();
         const int m = 4; // cubic fit: a*x^3 + b*x^2 + c*x + d
         double matrix[m][m];
@@ -63,6 +63,11 @@ private:
                 }
                 rhs[r] += dt * y * x_pow[m-1-r];
             }
+        }
+
+        // Apply Tikhonov regularization
+        for (int i = 0; i < m; i++) {
+            matrix[i][i] += lambda;
         }
 
         // Gaussian elimination with pivoting
@@ -136,8 +141,8 @@ public:
     void analyzeBanachSpace() {
         if (dataBuffer.size() < 4) return;  // Need minimum 4 points for 3rd order polynomial
 
-        // Fit polynomial
-        PolynomialCoefficients poly = fitPolynomial(dataBuffer);
+        // Fit polynomial using Ridge Regression for stability
+        PolynomialCoefficients poly = fitPolynomial(dataBuffer, 1e-4);
         
         // Compute Standard Error of Estimate (weighted)
         float rss = 0;
