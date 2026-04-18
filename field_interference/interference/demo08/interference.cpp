@@ -8,7 +8,7 @@
 //   3. Field Extensions (Lattices)
 //
 // Features:
-//   - Pan ning (Left Click)
+//   - Pan * ning (Left Click)
 //   - Zooming (Scroll / Right Click)
 //   - Synchronized Texture-mapped Heatmaps
 
@@ -211,7 +211,7 @@ public:
     glLoadIdentity();
 
     if (mode_algebraic) {
-      // Render Heatmap as a world-space Quad span ning [-2, 2]
+      // Render Heatmap as a world-space Quad spanning [-2, 2]
       glEnable(GL_TEXTURE_2D);
       glBindTexture(GL_TEXTURE_2D, tex_id);
       glColor4f(1, 1, 1, 1);

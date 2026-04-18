@@ -1,43 +1,29 @@
 # Field Interference Explorers
 
-This directory contains a suite of tools and visualizations for exploring "Field Interference" — the structural resonance and density patterns of algebraic numbers, finite fields, and transcendental extensions.
+A collection of interactive and high-performance tools for exploring the structural density and "interference" patterns of various field systems: Algebraic numbers, Finite fields, and Transcendental extensions.
 
-## Core Concepts
+## Core Showcases
 
-- **Algebraic Interference**: The density of roots of polynomials with restricted coefficients (e.g., Littlewood polynomials) in the complex plane. This reveals fractal-like structures and "holes" around roots of unity.
-- **Finite Field Interference**: Visualization of $GF(p^n)$ extensions as vector spaces over $GF(p)$, showing the additive and multiplicative coupling.
-- **Transcendental Interference**: Exploring the structure of the ring $\mathbb{Q}(\alpha)$ where $\alpha$ is a transcendental number like $\pi$ or $e$, by visualizing the values of polynomials evaluated at $\alpha$.
-- **Grothendieck Viewpoint**: Demos illustrating the descent of functions to varieties and the relationship between global polynomial rings and local field evaluations.
+### 1. Educational Galois Demos (`demo1/`)
+- **`demo01.cpp`**: Visualizes the interplay between the additive vector space structure of $GF(p^n)$ and its multiplicative cyclic group.
+- **`demo02.cpp`**: Illustrates the Grothendieck viewpoint—showing how functions defined on polynomial quotient rings GF(p)[x]/(g) descend to the variety $V(g)$.
+- **`demo03.cpp`**: Demonstrates the relationship between algebraic field extensions, companion matrices, and their roots (eigenvalues) in the complex plane.
+- **`gf_explorer.py`**: High-level visualization of finite field embeddings.
 
-## Project Structure
+### 2. Transcendental Explorer
+- **`transcendental_field_explorer.py`**: An interactive tool for visualizing the resonance of $\mathbb{Q}(\alpha)$ for transcendental $\alpha$ (like $\pi$ or $e$), allowing for custom base evaluation.
 
-### Python Tools (Interactive)
-- `field_interference_unified.py`: A unified explorer for Algebraic and Finite field structures using Matplotlib.
-- `transcendental_field_explorer.py`: Dedicated tool for exploring transcendental extensions with custom base support.
-- `demo1/gf_explorer.py`: Vector space visualization of finite field extensions.
-- `demo1/field_interference.py`: High-resolution algebraic number density plotter.
-
-### C++ Demos (High Performance)
-- `interference/`: Progressive demos (05 through 0c) using FLTK and OpenGL.
-- `unified2/`: Production-ready consolidated demos.
-- `demo1/`: Educational demos focusing on the logic of Galois theory and Grothendieck's approach.
+### 3. Production Field Explorers
+- **`unified2/demo05.cpp`**: A consolidated tool for exploring root-density heatmaps of random polynomials (algebraic interference) and finite field embeddings.
+- **`interference/demo0c/`**: 3D edition featuring helical flow visualizations and Galois tower constructions.
 
 ## Requirements
+- **Python**: `numpy`, `matplotlib`, `scipy`, `sympy`
+- **C++**: `FLTK 1.3+`, `OpenGL`, `Mesa/GLU`
 
-### Python
-- `numpy`
-- `matplotlib`
-- `scipy`
-- `sympy`
-
-### C++
-- `FLTK 1.3+`
-- `OpenGL`
-- `Mesa/GLU`
-
-## Building and Running C++ Demos
-Example for building `unified2/demo05.cpp`:
-```bash
-g++ -std=c++17 -O2 unified2/demo05.cpp -o unified_explorer -lfltk -lfltk_gl -lGL -lGLU -lm
-./unified_explorer
-```
+## Build Instructions
+Example:
+\`\`\`bash
+g++ -std=c++17 -O2 unified2/demo05.cpp -o field_explorer -lfltk -lfltk_gl -lGL -lGLU -lm
+./field_explorer
+\`\`\`

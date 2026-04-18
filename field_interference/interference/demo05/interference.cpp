@@ -56,7 +56,7 @@ using cd = complex<double>;
 static inline double clamp01(double x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
 
 // Durand-Kerner method for finding all roots of a polynomial simultaneously.
-// Coeffs are ordered: a_0 + a_1*x + ... + a_n*x^n
+// Coeffs are ordered: a_0 + a_1*x +   + a_n*x^n
 vector<cd> durand_kerner(const vector<cd> &input_coeffs, int max_iters = 400,
                          double tol = 1e-12) {
   // Strip trailing zeros to find actual degree
@@ -116,7 +116,7 @@ vector<cd> durand_kerner(const vector<cd> &input_coeffs, int max_iters = 400,
   return roots;
 }
 
-// Companion matrix for monic polynomial a_0 + ... + x^n
+// Companion matrix for monic polynomial a_0 +   + x^n
 // Returns row-major flat vector
 vector<double> companion_matrix(const vector<int> &coeffs) {
   int n = (int)coeffs.size() - 1; // Degree
@@ -135,11 +135,11 @@ vector<double> companion_matrix(const vector<int> &coeffs) {
     M[i * n + (i - 1)] = 1.0;
   }
 
-  // Last column: -a_0, -a_1 ... -a_{n-1}
+  // Last column: -a_0, -a_1   -a_{n-1}
   for (int i = 0; i < n; ++i) {
     double val = (i < (int)coeffs.size()) ? (double)coeffs[i] : 0.0;
-    // In companion matrix for x^n + a_{n-1}x^{n-1} + ... + a_0,
-    // The last column is typically -a_0, -a_1, ..., -a_{n-1}
+    // In companion matrix for x^n + a_{n-1}x^{n-1} +   + a_0,
+    // The last column is typically -a_0, -a_1,  , -a_{n-1}
     M[i * n + (n - 1)] = -val;
   }
   return M;
@@ -166,8 +166,8 @@ cd eval_poly_at_alpha(const vector<int> &coeffs, const cd &alpha) {
   cd acc(0, 0);
   cd powa(1, 0);
   for (int c : coeffs) {
-    acc += powa * *(double)c;
-    powa * *= alpha;
+    acc += powa * (double)c;
+    powa *= alpha;
   }
   return acc;
 }
@@ -707,7 +707,10 @@ int main(int argc, char **argv) {
         for (char ch : s) {
           if (ch == ',' || ch == ' ') {
             if (!tmp.empty()) {
-              try { coeffs.push_back(stoi(tmp)); } catch (...) { /* skip invalid int */ }
+              try {
+                coeffs.push_back(stoi(tmp));
+              } catch () {
+              }
               tmp.clear();
             }
           } else {
@@ -715,7 +718,10 @@ int main(int argc, char **argv) {
           }
         }
         if (!tmp.empty())
-          try { coeffs.push_back(stoi(tmp)); } catch (...) { /* skip invalid int */ }
+          try {
+            coeffs.push_back(stoi(tmp));
+          } catch () {
+          }
 
         if (coeffs.size() < 2) {
           fl_alert("Polynomial degree must be at least 1.");
