@@ -70,6 +70,28 @@ void testSVD() {
     std::cout << "  Passed!" << std::endl;
 }
 
+void testEdgeCases() {
+    std::cout << "Testing Edge Cases (Numerical Stability)..." << std::endl;
+
+    // Nearly singular system
+    auto K_sing = [](double x, double y) { return 1.0; }; // Rank-1 kernel
+    auto f = [](double x) { return 1.0; };
+    auto nodes = Solver::solveFredholm(0, 1, 1.0, K_sing, f, 16);
+    std::cout << "  Singular Fredholm (lambda=1, K=1) nodes size: " << nodes.size() << " (Expected empty or unstable)" << std::endl;
+
+    // Zero-width kernel
+    auto K_zero = [](double x, double y) { return (x == y) ? 1.0 : 0.0; };
+    auto nodes_zero = Solver::solveFredholm(0, 1, 0.5, K_zero, f, 16);
+    assert(!nodes_zero.empty());
+    std::cout << "  Delta-like Kernel Passed." << std::endl;
+
+    // High lambda oscillation
+    auto nodes_high = Solver::solveFredholm(0, 1, 100.0, [](double x, double y){ return std::sin(x*y); }, f, 16);
+    std::cout << "  High Lambda (100.0) Nodes Size: " << nodes_high.size() << std::endl;
+
+    std::cout << "  Passed!" << std::endl;
+}
+
 int main() {
     try {
         testLinearSolver();
@@ -77,6 +99,7 @@ int main() {
         testEigen();
         testFredholm();
         testSVD();
+        testEdgeCases();
         std::cout << "\nAll Engine Tests Passed Successfully!" << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "Test failed: " << e.what() << std::endl;
