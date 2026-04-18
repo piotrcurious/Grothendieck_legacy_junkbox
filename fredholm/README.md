@@ -1,17 +1,19 @@
 # Fredholm Theory Education Suite
 
-This directory contains a concrete visualization and interactive education suite for Fredholm Theory, specifically focusing on Fredholm integral equations of the second kind and their application in signal processing.
+This directory contains a concrete visualization and interactive education suite for Fredholm Theory, demonstrating its versatility across various mathematical and engineering domains.
 
 ## Components
 
 - **FredholmEngine.h**: A header-only C++ library implementing:
-  - Nystrom method for solving Fredholm integral equations.
+  - Nystrom method for solving Fredholm integral equations of the second kind.
   - Gauss-Legendre quadrature for numerical integration.
   - Linear system solver with partial pivoting.
-  - `AdaptiveCompensator`: A practical application of Fredholm theory for smoothing quantized or noisy signals.
-- **fredholm_suite.cpp**: An interactive SDL2-based application that demonstrates:
-  - **Theory Mode**: Visualize how a source function $f(x)$ and a kernel $K(x, y)$ produce a solution $\phi(x)$.
-  - **Application Mode**: Real-time demonstration of using Fredholm operators to recover smoothness from quantized and noisy angular data.
+  - `AdaptiveCompensator`: A real-time filter for smoothing quantized or noisy signals.
+- **fredholm_suite.cpp**: An interactive SDL2-based application featuring four demonstration modes:
+  - **Theory Mode**: Basic Fredholm equation visualization ($\phi = f + \lambda K \phi$) with interactive kernel heatmap.
+  - **Compensator Mode**: Practical application for signal jitter reduction and quantization recovery.
+  - **BVP Mode**: Solving Boundary Value Problems (ODEs) like $-u'' + Vu = f$ by converting them to Fredholm equations using Green's functions.
+  - **Deblur Mode**: Signal deconvolution/restoration using Tikhonov Regularization, showing how ill-posed problems are stabilized via Fredholm theory.
 
 ## Building and Running
 
@@ -37,13 +39,8 @@ g++ fredholm_suite.cpp -o fredholm_suite -lSDL2 -lSDL2_ttf -I .
 ./fredholm_suite
 ```
 
-## How it Works
+## Interactive Controls
 
-The suite solves the equation:
-$$\phi(x) = f(x) + \lambda \int_a^b K(x, y)\phi(y)dy$$
-
-In the interactive demo:
-- **Red Graph**: The input source function $f(x)$.
-- **Green Graph**: The resulting solution $\phi(x)$.
-- **Heatmap**: The interaction kernel $K(x, y)$.
-- **Sliders**: Allow real-time adjustment of kernel width ($\sigma$), interaction strength ($\lambda$), and source frequency.
+- **Tabbed Navigation**: Switch between Theory, Compensator, BVP, and Deblur modes.
+- **Sliders**: Adjust mathematical parameters (Sigma, Lambda, Frequency, Potential, Regularization Alpha) in real-time.
+- **Visual Feedback**: Graphs and heatmaps update instantly to reflect the solution of the integral equations.
