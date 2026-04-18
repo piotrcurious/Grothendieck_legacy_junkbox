@@ -66,8 +66,8 @@ def visualize_field_interference():
             if -2 <= val <= 2:
                 ax.plot(val, 0, 'wo', markersize=1, alpha=0.3)
 
-    ax.set_title("Field Interference: Algebraic Number Density in $\mathbb{C}$\n"
-                 "Resonance between $\mathbb{Q}$ and Higher Polynomial Structures", 
+    ax.set_title(r"Field Interference: Algebraic Number Density in '$\mathbb{C}$\n"
+                 r"Resonance between \mathbb{Q}$ and Higher Polynomial Structures",
                  color='white', fontsize=18, pad=20)
     ax.set_xlabel("Re(z)", color='white', fontsize=12)
     ax.set_ylabel("Im(z)", color='white', fontsize=12)
