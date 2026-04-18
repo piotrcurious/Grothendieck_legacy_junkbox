@@ -8,7 +8,7 @@
 //   3. Field Extensions (Lattices)
 //
 // Features:
-//   - Pan * ning (Left Click)
+//   - Panning (Left Click)
 //   - Zooming (Scroll / Right Click)
 //   - Synchronized Texture-mapped Heatmaps
 
