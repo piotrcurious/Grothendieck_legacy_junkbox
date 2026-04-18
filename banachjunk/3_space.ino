@@ -9,6 +9,7 @@ class BanachSpace {
 private:
     // Multi-dimensional numerical representation
     std::vector<std::vector<T>> dimensionalData;
+    std::vector<T> timestamps;
     
     // Metric space properties
     struct MetricProperties {
@@ -61,49 +62,56 @@ private:
         return metrics;
     }
 
-    // L-p Norm Computation with numerical scaling
+public:
+    // L-p Norm Computation using Lebesgue-style measure weighting
     T computeLpNorm(int p) {
-        if (dimensionalData.empty()) return T(0);
+        if (dimensionalData.empty() || timestamps.size() < 2) return T(0);
         
+        T totalMeasure = timestamps.back() - timestamps.front();
+        if (std::abs(totalMeasure) < 1e-9) return T(0);
+
         T accumulator = 0;
         for (const auto& dimension : dimensionalData) {
-            if (dimension.empty()) continue;
+            if (dimension.size() < 2) continue;
 
-            // Find max absolute value for scaling to prevent overflow
             T maxVal = 0;
             for (const auto& value : dimension) {
                 maxVal = std::max(maxVal, std::abs(value));
             }
-
             if (maxVal < 1e-9) continue;
 
-            T dimensionNorm = 0;
-            for (const auto& value : dimension) {
-                dimensionNorm += std::pow(std::abs(value) / maxVal, p);
+            T integral = 0;
+            for (size_t i = 0; i < dimension.size() - 1; ++i) {
+                T dt = timestamps[i+1] - timestamps[i];
+                if (dt <= 0) continue;
+                // Using midpoint/average for the interval [i, i+1]
+                T val = (std::abs(dimension[i]) + std::abs(dimension[i+1])) / (2.0 * maxVal);
+                integral += std::pow(val, p) * dt;
             }
-            accumulator += maxVal * std::pow(dimensionNorm, 1.0/p);
+            accumulator += maxVal * std::pow(integral / totalMeasure, 1.0/p);
         }
         
         return accumulator / dimensionalData.size();
     }
 
-    // Completeness Metric
+    // Completeness Metric using Cauchy-like convergence proxy
     T computeCompleteness() {
-        // Measure of how "complete" the numerical space is
-        // Based on coverage and continuity of data
         if (dimensionalData.empty()) return T(0);
         
-        T coverageScore = 0;
+        T completenessScore = 0;
         for (const auto& dimension : dimensionalData) {
-            // Compute local continuity and coverage
-            T localContinuity = 0;
+            if (dimension.size() < 2) continue;
+
+            // Analyze the decay of differences (Cauchy-like sequence property)
+            T cauchySum = 0;
             for (size_t i = 1; i < dimension.size(); ++i) {
-                localContinuity += std::abs(dimension[i] - dimension[i-1]);
+                // Weight later differences more for "convergence" check
+                cauchySum += std::abs(dimension[i] - dimension[i-1]) / static_cast<T>(i);
             }
-            coverageScore += localContinuity / dimension.size();
+            completenessScore += 1.0 / (1.0 + cauchySum);
         }
         
-        return coverageScore / dimensionalData.size();
+        return completenessScore / dimensionalData.size();
     }
 
     // Dimensional Coherence
@@ -160,25 +168,25 @@ public:
     // Clear data buffers
     void reset() {
         dimensionalData.clear();
+        timestamps.clear();
     }
 
-    // Add multi-dimensional data point
-    void addDataPoint(const std::vector<T>& point) {
-        if (point.size() != Dimension) {
-            // Handle dimension mismatch
-            return;
+    // Add multi-dimensional data point with timestamp
+    void addDataPoint(const std::vector<T>& point, T timestamp = -1.0) {
+        if (point.size() != Dimension) return;
+
+        if (dimensionalData.size() < Dimension) dimensionalData.resize(Dimension);
+        
+        // Auto-increment timestamp if not provided
+        if (timestamp < 0) {
+            timestamp = timestamps.empty() ? 0 : timestamps.back() + 1.0;
         }
         
-        // Expand or create dimensions as needed
-        if (dimensionalData.size() < Dimension) {
-            dimensionalData.resize(Dimension);
-        }
-        
-        // Add point to each dimension
+        timestamps.push_back(timestamp);
+        if (timestamps.size() > 100) timestamps.erase(timestamps.begin());
+
         for (size_t i = 0; i < Dimension; ++i) {
             dimensionalData[i].push_back(point[i]);
-            
-            // Maintain fixed buffer size
             if (dimensionalData[i].size() > 100) {
                 dimensionalData[i].erase(dimensionalData[i].begin());
             }

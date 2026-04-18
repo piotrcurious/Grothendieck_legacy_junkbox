@@ -54,6 +54,7 @@ class BanachGaloisAnalyzer {
 private:
     // Multi-dimensional buffer using Galois Field representations
     std::vector<GaloisField<P>> dataBuffer;
+    std::vector<float> timestamps;
     
     // Generalized Polynomial Structure
     struct GeneralizedPolynomial {
@@ -78,7 +79,7 @@ private:
         }
     };
 
-    // Compute Generalized Polynomial Fitting using Least Squares
+    // Compute Generalized Polynomial Fitting using Lebesgue-weighted Least Squares
     GeneralizedPolynomial fitGeneralizedPolynomial(int order) {
         int n = dataBuffer.size();
         int m = order + 1;
@@ -86,13 +87,28 @@ private:
         std::vector<double> rhs(m, 0.0);
 
         for (int i = 0; i < n; ++i) {
-            double x = i;
+            double x = timestamps[i];
             double y = dataBuffer[i].toFloat();
+
+            // Measure (dt) for Lebesgue-style weighting
+            double dt = 1.0;
+            if (n > 1) {
+                if (i == 0) dt = timestamps[1] - timestamps[0];
+                else if (i == n - 1) dt = timestamps[n-1] - timestamps[n-2];
+                else dt = (timestamps[i+1] - timestamps[i-1]) / 2.0;
+            }
+            if (dt < 0) dt = 0;
+
+            std::vector<double> x_powers(2 * m, 1.0);
+            for (int p = 1; p < 2 * m; ++p) {
+                x_powers[p] = x_powers[p - 1] * x;
+            }
+
             for (int r = 0; r < m; ++r) {
                 for (int c = 0; c < m; ++c) {
-                    matrix[r][c] += pow(x, r + c);
+                    matrix[r][c] += dt * x_powers[r + c];
                 }
-                rhs[r] += y * pow(x, r);
+                rhs[r] += dt * y * x_powers[r];
             }
         }
 
@@ -163,17 +179,20 @@ public:
     // Clear data buffer
     void reset() {
         dataBuffer.clear();
+        timestamps.clear();
     }
 
     // Add data point to buffer
-    void addDataPoint(float value) {
+    void addDataPoint(float value, float timestamp = -1.0) {
+        if (timestamp < 0) {
+            timestamp = timestamps.empty() ? 0 : timestamps.back() + 1.0;
+        }
+        timestamps.push_back(timestamp);
+        if (timestamps.size() > BufferSize) timestamps.erase(timestamps.begin());
+
         // Convert to Galois Field representation
         dataBuffer.push_back(GaloisField<P>(static_cast<int>(value * 100)));
-        
-        // Maintain fixed buffer size
-        if (dataBuffer.size() > BufferSize) {
-            dataBuffer.erase(dataBuffer.begin());
-        }
+        if (dataBuffer.size() > BufferSize) dataBuffer.erase(dataBuffer.begin());
     }
 
     // Comprehensive Banach-Galois Analysis

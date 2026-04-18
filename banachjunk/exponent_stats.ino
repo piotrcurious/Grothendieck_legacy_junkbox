@@ -104,6 +104,7 @@ class StatisticalBanachSpace {
 private:
     // Multi-dimensional statistical representation
     std::vector<std::vector<T>> statisticalData;
+    std::vector<T> timestamps;
 
     // Statistical Descriptors
     struct StatisticalDescriptors {
@@ -116,7 +117,7 @@ private:
         std::vector<T> totalVariation;
     };
 
-    // Compute Comprehensive Statistical Metrics
+    // Compute Comprehensive Statistical Metrics using Lebesgue-style measure weighting
     StatisticalDescriptors computeStatisticalMetrics() {
         StatisticalDescriptors metrics;
         metrics.mean.resize(Dimension, 0);
@@ -127,26 +128,37 @@ private:
         metrics.entropy.resize(Dimension, 0);
         metrics.totalVariation.resize(Dimension, 0);
 
+        if (statisticalData.empty() || timestamps.size() < 2) return metrics;
+        T totalMeasure = timestamps.back() - timestamps.front();
+        if (std::abs(totalMeasure) < 1e-9) return metrics;
+
         // Compute for each dimension
         for (size_t dim = 0; dim < Dimension; ++dim) {
             const auto& dimData = statisticalData[dim];
-            if (dimData.empty()) continue;
+            if (dimData.size() < 2) continue;
             
-            // Mean
-            T sum = std::accumulate(dimData.begin(), dimData.end(), T(0));
-            metrics.mean[dim] = sum / dimData.size();
+            // Mean (Lebesgue-weighted)
+            T meanIntegral = 0;
+            for (size_t i = 0; i < dimData.size() - 1; ++i) {
+                T dt = timestamps[i+1] - timestamps[i];
+                meanIntegral += (dimData[i] + dimData[i+1]) / 2.0 * dt;
+            }
+            T mean = meanIntegral / totalMeasure;
+            metrics.mean[dim] = mean;
 
-            // Variance and Higher Moments
-            T variance = 0, m3 = 0, m4 = 0;
-            for (const auto& val : dimData) {
-                T diff = val - metrics.mean[dim];
-                T diffSq = diff * diff;
-                variance += diffSq;
-                m3 += diff * diffSq;
-                m4 += diffSq * diffSq;
+            // Variance and Higher Moments (Lebesgue-weighted)
+            T varIntegral = 0, m3Integral = 0, m4Integral = 0;
+            for (size_t i = 0; i < dimData.size() - 1; ++i) {
+                T dt = timestamps[i+1] - timestamps[i];
+                T diff1 = dimData[i] - mean;
+                T diff2 = dimData[i+1] - mean;
+                T midDiff = (diff1 + diff2) / 2.0;
+                varIntegral += midDiff * midDiff * dt;
+                m3Integral += midDiff * midDiff * midDiff * dt;
+                m4Integral += midDiff * midDiff * midDiff * midDiff * dt;
             }
             
-            variance /= dimData.size();
+            T variance = varIntegral / totalMeasure;
             metrics.variance[dim] = variance;
             T sdev = std::sqrt(variance);
             metrics.stdDev[dim] = sdev;
@@ -194,46 +206,55 @@ private:
 public:
     void reset() {
         statisticalData.clear();
+        timestamps.clear();
     }
 
-    // Add multi-dimensional statistical data point
-    void addStatisticalDataPoint(const std::vector<T>& point) {
-        if (point.size() != Dimension) {
-            // Handle dimension mismatch
-            return;
-        }
+    // Add multi-dimensional statistical data point with timestamp
+    void addStatisticalDataPoint(const std::vector<T>& point, T timestamp = -1.0) {
+        if (point.size() != Dimension) return;
         
-        // Expand or create dimensions as needed
-        if (statisticalData.size() < Dimension) {
-            statisticalData.resize(Dimension);
-        }
+        if (statisticalData.size() < Dimension) statisticalData.resize(Dimension);
         
-        // Add point to each dimension
+        if (timestamp < 0) {
+            timestamp = timestamps.empty() ? 0 : timestamps.back() + 1.0;
+        }
+        timestamps.push_back(timestamp);
+        if (timestamps.size() > 100) timestamps.erase(timestamps.begin());
+
         for (size_t i = 0; i < Dimension; ++i) {
             statisticalData[i].push_back(point[i]);
-            
-            // Maintain fixed buffer size
             if (statisticalData[i].size() > 100) {
                 statisticalData[i].erase(statisticalData[i].begin());
             }
         }
     }
 
-    // Compute covariance between two dimensions
+    // Compute covariance between two dimensions (Lebesgue-weighted)
     T computeCovariance(size_t dim1, size_t dim2) {
         if (dim1 >= Dimension || dim2 >= Dimension) return 0;
         const auto& data1 = statisticalData[dim1];
         const auto& data2 = statisticalData[dim2];
-        if (data1.size() != data2.size() || data1.empty()) return 0;
+        if (data1.size() != data2.size() || data1.size() < 2) return 0;
+        T totalMeasure = timestamps.back() - timestamps.front();
+        if (std::abs(totalMeasure) < 1e-9) return 0;
 
-        T mean1 = std::accumulate(data1.begin(), data1.end(), T(0)) / data1.size();
-        T mean2 = std::accumulate(data2.begin(), data2.end(), T(0)) / data2.size();
-
-        T covar = 0;
-        for (size_t i = 0; i < data1.size(); ++i) {
-            covar += (data1[i] - mean1) * (data2[i] - mean2);
+        T m1 = 0, m2 = 0;
+        for (size_t i = 0; i < data1.size() - 1; i++) {
+            T dt = timestamps[i+1] - timestamps[i];
+            m1 += (data1[i] + data1[i+1]) / 2.0 * dt;
+            m2 += (data2[i] + data2[i+1]) / 2.0 * dt;
         }
-        return covar / data1.size();
+        T mean1 = m1 / totalMeasure;
+        T mean2 = m2 / totalMeasure;
+
+        T covarIntegral = 0;
+        for (size_t i = 0; i < data1.size() - 1; ++i) {
+            T dt = timestamps[i+1] - timestamps[i];
+            T d1 = (data1[i] + data1[i+1]) / 2.0 - mean1;
+            T d2 = (data2[i] + data2[i+1]) / 2.0 - mean2;
+            covarIntegral += d1 * d2 * dt;
+        }
+        return covarIntegral / totalMeasure;
     }
 
     // Comprehensive Statistical Banach Space Analysis
