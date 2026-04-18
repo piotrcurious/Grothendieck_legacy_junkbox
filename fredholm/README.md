@@ -1,19 +1,22 @@
-# Fredholm Theory Education Suite
+# Fredholm Education Suite Ultimate
 
-This directory contains a concrete visualization and interactive education suite for Fredholm Theory, demonstrating its versatility across various mathematical and engineering domains.
+This directory contains a high-fidelity visualization and interactive education suite for Fredholm and Volterra Theory. It covers basic integral equation theory, spectral analysis, and advanced applications in physics and engineering.
 
 ## Components
 
-- **FredholmEngine.h**: A header-only C++ library implementing:
-  - Nystrom method for solving Fredholm integral equations of the second kind.
-  - Gauss-Legendre quadrature for numerical integration.
-  - Linear system solver with partial pivoting.
-  - `AdaptiveCompensator`: A real-time filter for smoothing quantized or noisy signals.
-- **fredholm_suite.cpp**: An interactive SDL2-based application featuring four demonstration modes:
-  - **Theory Mode**: Basic Fredholm equation visualization ($\phi = f + \lambda K \phi$) with interactive kernel heatmap.
-  - **Compensator Mode**: Practical application for signal jitter reduction and quantization recovery.
-  - **BVP Mode**: Solving Boundary Value Problems (ODEs) like $-u'' + Vu = f$ by converting them to Fredholm equations using Green's functions.
-  - **Deblur Mode**: Signal deconvolution/restoration using Tikhonov Regularization, showing how ill-posed problems are stabilized via Fredholm theory.
+- **FredholmEngine.h**: A robust C++ header library implementing:
+  - **Fredholm Solver**: Nystrom method with 16-point Gauss-Legendre quadrature.
+  - **Volterra Solver**: Trapezoidal-rule based evolution for causal systems.
+  - **Spectral Engine**: QR algorithm for computing kernel eigenvalues and eigenfunctions.
+  - **Numerical Utilities**: Linear system solver with partial pivoting and singularity detection.
+- **fredholm_suite.cpp**: A multi-mode interactive SDL2 application:
+  - **Theory**: Basic Fredholm equations ($\phi = f + \lambda K \phi$) with Gaussian/Lorentzian kernel selection.
+  - **Comp**: Signal jitter reduction using Fredholm-based smoothing.
+  - **BVP**: Solving Boundary Value Problems (ODEs) using Green's functions.
+  - **Deblur**: Signal restoration using Tikhonov Regularization (Fredholm equation of the 2nd kind).
+  - **Spectral**: Visualization of the kernel's eigenfunctions and natural modes.
+  - **Volterra**: Evolution of causal systems where the integral only depends on past history.
+  - **Alt (Fredholm Alternative)**: Demonstration of resonance near kernel eigenvalues.
 
 ## Building and Running
 
@@ -39,8 +42,9 @@ g++ fredholm_suite.cpp -o fredholm_suite -lSDL2 -lSDL2_ttf -I .
 ./fredholm_suite
 ```
 
-## Interactive Controls
+## How it Works
 
-- **Tabbed Navigation**: Switch between Theory, Compensator, BVP, and Deblur modes.
-- **Sliders**: Adjust mathematical parameters (Sigma, Lambda, Frequency, Potential, Regularization Alpha) in real-time.
-- **Visual Feedback**: Graphs and heatmaps update instantly to reflect the solution of the integral equations.
+The suite focuses on equations of the form:
+$$\phi(x) = f(x) + \lambda \int K(x, y)\phi(y)dy$$
+
+It demonstrates how local interactions reach global balance (Fredholm) or evolve through time (Volterra), and how these mathematical structures appear in everything from beam deflection (BVP) to image processing (Deblur).
