@@ -447,5 +447,6 @@ int main() {
         }
         ui.draw(renderer); SDL_RenderPresent(renderer); SDL_Delay(10);
     }
+    cache.clear();
     TTF_CloseFont(font); SDL_DestroyRenderer(renderer); SDL_DestroyWindow(window); TTF_Quit(); SDL_Quit(); return 0;
 }
