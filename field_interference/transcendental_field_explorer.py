@@ -21,6 +21,8 @@ class TranscendentalFieldExplorer:
         self.current_base_val = np.pi
         self.current_base_name = 'pi'
         self.colorbar = None
+        self.coord_system = 'Standard'
+        self.current_cmap = 'magma'
         
         # Params
         self.max_degree = 3
@@ -44,19 +46,34 @@ class TranscendentalFieldExplorer:
         self.ax_text.set_visible(False)
 
         # Mode Selection
-        ax_mode = self.fig.add_axes([0.02, 0.75, 0.12, 0.15], facecolor='#111111')
-        self.radio = RadioButtons(ax_mode, ('Algebraic', 'Finite', 'Transcendental', 'Complexity'), activecolor='#00d4ff')
+        ax_mode = self.fig.add_axes([0.02, 0.72, 0.12, 0.2], facecolor='#111111')
+        self.radio = RadioButtons(ax_mode, ('Algebraic', 'Finite', 'Transcendental', 'Complexity', 'Dominant', 'Mean Coeff'), activecolor='#00d4ff')
         for label in self.radio.labels:
             label.set_color('white')
         self.radio.on_clicked(self.change_mode)
+
+        # Coordinate System Selection
+        self.ax_coord = self.fig.add_axes([0.02, 0.6, 0.12, 0.1], facecolor='#111111')
+        self.coord_radio = RadioButtons(self.ax_coord, ('Standard', 'Log-Polar', 'Reciprocal'), activecolor='#00ff9d')
+        for label in self.coord_radio.labels:
+            label.set_color('white')
+        self.coord_radio.on_clicked(self.change_coord)
         
         # Base Selection (for Transcendental mode)
-        self.ax_base = self.fig.add_axes([0.02, 0.6, 0.1, 0.15], facecolor='#111111')
+        self.ax_base = self.fig.add_axes([0.02, 0.4, 0.1, 0.15], facecolor='#111111')
         self.base_radio = RadioButtons(self.ax_base, list(self.bases.keys()), activecolor='#ff007f')
         for label in self.base_radio.labels:
             label.set_color('white')
         self.base_radio.on_clicked(self.change_base)
         self.ax_base.set_visible(False)
+
+        # Colormap Selection
+        self.ax_cmap = self.fig.add_axes([0.02, 0.25, 0.1, 0.12], facecolor='#111111')
+        self.cmap_radio = RadioButtons(self.ax_cmap, ('magma', 'viridis', 'twilight', 'ocean'), activecolor='#ffcc00')
+        for label in self.cmap_radio.labels:
+            label.set_color('white')
+        self.cmap_radio.on_clicked(self.change_cmap)
+        self.ax_cmap.set_visible(False)
         
         # Sliders
         self.ax_s1 = self.fig.add_axes([0.25, 0.12, 0.5, 0.02], facecolor='#222222')
@@ -82,9 +99,19 @@ class TranscendentalFieldExplorer:
 
     def change_mode(self, label):
         self.mode = label
-        is_trans = self.mode in ['Transcendental', 'Complexity']
+        is_trans = self.mode in ['Transcendental', 'Complexity', 'Dominant', 'Mean Coeff']
         self.ax_base.set_visible(is_trans)
         self.ax_text.set_visible(is_trans)
+        self.ax_coord.set_visible(is_trans)
+        self.ax_cmap.set_visible(is_trans)
+
+    def change_coord(self, label):
+        self.coord_system = label
+        self.update(None)
+
+    def change_cmap(self, label):
+        self.current_cmap = label
+        self.update(None)
         if self.mode == 'Algebraic':
             self.s1.label.set_text('Max Degree ')
             self.s2.label.set_text('Max Coeff ')
@@ -142,7 +169,7 @@ class TranscendentalFieldExplorer:
             results.append(p / q if q != 0 else p)
         return results
 
-    def draw_transcendental(self, deg, coeff_range, sigma, show_complexity=False, zoom=1.0, num_samples=300000):
+    def draw_transcendental(self, deg, coeff_range, sigma, mode='Transcendental', zoom=1.0, num_samples=300000):
         """
         Visualizes the 'interference' of a transcendental base using vectorized computation.
         We generate elements of the form: sum_{i=0}^{deg} c_i * base^i
@@ -152,37 +179,76 @@ class TranscendentalFieldExplorer:
 
         # Vectorized coefficient generation
         coeffs = np.random.randint(-coeff_range, coeff_range + 1, (num_samples, deg + 1))
+        # Ensure at least some non-zero to avoid 0/0
+        coeffs[np.all(coeffs == 0, axis=1), 0] = 1
+
         powers = base ** np.arange(deg + 1)
         vals = coeffs @ powers
 
-        limit = np.percentile(np.abs(vals), 95) / zoom
+        # Apply Coordinate Mapping
+        if self.coord_system == 'Log-Polar':
+            # r' = log(r), theta' = theta
+            r = np.abs(vals)
+            theta = np.angle(vals)
+            # Avoid log(0)
+            r[r < 1e-9] = 1e-9
+            mapped_vals = np.log(r) + 1j * theta
+        elif self.coord_system == 'Reciprocal':
+            # w = 1/z
+            mask = np.abs(vals) > 1e-9
+            mapped_vals = np.zeros_like(vals)
+            mapped_vals[mask] = 1.0 / vals[mask]
+        else:
+            mapped_vals = vals
+
+        limit = np.percentile(np.abs(mapped_vals), 95) / zoom
         x_range = (-limit, limit)
         y_range = (-limit, limit)
         
         title_base = self.current_base_name.replace('_', '\\_')
         
-        if show_complexity:
-            complexity = np.sum(np.abs(coeffs), axis=1)
+        if mode != 'Transcendental':
             # Map vals to pixel coords
-            ix = ((vals.real - x_range[0]) / (x_range[1] - x_range[0]) * (res - 1)).astype(int)
-            iy = ((vals.imag - y_range[0]) / (y_range[1] - y_range[0]) * (res - 1)).astype(int)
+            ix = ((mapped_vals.real - x_range[0]) / (x_range[1] - x_range[0]) * (res - 1)).astype(int)
+            iy = ((mapped_vals.imag - y_range[0]) / (y_range[1] - y_range[0]) * (res - 1)).astype(int)
             mask = (ix >= 0) & (ix < res) & (iy >= 0) & (iy < res)
 
-            # Efficiently find min complexity per pixel
-            Z_comp = np.full((res, res), np.inf)
-            np.minimum.at(Z_comp, (iy[mask], ix[mask]), complexity[mask])
-            Z_comp[np.isinf(Z_comp)] = np.nan
+            cmap = self.current_cmap
+            if mode == 'Complexity':
+                metric = np.sum(np.abs(coeffs), axis=1)
+                label = 'Min L1 Coefficient Complexity'
+                agg_func = np.minimum.at
+                init_val = np.inf
+            elif mode == 'Dominant':
+                terms = np.abs(coeffs * powers)
+                metric = np.argmax(terms, axis=1)
+                label = 'Dominant Power Index'
+                agg_func = np.maximum.at
+                init_val = -1.0
+            elif mode == 'Mean Coeff':
+                metric = np.mean(np.abs(coeffs), axis=1)
+                label = 'Mean Coefficient Magnitude'
+                agg_func = np.maximum.at
+                init_val = 0.0
 
-            im = self.ax.imshow(Z_comp, extent=[x_range[0], x_range[1], y_range[0], y_range[1]],
-                                origin='lower', cmap='viridis_r')
+            Z_metric = np.full((res, res), init_val)
+            agg_func(Z_metric, (iy[mask], ix[mask]), metric[mask].astype(float))
+
+            if mode == 'Complexity':
+                Z_metric[np.isinf(Z_metric)] = np.nan
+            else:
+                Z_metric[Z_metric == init_val] = np.nan
+
+            im = self.ax.imshow(Z_metric, extent=[x_range[0], x_range[1], y_range[0], y_range[1]],
+                                origin='lower', cmap=cmap)
             if self.colorbar:
                 self.colorbar.remove()
-            self.colorbar = self.fig.colorbar(im, ax=self.ax, label='Min L1 Coefficient Complexity')
+            self.colorbar = self.fig.colorbar(im, ax=self.ax, label=label)
             self.colorbar.ax.yaxis.label.set_color('white')
             self.colorbar.ax.tick_params(colors='white')
-            
-            self.ax.set_title(rf"Transcendental Complexity: $\mathbb{{Q}}({title_base})$" + "\n" +
-                              rf"Simplest representation for each neighborhood",
+
+            self.ax.set_title(rf"Transcendental Analysis: $\mathbb{{Q}}({title_base})$" + "\n" +
+                              f"{label} across the extension",
                               color='white', fontsize=14)
         else:
             if self.colorbar:
@@ -193,7 +259,7 @@ class TranscendentalFieldExplorer:
                                                range=[[x_range[0], x_range[1]], [y_range[0], y_range[1]]])
             Z_blur = gaussian_filter(H.T, sigma=sigma)
             self.ax.imshow(Z_blur, extent=[x_range[0], x_range[1], y_range[0], y_range[1]],
-                            origin='lower', cmap='plasma', norm=LogNorm(vmin=1.0))
+                            origin='lower', cmap=self.current_cmap, norm=LogNorm(vmin=1.0))
             self.ax.set_title(rf"Transcendental Field Interference: $\mathbb{{Q}}({title_base})$" + "\n" +
                               rf"Density of elements $\sum_{{i=0}}^{{{deg}}} c_i \cdot {title_base}^i$",
                               color='white', fontsize=14)
@@ -256,10 +322,8 @@ class TranscendentalFieldExplorer:
             self.draw_algebraic(v1, v2, v3)
         elif self.mode == 'Finite':
             self.draw_finite(v1, v2)
-        elif self.mode == 'Transcendental':
-            self.draw_transcendental(v1, v2, v3, show_complexity=False, zoom=v4, num_samples=v5)
-        else: # Complexity
-            self.draw_transcendental(v1, v2, v3, show_complexity=True, zoom=v4, num_samples=v5)
+        else:
+            self.draw_transcendental(v1, v2, v3, mode=self.mode, zoom=v4, num_samples=v5)
             
         self.ax.tick_params(colors='white')
         if self.interactive:

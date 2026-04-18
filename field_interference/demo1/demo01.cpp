@@ -136,6 +136,21 @@ public:
 
   void draw_logic() {
     int total = pow(p, n);
+
+    // Update irreducible polynomial based on n
+    if (n == 1)
+      g = {0, 1}; // x
+    else if (n == 2)
+      g = {1, 0, 1}; // x^2 + 1 (or x^2 + x + 1 for some p)
+    else if (n == 3)
+      g = {1, 0, 0, 1}; // x^3 + 1
+    else if (n == 4)
+      g = {1, 0, 0, 0, 1}; // x^4 + 1
+
+    // For some primes, x^n+1 might be reducible.
+    // In a real Galois tool we'd use a table of primitives.
+    // For this demo, we use it as a formal quotient basis.
+
     vector<GFElement> elements;
     for (int i = 0; i < total; ++i) {
       GFElement e(n);

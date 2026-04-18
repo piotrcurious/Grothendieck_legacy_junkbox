@@ -57,11 +57,14 @@ Visualizes the resonance of $\mathbb{Q}(\alpha)$ for transcendental $\alpha$ (li
 ![Transcendental Explorer](docs/images/transcendental_explorer.png)
 
 - **Vectorized Engine**: High-performance NumPy implementation capable of simulating millions of elements in real-time.
+- **Coordinate Mappings**: Supports Standard, Log-Polar, and Reciprocal mappings to expose different symmetries of the extension.
 - **Custom Bases**: Supports arbitrary complex bases and mathematical expressions (e.g., `exp(1j*pi/4)`).
-- **Complexity Analysis**: Visualizes the "simplest" representation of field elements using L1-coefficient complexity heatmaps.
+- **Advanced Metrics**: Visualizes "Min Complexity", "Dominant Power Index", and "Mean Coefficient Magnitude" across the complex plane.
 - **Rational Convergents**: Overlays continued fraction convergents to show the rational skeleton of the extension.
 
 ![Transcendental Complexity](docs/images/transcendental_complexity.png)
+![Transcendental Log-Polar](docs/images/transcendental_logpolar.png)
+![Transcendental Dominant](docs/images/transcendental_dominant.png)
 
 ---
 
