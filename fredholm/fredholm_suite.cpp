@@ -88,26 +88,37 @@ public:
     }
 };
 
-void drawGraph(SDL_Renderer* ren, int x, int y, int w, int h, const std::vector<double>& data, SDL_Color color, double minV, double maxV, TextureCache& cache, bool drawAxes = true) {
+void drawGraph(SDL_Renderer* ren, int x, int y, int w, int h, const std::vector<double>& data, SDL_Color color, double minV, double maxV, TextureCache& cache, bool drawAxes = true, double zoom = 1.0, double panY = 0.0) {
     if (data.size() < 2) return;
+    double midV = (minV + maxV) / 2.0;
+    auto transform = [&](double val) {
+        double normalized = (val - (midV + panY)) / ((maxV - minV) / zoom);
+        return y + h/2 - (int)(normalized * h/2);
+    };
     if (drawAxes) {
-        SDL_SetRenderDrawColor(ren, 60, 60, 65, 255); SDL_RenderDrawLine(ren, x, y + h/2, x + w, y + h/2); SDL_RenderDrawLine(ren, x, y, x, y + h);
-        SDL_SetRenderDrawColor(ren, 40, 40, 45, 255); for(int i=1; i<4; i++) { int gy = y + (i * h) / 4; SDL_RenderDrawLine(ren, x, gy, x + w, gy); }
+        int y0 = transform(0.0);
+        SDL_SetRenderDrawColor(ren, 60, 60, 65, 255);
+        if (y0 >= y && y0 <= y+h) SDL_RenderDrawLine(ren, x, y0, x + w, y0);
+        SDL_RenderDrawLine(ren, x, y, x, y + h);
     }
     SDL_SetRenderDrawColor(ren, color.r, color.g, color.b, color.a);
     for (size_t i = 0; i < data.size() - 1; ++i) {
         int x1 = x + (i * w) / (data.size() - 1), x2 = x + ((i + 1) * w) / (data.size() - 1);
-        int y1 = y + h - (int)((data[i] - minV) / (maxV - minV) * h), y2 = y + h - (int)((data[i+1] - minV) / (maxV - minV) * h);
+        int y1 = transform(data[i]), y2 = transform(data[i+1]);
+        if ((y1 < y && y2 < y) || (y1 > y+h && y2 > y+h)) continue;
         y1 = std::clamp(y1, y, y + h); y2 = std::clamp(y2, y, y + h); SDL_RenderDrawLine(ren, x1, y1, x2, y2);
     }
 }
 
 class FredholmDemo {
 public:
+    double zoom = 1.0;
+    double panY = 0.0;
     virtual ~FredholmDemo() {}
     virtual void setupSliders(UI& ui, float& sigma, float& lambda, float& freq, float& jitter, float& compLambda, float& potential, float& alpha, float& index, float& kType, float& nIters) = 0;
     virtual void render(SDL_Renderer* ren, TextureCache& cache, int gx, int gy, int gw, int gh, float sigma, float lambda, float freq, float jitter, float compLambda, float potential, float alpha, float index, float kType, float nIters, std::chrono::steady_clock::time_point start, AdaptiveCompensator<double>& comp) = 0;
     virtual std::string getEquation() const = 0;
+    virtual std::string getTheory() const { return ""; }
     void drawHeatmap(SDL_Renderer* ren, int kx, int ky, int kw, int kh, std::function<double(double, double)> K) {
         for (int i = 0; i < 40; ++i) for (int j = 0; j < 40; ++j) {
             double val = K((double)i/40.0, (double)j/40.0);
@@ -128,12 +139,14 @@ public:
         auto f = [&](double x) { return std::sin(freq * M_PI * x); };
         auto phi_nodes = Solver::solveFredholm(0, 1, lambda, K, f, 16);
         std::vector<double> f_v, phi_v; for (int i = 0; i <= 100; ++i) { double x = i/100.0; f_v.push_back(f(x)); phi_v.push_back(phi_nodes.empty() ? 0 : Solver::interpolateFredholm(x, 0, 1, lambda, K, f, phi_nodes, 16)); }
-        drawGraph(ren, gx, gy, gw, gh, f_v, {255, 100, 100, 255}, -2, 2, cache); drawGraph(ren, gx, gy, gw, gh, phi_v, {100, 255, 100, 255}, -2, 2, cache);
+        drawGraph(ren, gx, gy, gw, gh, f_v, {255, 100, 100, 255}, -2, 2, cache, true, zoom, panY);
+        drawGraph(ren, gx, gy, gw, gh, phi_v, {100, 255, 100, 255}, -2, 2, cache, false, zoom, panY);
         cache.renderText("Theory: Fredholm Equation of the Second Kind", {200,200,200,255}, 450, 420);
         cache.renderText("Red: Source f(x), Green: Solution phi(x)", {200,200,200,255}, 450, 445);
         drawHeatmap(ren, 20, 450, 200, 200, K);
     }
     std::string getEquation() const override { return "phi(x) = f(x) + lambda * integral[ K(x,y) phi(y) dy ]"; }
+    std::string getTheory() const override { return "The 2nd kind equation is generally well-posed. The operator (I - lambda K) is invertible if lambda is not an eigenvalue."; }
 };
 
 class SpectralDemo : public FredholmDemo {
@@ -163,6 +176,7 @@ public:
         cache.renderText(ss.str(), {200,200,200,255}, 450, 445);
     }
     std::string getEquation() const override { return "integral[ K(x,y) phi(y) dy ] = mu * phi(x)"; }
+    std::string getTheory() const override { return "Spectral Analysis: Eigenvalues mu and eigenfunctions phi reveal the natural resonance modes of the integral operator."; }
 };
 
 class CompDemo : public FredholmDemo {
@@ -172,7 +186,7 @@ public:
     }
     void render(SDL_Renderer* ren, TextureCache& cache, int gx, int gy, int gw, int gh, float sigma, float lambda, float freq, float jitter, float compLambda, float potential, float alpha, float index, float kType, float nIters, std::chrono::steady_clock::time_point start, AdaptiveCompensator<double>& comp) override {
         auto now = std::chrono::steady_clock::now(); float t = std::chrono::duration<float>(now - start).count();
-        float raw = t * 1.0f, noisy = raw + ((rand() % 1000) / 1000.0f - 0.5f) * jitter, quantized = std::floor(noisy * 16.0f) / 16.0f;
+        float raw = std::fmod(t * 1.0f, 2.0f * M_PI), noisy = raw + ((rand() % 1000) / 1000.0f - 0.5f) * jitter, quantized = std::floor(noisy * 16.0f) / 16.0f;
         comp.setParams(0.1, compLambda); float corrected = comp.compensate(quantized);
         auto drawPtr = [&](int cx, int cy, float angle, const char* lbl) {
             int r = 80; SDL_SetRenderDrawColor(ren, 150, 150, 150, 255); for(int i=0; i<360; i++) SDL_RenderDrawPoint(ren, cx + r*cos(i*M_PI/180), cy + r*sin(i*M_PI/180));
@@ -182,6 +196,7 @@ public:
         drawPtr(550, 300, quantized, "Quantized"); drawPtr(850, 300, corrected, "Corrected");
     }
     std::string getEquation() const override { return "y_corr(t) = y_raw(t) - lambda * integral[ K(t-s) (y_corr(s) - y_raw(s)) ds ]"; }
+    std::string getTheory() const override { return "Self-correcting feedback loop: the error is fed back through an integral operator to smooth the signal."; }
 };
 
 class BVPDemo : public FredholmDemo {
@@ -195,9 +210,11 @@ public:
         auto F = [&](double x) { double sum = 0; int n = 32; Quadrature q = Quadrature::GaussLegendreN(n, 0, 1); for(int i=0; i<n; i++) sum += q.weights[i] * G(x, q.points[i]) * f(q.points[i]); return sum; };
         auto phi_nodes = Solver::solveFredholm(0, 1, -1.0, [&](double x, double y){return G(x,y)*V(y);}, F, 16);
         std::vector<double> u_v, f_s; for(int i=0; i<=100; i++){ double x = i/100.0; f_s.push_back(f(x)*0.1); u_v.push_back(phi_nodes.empty() ? 0 : Solver::interpolateFredholm(x, 0, 1, -1.0, [&](double x, double y){return G(x,y)*V(y);}, F, phi_nodes, 16)); }
-        drawGraph(ren, gx, gy, gw, gh, f_s, {255, 100, 100, 255}, -0.5, 0.5, cache); drawGraph(ren, gx, gy, gw, gh, u_v, {100, 255, 100, 255}, -0.5, 0.5, cache);
+        drawGraph(ren, gx, gy, gw, gh, f_s, {255, 100, 100, 255}, -0.5, 0.5, cache, true, zoom, panY);
+        drawGraph(ren, gx, gy, gw, gh, u_v, {100, 255, 100, 255}, -0.5, 0.5, cache, false, zoom, panY);
     }
     std::string getEquation() const override { return "u''(x) - V(x)u(x) = f(x)  =>  u(x) = integral[ G(x,y) (f(y) - V(y)u(y)) dy ]"; }
+    std::string getTheory() const override { return "Converting a differential BVP to an integral equation via Green's function. Integral form is often more numerically stable."; }
 };
 
 class DeblurDemo : public FredholmDemo {
@@ -216,6 +233,7 @@ public:
         drawGraph(ren, gx, gy, gw, gh, o_v, {80, 80, 80, 255}, -0.2, 1.2, cache); drawGraph(ren, gx, gy, gw, gh, b_v, {255, 100, 100, 255}, -0.2, 1.2, cache); drawGraph(ren, gx, gy, gw, gh, d_v, {100, 255, 100, 255}, -0.2, 1.2, cache);
     }
     std::string getEquation() const override { return "min ||K*phi - f||^2 + alpha*||phi||^2  =>  (K*K + alpha*I)phi = K*f"; }
+    std::string getTheory() const override { return "Tikhonov Regularization: Adding a penalty term to stabilize the inversion of a smoothing (blurring) kernel."; }
 };
 
 class VolterraDemo : public FredholmDemo {
@@ -231,6 +249,7 @@ public:
         drawGraph(ren, gx, gy, gw, gh, f_v, {255, 100, 100, 255}, -10, 10, cache); drawGraph(ren, gx, gy, gw, gh, phi, {100, 255, 100, 255}, -10, 10, cache);
     }
     std::string getEquation() const override { return "phi(x) = f(x) + lambda * integral[0 to x] K(x,y) phi(y) dy"; }
+    std::string getTheory() const override { return "Volterra equations are causal: the solution at x depends only on values for y <= x. Always well-posed."; }
 };
 
 class AltDemo : public FredholmDemo {
@@ -248,6 +267,7 @@ public:
         drawGraph(ren, gx, gy, gw, gh, phi_v, {100, 255, 100, 255}, -graphRange, graphRange, cache);
     }
     std::string getEquation() const override { return "Fredholm Alternative: If lambda is an eigenvalue, (I - lambda K)phi = f may have no solution."; }
+    std::string getTheory() const override { return "When lambda matches an internal resonance (eigenvalue), the system becomes singular, leading to divergence."; }
 };
 
 class NeumannDemo : public FredholmDemo {
@@ -265,6 +285,7 @@ public:
         drawGraph(ren, gx, gy, gw, gh, phi_v, {255, 255, 100, 255}, -5, 5, cache);
     }
     std::string getEquation() const override { return "phi_{n+1} = f + lambda K phi_n  =>  phi = (I + lambda K + lambda^2 K^2 + ...)f"; }
+    std::string getTheory() const override { return "Neumann Series: Iterative solution method. Converges if the spectral radius |lambda|*rho(K) < 1."; }
 };
 
 class GalerkinDemo : public FredholmDemo {
@@ -285,6 +306,7 @@ public:
         drawGraph(ren, gx, gy, gw, gh, phi_v, {100, 255, 100, 255}, -2, 2, cache);
     }
     std::string getEquation() const override { return "phi(x) approx sum c_i P_i(x); <P_i, phi - lambda K phi - f> = 0"; }
+    std::string getTheory() const override { return "Galerkin Method: Projecting the infinite-dimensional problem onto a finite polynomial basis (Legendre)."; }
 };
 
 class KindsDemo : public FredholmDemo {
@@ -324,6 +346,7 @@ public:
         cache.renderText("Singular Value Decay (Log Scale)", {200,200,200,255}, sx, sy + ss + 10);
     }
     std::string getEquation() const override { return "First Kind: K*phi = f (Ill-posed). Tikhonov: (K*K + alpha*I)phi = K*f"; }
+    std::string getTheory() const override { return "First kind equations are ill-posed because integral kernels are compact operators with singular values decaying to zero."; }
 };
 
 int main() {
@@ -362,9 +385,25 @@ int main() {
 
     bool quit = false; SDL_Event e; Fredholm::AdaptiveCompensator<double> compensator; auto startTime = std::chrono::steady_clock::now();
     while (!quit) {
-        while (SDL_PollEvent(&e)) { if (e.type == SDL_QUIT) quit = true; ui.handleEvent(e); }
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_QUIT) quit = true;
+            ui.handleEvent(e);
+            if (e.type == SDL_MOUSEWHEEL) {
+                if (demos.count(ui.currentMode)) {
+                    if (e.wheel.y > 0) demos[ui.currentMode]->zoom *= 1.1;
+                    else demos[ui.currentMode]->zoom /= 1.1;
+                }
+            }
+            if (e.type == SDL_MOUSEMOTION && (e.motion.state & SDL_BUTTON_RMASK)) {
+                if (demos.count(ui.currentMode)) {
+                    demos[ui.currentMode]->panY += e.motion.yrel * 0.01 / demos[ui.currentMode]->zoom;
+                }
+            }
+        }
+
         SDL_SetRenderDrawColor(renderer, 20, 20, 25, 255); SDL_RenderClear(renderer);
         ui.sliders.clear();
+
         if(demos.count(ui.currentMode)) {
             demos[ui.currentMode]->setupSliders(ui, sigma, lambda, freq, jitter, compL, pot, alpha, eigenIdx, kType, nIters);
             int gx = 450, gy = 100, gw = 700, gh = 300; SDL_SetRenderDrawColor(renderer, 35, 35, 40, 255); SDL_Rect gr = {gx, gy, gw, gh}; SDL_RenderFillRect(renderer, &gr);
@@ -388,15 +427,22 @@ int main() {
                 std::stringstream ss; ss << std::fixed << std::setprecision(3) << "(" << vx << ", " << vy << ")";
                 cache.renderText(ss.str(), {255, 255, 255, 255}, mx + 10, my - 20);
             }
-            // Tooltip for Equation
+            // Tooltip for Equation & Theory
             if (my >= 420 && my <= 480 && mx >= 450 && mx <= 950) {
                 std::string eq = demos[ui.currentMode]->getEquation();
-                int w, h; TTF_SizeText(font, eq.c_str(), &w, &h);
-                int tx = mx + 20; if (tx + w > SCREEN_WIDTH) tx = SCREEN_WIDTH - w - 10;
+                std::string theory = demos[ui.currentMode]->getTheory();
+                int w1, h1, w2, h2;
+                TTF_SizeText(font, eq.c_str(), &w1, &h1);
+                TTF_SizeText(font, theory.c_str(), &w2, &h2);
+                int maxW = std::max(w1, w2);
+                int totalH = h1 + (theory.empty() ? 0 : h2 + 10);
+
+                int tx = mx + 20; if (tx + maxW > SCREEN_WIDTH) tx = SCREEN_WIDTH - maxW - 10;
                 SDL_SetRenderDrawColor(renderer, 30, 30, 30, 240);
-                SDL_Rect bg = {tx-5, my+15, w+10, h+10}; SDL_RenderFillRect(renderer, &bg);
+                SDL_Rect bg = {tx-5, my+15, maxW+10, totalH+10}; SDL_RenderFillRect(renderer, &bg);
                 SDL_SetRenderDrawColor(renderer, 200, 200, 100, 255); SDL_RenderDrawRect(renderer, &bg);
                 cache.renderText(eq, {255, 255, 100, 255}, tx, my + 20);
+                if (!theory.empty()) cache.renderText(theory, {150, 255, 150, 255}, tx, my + 20 + h1 + 5);
             }
         }
         ui.draw(renderer); SDL_RenderPresent(renderer); SDL_Delay(10);
