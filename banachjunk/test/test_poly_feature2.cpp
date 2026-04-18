@@ -23,6 +23,10 @@ void test_poly_feature2() {
                   << ", Type: " << f.type
                   << ", Degree: " << f.polynomialDegree
                   << ", Confidence: " << f.confidence << std::endl;
+
+        // Assertions for linear segment
+        assert(f.polynomialDegree <= 1);
+        assert(f.type == "linear");
     }
 
     std::cout << "poly_feature2 test finished." << std::endl;

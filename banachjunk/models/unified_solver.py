@@ -134,6 +134,28 @@ class UnifiedAnnihilatorSolver:
         sol = self.solve_dynamics(H, psi0, (0, t_end), t_eval)
         return sol
 
+    def compute_parameter_sensitivity(self, empirical_data, optimal_params, epsilon=1e-5):
+        """
+        Computes the sensitivity (gradient) of the loss function
+        with respect to the model parameters.
+        """
+        def loss_function(params):
+            prediction = params[0] * np.exp(-params[1] * np.arange(len(empirical_data)))
+            return np.sum((empirical_data - prediction)**2)
+
+        base_loss = loss_function(optimal_params)
+        sensitivities = []
+
+        for i in range(len(optimal_params)):
+            perturbed_params = np.array(optimal_params, copy=True)
+            perturbed_params[i] += epsilon
+            perturbed_loss = loss_function(perturbed_params)
+            # Finite difference approximation of gradient
+            grad = (perturbed_loss - base_loss) / epsilon
+            sensitivities.append(grad)
+
+        return np.array(sensitivities)
+
 def main():
     solver = UnifiedAnnihilatorSolver(dim=2)
 
@@ -169,6 +191,11 @@ def main():
     # P_excited = |psi_1|^2
     p_excited = np.abs(rabi_sol.y[1, :])**2
     logging.info(f"Max excited state population: {np.max(p_excited)}")
+
+    logging.info("7. Computing Parameter Sensitivity")
+    # Using the previously estimated parameters from mock_data (res.x)
+    sens = solver.compute_parameter_sensitivity(mock_data, res.x)
+    logging.info(f"Sensitivity Gradient: {sens}")
 
 if __name__ == "__main__":
     main()

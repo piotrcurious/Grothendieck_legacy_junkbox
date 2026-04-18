@@ -115,6 +115,8 @@ private:
         std::vector<T> kurtosis;
         std::vector<T> entropy;
         std::vector<T> totalVariation;
+        std::vector<T> confidenceIntervalLower;
+        std::vector<T> confidenceIntervalUpper;
     };
 
     // Compute Comprehensive Statistical Metrics using Lebesgue-style measure weighting
@@ -127,6 +129,8 @@ private:
         metrics.kurtosis.resize(Dimension, 0);
         metrics.entropy.resize(Dimension, 0);
         metrics.totalVariation.resize(Dimension, 0);
+        metrics.confidenceIntervalLower.resize(Dimension, 0);
+        metrics.confidenceIntervalUpper.resize(Dimension, 0);
 
         if (statisticalData.empty() || timestamps.size() < 2) return metrics;
         T totalMeasure = timestamps.back() - timestamps.front();
@@ -164,10 +168,10 @@ private:
             metrics.stdDev[dim] = sdev;
 
             // Skewness
-            metrics.skewness[dim] = (abs(sdev) > 1e-9) ? (m3 / dimData.size()) / std::pow(sdev, 3) : 0;
+            metrics.skewness[dim] = (abs(sdev) > 1e-9) ? (m3Integral / totalMeasure) / std::pow(sdev, 3) : 0;
 
             // Kurtosis
-            metrics.kurtosis[dim] = (abs(variance) > 1e-9) ? (m4 / dimData.size()) / (variance * variance) - 3 : 0;
+            metrics.kurtosis[dim] = (abs(variance) > 1e-9) ? (m4Integral / totalMeasure) / (variance * variance) - 3 : 0;
 
             // Entropy (Shannon Information Entropy) using a simple histogram
             T entropy = 0;
@@ -198,6 +202,13 @@ private:
                 tv += std::abs(dimData[i] - dimData[i-1]);
             }
             metrics.totalVariation[dim] = tv;
+
+            // 95% Confidence Interval for the mean (assuming normality for proxy)
+            // CI = mean +/- 1.96 * (sdev / sqrt(N_eff))
+            // N_eff is approximated here by actual sample count
+            T marginOfError = 1.96 * (sdev / std::sqrt(static_cast<T>(dimData.size())));
+            metrics.confidenceIntervalLower[dim] = mean - marginOfError;
+            metrics.confidenceIntervalUpper[dim] = mean + marginOfError;
         }
 
         return metrics;
@@ -276,6 +287,9 @@ public:
             Serial.printf("  Kurtosis: %f\n", static_cast<float>(metrics.kurtosis[dim]));
             Serial.printf("  Entropy: %f\n", static_cast<float>(metrics.entropy[dim]));
             Serial.printf("  Total Variation: %f\n", static_cast<float>(metrics.totalVariation[dim]));
+            Serial.printf("  95%% CI Mean: [%f, %f]\n",
+                static_cast<float>(metrics.confidenceIntervalLower[dim]),
+                static_cast<float>(metrics.confidenceIntervalUpper[dim]));
         }
 
         Serial.println("\nCovariance Matrix:");

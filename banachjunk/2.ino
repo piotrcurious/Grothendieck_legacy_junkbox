@@ -79,8 +79,8 @@ private:
         }
     };
 
-    // Compute Generalized Polynomial Fitting using Lebesgue-weighted Least Squares
-    GeneralizedPolynomial fitGeneralizedPolynomial(int order) {
+    // Compute Generalized Polynomial Fitting using Lebesgue-weighted Ridge Regression
+    GeneralizedPolynomial fitGeneralizedPolynomial(int order, double lambda = 1e-4) {
         int n = dataBuffer.size();
         int m = order + 1;
         std::vector<std::vector<double>> matrix(m, std::vector<double>(m, 0.0));
@@ -110,6 +110,11 @@ private:
                 }
                 rhs[r] += dt * y * x_powers[r];
             }
+        }
+
+        // Apply Tikhonov (Ridge) regularization to the diagonal
+        for (int i = 0; i < m; ++i) {
+            matrix[i][i] += lambda;
         }
 
         // Solve using Gaussian elimination
@@ -161,18 +166,22 @@ private:
         return maxNorm;
     }
 
-    // Spectral Analysis using Galois Field Transformations
+    // Spectral Analysis using Galois Field Transformations (Lebesgue-normalized)
     float computeSpectralCharacteristic() {
-        if (dataBuffer.size() < 2) return 0;
+        if (dataBuffer.size() < 2 || timestamps.size() < 2) return 0;
 
-        // Compute spectral characteristics as the mean absolute difference in the field
-        // This avoids product-induced saturation/zeroing
-        int totalDiff = 0;
+        // Compute spectral characteristics as time-normalized total variation in the field
+        float totalWeightedDiff = 0;
+        float totalDt = timestamps.back() - timestamps.front();
+        if (totalDt < 1e-9) return 0;
+
         for (size_t i = 1; i < dataBuffer.size(); ++i) {
-            totalDiff += abs(dataBuffer[i].getValue() - dataBuffer[i-1].getValue());
+            float dt = timestamps[i] - timestamps[i-1];
+            if (dt <= 0) continue;
+            totalWeightedDiff += abs(dataBuffer[i].getValue() - dataBuffer[i-1].getValue()) * dt;
         }
 
-        return static_cast<float>(totalDiff) / (dataBuffer.size() - 1);
+        return totalWeightedDiff / totalDt;
     }
 
 public:
@@ -199,8 +208,8 @@ public:
     void performAnalysis() {
         if (dataBuffer.size() < 4) return;
 
-        // Polynomial Fitting
-        GeneralizedPolynomial poly3rd = fitGeneralizedPolynomial(3);
+        // Polynomial Fitting (using Ridge Regression for stability)
+        GeneralizedPolynomial poly3rd = fitGeneralizedPolynomial(3, 1e-4);
         GeneralizedPolynomial derivative = poly3rd.derivative();
 
         // Banach Space Characteristics

@@ -22,6 +22,9 @@ void test_poly_feat_opt1() {
         std::cout << "Time: " << f.timestamp
                   << ", Type: " << Feature::getTypeString(f.typeIndex)
                   << ", Complexity: " << f.algebraicComplexity << std::endl;
+
+        // Assertions for linear segment (type index 0 is linear)
+        assert(f.typeIndex == 0);
     }
 
     std::cout << "poly_feat_opt1 test finished." << std::endl;
