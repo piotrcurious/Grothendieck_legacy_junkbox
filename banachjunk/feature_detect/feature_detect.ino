@@ -3,6 +3,8 @@
 // Uses functional analysis concepts to detect features in time-series data
 
 #include <vector>
+#include <cmath>
+#include <algorithm>
 #include "../math_utils.h"
 
 struct DataPoint {
@@ -75,7 +77,7 @@ public:
   // Detect features in a window of signal data
   int detectFeatures(const DataPoint* signal, int signalSize, Feature* features) {
     int featureCount = 0;
-    float windowValues[WINDOW_SIZE];
+    std::vector<float> windowValues(WINDOW_SIZE);
     
     // Slide window through signal
     for (int i = 0; i <= signalSize - WINDOW_SIZE && featureCount < MAX_FEATURES; i++) {
@@ -87,7 +89,7 @@ public:
       // Calculate different norms using Lebesgue weighting
       float l1Norm = calculateL1Norm(signal, i, WINDOW_SIZE);
       float l2Norm = calculateL2Norm(signal, i, WINDOW_SIZE);
-      float lInfNorm = calculateLInfNorm(windowValues, WINDOW_SIZE);
+      float lInfNorm = calculateLInfNorm(windowValues.data(), WINDOW_SIZE);
       
       // Complexity gating: ignore high-entropy noise
       float flatness = calculateFlatness(signal, i, WINDOW_SIZE);

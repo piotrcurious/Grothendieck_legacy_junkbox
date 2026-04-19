@@ -192,6 +192,26 @@ public:
         }
         return (den1 * den2 > 1e-9) ? (float)(num / std::sqrt(den1 * den2)) : 0.0f;
     }
+
+    // Lebesgue-weighted Autocorrelation for arbitrary lags
+    template<typename T>
+    static float calculateAutoCorrelation(const std::vector<T>& values, const std::vector<T>& timestamps, int lag) {
+        if (values.size() <= (size_t)lag || timestamps.size() <= (size_t)lag) return 0.0f;
+        double mean = calculateMean(values, timestamps);
+        double var = calculateVariance(values, timestamps);
+        if (var < 1e-9) return 0.0f;
+
+        double integral = 0;
+        double totalDt = 0;
+        for (size_t i = 0; i < values.size() - lag - 1; ++i) {
+            double dt = timestamps[i+1] - timestamps[i];
+            double d1 = (values[i] - mean) * (values[i + lag] - mean);
+            double d2 = (values[i+1] - mean) * (values[i + lag + 1] - mean);
+            integral += (d1 + d2) / 2.0 * dt;
+            totalDt += dt;
+        }
+        return (totalDt > 1e-9) ? (float)(integral / totalDt / var) : 0.0f;
+    }
 };
 
 // Legendre Polynomials (shifted to [t_min, t_max])

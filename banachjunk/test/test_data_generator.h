@@ -152,6 +152,39 @@ public:
         }
         return signal;
     }
+
+    // Generates a signal with missing segments (gaps)
+    static std::vector<SignalPoint> generateGappedSignal(int n, float gap_prob, float gap_len_max) {
+        std::vector<SignalPoint> signal;
+        std::mt19937 gen(1234);
+        std::uniform_real_distribution<float> prob(0, 1.0f);
+        std::uniform_real_distribution<float> length(0.1f, gap_len_max);
+
+        float t = 0;
+        for (int i = 0; i < n; ++i) {
+            if (prob(gen) < gap_prob) {
+                t += length(gen); // Large jump in time (the gap)
+            } else {
+                t += 0.1f;
+            }
+            signal.push_back({t, std::sin(t)});
+        }
+        return signal;
+    }
+
+    // Generates a quantized signal (ADC simulator)
+    static std::vector<SignalPoint> generateQuantizedSignal(int n, float bits, float v_range) {
+        std::vector<SignalPoint> signal;
+        float levels = std::pow(2.0f, bits);
+        float lsb = v_range / levels;
+        for (int i = 0; i < n; ++i) {
+            float t = i * 0.1f;
+            float v = std::sin(t);
+            float v_quant = std::round(v / lsb) * lsb;
+            signal.push_back({t, v_quant});
+        }
+        return signal;
+    }
 };
 
 } // namespace test
