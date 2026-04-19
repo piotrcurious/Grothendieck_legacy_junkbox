@@ -70,3 +70,5 @@ g++ fredholm_suite.cpp -o fredholm_suite -lSDL2 -lSDL2_ttf -I .
 - **Right Click + Drag**: Pan vertically.
 - **Hover**: View 'Theory Cards' and precise $(x, y)$ coordinates.
 - **Sliders**: Real-time parameter tuning ($\lambda$, $\sigma$, $\alpha$).
+- **Compare Slider**: In Theory mode, toggle to compare Nystrom vs. Galerkin numerical solutions.
+- **Export Data**: Press **'E'** to export the current solution to `fredholm_export.csv`.

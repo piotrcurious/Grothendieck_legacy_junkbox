@@ -9,6 +9,7 @@
 #include <cmath>
 #include <chrono>
 #include <map>
+#include <fstream>
 
 using namespace Fredholm;
 
@@ -114,11 +115,18 @@ class FredholmDemo {
 public:
     double zoom = 1.0;
     double panY = 0.0;
+    std::vector<double> lastX, lastY;
     virtual ~FredholmDemo() {}
     virtual void setupSliders(UI& ui, float& sigma, float& lambda, float& freq, float& jitter, float& compLambda, float& potential, float& alpha, float& index, float& kType, float& nIters) = 0;
     virtual void render(SDL_Renderer* ren, TextureCache& cache, int gx, int gy, int gw, int gh, float sigma, float lambda, float freq, float jitter, float compLambda, float potential, float alpha, float index, float kType, float nIters, std::chrono::steady_clock::time_point start, AdaptiveCompensator<double>& comp) = 0;
     virtual std::string getEquation() const = 0;
     virtual std::string getTheory() const { return ""; }
+    void exportCSV(const std::string& filename) {
+        if (lastX.empty()) return;
+        std::ofstream f(filename); f << "x,phi\n";
+        for(size_t i=0; i<lastX.size(); i++) f << lastX[i] << "," << lastY[i] << "\n";
+        std::cout << "Exported to " << filename << std::endl;
+    }
     void drawHeatmap(SDL_Renderer* ren, int kx, int ky, int kw, int kh, std::function<double(double, double)> K) {
         for (int i = 0; i < 40; ++i) for (int j = 0; j < 40; ++j) {
             double val = K((double)i/40.0, (double)j/40.0);
@@ -132,17 +140,34 @@ public:
 class TheoryDemo : public FredholmDemo {
 public:
     void setupSliders(UI& ui, float& sigma, float& lambda, float& freq, float& jitter, float& compLambda, float& potential, float& alpha, float& index, float& kType, float& nIters) override {
-        ui.addSlider("Sigma", &sigma, 0.01f, 1.0f, 50, 120); ui.addSlider("Lambda", &lambda, -2.0f, 2.0f, 50, 190); ui.addSlider("Freq", &freq, 0.1f, 10.0f, 50, 260); ui.addSlider("Kernel", &kType, 0.0f, 1.0f, 50, 330);
+        ui.addSlider("Sigma", &sigma, 0.01f, 1.0f, 50, 120); ui.addSlider("Lambda", &lambda, -2.0f, 2.0f, 50, 190); ui.addSlider("Freq", &freq, 0.1f, 10.0f, 50, 260); ui.addSlider("Kernel", &kType, 0.0f, 4.99f, 50, 330);
+        ui.addSlider("Compare", &nIters, 0.0f, 1.0f, 50, 400);
     }
     void render(SDL_Renderer* ren, TextureCache& cache, int gx, int gy, int gw, int gh, float sigma, float lambda, float freq, float jitter, float compLambda, float potential, float alpha, float index, float kType, float nIters, std::chrono::steady_clock::time_point start, AdaptiveCompensator<double>& comp) override {
-        auto K = [&](double x, double y) { double d = x - y; return (kType < 0.5) ? std::exp(-d*d / (2*sigma*sigma)) : 1.0 / (1.0 + (d*d)/(sigma*sigma)); };
+        auto K = KernelFactory::create((int)kType, sigma);
         auto f = [&](double x) { return std::sin(freq * M_PI * x); };
+
         auto phi_nodes = Solver::solveFredholm(0, 1, lambda, K, f, 16);
-        std::vector<double> f_v, phi_v; for (int i = 0; i <= 100; ++i) { double x = i/100.0; f_v.push_back(f(x)); phi_v.push_back(phi_nodes.empty() ? 0 : Solver::interpolateFredholm(x, 0, 1, lambda, K, f, phi_nodes, 16)); }
+        std::vector<double> f_v, phi_v; lastX.clear(); lastY.clear();
+        for (int i = 0; i <= 100; ++i) {
+            double x = i/100.0; f_v.push_back(f(x));
+            double val = phi_nodes.empty() ? 0 : Solver::interpolateFredholm(x, 0, 1, lambda, K, f, phi_nodes, 16);
+            phi_v.push_back(val); lastX.push_back(x); lastY.push_back(val);
+        }
         drawGraph(ren, gx, gy, gw, gh, f_v, {255, 100, 100, 255}, -2, 2, cache, true, zoom, panY);
         drawGraph(ren, gx, gy, gw, gh, phi_v, {100, 255, 100, 255}, -2, 2, cache, false, zoom, panY);
+
+        if (nIters > 0.5f) {
+            auto coeffs = Solver::solveGalerkinOptimized(0, 1, lambda, K, f, 5);
+            std::vector<double> phi_g; for(int i=0; i<=100; i++) { double x = i/100.0, val = 0; for(int j=0; j<(int)coeffs.size(); j++) val += coeffs[j] * Solver::legendreP(j, 2.0*x - 1.0); phi_g.push_back(val); }
+            drawGraph(ren, gx, gy, gw, gh, phi_g, {100, 100, 255, 255}, -2, 2, cache, false, zoom, panY);
+            cache.renderText("Blue: Galerkin (Order 5)", {100,100,255,255}, 450, 495);
+        }
+
         cache.renderText("Theory: Fredholm Equation of the Second Kind", {200,200,200,255}, 450, 420);
-        cache.renderText("Red: Source f(x), Green: Solution phi(x)", {200,200,200,255}, 450, 445);
+        cache.renderText("Red: Source f(x), Green: Solution phi(x) (Nystrom)", {200,200,200,255}, 450, 445);
+        std::string kn = "Kernel: " + std::string(KernelFactory::getName((int)kType));
+        cache.renderText(kn, {150,200,255,255}, 450, 470);
         drawHeatmap(ren, 20, 450, 200, 200, K);
     }
     std::string getEquation() const override { return "phi(x) = f(x) + lambda * integral[ K(x,y) phi(y) dy ]"; }
@@ -415,6 +440,9 @@ int main(int argc, char* argv[]) {
                 if (demos.count(ui.currentMode)) {
                     demos[ui.currentMode]->panY += e.motion.yrel * 0.01 / demos[ui.currentMode]->zoom;
                 }
+            }
+            if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_e) {
+                if (demos.count(ui.currentMode)) demos[ui.currentMode]->exportCSV("fredholm_export.csv");
             }
         }
 

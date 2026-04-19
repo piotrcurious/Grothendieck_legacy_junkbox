@@ -232,6 +232,23 @@ public:
     }
 };
 
+struct KernelFactory {
+    static std::function<double(double, double)> create(int type, double sigma) {
+        switch(type) {
+            case 0: return [sigma](double x, double y) { double d = x - y; return std::exp(-d*d / (2*sigma*sigma)); }; // Gaussian
+            case 1: return [sigma](double x, double y) { double d = x - y; return 1.0 / (1.0 + (d*d)/(sigma*sigma)); }; // Lorentzian
+            case 2: return [](double x, double y) { return std::sin(M_PI * (x - y)); }; // Periodic
+            case 3: return [](double x, double y) { return x * y; }; // Rank-1
+            case 4: return [](double x, double y) { return std::abs(x - y); }; // V-shape
+            default: return [](double x, double y) { return 1.0; };
+        }
+    }
+    static const char* getName(int type) {
+        const char* names[] = {"Gaussian", "Lorentzian", "Sine", "XY (Rank-1)", "Absolute Diff"};
+        return (type >= 0 && type < 5) ? names[type] : "Constant";
+    }
+};
+
 template<typename T>
 class AdaptiveCompensator {
 private:
