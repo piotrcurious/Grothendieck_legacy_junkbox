@@ -125,6 +125,33 @@ public:
         }
         return signal;
     }
+
+    // Generates a Fractional Brownian Motion proxy using filtered noise
+    static std::vector<SignalPoint> generateHurstProxy(int n, float target_hurst) {
+        std::vector<SignalPoint> signal;
+        std::mt19937 gen(target_hurst * 100);
+        std::normal_distribution<float> dist(0, 1.0f);
+        float current_v = 0;
+        // Simple smoothing filter: higher alpha -> higher Hurst
+        float alpha = std::clamp(target_hurst, 0.01f, 0.99f);
+        for (int i = 0; i < n; ++i) {
+            float raw = dist(gen);
+            current_v = alpha * current_v + (1.0f - alpha) * raw;
+            signal.push_back({i * 0.1f, current_v});
+        }
+        return signal;
+    }
+
+    // Generates bursty Log-Normal spikes
+    static std::vector<SignalPoint> generateLogNormalSpikes(int n, float mu, float sigma) {
+        std::vector<SignalPoint> signal;
+        std::mt19937 gen(42);
+        std::lognormal_distribution<float> dist(mu, sigma);
+        for (int i = 0; i < n; ++i) {
+            signal.push_back({i * 0.1f, dist(gen)});
+        }
+        return signal;
+    }
 };
 
 } // namespace test

@@ -58,7 +58,18 @@ void test_exponent_stats() {
     std::cout << "\nAnalysis for Noisy Sine Wave (N=100):" << std::endl;
     statisticalSpace.performStatisticalAnalysis();
 
-    // Test entropy and covariance (if public)
+    // Hurst Recovery Test: Persistent vs Anti-persistent
+    std::cout << "\nVerifying Hurst Recovery (High Hurst Proxy):" << std::endl;
+    statisticalSpace.reset();
+    auto highHurst = banach::test::DataGenerator::generateHurstProxy(100, 0.9f);
+    for(const auto& p : highHurst) statisticalSpace.addStatisticalDataPoint({p.v, p.v, p.v}, p.t);
+    statisticalSpace.performStatisticalAnalysis();
+
+    std::cout << "\nVerifying Hurst Recovery (Low Hurst Proxy):" << std::endl;
+    statisticalSpace.reset();
+    auto lowHurst = banach::test::DataGenerator::generateHurstProxy(100, 0.1f);
+    for(const auto& p : lowHurst) statisticalSpace.addStatisticalDataPoint({p.v, p.v, p.v}, p.t);
+    statisticalSpace.performStatisticalAnalysis();
 
     std::cout << "exponent_stats test finished." << std::endl;
 }
