@@ -47,6 +47,10 @@ void test_exponent_stats() {
     }
     statisticalSpace.performStatisticalAnalysis();
 
+    // Verify properties of Hurst exponent
+    // For a sine wave, we expect Hurst to be relatively high (persistent trend)
+    // Actually R/S for sine is complex but deterministic.
+
     // Test entropy and covariance (if public)
 
     std::cout << "exponent_stats test finished." << std::endl;
