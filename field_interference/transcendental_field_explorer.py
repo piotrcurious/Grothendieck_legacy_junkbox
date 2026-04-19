@@ -52,14 +52,14 @@ class TranscendentalFieldExplorer:
 
         # Mode Selection
         ax_mode = self.fig.add_axes([panel_x, 0.82, panel_w, 0.15], facecolor='#111111')
-        self.radio = RadioButtons(ax_mode, ('Algebraic', 'Finite', 'Transcendental', 'Complexity', 'Dominant', 'Mean Coeff', 'Phase', 'Radial', 'Parity', 'L1 Norm'), activecolor='#00d4ff')
+        self.radio = RadioButtons(ax_mode, ('Algebraic', 'Finite', 'Transcendental', 'Complexity', 'Dominant', 'Resonance', 'Alignment', 'Phase', 'Radial', 'Parity', 'L1 Norm'), activecolor='#00d4ff')
         for label in self.radio.labels:
             label.set_color('white')
         self.radio.on_clicked(self.change_mode)
 
         # Coordinate System Selection
         self.ax_coord = self.fig.add_axes([panel_x, 0.71, panel_w, 0.1], facecolor='#111111')
-        self.coord_radio = RadioButtons(self.ax_coord, ('Standard', 'Log-Polar', 'Reciprocal', 'Joukowsky', 'Exponential'), activecolor='#00ff9d')
+        self.coord_radio = RadioButtons(self.ax_coord, ('Standard', 'Log-Polar', 'Reciprocal', 'Joukowsky', 'Euler Space'), activecolor='#00ff9d')
         for label in self.coord_radio.labels:
             label.set_color('white')
         self.coord_radio.on_clicked(self.change_coord)
@@ -147,7 +147,7 @@ class TranscendentalFieldExplorer:
 
     def change_mode(self, label):
         self.mode = label
-        is_trans = self.mode in ['Transcendental', 'Complexity', 'Dominant', 'Mean Coeff', 'Phase', 'Radial', 'Parity', 'L1 Norm']
+        is_trans = self.mode in ['Transcendental', 'Complexity', 'Dominant', 'Resonance', 'Alignment', 'Phase', 'Radial', 'Parity', 'L1 Norm']
         self.ax_base.set_visible(is_trans)
         self.ax_text.set_visible(is_trans)
         self.ax_text2.set_visible(is_trans)
@@ -310,11 +310,11 @@ class TranscendentalFieldExplorer:
             mask = np.abs(vals) > 1e-9
             mapped_vals = np.zeros_like(vals)
             mapped_vals[mask] = vals[mask] + 1.0 / vals[mask]
-        elif self.coord_system == 'Exponential':
-            # w = exp(z)
-            # Clip to avoid overflow in exp
-            v_clipped = np.clip(vals.real, -10, 10) + 1j * vals.imag
-            mapped_vals = np.exp(v_clipped)
+        elif self.coord_system == 'Euler Space':
+            # Mapping based on Euler's identity principles: z -> exp(i*pi * z / base)
+            # This often regularizes the 'rotational' interference
+            scale = np.abs(base) if np.abs(base) > 0 else 1.0
+            mapped_vals = np.exp(1j * np.pi * vals / scale)
         else:
             mapped_vals = vals
 
@@ -340,47 +340,65 @@ class TranscendentalFieldExplorer:
             if mode == 'Complexity':
                 metric = np.sum(np.abs(coeffs), axis=1)
                 label = 'Min L1 Coefficient Complexity'
-                agg_func = np.minimum.at
-                init_val = np.inf
+                Z_metric = np.full((res, res), np.inf)
+                np.minimum.at(Z_metric, (iy[mask], ix[mask]), metric[mask].astype(float))
+                Z_metric[np.isinf(Z_metric)] = np.nan
             elif mode == 'Dominant':
                 terms = np.abs(coeffs * powers)
                 metric = np.argmax(terms, axis=1)
                 label = 'Dominant Power Index'
-                agg_func = np.maximum.at
-                init_val = -1.0
-            elif mode == 'Mean Coeff':
-                metric = np.mean(np.abs(coeffs), axis=1)
-                label = 'Mean Coefficient Magnitude'
-                agg_func = np.maximum.at
-                init_val = 0.0
+                Z_metric = np.full((res, res), -1.0)
+                np.maximum.at(Z_metric, (iy[mask], ix[mask]), metric[mask].astype(float))
+                Z_metric[Z_metric == -1.0] = np.nan
+            elif mode == 'Resonance':
+                convs = np.array(self.get_convergents(base.real, n=12)) if abs(base.imag) < 1e-9 else np.array([0, 1, 1j, -1, -1j])
+                dists = np.abs(vals[:, np.newaxis] - convs)
+                metric = np.min(dists, axis=1)
+                metric = -np.log10(metric + 1e-12)
+                label = 'Rational Resonance Intensity'
+                Z_metric = np.full((res, res), -15.0)
+                np.maximum.at(Z_metric, (iy[mask], ix[mask]), metric[mask].astype(float))
+                Z_metric[Z_metric == -15.0] = np.nan
+            elif mode in ['Alignment', 'L1 Norm', 'Mean Coeff']:
+                if mode == 'Alignment':
+                    if self.secondary_base_val is None:
+                        terms = coeffs * (base ** np.arange(deg + 1))
+                    else:
+                        terms = coeffs * (base ** np.arange(len(coeffs[0])))
+                    args = np.angle(terms)
+                    metric = 1.0 - np.abs(np.mean(np.exp(1j * args), axis=1))
+                    label = 'Phase Symmetrization Index'
+                elif mode == 'L1 Norm':
+                    metric = np.sum(np.abs(coeffs), axis=1)
+                    label = 'Sum of Absolute Coeffs'
+                else: # Mean Coeff
+                    metric = np.mean(np.abs(coeffs), axis=1)
+                    label = 'Mean Coefficient Magnitude'
+
+                H_sum, _, _ = np.histogram2d(mapped_vals.real[mask], mapped_vals.imag[mask], bins=res,
+                                             range=[[x_range[0], x_range[1]], [y_range[0], y_range[1]]],
+                                             weights=metric[mask])
+                H_count, _, _ = np.histogram2d(mapped_vals.real[mask], mapped_vals.imag[mask], bins=res,
+                                               range=[[x_range[0], x_range[1]], [y_range[0], y_range[1]]])
+                Z_metric = np.divide(H_sum.T, H_count.T, out=np.full((res, res), np.nan), where=H_count.T > 0)
             elif mode == 'Phase':
                 metric = np.angle(vals)
                 label = 'Argument (Phase)'
-                agg_func = np.maximum.at
-                init_val = -np.pi - 1.0
+                Z_metric = np.full((res, res), -4.0)
+                np.maximum.at(Z_metric, (iy[mask], ix[mask]), metric[mask].astype(float))
+                Z_metric[Z_metric == -4.0] = np.nan
             elif mode == 'Radial':
                 metric = np.abs(vals)
                 label = 'Radial Distance'
-                agg_func = np.maximum.at
-                init_val = -1.0
+                Z_metric = np.full((res, res), -1.0)
+                np.maximum.at(Z_metric, (iy[mask], ix[mask]), metric[mask].astype(float))
+                Z_metric[Z_metric == -1.0] = np.nan
             elif mode == 'Parity':
                 metric = np.sum(coeffs, axis=1) % 2
                 label = 'Coefficient Parity'
-                agg_func = np.maximum.at
-                init_val = -1.0
-            elif mode == 'L1 Norm':
-                metric = np.sum(np.abs(coeffs), axis=1)
-                label = 'Sum of Absolute Coeffs'
-                agg_func = np.mean.at
-                init_val = 0.0
-
-            Z_metric = np.full((res, res), init_val)
-            agg_func(Z_metric, (iy[mask], ix[mask]), metric[mask].astype(float))
-
-            if mode == 'Complexity':
-                Z_metric[np.isinf(Z_metric)] = np.nan
-            else:
-                Z_metric[Z_metric == init_val] = np.nan
+                Z_metric = np.full((res, res), -1.0)
+                np.maximum.at(Z_metric, (iy[mask], ix[mask]), metric[mask].astype(float))
+                Z_metric[Z_metric == -1.0] = np.nan
 
             im = self.ax.imshow(Z_metric, extent=[x_range[0], x_range[1], y_range[0], y_range[1]],
                                 origin='lower', cmap=cmap)
@@ -397,7 +415,7 @@ class TranscendentalFieldExplorer:
             if self.colorbar:
                 self.colorbar.remove()
                 self.colorbar = None
-                
+
             H, xedges, yedges = np.histogram2d(mapped_vals.real, mapped_vals.imag, bins=res,
                                                range=[[x_range[0], x_range[1]], [y_range[0], y_range[1]]])
             Z_final = gaussian_filter(H.T, sigma=sigma)
