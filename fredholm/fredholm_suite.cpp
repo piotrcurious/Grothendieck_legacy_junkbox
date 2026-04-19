@@ -349,7 +349,8 @@ public:
     std::string getTheory() const override { return "First kind equations are ill-posed because integral kernels are compact operators with singular values decaying to zero."; }
 };
 
-int main() {
+int main(int argc, char* argv[]) {
+    bool galleryMode = (argc > 1 && std::string(argv[1]) == "--gallery");
     if (SDL_Init(SDL_INIT_VIDEO) < 0 || TTF_Init() < 0) return 1;
     SDL_Window* window = SDL_CreateWindow("Fredholm Architect Suite", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
@@ -384,7 +385,23 @@ int main() {
     demos[AppMode::KINDS] = std::make_unique<KindsDemo>();
 
     bool quit = false; SDL_Event e; Fredholm::AdaptiveCompensator<double> compensator; auto startTime = std::chrono::steady_clock::now();
+    int frameCount = 0;
     while (!quit) {
+        if (galleryMode) {
+            int modeIdx = (frameCount / 20) % 10;
+            AppMode modes[] = {AppMode::THEORY, AppMode::COMPENSATOR, AppMode::BVP, AppMode::DEBLUR, AppMode::SPECTRAL, AppMode::VOLTERRA, AppMode::ALTERNATIVE, AppMode::NEUMANN, AppMode::GALERKIN, AppMode::KINDS};
+            ui.currentMode = modes[modeIdx];
+            if (frameCount % 20 == 10) {
+                SDL_Surface* ss = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_WIDTH, SCREEN_HEIGHT, 32, SDL_PIXELFORMAT_ARGB8888);
+                SDL_RenderReadPixels(renderer, NULL, SDL_PIXELFORMAT_ARGB8888, ss->pixels, ss->pitch);
+                std::string fn = "mode_" + std::to_string(modeIdx) + ".bmp";
+                SDL_SaveBMP(ss, fn.c_str());
+                SDL_FreeSurface(ss);
+                std::cout << "Captured " << fn << std::endl;
+            }
+            if (frameCount >= 200) quit = true;
+            frameCount++;
+        }
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) quit = true;
             ui.handleEvent(e);

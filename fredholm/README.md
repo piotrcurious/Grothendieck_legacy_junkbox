@@ -1,45 +1,72 @@
-# Fredholm Education Suite Master (Optimized)
+# Fredholm Architect Suite (Research Grade)
 
-This directory contains a research-grade visualization and interactive education suite for Fredholm and Volterra Integral Equations. It demonstrates the depth of integral operator theory through high-fidelity numerical methods and optimized matrix computations.
+A comprehensive numerical engine and interactive visualization suite for Fredholm and Volterra Integral Equations. This tool provides deep visual insights into the behavior of integral operators, spectral decomposition, and regularization of ill-posed problems.
 
-## Components
+## Visual Tour
 
-- **FredholmEngine.h**: A performance-optimized C++ header library featuring:
-  - **Nystrom Solver**: High-precision solving with up to 16-point Gauss-Legendre quadrature.
-  - **Volterra Solver**: Time-evolution solver for causal systems.
-  - **Optimized Galerkin Solver**: High-speed basis expansion method using pre-calculated Legendre polynomial values.
-  - **Neumann Series**: Iterative step functionality for visualizing convergence paths.
-  - **Spectral Engine**: QR algorithm for eigenvalue/eigenfunction decomposition.
-  - **SVD Engine**: Jacobi rotation method for Singular Value Decomposition, essential for analyzing ill-posed problems.
-  - **Stability Analysis**: Real-time Condition Number proxy estimation and Singular Value decay analysis.
-- **fredholm_suite.cpp**: A sophisticated 10-mode interactive SDL2 application:
-  - **Theory**: Basic integral equations with Gaussian/Lorentzian kernel selection.
-  - **Comp**: Real-time signal jitter and quantization noise reduction.
-  - **BVP**: Solving Boundary Value Problems via Green's functions.
-  - **Deblur**: Signal restoration from ill-posed blurring using Tikhonov Regularization.
-  - **Spectral**: Visualization of kernel natural modes and complex plane eigenvalue distribution.
-  - **Volterra**: Modeling causal history-dependent evolution.
-  - **Alt**: Demonstrating resonance near characteristic values.
-  - **Neumann**: Visualizing iterative successive approximations.
-  - **Galerkin**: Optimized global polynomial expansion approach.
-  - **Kinds**: Demonstrating the ill-posedness of 1st-kind equations ($K\phi = f$) and their resolution via Tikhonov Regularization ($[K^*K + \alpha I]\phi = K^*f$), complemented by a log-scale SVD chart.
+### 1. Fredholm Equation of the Second Kind
+The fundamental equation $\phi(x) = f(x) + \lambda \int K(x,y)\phi(y)dy$.
+![Theory Mode](screenshots/mode_0.png)
+
+### 2. Signal Compensation
+Real-time quantization noise and jitter reduction using an adaptive integral feedback loop.
+![Compensator Mode](screenshots/mode_1.png)
+
+### 3. Boundary Value Problems (BVP)
+Solving $u''(x) - V(x)u(x) = f(x)$ by conversion to an integral equation via Green's Functions.
+![BVP Mode](screenshots/mode_2.png)
+
+### 4. Tikhonov Deblurring
+Restoring a signal from a smoothing (blurring) kernel using Tikhonov Regularization ($L^2$ penalty).
+![Deblur Mode](screenshots/mode_3.png)
+
+### 5. Spectral Decomposition
+Visualization of the operator's eigenfunctions and the distribution of its eigenvalues in the complex plane.
+![Spectral Mode](screenshots/mode_4.png)
+
+### 6. Volterra Evolution
+Modeling causal systems where the state at $t$ depends only on history ($s \le t$). Always well-posed.
+![Volterra Mode](screenshots/mode_5.png)
+
+### 7. Fredholm Alternative & Resonance
+Demonstrating the singularity that occurs when $\lambda$ matches an internal eigenvalue of the kernel.
+![Alternative Mode](screenshots/mode_6.png)
+
+### 8. Neumann Series Convergence
+Visualizing successive approximations $\phi_{n+1} = f + \lambda K \phi_n$. Converges when $|\lambda|\rho(K) < 1$.
+![Neumann Mode](screenshots/mode_7.png)
+
+### 9. Galerkin Basis Expansion
+Solving the equation by projecting it onto a finite-dimensional basis of Legendre Polynomials.
+![Galerkin Mode](screenshots/mode_8.png)
+
+### 10. First-Kind Equations & SVD
+Analyzing the inherent ill-posedness of $K\phi = f$ using Singular Value Decomposition (SVD).
+![Kinds Mode](screenshots/mode_9.png)
+
+## Core Technologies
+
+- **FredholmEngine.h**: Header-only C++17 library.
+  - **Quadrature**: 8 and 16-point Gauss-Legendre schemes.
+  - **SVD Solver**: Robust Jacobi-rotation implementation with spectral sorting.
+  - **BVP Solver**: Integrated Green's function mapping.
+  - **Stability**: Real-time Condition Number estimation ($||\sigma_{max} / \sigma_{min}||$).
+- **Visuals**: SDL2-accelerated with `TextureCache` for high-performance text rendering and multi-path font search.
 
 ## Building and Running
 
 ### Prerequisites
+- C++17 compiler (g++)
+- `libsdl2-dev`, `libsdl2-ttf-dev`
 
-- C++17 compiler (e.g., g++)
-- SDL2 and SDL2_ttf development libraries
-
-### Build & Run
-
+### Build
 ```bash
 g++ fredholm_suite.cpp -o fredholm_suite -lSDL2 -lSDL2_ttf -I .
 ./fredholm_suite
 ```
 
-## Interactive Features
-
-- **Data Probing**: Hover over graphs to see precise coordinate values and crosshairs.
-- **Divergence Warning**: Real-time alerts when parameters lead to numerical instability ($|\lambda| \rho(K) > 1$).
-- **Tabbed Navigation**: 10 distinct modes covering the full spectrum of integral equation theory.
+## Interactive Navigation
+- **Scroll Wheel**: Zoom into graphs.
+- **Right Click + Drag**: Pan vertically.
+- **Hover**: View 'Theory Cards' and precise $(x, y)$ coordinates.
+- **Sliders**: Real-time parameter tuning ($\lambda$, $\sigma$, $\alpha$).
