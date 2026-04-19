@@ -1,0 +1,131 @@
+Lebesgue integration numerically is usually best thought of as approximating the measure of value-level sets or approximating the function by simple functions, not just as “sum weights × samples.” That is a different mindset from classical Riemann-style quadrature.
+
+A few useful families:
+
+1. Simple-function approximation You replace  by a step function of the form
+
+s(x)=\sum_{k=1}^m a_k\,\mathbf 1_{E_k}(x),
+
+\int f\,d\mu \approx \sum_{k=1}^m a_k\,\mu(E_k).
+
+For a nonnegative function, a common version is:
+
+f(x)\approx \sum_{j=1}^m \Delta t \,\mathbf 1_{\{f(x)>j\Delta t\}},
+
+\int f\,d\mu \approx \Delta t \sum_{j=1}^m \mu(\{f>j\Delta t\}).
+
+This is called a layer-cake or superlevel-set approximation.
+
+2. Layer-cake / distribution-function methods For ,
+
+\int f\,d\mu=\int_0^\infty \mu(\{x:f(x)>t\})\,dt.
+
+Numerically, this can be very effective when:
+
+the function has sharp spikes,
+
+the geometry of the level sets is easier to estimate than the pointwise integral,
+
+you only care about the distribution of function values.
+
+
+This is especially useful in image processing, statistics, and PDEs, where thresholded sets are easy to compute.
+
+3. Partition-of-range methods Instead of subdividing the domain into cells, you subdivide the output values:
+
+choose thresholds ,
+
+estimate the measure of each slice ,
+
+approximate
+
+
+\int f\,d\mu \approx \sum_{j=1}^m c_j\,\mu(\{t_{j-1}<f\le t_j\}),
+
+This is often more “Lebesgue-like” than grid quadrature.
+
+4. Histogram-based integration If you sample the domain and build a histogram of , then the integral can be approximated by
+
+\int f\,d\mu \approx \sum_j \text{bin center}_j \times \text{estimated mass of bin}_j.
+
+This is good when you want:
+
+robustness to irregular geometry,
+
+approximate integrals of complicated random fields,
+
+a distributional view of the integral.
+
+
+5. Monte Carlo integration This is not just “weighting” in the quadrature sense; it is a measure-theoretic estimator:
+
+\int f\,d\mu \approx \frac1N\sum_{i=1}^N f(X_i)
+
+It is especially good when:
+
+dimension is high,
+
+the domain is complicated,
+
+deterministic grids become expensive.
+
+
+Variance reduction techniques matter a lot here, but the core idea is still Lebesgue-friendly: you are averaging with respect to the measure.
+
+6. Stratified and adaptive sampling Instead of plain Monte Carlo, split the domain into measurable strata , then sample inside each stratum:
+
+\int f\,d\mu = \sum_{k=1}^m \int_{A_k} f\,d\mu.
+
+7. Rearrangement-based methods If you know or can estimate the decreasing rearrangement , then
+
+\int f\,d\mu = \int_0^{\mu(X)} f^\*(s)\,ds.
+
+8. Adaptive measurable-set refinement This is a hybrid of simple-function approximation and adaptive meshing:
+
+start with a coarse partition of the domain,
+
+estimate variation of  on each cell,
+
+subdivide only where needed,
+
+approximate  by constants on each measurable cell.
+
+
+This works well when  has localized complexity. It feels like finite elements, but the emphasis is on approximating measurable sets and simple functions rather than smooth interpolants.
+
+
+---
+
+A practical way to think about it
+
+If you do not like “weighting,” then Lebesgue-style numerical integration can be organized around these three viewpoints:
+
+1. Approximate the function by simple functions.
+
+
+2. Approximate the measure of level sets.
+
+
+3. Approximate the distribution of function values.
+
+
+
+Those are often more natural than classical quadrature when the function is discontinuous, spiky, or defined on a weird measurable set.
+
+When these beat standard quadrature
+
+They are often preferable when:
+
+the integrand is highly discontinuous,
+
+the domain has complicated geometry,
+
+the dimension is large,
+
+the function’s level sets are easier to understand than pointwise behavior.
+
+
+A nice rule of thumb:
+if the problem is “how much of the space has values around this range?” then a Lebesgue-based numerical method is usually the right lens.
+
+If you want, I can also give you a taxonomy of Lebesgue numerical methods by implementation style or show a worked example comparing layer-cake vs Monte Carlo vs adaptive simple functions.
