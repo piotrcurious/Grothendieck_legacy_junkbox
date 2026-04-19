@@ -85,6 +85,7 @@ class UnifiedGL : public Fl_Gl_Window {
 public:
   bool mode_algebraic = true;
   bool show_edges = true;
+  bool mode_riemann = false;
   float v_x = 0, v_y = 0, v_zoom = 1.0, rot_x = 25, rot_y = -35;
   int last_mx = 0, last_my = 0;
 
@@ -193,35 +194,39 @@ public:
     glRotatef(rot_x, 1, 0, 0);
     glRotatef(rot_y, 0, 1, 0);
 
-    // Grid Plane
-    glLineWidth(1.0f);
-    glBegin(GL_LINES);
-    for (int i = -5; i <= 5; ++i) {
-      glColor4f(0.2f, 0.2f, 0.4f, 0.2f);
-      glVertex3f(i, -5, 0);
-      glVertex3f(i, 5, 0);
-      glVertex3f(-5, i, 0);
-      glVertex3f(5, i, 0);
-    }
-    glEnd();
-
-    if (mode_algebraic) {
-      glEnable(GL_TEXTURE_2D);
-      glBindTexture(GL_TEXTURE_2D, tex_id);
-      glColor4f(1, 1, 1, 0.8f);
-      glBegin(GL_QUADS);
-      glTexCoord2f(0, 0);
-      glVertex3f(-2, -2, 0);
-      glTexCoord2f(1, 0);
-      glVertex3f(2, -2, 0);
-      glTexCoord2f(1, 1);
-      glVertex3f(2, 2, 0);
-      glTexCoord2f(0, 1);
-      glVertex3f(-2, 2, 0);
-      glEnd();
-      glDisable(GL_TEXTURE_2D);
+    if (mode_riemann) {
+      draw_riemann_sphere();
     } else {
-      render_gf_3d();
+      // Grid Plane
+      glLineWidth(1.0f);
+      glBegin(GL_LINES);
+      for (int i = -5; i <= 5; ++i) {
+        glColor4f(0.2f, 0.2f, 0.4f, 0.2f);
+        glVertex3f(i, -5, 0);
+        glVertex3f(i, 5, 0);
+        glVertex3f(-5, i, 0);
+        glVertex3f(5, i, 0);
+      }
+      glEnd();
+
+      if (mode_algebraic) {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, tex_id);
+        glColor4f(1, 1, 1, 0.8f);
+        glBegin(GL_QUADS);
+        glTexCoord2f(0, 0);
+        glVertex3f(-2, -2, 0);
+        glTexCoord2f(1, 0);
+        glVertex3f(2, -2, 0);
+        glTexCoord2f(1, 1);
+        glVertex3f(2, 2, 0);
+        glTexCoord2f(0, 1);
+        glVertex3f(-2, 2, 0);
+        glEnd();
+        glDisable(GL_TEXTURE_2D);
+      } else {
+        render_gf_3d();
+      }
     }
     render_extension_3d();
   }
@@ -241,28 +246,43 @@ public:
       }
       pts[i] = z;
     }
-    if (show_edges && N < 3000) {
-      glLineWidth(1.5f);
-      glBegin(GL_LINE_STRIP);
-      int curr = 1, step = (p == 2 ? 1 : p - 1);
-      for (int k = 0; k < min(N, 1500); ++k) {
-        float a = 0.7f * (1.0f - (float)k / 1500);
-        glColor4f(0.3f, 0.8f, 1.0f, a);
-        glVertex3f((float)pts[curr].real(), (float)pts[curr].imag(),
-                   k * 0.001f);
-        curr = (curr * step) % N;
-        if (curr == 0)
-          curr = 1;
+
+    if (mode_riemann) {
+      glPointSize(3.0f);
+      glBegin(GL_POINTS);
+      for (auto &z : pts) {
+        float r2 = z.real() * z.real() + z.imag() * z.imag();
+        float X = 2 * z.real() / (r2 + 1);
+        float Y = 2 * z.imag() / (r2 + 1);
+        float Z = (r2 - 1) / (r2 + 1);
+        glColor4f(0.4f, 0.5f, 1.0f, 0.6f);
+        glVertex3f(X, Y, Z);
+      }
+      glEnd();
+    } else {
+      if (show_edges && N < 3000) {
+        glLineWidth(1.5f);
+        glBegin(GL_LINE_STRIP);
+        int curr = 1, step = (p == 2 ? 1 : p - 1);
+        for (int k = 0; k < min(N, 1500); ++k) {
+          float a = 0.7f * (1.0f - (float)k / 1500);
+          glColor4f(0.3f, 0.8f, 1.0f, a);
+          glVertex3f((float)pts[curr].real(), (float)pts[curr].imag(),
+                     k * 0.001f);
+          curr = (curr * step) % N;
+          if (curr == 0)
+            curr = 1;
+        }
+        glEnd();
+      }
+      glPointSize(3.0f);
+      glBegin(GL_POINTS);
+      for (auto &z : pts) {
+        glColor4f(0.4f, 0.5f, 1.0f, 0.6f);
+        glVertex3f((float)z.real(), (float)z.imag(), 0);
       }
       glEnd();
     }
-    glPointSize(3.0f);
-    glBegin(GL_POINTS);
-    for (auto &z : pts) {
-      glColor4f(0.4f, 0.5f, 1.0f, 0.6f);
-      glVertex3f((float)z.real(), (float)z.imag(), 0);
-    }
-    glEnd();
   }
 
   void render_extension_3d() {
@@ -283,10 +303,33 @@ public:
         z += (double)c * pow(chosen_alpha, k);
         zh += c * tower_height * (k + 1);
       }
-      glColor4f(1.0f, 0.8f, 0.1f, 0.9f);
-      glVertex3f((float)z.real(), (float)z.imag(), zh);
+      if (mode_riemann) {
+        float r2 = z.real() * z.real() + z.imag() * z.imag();
+        float X = 2 * z.real() / (r2 + 1);
+        float Y = 2 * z.imag() / (r2 + 1);
+        float Z = (r2 - 1) / (r2 + 1);
+        glColor4f(1.0f, 0.8f, 0.1f, 0.9f);
+        glVertex3f(X, Y, Z);
+      } else {
+        glColor4f(1.0f, 0.8f, 0.1f, 0.9f);
+        glVertex3f((float)z.real(), (float)z.imag(), zh);
+      }
     }
     glEnd();
+  }
+
+  void draw_riemann_sphere() {
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    GLfloat pos[] = {1, 1, 1, 0};
+    glLightfv(GL_LIGHT0, GL_POSITION, pos);
+
+    glColor4f(0.3, 0.4, 0.6, 0.3);
+    GLUquadric *q = gluNewQuadric();
+    gluQuadricDrawStyle(q, GLU_SILHOUETTE);
+    gluSphere(q, 1.0, 32, 32);
+    gluDeleteQuadric(q);
+    glDisable(GL_LIGHTING);
   }
 };
 
@@ -330,7 +373,10 @@ int main(int argc, char **argv) {
   Fl_Check_Button *cb = new Fl_Check_Button(1000, 155, 230, 25, "Show 3D Flow");
   cb->value(1);
 
-  Fl_Button *reset = new Fl_Button(910, 195, 320, 30, "Reset Camera & View");
+  Fl_Check_Button *cr = new Fl_Check_Button(1000, 185, 230, 25, "Riemann Sphere");
+  cr->value(0);
+
+  Fl_Button *reset = new Fl_Button(910, 215, 320, 25, "Reset Camera & View");
   g1->end();
 
   Fl_Group *g2 = new Fl_Group(900, 260, 340, 580, "Galois Tower Builder");
@@ -405,6 +451,12 @@ int main(int argc, char **argv) {
   mode->callback(
       [](Fl_Widget *w, void *v) {
         ((UnifiedGL *)v)->mode_algebraic = (((Fl_Choice *)w)->value() == 0);
+        ((UnifiedGL *)v)->redraw();
+      },
+      gl);
+  cr->callback(
+      [](Fl_Widget *w, void *v) {
+        ((UnifiedGL *)v)->mode_riemann = ((Fl_Check_Button *)w)->value();
         ((UnifiedGL *)v)->redraw();
       },
       gl);
