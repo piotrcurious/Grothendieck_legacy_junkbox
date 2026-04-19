@@ -68,7 +68,8 @@ g++ fredholm_suite.cpp -o fredholm_suite -lSDL2 -lSDL2_ttf -I .
 ## Interactive Navigation
 - **Scroll Wheel**: Zoom into graphs.
 - **Right Click + Drag**: Pan vertically.
-- **Hover**: View 'Theory Cards' and precise $(x, y)$ coordinates.
+- **Hover**: View 'Theory Cards', precise $(x, y)$ coordinates, and real-time $K(x,y)$ values by hovering over the heatmap.
+- **Stability Gauge**: Monitor system proximity to singularity with the color-coded visual indicator.
 - **Sliders**: Real-time parameter tuning ($\lambda$, $\sigma$, $\alpha$).
 - **Compare Slider**: In Theory mode, toggle to compare Nystrom vs. Galerkin numerical solutions.
 - **Export Data**: Press **'E'** to export the current solution to `fredholm_export.csv`.
