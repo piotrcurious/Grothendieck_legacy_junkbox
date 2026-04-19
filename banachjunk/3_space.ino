@@ -19,6 +19,7 @@ private:
         T dimensionalCoherence;
         std::vector<T> spectralFlatness;
         std::vector<std::vector<T>> instantaneousCoherence;
+        T phaseSpaceArea;
     };
 
     // Projection and Transformation Operators
@@ -63,6 +64,7 @@ private:
         metrics.dimensionalCoherence = computeDimensionalCoherence();
         metrics.spectralFlatness = computeSpectralFlatness();
         metrics.instantaneousCoherence = computeInstantaneousCoherence(5);
+        metrics.phaseSpaceArea = computePhaseSpaceArea();
         
         return metrics;
     }
@@ -131,6 +133,19 @@ public:
         return matrix;
     }
 
+    // Phase Space Area: Sum of cross-products between consecutive 2D projections (Dim 0, Dim 1)
+    T computePhaseSpaceArea() {
+        if (Dimension < 2 || dimensionalData[0].size() < 2) return 0;
+        T area = 0;
+        const auto& d0 = dimensionalData[0];
+        const auto& d1 = dimensionalData[1];
+        for (size_t i = 1; i < d0.size(); ++i) {
+            // Shoelace-like incremental area in phase space
+            area += (d0[i-1] * d1[i] - d0[i] * d1[i-1]);
+        }
+        return std::abs(area) / 2.0;
+    }
+
     // Spectral Flatness (Wiener Entropy proxy) using Lebesgue-weighted geometric/arithmetic means
     std::vector<T> computeSpectralFlatness() {
         std::vector<T> flatness(Dimension, 0);
@@ -182,9 +197,9 @@ public:
     // Add multi-dimensional data point with timestamp
     void addDataPoint(const std::vector<T>& point, T timestamp = -1.0) {
         if (point.size() != Dimension) return;
-
-        if (dimensionalData.size() < Dimension) dimensionalData.resize(Dimension);
         
+        if (dimensionalData.size() < Dimension) dimensionalData.resize(Dimension);
+
         // Auto-increment timestamp if not provided
         if (timestamp < 0) {
             timestamp = timestamps.empty() ? 0 : timestamps.back() + 1.0;
@@ -244,6 +259,8 @@ public:
             static_cast<float>(metrics.completenessIndex));
         Serial.printf("Dimensional Coherence: %f\n", 
             static_cast<float>(metrics.dimensionalCoherence));
+        Serial.printf("Phase Space Area (D0 x D1): %f\n",
+            static_cast<float>(metrics.phaseSpaceArea));
 
         Serial.println("\nSpectral Flatness (per dimension):");
         for (size_t i = 0; i < Dimension; ++i) {

@@ -228,11 +228,14 @@ public:
       newFeature.algebraicComplexity = (float)varietyDim / WINDOW_SIZE;
 
       // Classify features based on algebraic properties
+      // Periodicity check: Low variety dimension relative to polynomial degree
+      bool periodic_proxy = (varietyDim < WINDOW_SIZE / 3) && (fitted.degree() > 2);
+
       if (fitted.degree() <= 1) {
         newFeature.type = "linear";
       } else if (fitted.degree() == 2) {
         newFeature.type = "quadratic";
-      } else if (varietyDim < WINDOW_SIZE / 4) {
+      } else if (periodic_proxy) {
         newFeature.type = "periodic";
       } else if (fitted.degree() >= MAX_POLY_DEGREE) {
         newFeature.type = "complex";
