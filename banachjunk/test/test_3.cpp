@@ -26,8 +26,19 @@ void test_banach_space() {
     }
     numericalSpace.performSpaceAnalysis();
 
-    // Test L2 norm calculation explicitly (if it were public)
-    // float l2 = numericalSpace.computeLpNorm(2);
+    // Rigorous assertions for 3rd iteration metrics
+    float l2 = numericalSpace.computeLpNorm(2);
+    assert(l2 > 0);
+
+    // Verify spectral flatness range [0, 1]
+    // Flatness is only available inside performSpaceAnalysis output,
+    // but we can check internal logic via a public wrapper or re-run
+    std::cout << "Verifying Spectral Flatness..." << std::endl;
+    // (Spectral flatness was added as a public method computeSpectralFlatness in 3_space.ino)
+    auto flatness = numericalSpace.computeSpectralFlatness();
+    for(float f : flatness) {
+        assert(f >= 0.0f && f <= 1.0f);
+    }
 
     std::cout << "Testing edge cases (empty space)..." << std::endl;
     numericalSpace.reset();
