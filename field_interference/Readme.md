@@ -18,7 +18,7 @@ Visualizes the interplay between the **additive vector space** structure of $GF(
 ![Finite Field Demo](docs/images/demo01_screenshot.png)
 
 - **Irreducible Search**: Automatically finds valid irreducible polynomials for extension degrees 1-4.
-- **Generator Orbit**: Traces the cyclic multiplicative structure with color gradients.
+- **Generator Orbit**: Traces the cyclic multiplicative structure with color gradients using mathematically correct polynomial reduction.
 - **Key Concept**: Every finite field $GF(q)$ is a vector space over its prime subfield $GF(p)$. Simultaneously, its non-zero elements form a cyclic group under multiplication.
 
 ### Grothendieck Viewpoint (`demo02.cpp`)
@@ -55,9 +55,11 @@ Features high-performance OpenGL texture rendering for root-density heatmaps, al
 Visualizes field structures in 3D, including "Basis Towers" for extensions and a Riemann Sphere projection.
 
 ![3D Explorer Demo](docs/images/demo0c_screenshot.png)
+![Torus Mapping Demo](docs/images/demo0c_torus.png)
 
 - **Riemann Sphere**: Maps the complex plane and its field extensions onto a unit sphere, exposing symmetries at infinity.
 - **Galois Towers**: Plots basis components along the Z-axis to show the hierarchy of extensions.
+- **Torus Mapping**: Visualizes the periodic additive structure of finite fields by mapping elements to a 3D torus.
 
 ---
 
@@ -74,20 +76,19 @@ Visualizes the resonance of $\mathbb{Q}(\alpha)$ for transcendental $\alpha$ (li
 ![Transcendental Explorer](docs/images/transcendental_explorer.png)
 
 - **Vectorized Engine**: High-performance NumPy implementation with dynamic binning for real-time micro-structure analysis. Now includes a batch-eigenvalue solver for Algebraic mode.
-- **Coordinate Mappings**: Supports Standard, Log-Polar, Reciprocal, Joukowsky, and Exponential mappings to expose different structural symmetries.
+- **Coordinate Mappings**: Supports Standard, Log-Polar, Reciprocal, Joukowsky, and **Euler Space** mappings to expose deep rotational and periodic symmetries.
 - **Multi-Base Support**: Explore coupled extensions $\mathbb{Q}(A, B)$ and visualize the interaction of two transcendental generators.
+- **Interference Analysis**:
+    - **Rational Resonance**: Highlights proximity to continued fraction convergents where field elements constructive interfere with rational approximations.
+    - **Phase Alignment**: Visualizes circular variance of individual expansion terms to show coherent summation zones.
 - **Custom Bases & Rotation**: Supports arbitrary complex expressions and real-time base rotation.
 - **Advanced Metrics**: Visualizes "Min Complexity", "Dominant Power Index", "Parity", and "L1 Norm".
-- **Coefficient Sets**: Choice of 'Standard' (uniform), 'Binary' {0, 1}, or 'Littlewood' {-1, 1} distributions.
-- **Analytic Overlays**: Continued fraction convergents and roots of unity to provide structural context.
-- **Gradient Mode**: Visualizes the rate of change in density to highlight field boundaries and cluster edges.
+- **Coefficient Sets**: Choice of 'Standard', 'Binary' {0, 1}, or 'Littlewood' {-1, 1} distributions.
 
-![Transcendental Gradient](docs/images/transcendental_gradient.png)
+![Transcendental Resonance](docs/images/transcendental_resonance.png)
+![Transcendental Euler Space](docs/images/transcendental_eulerspace.png)
+![Transcendental Alignment](docs/images/transcendental_alignment.png)
 ![Transcendental Log-Polar](docs/images/transcendental_logpolar.png)
-![Transcendental Reciprocal](docs/images/transcendental_reciprocal.png)
-![Transcendental Joukowsky](docs/images/transcendental_joukowsky.png)
-![Transcendental Parity](docs/images/transcendental_parity.png)
-![Transcendental Dominant](docs/images/transcendental_dominant.png)
 
 ---
 

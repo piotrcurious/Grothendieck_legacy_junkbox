@@ -42,6 +42,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "../../galois_math.h"
 
 using namespace std;
 using cd = complex<double>;
@@ -214,8 +215,8 @@ public:
   int max_degree = 5;
   int max_coeff = 5;
   double sigma = 1.0;
-  int prime_p = 3;
-  int ext_n = 2;
+  int p_prime = 3;
+  int n_ext = 2;
 
   const int grid_res = 512;
   vector<double> heat;
@@ -311,7 +312,7 @@ public:
     if (mode_algebraic)
       render_algebraic_view();
     else
-      render_finite_view();
+      render_finite_field_math();
     draw_overlays();
   }
 
@@ -325,13 +326,13 @@ public:
     glDrawPixels(grid_res, grid_res, GL_RGB, GL_UNSIGNED_BYTE, image.data());
   }
 
-  void render_finite_view() {
+  void render_finite_field_math() {
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     glOrtho(-2.5, 2.5, -2.5, 2.5, -1, 1);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    int p = max(2, prime_p), n = max(1, ext_n);
+    int p = max(2, p_prime), n = max(1, n_ext);
     int N = (int)pow(p, n);
     if (N > 10000)
       N = 10000;
@@ -504,7 +505,7 @@ int main(int argc, char **argv) {
   s1->callback(
       [](Fl_Widget *w, void *v) {
         UnifiedGL *g = (UnifiedGL *)v;
-        g->max_degree = g->prime_p = (int)((Fl_Value_Slider *)w)->value();
+        g->max_degree = g->p_prime = (int)((Fl_Value_Slider *)w)->value();
         g->trigger_regen();
       },
       gl);
@@ -517,7 +518,7 @@ int main(int argc, char **argv) {
   s2->callback(
       [](Fl_Widget *w, void *v) {
         UnifiedGL *g = (UnifiedGL *)v;
-        g->max_coeff = g->ext_n = (int)((Fl_Value_Slider *)w)->value();
+        g->max_coeff = g->n_ext = (int)((Fl_Value_Slider *)w)->value();
         g->trigger_regen();
       },
       gl);

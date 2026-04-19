@@ -42,6 +42,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "../../galois_math.h"
 
 using namespace std;
 using cd = complex<double>;
@@ -257,8 +258,8 @@ public:
   int max_degree = 3;
   int max_coeff = 5;
   double sigma = 1.0;
-  int prime_p = 3;
-  int ext_n = 2;
+  int p_prime = 3;
+  int n_ext = 2;
 
   // Internal resolution
   const int grid_res = 512;
@@ -401,7 +402,7 @@ public:
     if (mode_algebraic) {
       render_algebraic_view();
     } else {
-      render_finite_view();
+      render_finite_field_math();
     }
 
     draw_overlays();
@@ -419,15 +420,15 @@ public:
     glDrawPixels(grid_res, grid_res, GL_RGB, GL_UNSIGNED_BYTE, image.data());
   }
 
-  void render_finite_view() {
+  void render_finite_field_math() {
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     glOrtho(-2.5, 2.5, -2.5, 2.5, -1, 1); // Broader view for finite fields
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
 
-    int p = max(2, prime_p);
-    int n = max(1, ext_n);
+    int p = max(2, p_prime);
+    int n = max(1, n_ext);
     int N = (int)pow(p, n);
 
     // Safety cap for rendering
@@ -599,7 +600,7 @@ int main(int argc, char **argv) {
         UnifiedGL *gl = (UnifiedGL *)v;
         int val = (int)((Fl_Value_Slider *)w)->value();
         gl->max_degree = val;
-        gl->prime_p = max(2, val);
+        gl->p_prime = max(2, val);
         gl->trigger_regen();
       },
       gl);
@@ -615,7 +616,7 @@ int main(int argc, char **argv) {
         UnifiedGL *gl = (UnifiedGL *)v;
         int val = (int)((Fl_Value_Slider *)w)->value();
         gl->max_coeff = val;
-        gl->ext_n = max(1, val);
+        gl->n_ext = max(1, val);
         gl->trigger_regen();
       },
       gl);
