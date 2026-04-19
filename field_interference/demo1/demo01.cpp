@@ -87,9 +87,7 @@ bool is_irreducible(const vector<int> &poly, int p) {
   if (n == 1)
     return true;
 
-  // Brute force check for roots in extensions is hard,
-  // but for small p, n we can check for factors.
-  // This is a simplified check for the demo purposes.
+  // Brute force check for roots in extensions.
   // For degree 2 and 3, irreducibility is equivalent to having no roots.
   if (n <= 3) {
     for (int i = 0; i < p; ++i) {
