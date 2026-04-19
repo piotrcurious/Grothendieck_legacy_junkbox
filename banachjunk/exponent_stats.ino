@@ -3,6 +3,7 @@
 #include <cmath>
 #include <complex>
 #include <algorithm>
+#include "math_utils.h"
 
 // Exponential Detection and Analysis Class
 template <typename T>
@@ -145,37 +146,17 @@ private:
             const auto& dimData = statisticalData[dim];
             if (dimData.size() < 2) continue;
             
-            // Mean (Lebesgue-weighted)
-            T meanIntegral = 0;
-            for (size_t i = 0; i < dimData.size() - 1; ++i) {
-                T dt = timestamps[i+1] - timestamps[i];
-                meanIntegral += (dimData[i] + dimData[i+1]) / 2.0 * dt;
-            }
-            T mean = meanIntegral / totalMeasure;
-            metrics.mean[dim] = mean;
-
-            // Variance and Higher Moments (Lebesgue-weighted)
-            T varIntegral = 0, m3Integral = 0, m4Integral = 0;
-            for (size_t i = 0; i < dimData.size() - 1; ++i) {
-                T dt = timestamps[i+1] - timestamps[i];
-                T diff1 = dimData[i] - mean;
-                T diff2 = dimData[i+1] - mean;
-                T midDiff = (diff1 + diff2) / 2.0;
-                varIntegral += midDiff * midDiff * dt;
-                m3Integral += midDiff * midDiff * midDiff * dt;
-                m4Integral += midDiff * midDiff * midDiff * midDiff * dt;
-            }
-            
-            T variance = varIntegral / totalMeasure;
-            metrics.variance[dim] = variance;
+            // Using centralized moment calculation
+            auto moments = banach::Statistics::calculateMoments(dimData, timestamps);
+            T mean = static_cast<T>(moments.mean);
+            T variance = static_cast<T>(moments.variance);
             T sdev = std::sqrt(variance);
+
+            metrics.mean[dim] = mean;
+            metrics.variance[dim] = variance;
             metrics.stdDev[dim] = sdev;
-
-            // Skewness
-            metrics.skewness[dim] = (abs(sdev) > 1e-9) ? (m3Integral / totalMeasure) / std::pow(sdev, 3) : 0;
-
-            // Kurtosis
-            metrics.kurtosis[dim] = (abs(variance) > 1e-9) ? (m4Integral / totalMeasure) / (variance * variance) - 3 : 0;
+            metrics.skewness[dim] = static_cast<T>(moments.skewness);
+            metrics.kurtosis[dim] = static_cast<T>(moments.kurtosis);
 
             // Entropy (Shannon Information Entropy) using a simple histogram
             T entropy = 0;
@@ -214,49 +195,9 @@ private:
             metrics.confidenceIntervalLower[dim] = mean - marginOfError;
             metrics.confidenceIntervalUpper[dim] = mean + marginOfError;
 
-            // Hurst Exponent Estimation (Simplified R/S Analysis)
-            if (dimData.size() >= 8 && sdev > 1e-9) {
-                T cumSum = 0;
-                T minZ = 1e30, maxZ = -1e30;
-                for (T val : dimData) {
-                    cumSum += (val - mean);
-                    if (cumSum < minZ) minZ = cumSum;
-                    if (cumSum > maxZ) maxZ = cumSum;
-                }
-                T RS = (maxZ - minZ) / sdev;
-                // Hurst H = log(R/S) / log(N).
-                // Guard log(N) against small N (though already checked >=8) and RS > 0.
-                if (RS > 1e-9) {
-                    T logN = std::log(static_cast<T>(dimData.size()));
-                    metrics.hurstExponent[dim] = (logN > 1e-9) ? std::log(RS) / logN : 0.5;
-                }
-            }
-
-            // Approximate Entropy (ApEn) - Simplified implementation (m=2)
-            if (dimData.size() > 15) {
-                auto phi = [&](int m) {
-                    int N = dimData.size();
-                    T r = 0.2 * sdev;
-                    if (r < 1e-9) r = 0.01;
-                    T sumLogC = 0;
-                    for (int i = 0; i <= N - m; ++i) {
-                        int count = 0;
-                        for (int j = 0; j <= N - m; ++j) {
-                            bool match = true;
-                            for (int k = 0; k < m; ++k) {
-                                if (std::abs(dimData[i+k] - dimData[j+k]) > r) {
-                                    match = false;
-                                    break;
-                                }
-                            }
-                            if (match) count++;
-                        }
-                        sumLogC += std::log(static_cast<T>(count) / (N - m + 1));
-                    }
-                    return sumLogC / (N - m + 1);
-                };
-                metrics.approxEntropy[dim] = std::abs(phi(2) - phi(3));
-            }
+            // Unified metrics from math_utils
+            metrics.hurstExponent[dim] = static_cast<T>(banach::Statistics::calculateHurst(dimData, timestamps));
+            metrics.approxEntropy[dim] = static_cast<T>(banach::Statistics::calculateApEn(dimData));
         }
 
         return metrics;

@@ -30,86 +30,25 @@ private:
     // Least squares method for polynomial fitting using Lebesgue-weighted Ridge Regression
     PolynomialCoefficients fitPolynomial(const std::vector<float>& data, float& conditionProxy, double lambda = 1e-4) {
         int n = data.size();
-        const int m = 4; // cubic fit: a*x^3 + b*x^2 + c*x + d
-        double matrix[m][m];
-        double rhs[m];
-
-        for (int i = 0; i < m; i++) {
-            rhs[i] = 0;
-            for (int j = 0; j < m; j++) {
-                matrix[i][j] = 0;
-            }
-        }
-
-        for (int i = 0; i < n; i++) {
-            double x = timestamps[i];
-            double y = data[i];
-
+        std::vector<double> x(n), y(n), dts(n);
+        for(int i=0; i<n; ++i) {
+            x[i] = timestamps[i];
+            y[i] = data[i];
             double dt = 1.0;
             if (n > 1) {
                 if (i == 0) dt = timestamps[1] - timestamps[0];
                 else if (i == n - 1) dt = timestamps[n-1] - timestamps[n-2];
                 else dt = (timestamps[i+1] - timestamps[i-1]) / 2.0;
             }
-            if (dt < 0) dt = 0;
-
-            double x_pow[2 * m - 1];
-            x_pow[0] = 1.0;
-            // Incremental multiplication for power calculation
-            for (int p = 1; p < 2 * m - 1; p++) x_pow[p] = x_pow[p-1] * x;
-
-            for (int r = 0; r < m; r++) {
-                for (int c = 0; c < m; c++) {
-                    matrix[r][c] += dt * x_pow[(m-1-r) + (m-1-c)];
-                }
-                rhs[r] += dt * y * x_pow[m-1-r];
-            }
+            dts[i] = (dt < 0) ? 0 : dt;
         }
 
-        // Apply Tikhonov regularization
-        for (int i = 0; i < m; i++) {
-            matrix[i][i] += lambda;
-        }
-
-        // Gaussian elimination with pivoting
-        for (int i = 0; i < m; i++) {
-            int pivot = i;
-            for (int j = i + 1; j < m; j++) {
-                if (std::abs(matrix[j][i]) > std::abs(matrix[pivot][i])) pivot = j;
-            }
-            for (int k = i; k < m; k++) std::swap(matrix[i][k], matrix[pivot][k]);
-            std::swap(rhs[i], rhs[pivot]);
-
-            if (std::abs(matrix[i][i]) < 1e-9) continue;
-
-            for (int j = i + 1; j < m; j++) {
-                double factor = matrix[j][i] / matrix[i][i];
-                rhs[j] -= factor * rhs[i];
-                for (int k = i; k < m; k++) matrix[j][k] -= factor * matrix[i][k];
-            }
-        }
-
-        // Estimate condition proxy: ratio of max to min diagonal elements
-        double d_min = 1e30, d_max = -1e30;
-        for (int i = 0; i < m; i++) {
-            double abs_d = std::abs(matrix[i][i]);
-            if (abs_d < d_min) d_min = abs_d;
-            if (abs_d > d_max) d_max = abs_d;
-        }
-        conditionProxy = (d_min > 1e-12) ? (float)(d_max / d_min) : 1e12f;
-
-        float coeffs_arr[m];
-        for (int i = m - 1; i >= 0; i--) {
-            if (std::abs(matrix[i][i]) < 1e-9) {
-                coeffs_arr[i] = 0;
-            } else {
-                double sum = 0;
-                for (int j = i + 1; j < m; j++) sum += matrix[i][j] * coeffs_arr[j];
-                coeffs_arr[i] = (rhs[i] - sum) / matrix[i][i];
-            }
-        }
-
-        return {coeffs_arr[0], coeffs_arr[1], coeffs_arr[2], coeffs_arr[3]};
+        // Using centralized solver for consistent fitting
+        auto res = banach::LinearSolvers::solveRidge<4>(x, y, dts, lambda);
+        conditionProxy = res.conditionProxy;
+        // Coefficients from solveRidge are P[0] + P[1]*x + P[2]*x^2 + P[3]*x^3
+        // Struct expects {a: x^3, b: x^2, c: x, d: const}
+        return { (float)res.coefficients[3], (float)res.coefficients[2], (float)res.coefficients[1], (float)res.coefficients[0] };
     }
 
     // Compute rate of change using Galois field properties

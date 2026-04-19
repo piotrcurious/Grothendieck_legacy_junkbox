@@ -2,6 +2,7 @@
 #include <vector>
 #include <cmath>
 #include <complex>
+#include "math_utils.h"
 
 // Abstract Banach Space Representation
 template <typename T, size_t Dimension>
@@ -69,33 +70,7 @@ private:
 public:
     // L-p Norm Computation using Lebesgue-style measure weighting
     T computeLpNorm(int p) {
-        if (dimensionalData.empty() || timestamps.size() < 2) return T(0);
-        
-        T totalMeasure = timestamps.back() - timestamps.front();
-        if (std::abs(totalMeasure) < 1e-9) return T(0);
-
-        T accumulator = 0;
-        for (const auto& dimension : dimensionalData) {
-            if (dimension.size() < 2) continue;
-
-            T maxVal = 0;
-            for (const auto& value : dimension) {
-                maxVal = std::max(maxVal, std::abs(value));
-            }
-            if (maxVal < 1e-9) continue;
-
-            T integral = 0;
-            for (size_t i = 0; i < dimension.size() - 1; ++i) {
-                T dt = timestamps[i+1] - timestamps[i];
-                if (dt <= 0) continue;
-                // Using midpoint/average for the interval [i, i+1]
-                T val = (std::abs(dimension[i]) + std::abs(dimension[i+1])) / (2.0 * maxVal);
-                integral += std::pow(val, p) * dt;
-            }
-            accumulator += maxVal * std::pow(integral / totalMeasure, 1.0/p);
-        }
-        
-        return accumulator / dimensionalData.size();
+        return static_cast<T>(banach::Statistics::calculateLpNorm(dimensionalData, timestamps, p));
     }
 
     // Completeness Metric using a Lebesgue-measure-aware Cauchy-like convergence proxy
@@ -146,60 +121,21 @@ public:
         size_t n = dimensionalData[0].size();
         if (n < windowSize) return {};
 
-        std::vector<std::vector<T>> coherenceMatrix(Dimension, std::vector<T>(Dimension, 1.0));
-
+        std::vector<std::vector<T>> matrix(Dimension, std::vector<T>(Dimension, 1.0));
         for (size_t i = 0; i < Dimension; ++i) {
             for (size_t j = i + 1; j < Dimension; ++j) {
-                // Compute correlation over the last 'windowSize' points
-                T mean1 = 0, mean2 = 0;
-                for (size_t k = n - windowSize; k < n; ++k) {
-                    mean1 += dimensionalData[i][k];
-                    mean2 += dimensionalData[j][k];
-                }
-                mean1 /= windowSize;
-                mean2 /= windowSize;
-
-                T num = 0, den1 = 0, den2 = 0;
-                for (size_t k = n - windowSize; k < n; ++k) {
-                    T d1 = dimensionalData[i][k] - mean1;
-                    T d2 = dimensionalData[j][k] - mean2;
-                    num += d1 * d2;
-                    den1 += d1 * d1;
-                    den2 += d2 * d2;
-                }
-                T score = (den1 * den2 > 1e-9) ? num / std::sqrt(den1 * den2) : 0;
-                coherenceMatrix[i][j] = score;
-                coherenceMatrix[j][i] = score;
+                T score = static_cast<T>(banach::Statistics::calculateCoherence(dimensionalData[i], dimensionalData[j], n - windowSize, windowSize));
+                matrix[i][j] = matrix[j][i] = score;
             }
         }
-        return coherenceMatrix;
+        return matrix;
     }
 
     // Spectral Flatness (Wiener Entropy proxy) using Lebesgue-weighted geometric/arithmetic means
     std::vector<T> computeSpectralFlatness() {
         std::vector<T> flatness(Dimension, 0);
-        if (dimensionalData.empty() || timestamps.size() < 2) return flatness;
-        T totalMeasure = timestamps.back() - timestamps.front();
-        if (std::abs(totalMeasure) < 1e-9) return flatness;
-
         for (size_t dim = 0; dim < Dimension; ++dim) {
-            const auto& data = dimensionalData[dim];
-            if (data.size() < 2) continue;
-
-            T logSum = 0;
-            T arithSum = 0;
-            for (size_t i = 0; i < data.size() - 1; ++i) {
-                T dt = timestamps[i+1] - timestamps[i];
-                T val = (std::abs(data[i]) + std::abs(data[i+1])) / 2.0;
-                if (val < 1e-9) val = 1e-9; // Small epsilon for log
-                logSum += std::log(val) * dt;
-                arithSum += val * dt;
-            }
-            T geomMean = std::exp(logSum / totalMeasure);
-            T arithMean = arithSum / totalMeasure;
-
-            if (arithMean > 1e-9) flatness[dim] = geomMean / arithMean;
-            else flatness[dim] = 0;
+            flatness[dim] = static_cast<T>(banach::Statistics::calculateFlatness(dimensionalData[dim], timestamps));
         }
         return flatness;
     }

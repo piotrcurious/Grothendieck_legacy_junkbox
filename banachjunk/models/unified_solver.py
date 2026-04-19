@@ -78,6 +78,16 @@ class HybridQuantumAlgebraicSolver:
         ipr = np.sum(prob_density**2) / (norm_sq**2)
         return ipr
 
+    def calculate_fidelity(self, psi1, psi2):
+        """Calculates the overlap fidelity between two wavefunctions."""
+        inner_prod = np.vdot(psi1, psi2)
+        return np.abs(inner_prod)**2 / (np.linalg.norm(psi1)**2 * np.linalg.norm(psi2)**2)
+
+    def calculate_energy(self, psi, theta):
+        """Calculates the energy expectation value <psi|H|psi>."""
+        H = self.hamiltonian(theta)
+        return np.vdot(psi, H @ psi).real / np.vdot(psi, psi).real
+
     def algebraic_constraints(self):
         """Computes symbolic Groebner basis for structure resolution."""
         x, y, rho, kappa = symbols('x y rho kappa')
@@ -182,6 +192,17 @@ class TwoLevelLindbladSolver:
             trajectory.append(rho)
         return np.array(trajectory)
 
+    def calculate_g1(self, trajectory):
+        """Calculates the first-order coherence function g1(tau) for the trajectory."""
+        # g1(tau) = Tr(sigma_p(t+tau) sigma_m(t))
+        # Simplified: overlap of state with initial state for unitary, or Tr(rho(tau) * initial_state)
+        g1 = []
+        rho0 = trajectory[0]
+        for rho in trajectory:
+            # Overlap fidelity is a proxy for first-order coherence in this toy model
+            g1.append(np.abs(np.trace(rho @ rho0.conj().T)))
+        return np.array(g1)
+
     def rabi_oscillation(self, rho0, dt, steps, drive_amp=0.5):
         """Simulates Rabi oscillations with a coherent drive sigma_x."""
         original_omega = self.omega
@@ -227,6 +248,12 @@ def main():
     ipr_val = solver.calculate_ipr(traj[-1])
     logging.info(f"Inverse Participation Ratio (Localization): {ipr_val:.4f} (1/N={1.0/solver.N:.4f})")
 
+    fid = solver.calculate_fidelity(traj[0], traj[-1])
+    logging.info(f"Fidelity (Initial vs Final): {fid:.4f}")
+
+    energy = solver.calculate_energy(traj[-1], theta_true)
+    logging.info(f"Energy Expectation Value: {energy:.4f}")
+
     H_test = solver.hamiltonian(theta_true)
     dev = solver.verify_unitarity(H_test, dt)
     logging.info(f"Unitary Propagator Deviation (||U'U - I||): {dev:.2e}")
@@ -253,6 +280,9 @@ def main():
     ground_pops = [np.real(r[0,0]) for r in traj_tls]
     coherences = [np.abs(r[0,1]) for r in traj_tls]
     logging.info(f"TLS Evolution: Ground state pop: {ground_pops[-1]:.4f}, Coherence: {coherences[-1]:.4f}")
+
+    g1_tls = tls.calculate_g1(traj_tls)
+    logging.info(f"TLS g1 Coherence (tau=steps): {g1_tls[-1]:.4f}")
 
     logging.info("6. Rabi Oscillation Simulation")
     traj_rabi = tls.rabi_oscillation(rho0, dt=0.1, steps=100, drive_amp=1.0)
