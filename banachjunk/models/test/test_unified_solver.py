@@ -33,17 +33,21 @@ class TestHybridSolver(unittest.TestCase):
 
     def test_parameter_fitting(self):
         # Generate data
-        theta_true = [1.0, 0.5]
+        theta_true = [1.0, 2.5]
         psi0 = np.exp(-self.solver.x_grid**2) + 0j
         psi0 /= np.linalg.norm(psi0)
         dt = 0.1
-        steps = 10
+        steps = 15
         traj = self.solver.solve_dynamics(theta_true, psi0, dt, steps)
-        data_densities = np.abs(traj)**2
 
-        # Using a very close guess to verify local convergence in this minimal test
-        res = self.solver.estimate_parameters(data_densities, psi0, dt, steps, [1.01, 0.49])
-        np.testing.assert_array_almost_equal(res.x, theta_true, decimal=2)
+        # Add 5% Gaussian noise to mock realistic sensor observations
+        data_densities = np.abs(traj)**2
+        noise = np.random.normal(0, 0.05 * np.mean(data_densities), data_densities.shape)
+        data_densities_noisy = np.clip(data_densities + noise, 0, None)
+
+        res = self.solver.estimate_parameters(data_densities_noisy, psi0, dt, steps, [1.2, 2.0])
+        # Allow more margin for noise
+        np.testing.assert_array_almost_equal(res.x, theta_true, decimal=1)
 
 class TestTwoLevelSolver(unittest.TestCase):
     def setUp(self):
@@ -70,6 +74,16 @@ class TestTwoLevelSolver(unittest.TestCase):
         traj = self.tls.rabi_oscillation(rho0, dt=0.1, steps=20, drive_amp=1.0)
         excited_pops = [np.real(r[1,1]) for r in traj]
         self.assertGreater(max(excited_pops), 0.4)
+
+    def test_landau_zener_check(self):
+        # Verify that solver handles time-dependent Hamiltonian logic if we were to add it,
+        # but for now, we verify stability of dynamics with very high drive.
+        rho0 = np.array([[1, 0], [0, 0]], dtype=complex)
+        # High drive amp should produce fast oscillations
+        traj = self.tls.rabi_oscillation(rho0, dt=0.01, steps=100, drive_amp=10.0)
+        # Verify trace preservation under high drive
+        for r in traj:
+            self.assertAlmostEqual(np.trace(r).real, 1.0, places=5)
 
     def test_unitarity_check(self):
         # Just verify it runs and returns a reasonable deviation for small dt

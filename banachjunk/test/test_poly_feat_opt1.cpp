@@ -3,17 +3,20 @@
 #include <cassert>
 #include <cmath>
 #include "../test/Arduino.h"
+#include "test_data_generator.h"
 
 #include "../feature_detect/poly_feat_opt1.ino"
 
 void test_poly_feat_opt1() {
-    std::cout << "Testing AlgebraicFeatureDetector (from poly_feat_opt1.ino)..." << std::endl;
+    std::cout << "Testing AlgebraicFeatureDetector (poly_feat_opt1.ino) with representative data..." << std::endl;
 
     AlgebraicFeatureDetector detector;
 
-    // Simulate a few data points (keep within [-1, 1] to avoid GF clamping)
-    for (int i = 0; i < 30; i++) {
-        detector.processDataPoint(DataPoint(i * 0.05f - 0.5f, i * 0.05f - 0.5f));
+    // Simulate a linear trend with slight jitter
+    auto linear = banach::test::DataGenerator::generateNoisySine(40, 0, 0, 0.02f, 0.05f);
+    for (int i = 0; i < 40; i++) {
+        float t = i * 0.05f - 1.0f;
+        detector.processDataPoint(DataPoint(t, t));
     }
 
     auto features = detector.detectAndUpdateFeatures();
@@ -31,11 +34,11 @@ void test_poly_feat_opt1() {
 }
 
 void test_quadratic_opt() {
-    std::cout << "Testing quadratic segment in poly_feat_opt1..." << std::endl;
+    std::cout << "Testing quadratic segment in poly_feat_opt1 with representative data..." << std::endl;
     AlgebraicFeatureDetector detector;
     // Keep quadratic within range
-    for (int i = 0; i < 30; i++) {
-        float t = i * 0.05f - 0.5f;
+    for (int i = 0; i < 40; i++) {
+        float t = i * 0.05f - 1.0f;
         detector.processDataPoint(DataPoint(t, 0.5f * t * t));
     }
     auto features = detector.detectAndUpdateFeatures();

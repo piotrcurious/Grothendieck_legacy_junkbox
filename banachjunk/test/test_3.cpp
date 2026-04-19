@@ -3,26 +3,21 @@
 #include <cassert>
 #include <cmath>
 #include "../test/Arduino.h"
+#include "test_data_generator.h"
 
 // For 3_space.ino
 #include "../3_space.ino"
 
 void test_banach_space() {
-    std::cout << "Testing BanachSpace (from 3_space.ino)..." << std::endl;
+    std::cout << "Testing BanachSpace with representative jittered data..." << std::endl;
     BanachSpace<float, 3> numericalSpace;
-    std::vector<std::vector<float>> simulatedData = {
-        {1.2, 2.4, 4.8, 9.6, 19.2},   // Dimension 1
-        {3.5, 7.0, 14.0, 28.0, 56.0},  // Dimension 2
-        {2.1, 4.2, 8.4, 16.8, 33.6}    // Dimension 3
-    };
 
-    for (size_t i = 0; i < simulatedData[0].size(); ++i) {
-        std::vector<float> point = {
-            simulatedData[0][i],
-            simulatedData[1][i],
-            simulatedData[2][i]
-        };
-        numericalSpace.addDataPoint(point);
+    // Generate complex multi-dimensional signal with jitter and varying correlation
+    auto [s1, s2] = banach::test::DataGenerator::generateCorrelatedSignals(200, 0.05f);
+    auto s3 = banach::test::DataGenerator::generateChirp(200, 0.1f, 2.0f, 20.0f, 1.0f);
+
+    for (int i = 0; i < 200; ++i) {
+        numericalSpace.addDataPoint({s1[i].v, s2[i].v, s3[i].v}, s1[i].t);
     }
     numericalSpace.performSpaceAnalysis();
 
