@@ -17,16 +17,25 @@ Visualizes the interplay between the **additive vector space** structure of $GF(
 
 ![Finite Field Demo](docs/images/demo01_screenshot.png)
 
+- **Irreducible Search**: Automatically finds valid irreducible polynomials for extension degrees 1-4.
+- **Generator Orbit**: Traces the cyclic multiplicative structure with color gradients.
 - **Key Concept**: Every finite field $GF(q)$ is a vector space over its prime subfield $GF(p)$. Simultaneously, its non-zero elements form a cyclic group under multiplication.
-- **Visualization**: Blue lines show the additive neighbors (distance 1 in the basis), while the yellow path traces the orbit of a primitive element $\alpha$.
+
+### Grothendieck Viewpoint (`demo02.cpp`)
+Illustrates how functions defined on polynomial quotient rings $GF(p)[x]/(g)$ are essentially functions restricted to the variety $V(g)$.
+
+![Grothendieck Demo](docs/images/demo02_screenshot.png)
+
+- **Splitting Field Mode**: Approximates roots in $\mathbb{C}$ to show how the function $f$ evaluates at the variety's points.
+- **Quotient Mapping**: Visualizes the "descent" of algebraic functions to geometric varieties.
 
 ### Companion Matrices & Field Extensions (`demo03.cpp`)
 Demonstrates the relationship between algebraic field extensions $Q(\alpha)$, companion matrices, and their roots (eigenvalues) in the complex plane.
 
 ![Companion Matrix Demo](docs/images/demo03_screenshot.png)
 
-- **Key Concept**: The companion matrix of a polynomial $P(x)$ has eigenvalues exactly equal to the roots of $P(x)$. This links linear algebra directly to field theory.
-- **Visualization**: Left side shows the roots in $\mathbb{C}$. Right side shows the structure of the companion matrix $M$.
+- **Eigenvalue Equivalence**: Explicitly lists computed eigenvalues next to the companion matrix structure.
+- **Visualization**: Left side shows the roots in $\mathbb{C}$. Right side shows the companion matrix $M$, where eigenvalues = roots.
 
 ---
 
@@ -39,8 +48,16 @@ Features high-performance OpenGL texture rendering for root-density heatmaps, al
 
 ![Root Density Demo](docs/images/demo07_screenshot.png)
 
-- **Key Concept**: The distribution of roots of random polynomials with restricted coefficients (e.g., Littlewood polynomials) reveals intense "interference" patterns, particularly near the unit circle.
-- **Visualization**: Magma-colored heatmaps showing where roots cluster in the complex plane.
+- **Hardware Acceleration**: Uses OpenGL textures for fluid interactive exploration.
+- **Algebraic Interference**: Visualizes the density of roots for random Littlewood polynomials.
+
+### Professional 3D Explorer (`demo0c/`)
+Visualizes field structures in 3D, including "Basis Towers" for extensions and a Riemann Sphere projection.
+
+![3D Explorer Demo](docs/images/demo0c_screenshot.png)
+
+- **Riemann Sphere**: Maps the complex plane and its field extensions onto a unit sphere, exposing symmetries at infinity.
+- **Galois Towers**: Plots basis components along the Z-axis to show the hierarchy of extensions.
 
 ---
 

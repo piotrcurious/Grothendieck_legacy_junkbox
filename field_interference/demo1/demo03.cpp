@@ -211,9 +211,9 @@ public:
     if (n < 1)
       return;
 
-    float size = 0.8f / n;
+    float size = min(0.6f / n, 0.15f);
     float start_x = 0.1f;
-    float start_y = 0.9f;
+    float start_y = 0.85f;
 
     for (int i = 0; i < n; ++i) {
       for (int j = 0; j < n; ++j) {
@@ -226,7 +226,17 @@ public:
         draw_text(x + size * 0.1f, y - size * 0.5f, ss.str());
       }
     }
-    draw_text(0.1, 0.95, "Companion Matrix M (Eigenvalues = Roots)");
+    draw_text(0.1, 0.92, "Companion Matrix M (Eigenvalues = Roots)");
+
+    // List computed roots as eigenvalues
+    float text_y = start_y - n * size - 0.1f;
+    draw_text(0.1, text_y, "Eigenvalues computed via Durand-Kerner:");
+    for (size_t i = 0; i < roots.size(); ++i) {
+      ostringstream ss;
+      ss << "λ_" << i << " = " << fixed << setprecision(3) << roots[i].real()
+         << (roots[i].imag() >= 0 ? " + " : " - ") << abs(roots[i].imag()) << "i";
+      draw_text(0.15, text_y - (i + 1) * 0.05f, ss.str());
+    }
   }
 
   void draw_text(float x, float y, const string &s) {
