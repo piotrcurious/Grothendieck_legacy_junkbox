@@ -37,6 +37,15 @@ void test_uneven_sampling() {
     std::cout << "L2 norm for triangle (expected ~5.0): " << l2 << std::endl;
     assert(std::abs(l2 - 5.0) < 1e-3);
 
+    std::cout << "Verifying Spectral Flatness for uneven sampling..." << std::endl;
+    // v: [10, 10, 10] @ t: [0, 1, 10] -> Flatness 1.0
+    space.reset();
+    space.addDataPoint({10.0}, 0.0);
+    space.addDataPoint({10.0}, 1.0);
+    space.addDataPoint({10.0}, 10.0);
+    auto flatness = space.computeSpectralFlatness();
+    assert(std::abs(flatness[0] - 1.0f) < 1e-3);
+
     std::cout << "uneven_sampling test finished." << std::endl;
 }
 

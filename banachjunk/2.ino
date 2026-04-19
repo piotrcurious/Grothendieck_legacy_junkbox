@@ -48,6 +48,8 @@ public:
     int getValue() const { return value; }
 };
 
+#include "math_utils.h"
+
 // Banach Space Analyzer incorporating Galois Field Concepts
 template <int P, int BufferSize = 64>
 class BanachGaloisAnalyzer {
@@ -80,7 +82,7 @@ private:
     };
 
     // Compute Generalized Polynomial Fitting using Lebesgue-weighted Ridge Regression
-    GeneralizedPolynomial fitGeneralizedPolynomial(int order, double lambda = 1e-4) {
+    GeneralizedPolynomial fitGeneralizedPolynomial(int order, float& conditionProxy, double lambda = 1e-4) {
         int n = dataBuffer.size();
         int m = order + 1;
         std::vector<std::vector<double>> matrix(m, std::vector<double>(m, 0.0));
@@ -136,6 +138,15 @@ private:
                 }
             }
         }
+
+        // Estimate condition proxy
+        double d_min = 1e30, d_max = -1e30;
+        for (int i = 0; i < m; i++) {
+            double abs_d = std::abs(matrix[i][i]);
+            if (abs_d < d_min) d_min = abs_d;
+            if (abs_d > d_max) d_max = abs_d;
+        }
+        conditionProxy = (d_min > 1e-12) ? (float)(d_max / d_min) : 1e12f;
 
         GeneralizedPolynomial poly;
         poly.coefficients.resize(m, 0);
@@ -209,7 +220,8 @@ public:
         if (dataBuffer.size() < 4) return;
 
         // Polynomial Fitting (using Ridge Regression for stability)
-        GeneralizedPolynomial poly3rd = fitGeneralizedPolynomial(3, 1e-4);
+        float conditionProxy = 0;
+        GeneralizedPolynomial poly3rd = fitGeneralizedPolynomial(3, conditionProxy, 1e-4);
         GeneralizedPolynomial derivative = poly3rd.derivative();
 
         // Banach Space Characteristics
@@ -231,6 +243,16 @@ public:
 
         Serial.printf("\nBanach Norm (L-infinity): %f\n", banachNorm);
         Serial.printf("Spectral Characteristic: %f\n", spectralChar);
+        Serial.printf("Matrix Condition Proxy: %f %s\n", conditionProxy, (conditionProxy > 1e5) ? "(Poor)" : "(Stable)");
+
+        // Orthogonal Projection (via math_utils)
+        std::vector<float> floatData;
+        for(const auto& val : dataBuffer) floatData.push_back(val.toFloat());
+        auto legendre = banach::LegendreBasis::project(floatData, timestamps, 3);
+        Serial.println("\nLegendre Coefficients:");
+        for(size_t i=0; i<legendre.size(); ++i) {
+            Serial.printf("P%zu: %f\n", i, legendre[i]);
+        }
 
         // Polynomial Evaluation Demonstration
         Serial.println("\nPolynomial Evaluation:");

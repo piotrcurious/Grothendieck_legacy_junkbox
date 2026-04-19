@@ -40,6 +40,11 @@ void test_banach_space() {
         assert(f >= 0.0f && f <= 1.0f);
     }
 
+    std::cout << "Verifying Instantaneous Coherence..." << std::endl;
+    auto instCovar = numericalSpace.computeInstantaneousCoherence(3);
+    assert(instCovar.size() == 3);
+    for(size_t i=0; i<3; ++i) assert(instCovar[i][i] >= 0.99f); // Self-coherence
+
     std::cout << "Testing edge cases (empty space)..." << std::endl;
     numericalSpace.reset();
     numericalSpace.performSpaceAnalysis(); // Should not crash

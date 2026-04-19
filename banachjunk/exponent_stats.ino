@@ -215,7 +215,7 @@ private:
             metrics.confidenceIntervalUpper[dim] = mean + marginOfError;
 
             // Hurst Exponent Estimation (Simplified R/S Analysis)
-            if (dimData.size() > 10 && sdev > 1e-9) {
+            if (dimData.size() >= 8 && sdev > 1e-9) {
                 T cumSum = 0;
                 T minZ = 1e30, maxZ = -1e30;
                 for (T val : dimData) {
@@ -224,8 +224,11 @@ private:
                     if (cumSum > maxZ) maxZ = cumSum;
                 }
                 T RS = (maxZ - minZ) / sdev;
+                // Hurst H = log(R/S) / log(N).
+                // Guard log(N) against small N (though already checked >=8) and RS > 0.
                 if (RS > 1e-9) {
-                    metrics.hurstExponent[dim] = std::log(RS) / std::log(static_cast<T>(dimData.size()));
+                    T logN = std::log(static_cast<T>(dimData.size()));
+                    metrics.hurstExponent[dim] = (logN > 1e-9) ? std::log(RS) / logN : 0.5;
                 }
             }
 

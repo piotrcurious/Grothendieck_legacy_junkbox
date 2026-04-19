@@ -42,6 +42,17 @@ class HybridQuantumAlgebraicSolver:
         B = I - 1j * dt / (2 * self.hbar) * H
         return solve(A, B @ psi)
 
+    def verify_unitarity(self, H, dt):
+        """Computes deviation from unitarity for the Crank-Nicolson propagator."""
+        I = np.eye(H.shape[0])
+        A = I + 1j * dt / (2 * self.hbar) * H
+        B = I - 1j * dt / (2 * self.hbar) * H
+        U = solve(A, B)
+        # Check U^dag * U approx I
+        U_dag = U.conj().T
+        deviation = np.linalg.norm(U_dag @ U - I)
+        return deviation
+
     def solve_dynamics(self, theta, psi0, dt, steps):
         """Evolves the wavefunction over time."""
         H = self.hamiltonian(theta)
@@ -57,6 +68,15 @@ class HybridQuantumAlgebraicSolver:
             psi = U @ psi
             trajectory.append(psi)
         return np.array(trajectory)
+
+    def calculate_ipr(self, psi):
+        """Calculates the Inverse Participation Ratio (IPR) to quantify localization."""
+        # IPR = sum(|psi|^4) / (sum(|psi|^2))^2
+        prob_density = np.abs(psi)**2
+        norm_sq = np.sum(prob_density)
+        if norm_sq < 1e-12: return 0
+        ipr = np.sum(prob_density**2) / (norm_sq**2)
+        return ipr
 
     def algebraic_constraints(self):
         """Computes symbolic Groebner basis for structure resolution."""
@@ -147,12 +167,18 @@ class TwoLevelLindbladSolver:
         """Evolves the density matrix using RK4."""
         rho = rho0.copy()
         trajectory = [rho]
-        for _ in range(steps):
+        for s in range(steps):
             k1 = self.lindbladian(rho)
             k2 = self.lindbladian(rho + 0.5 * dt * k1)
             k3 = self.lindbladian(rho + 0.5 * dt * k2)
             k4 = self.lindbladian(rho + dt * k3)
             rho = rho + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+
+            # Physical sanity check: eigenvalues should be in [0, 1]
+            evals = np.linalg.eigvals(rho)
+            if np.any(evals.real < -1e-6) or np.any(evals.real > 1.00001):
+                logging.warning(f"Step {s}: Physicality violation in density matrix. Eigenvalues: {evals}")
+
             trajectory.append(rho)
         return np.array(trajectory)
 
@@ -197,6 +223,13 @@ def main():
 
     traj = solver.solve_dynamics(theta_true, psi0, dt, steps)
     logging.info(f"Dynamics solved for {steps} steps. Final norm: {np.linalg.norm(traj[-1])}")
+
+    ipr_val = solver.calculate_ipr(traj[-1])
+    logging.info(f"Inverse Participation Ratio (Localization): {ipr_val:.4f} (1/N={1.0/solver.N:.4f})")
+
+    H_test = solver.hamiltonian(theta_true)
+    dev = solver.verify_unitarity(H_test, dt)
+    logging.info(f"Unitary Propagator Deviation (||U'U - I||): {dev:.2e}")
 
     logging.info("3. Parameter Inference")
     # Use generated trajectory as mock data
