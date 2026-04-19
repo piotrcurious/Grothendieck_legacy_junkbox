@@ -73,10 +73,11 @@ Visualizes the resonance of $\mathbb{Q}(\alpha)$ for transcendental $\alpha$ (li
 
 ![Transcendental Explorer](docs/images/transcendental_explorer.png)
 
-- **Vectorized Engine**: High-performance NumPy implementation with dynamic binning for real-time micro-structure analysis.
-- **Coordinate Mappings**: Supports Standard, Log-Polar, and Reciprocal mappings to expose different symmetries of the extension.
-- **Custom Bases & Rotation**: Supports arbitrary complex expressions and real-time base rotation to explore extension variations.
-- **Advanced Metrics**: Visualizes "Min Complexity", "Dominant Power Index", and "Mean Coefficient Magnitude".
+- **Vectorized Engine**: High-performance NumPy implementation with dynamic binning for real-time micro-structure analysis. Now includes a batch-eigenvalue solver for Algebraic mode.
+- **Coordinate Mappings**: Supports Standard, Log-Polar, Reciprocal, Joukowsky, and Exponential mappings to expose different structural symmetries.
+- **Multi-Base Support**: Explore coupled extensions $\mathbb{Q}(A, B)$ and visualize the interaction of two transcendental generators.
+- **Custom Bases & Rotation**: Supports arbitrary complex expressions and real-time base rotation.
+- **Advanced Metrics**: Visualizes "Min Complexity", "Dominant Power Index", "Parity", and "L1 Norm".
 - **Coefficient Sets**: Choice of 'Standard' (uniform), 'Binary' {0, 1}, or 'Littlewood' {-1, 1} distributions.
 - **Analytic Overlays**: Continued fraction convergents and roots of unity to provide structural context.
 - **Gradient Mode**: Visualizes the rate of change in density to highlight field boundaries and cluster edges.
@@ -84,6 +85,8 @@ Visualizes the resonance of $\mathbb{Q}(\alpha)$ for transcendental $\alpha$ (li
 ![Transcendental Gradient](docs/images/transcendental_gradient.png)
 ![Transcendental Log-Polar](docs/images/transcendental_logpolar.png)
 ![Transcendental Reciprocal](docs/images/transcendental_reciprocal.png)
+![Transcendental Joukowsky](docs/images/transcendental_joukowsky.png)
+![Transcendental Parity](docs/images/transcendental_parity.png)
 ![Transcendental Dominant](docs/images/transcendental_dominant.png)
 
 ---

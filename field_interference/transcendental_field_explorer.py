@@ -20,6 +20,8 @@ class TranscendentalFieldExplorer:
         }
         self.current_base_val = np.pi
         self.current_base_name = 'pi'
+        self.secondary_base_val = None
+        self.secondary_base_name = ''
         self.colorbar = None
         self.coord_system = 'Standard'
         self.current_cmap = 'magma'
@@ -27,6 +29,7 @@ class TranscendentalFieldExplorer:
         self.coeff_set = 'Standard'
         self.base_rotation = 0.0
         self.show_gradient = False
+        self.auto_scale = True
         
         # Params
         self.max_degree = 3
@@ -43,23 +46,27 @@ class TranscendentalFieldExplorer:
         self.update(None)
 
     def setup_widgets(self):
+        # UI Organization: Fixed width panel on the left
+        panel_x = 0.01
+        panel_w = 0.12
+
         # Mode Selection
-        ax_mode = self.fig.add_axes([0.01, 0.82, 0.13, 0.15], facecolor='#111111')
-        self.radio = RadioButtons(ax_mode, ('Algebraic', 'Finite', 'Transcendental', 'Complexity', 'Dominant', 'Mean Coeff', 'Phase', 'Radial'), activecolor='#00d4ff')
+        ax_mode = self.fig.add_axes([panel_x, 0.82, panel_w, 0.15], facecolor='#111111')
+        self.radio = RadioButtons(ax_mode, ('Algebraic', 'Finite', 'Transcendental', 'Complexity', 'Dominant', 'Mean Coeff', 'Phase', 'Radial', 'Parity', 'L1 Norm'), activecolor='#00d4ff')
         for label in self.radio.labels:
             label.set_color('white')
         self.radio.on_clicked(self.change_mode)
 
         # Coordinate System Selection
-        self.ax_coord = self.fig.add_axes([0.01, 0.71, 0.13, 0.1], facecolor='#111111')
-        self.coord_radio = RadioButtons(self.ax_coord, ('Standard', 'Log-Polar', 'Reciprocal'), activecolor='#00ff9d')
+        self.ax_coord = self.fig.add_axes([panel_x, 0.71, panel_w, 0.1], facecolor='#111111')
+        self.coord_radio = RadioButtons(self.ax_coord, ('Standard', 'Log-Polar', 'Reciprocal', 'Joukowsky', 'Exponential'), activecolor='#00ff9d')
         for label in self.coord_radio.labels:
             label.set_color('white')
         self.coord_radio.on_clicked(self.change_coord)
         self.ax_coord.set_visible(False)
 
         # Colormap Selection
-        self.ax_cmap = self.fig.add_axes([0.01, 0.58, 0.13, 0.12], facecolor='#111111')
+        self.ax_cmap = self.fig.add_axes([panel_x, 0.58, panel_w, 0.12], facecolor='#111111')
         self.cmap_radio = RadioButtons(self.ax_cmap, ('magma', 'viridis', 'twilight', 'ocean'), activecolor='#ffcc00')
         for label in self.cmap_radio.labels:
             label.set_color('white')
@@ -67,7 +74,7 @@ class TranscendentalFieldExplorer:
         self.ax_cmap.set_visible(False)
         
         # Base Selection (for Transcendental mode)
-        self.ax_base = self.fig.add_axes([0.01, 0.42, 0.13, 0.15], facecolor='#111111')
+        self.ax_base = self.fig.add_axes([panel_x, 0.42, panel_w, 0.15], facecolor='#111111')
         self.base_radio = RadioButtons(self.ax_base, list(self.bases.keys()), activecolor='#ff007f')
         for label in self.base_radio.labels:
             label.set_color('white')
@@ -75,13 +82,18 @@ class TranscendentalFieldExplorer:
         self.ax_base.set_visible(False)
 
         # Custom Base Input
-        self.ax_text = self.fig.add_axes([0.01, 0.36, 0.13, 0.05], facecolor='#111111')
-        self.text_box = TextBox(self.ax_text, 'Custom: ', initial='pi', color='white', hovercolor='#333333')
+        self.ax_text = self.fig.add_axes([panel_x, 0.37, panel_w, 0.04], facecolor='#111111')
+        self.text_box = TextBox(self.ax_text, 'Base A: ', initial='pi', color='white', hovercolor='#333333')
         self.text_box.on_submit(self.submit_custom_base)
         self.ax_text.set_visible(False)
 
+        self.ax_text2 = self.fig.add_axes([panel_x, 0.32, panel_w, 0.04], facecolor='#111111')
+        self.text_box2 = TextBox(self.ax_text2, 'Base B: ', initial='', color='white', hovercolor='#333333')
+        self.text_box2.on_submit(self.submit_secondary_base)
+        self.ax_text2.set_visible(False)
+
         # Coefficient Set Selection
-        self.ax_coeff = self.fig.add_axes([0.01, 0.22, 0.13, 0.1], facecolor='#111111')
+        self.ax_coeff = self.fig.add_axes([panel_x, 0.22, panel_w, 0.09], facecolor='#111111')
         self.coeff_radio = RadioButtons(self.ax_coeff, ('Standard', 'Binary', 'Littlewood'), activecolor='#ff5500')
         for label in self.coeff_radio.labels:
             label.set_color('white')
@@ -89,17 +101,23 @@ class TranscendentalFieldExplorer:
         self.ax_coeff.set_visible(False)
 
         # Overlays Toggle
-        self.ax_check = self.fig.add_axes([0.01, 0.13, 0.13, 0.08], facecolor='#111111')
-        self.check = CheckButtons(self.ax_check, ['Overlays', 'Gradient'], [True, False])
+        self.ax_check = self.fig.add_axes([panel_x, 0.11, panel_w, 0.1], facecolor='#111111')
+        self.check = CheckButtons(self.ax_check, ['Overlays', 'Gradient', 'Auto-Scale'], [True, False, True])
         for label in self.check.labels:
             label.set_color('white')
         self.check.on_clicked(self.toggle_checks)
 
         # Export Button
-        self.ax_export = self.fig.add_axes([0.01, 0.05, 0.13, 0.05], facecolor='#111111')
+        self.ax_export = self.fig.add_axes([panel_x, 0.06, panel_w, 0.04], facecolor='#111111')
         self.btn_export = MplButton(self.ax_export, 'Export PNG', color='#333333', hovercolor='#555555')
         self.btn_export.label.set_color('white')
         self.btn_export.on_clicked(self.export_high_res)
+
+        # Reset View Button
+        self.ax_reset = self.fig.add_axes([panel_x, 0.01, panel_w, 0.04], facecolor='#111111')
+        self.btn_reset = MplButton(self.ax_reset, 'Reset View', color='#333333', hovercolor='#555555')
+        self.btn_reset.label.set_color('white')
+        self.btn_reset.on_clicked(self.reset_view)
         
         # Sliders
         self.ax_s1 = self.fig.add_axes([0.25, 0.14, 0.5, 0.015], facecolor='#222222')
@@ -129,9 +147,10 @@ class TranscendentalFieldExplorer:
 
     def change_mode(self, label):
         self.mode = label
-        is_trans = self.mode in ['Transcendental', 'Complexity', 'Dominant', 'Mean Coeff', 'Phase', 'Radial']
+        is_trans = self.mode in ['Transcendental', 'Complexity', 'Dominant', 'Mean Coeff', 'Phase', 'Radial', 'Parity', 'L1 Norm']
         self.ax_base.set_visible(is_trans)
         self.ax_text.set_visible(is_trans)
+        self.ax_text2.set_visible(is_trans)
         self.ax_coord.set_visible(is_trans)
         self.ax_cmap.set_visible(is_trans)
         self.ax_coeff.set_visible(is_trans)
@@ -171,6 +190,13 @@ class TranscendentalFieldExplorer:
             self.show_overlays = not self.show_overlays
         elif label == 'Gradient':
             self.show_gradient = not self.show_gradient
+        elif label == 'Auto-Scale':
+            self.auto_scale = not self.auto_scale
+        self.update(None)
+
+    def reset_view(self, event):
+        self.s4.set_val(1.0)
+        self.s6.set_val(0.0)
         self.update(None)
 
     def export_high_res(self, event):
@@ -179,19 +205,34 @@ class TranscendentalFieldExplorer:
         print(f"High-resolution export saved to {filename}")
 
     def submit_custom_base(self, text):
+        val = self._safe_eval(text)
+        if val is not None:
+            self.current_base_name = text
+            self.current_base_val = complex(val)
+            self.update(None)
+
+    def submit_secondary_base(self, text):
+        if not text.strip():
+            self.secondary_base_val = None
+            self.secondary_base_name = ''
+        else:
+            val = self._safe_eval(text)
+            if val is not None:
+                self.secondary_base_name = text
+                self.secondary_base_val = complex(val)
+        self.update(None)
+
+    def _safe_eval(self, text):
         try:
-            # Safe eval for mathematical expressions
             allowed_names = {
                 'pi': np.pi, 'e': np.e, 'phi': (1 + 5**0.5) / 2, 'i': 1j,
                 'j': 1j, 'exp': np.exp, 'sin': np.sin, 'cos': np.cos,
                 'sqrt': np.sqrt, 'log': np.log
             }
-            val = eval(text, {"__builtins__": None}, allowed_names)
-            self.current_base_name = text
-            self.current_base_val = complex(val)
-            self.update(None)
+            return eval(text, {"__builtins__": None}, allowed_names)
         except Exception as e:
-            print(f"Error evaluating custom base: {e}")
+            print(f"Error evaluating expression '{text}': {e}")
+            return None
 
     def get_convergents(self, x, n=8):
         convergents = []
@@ -220,25 +261,36 @@ class TranscendentalFieldExplorer:
     def draw_transcendental(self, deg, coeff_range, sigma, mode='Transcendental', zoom=1.0, num_samples=300000, rotation=0.0):
         """
         Visualizes the 'interference' of a transcendental base using vectorized computation.
-        We generate elements of the form: sum_{i=0}^{deg} c_i * base^i
         """
-        # Dynamic Resolution based on zoom and samples
         res = int(min(1200, 400 + 200 * np.log10(num_samples/1e4) * np.sqrt(zoom)))
         base = self.current_base_val * np.exp(1j * rotation)
 
         # Vectorized coefficient generation
-        if self.coeff_set == 'Binary':
-            coeffs = np.random.randint(0, 2, (num_samples, deg + 1))
-        elif self.coeff_set == 'Littlewood':
-            coeffs = np.random.choice([-1, 1], size=(num_samples, deg + 1))
-        else: # Standard
-            coeffs = np.random.randint(-coeff_range, coeff_range + 1, (num_samples, deg + 1))
+        def get_coeffs(ns, d):
+            if self.coeff_set == 'Binary':
+                c = np.random.randint(0, 2, (ns, d + 1))
+            elif self.coeff_set == 'Littlewood':
+                c = np.random.choice([-1, 1], size=(ns, d + 1))
+            else: # Standard
+                c = np.random.randint(-coeff_range, coeff_range + 1, (ns, d + 1))
+            c[np.all(c == 0, axis=1), 0] = 1
+            return c
 
-        # Ensure at least some non-zero to avoid 0/0
-        coeffs[np.all(coeffs == 0, axis=1), 0] = 1
+        if self.secondary_base_val is None:
+            coeffs = get_coeffs(num_samples, deg)
+            powers = base ** np.arange(deg + 1)
+            vals = coeffs @ powers
+        else:
+            # Full interaction: sum_{i,j} c_ij * A^i * B^j
+            # Coupled degrees: i + j <= deg
+            d_sub = max(1, deg // 2)
+            pa = base ** np.arange(d_sub + 1)
+            pb = self.secondary_base_val ** np.arange(d_sub + 1)
+            p_matrix = np.outer(pa, pb).flatten()
 
-        powers = base ** np.arange(deg + 1)
-        vals = coeffs @ powers
+            n_terms = len(p_matrix)
+            coeffs = get_coeffs(num_samples, n_terms - 1)
+            vals = coeffs @ p_matrix
 
         # Apply Coordinate Mapping
         if self.coord_system == 'Log-Polar':
@@ -253,12 +305,28 @@ class TranscendentalFieldExplorer:
             mask = np.abs(vals) > 1e-9
             mapped_vals = np.zeros_like(vals)
             mapped_vals[mask] = 1.0 / vals[mask]
+        elif self.coord_system == 'Joukowsky':
+            # w = z + 1/z
+            mask = np.abs(vals) > 1e-9
+            mapped_vals = np.zeros_like(vals)
+            mapped_vals[mask] = vals[mask] + 1.0 / vals[mask]
+        elif self.coord_system == 'Exponential':
+            # w = exp(z)
+            # Clip to avoid overflow in exp
+            v_clipped = np.clip(vals.real, -10, 10) + 1j * vals.imag
+            mapped_vals = np.exp(v_clipped)
         else:
             mapped_vals = vals
 
-        limit = np.percentile(np.abs(mapped_vals), 95) / zoom
-        x_range = (-limit, limit)
-        y_range = (-limit, limit)
+        if self.auto_scale:
+            limit = np.percentile(np.abs(mapped_vals), 95) / zoom
+            x_range = (-limit, limit)
+            y_range = (-limit, limit)
+        else:
+            # Fixed range [-10, 10] adjusted by zoom
+            limit = 10.0 / zoom
+            x_range = (-limit, limit)
+            y_range = (-limit, limit)
         
         title_base = self.current_base_name.replace('_', '\\_')
         
@@ -295,6 +363,16 @@ class TranscendentalFieldExplorer:
                 label = 'Radial Distance'
                 agg_func = np.maximum.at
                 init_val = -1.0
+            elif mode == 'Parity':
+                metric = np.sum(coeffs, axis=1) % 2
+                label = 'Coefficient Parity'
+                agg_func = np.maximum.at
+                init_val = -1.0
+            elif mode == 'L1 Norm':
+                metric = np.sum(np.abs(coeffs), axis=1)
+                label = 'Sum of Absolute Coeffs'
+                agg_func = np.mean.at
+                init_val = 0.0
 
             Z_metric = np.full((res, res), init_val)
             agg_func(Z_metric, (iy[mask], ix[mask]), metric[mask].astype(float))
@@ -335,8 +413,15 @@ class TranscendentalFieldExplorer:
 
             self.ax.imshow(Z_final, extent=[x_range[0], x_range[1], y_range[0], y_range[1]],
                             origin='lower', cmap=self.current_cmap, norm=norm)
-            self.ax.set_title(rf"Transcendental Field Interference: $\mathbb{{Q}}({title_base})$" + "\n" +
-                              rf"Density of elements $\sum_{{i=0}}^{{{deg}}} c_i \cdot {title_base}^i$",
+
+            title = rf"$\mathbb{{Q}}({title_base}"
+            if self.secondary_base_val is not None:
+                title_b = self.secondary_base_name.replace('_', '\\_')
+                title += f", {title_b}"
+            title += ")$"
+
+            self.ax.set_title(f"Transcendental Field Interference: {title}\n" +
+                              rf"Coupled Extension micro-structures",
                               color='white', fontsize=14)
 
         # Plot Rational Convergents if base is real
@@ -382,23 +467,41 @@ class TranscendentalFieldExplorer:
         self.ax.scatter(mapped_roots.real, mapped_roots.imag, color='cyan', s=10, alpha=0.5, label=f'{n_roots}-th Roots')
 
     def draw_algebraic(self, deg, coeff, sigma):
-        res = 400
-        Z = np.zeros((res, res))
-        x_range = (-2, 2)
+        res = 500
+        all_roots = []
         for d in range(1, deg + 1):
-            num_samples = 10000 // d
-            for _ in range(num_samples):
-                poly = np.random.randint(-coeff, coeff + 1, d + 1)
-                if poly[-1] == 0: poly[-1] = 1
-                roots = np.roots(poly[::-1])
-                for r in roots:
-                    re, im = r.real, r.imag
-                    if x_range[0] <= re <= x_range[1] and x_range[0] <= im <= x_range[1]:
-                        ix = int((re - x_range[0]) / 4 * (res - 1))
-                        iy = int((im - x_range[0]) / 4 * (res - 1))
-                        Z[iy, ix] += 1
-        Z_blur = gaussian_filter(Z, sigma=sigma)
-        self.ax.imshow(Z_blur, extent=[-2, 2, -2, 2], origin='lower', cmap='magma', norm=LogNorm(vmin=0.1))
+            num_samples = 20000 // d
+            # Shape (num_samples, d+1)
+            polys = np.random.randint(-coeff, coeff + 1, (num_samples, d + 1)).astype(float)
+            polys[polys[:, -1] == 0, -1] = 1 # Lead coefficient != 0
+
+            if d == 1:
+                # ax + b = 0 -> x = -b/a
+                all_roots.extend(-polys[:, 0] / polys[:, 1])
+            else:
+                # Use companion matrix batch eigenvalue solver for speed
+                # monic: x^d + (c_{d-1}/c_d)x^{d-1} + ... + (c_0/c_d)
+                monic = polys[:, :-1] / polys[:, -1:]
+
+                # Construct companion matrices: (num_samples, d, d)
+                matrices = np.zeros((num_samples, d, d))
+                matrices[:, 1:, :-1] = np.eye(d - 1)
+                matrices[:, :, -1] = -monic
+
+                # Batch eigenvalues
+                roots = np.linalg.eigvals(matrices)
+                all_roots.extend(roots.flatten())
+
+        all_roots = np.array(all_roots)
+        # Filter roots in range
+        mask = (np.abs(all_roots.real) <= 2.5) & (np.abs(all_roots.imag) <= 2.5)
+        roots = all_roots[mask]
+
+        H, xedges, yedges = np.histogram2d(roots.real, roots.imag, bins=res, range=[[-2.5, 2.5], [-2.5, 2.5]])
+        Z_blur = gaussian_filter(H.T, sigma=sigma)
+        vmin = 0.1
+        vmax = max(vmin + 1.0, np.max(Z_blur))
+        self.ax.imshow(Z_blur, extent=[-2.5, 2.5, -2.5, 2.5], origin='lower', cmap='magma', norm=LogNorm(vmin=vmin, vmax=vmax))
         self.ax.set_title(r"Field Interference: Algebraic Number Density in $\mathbb{C}$", color='white', fontsize=15)
 
     def draw_finite(self, p, n):
