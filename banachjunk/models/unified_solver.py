@@ -88,6 +88,17 @@ class HybridQuantumAlgebraicSolver:
         H = self.hamiltonian(theta)
         return np.vdot(psi, H @ psi).real / np.vdot(psi, psi).real
 
+    def calculate_entanglement_entropy(self, psi):
+        """Calculates Von Neumann entanglement entropy for a bipartite grid split."""
+        # This is a proxy since we represent a single particle wavefunction,
+        # not a many-body state. For single particle, this is spatial entropy.
+        psi_norm = psi / np.linalg.norm(psi)
+        prob = np.abs(psi_norm)**2
+        # Filter zero probs for log
+        prob = prob[prob > 1e-15]
+        entropy = -np.sum(prob * np.log(prob))
+        return entropy
+
     def algebraic_constraints(self):
         """Computes symbolic Groebner basis for structure resolution."""
         x, y, rho, kappa = symbols('x y rho kappa')
@@ -283,6 +294,11 @@ def main():
 
     g1_tls = tls.calculate_g1(traj_tls)
     logging.info(f"TLS g1 Coherence (tau=steps): {g1_tls[-1]:.4f}")
+
+    logging.info("7. Entanglement Entropy Proxy (Spatial)")
+    entropy_initial = solver.calculate_entanglement_entropy(traj[0])
+    entropy_final = solver.calculate_entanglement_entropy(traj[-1])
+    logging.info(f"Spatial Entropy: Initial={entropy_initial:.4f}, Final={entropy_final:.4f}")
 
     logging.info("6. Rabi Oscillation Simulation")
     traj_rabi = tls.rabi_oscillation(rho0, dt=0.1, steps=100, drive_amp=1.0)
