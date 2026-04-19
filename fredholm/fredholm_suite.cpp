@@ -127,12 +127,21 @@ public:
         for(size_t i=0; i<lastX.size(); i++) f << lastX[i] << "," << lastY[i] << "\n";
         std::cout << "Exported to " << filename << std::endl;
     }
-    void drawHeatmap(SDL_Renderer* ren, int kx, int ky, int kw, int kh, std::function<double(double, double)> K) {
+    void drawHeatmap(SDL_Renderer* ren, TextureCache& cache, int kx, int ky, int kw, int kh, std::function<double(double, double)> K) {
         for (int i = 0; i < 40; ++i) for (int j = 0; j < 40; ++j) {
             double val = K((double)i/40.0, (double)j/40.0);
             Uint8 c = (Uint8)(std::clamp(val, 0.0, 1.0) * 255);
             SDL_SetRenderDrawColor(ren, c, c/2, 255-c, 255);
             SDL_Rect r = {kx + i*5, ky + j*5, 5, 5}; SDL_RenderFillRect(ren, &r);
+        }
+        int mx, my; SDL_GetMouseState(&mx, &my);
+        if (mx >= kx && mx <= kx + 200 && my >= ky && my <= ky + 200) {
+            double kx_val = (double)(mx - kx) / 200.0;
+            double ky_val = (double)(my - ky) / 200.0;
+            double val = K(kx_val, ky_val);
+            std::stringstream ss; ss << "K(" << std::fixed << std::setprecision(2) << kx_val << "," << ky_val << ")=" << val;
+            cache.renderText(ss.str(), {255,255,255,255}, mx + 10, my - 20);
+            SDL_Rect r_out = {kx, ky, 200, 200}; SDL_SetRenderDrawColor(ren, 255, 255, 255, 150); SDL_RenderDrawRect(ren, &r_out);
         }
     }
 };
@@ -147,7 +156,7 @@ public:
         auto K = KernelFactory::create((int)kType, sigma);
         auto f = [&](double x) { return std::sin(freq * M_PI * x); };
 
-        auto phi_nodes = Solver::solveFredholm(0, 1, lambda, K, f, 16);
+        auto phi_nodes = Solver::solveFredholm(0, 1, lambda, K, f, (nIters > 0.5f) ? 32 : 16);
         std::vector<double> f_v, phi_v; lastX.clear(); lastY.clear();
         for (int i = 0; i <= 100; ++i) {
             double x = i/100.0; f_v.push_back(f(x));
@@ -168,10 +177,10 @@ public:
         cache.renderText("Red: Source f(x), Green: Solution phi(x) (Nystrom)", {200,200,200,255}, 450, 445);
         std::string kn = "Kernel: " + std::string(KernelFactory::getName((int)kType));
         cache.renderText(kn, {150,200,255,255}, 450, 470);
-        drawHeatmap(ren, 20, 450, 200, 200, K);
+        drawHeatmap(ren, cache, 20, 450, 200, 200, K);
     }
     std::string getEquation() const override { return "phi(x) = f(x) + lambda * integral[ K(x,y) phi(y) dy ]"; }
-    std::string getTheory() const override { return "The 2nd kind equation is generally well-posed. The operator (I - lambda K) is invertible if lambda is not an eigenvalue."; }
+    std::string getTheory() const override { return "The 2nd kind equation is generally well-posed. Formally: (I - lambda K)phi = f. Solvable if 1/lambda is not in the spectrum of K."; }
 };
 
 class SpectralDemo : public FredholmDemo {
@@ -257,8 +266,8 @@ public:
         std::vector<double> o_v, b_v, d_v; for(int i=0; i<=100; i++){ double x = i/100.0; o_v.push_back(s_o(x)); b_v.push_back(b_f(x)); d_v.push_back(phi_nodes.empty() ? 0 : Solver::interpolateFredholm(x, 0, 1, -1.0/alpha, KK_f, [&](double x){return Kb_f(x)/alpha;}, phi_nodes, 16)); }
         drawGraph(ren, gx, gy, gw, gh, o_v, {80, 80, 80, 255}, -0.2, 1.2, cache); drawGraph(ren, gx, gy, gw, gh, b_v, {255, 100, 100, 255}, -0.2, 1.2, cache); drawGraph(ren, gx, gy, gw, gh, d_v, {100, 255, 100, 255}, -0.2, 1.2, cache);
     }
-    std::string getEquation() const override { return "min ||K*phi - f||^2 + alpha*||phi||^2  =>  (K*K + alpha*I)phi = K*f"; }
-    std::string getTheory() const override { return "Tikhonov Regularization: Adding a penalty term to stabilize the inversion of a smoothing (blurring) kernel."; }
+    std::string getEquation() const override { return "min ||K*phi - f||^2 + alpha*||phi||^2  =>  (K^*K + alpha*I)phi = K^*f"; }
+    std::string getTheory() const override { return "Tikhonov Regularization: Stabilizes ill-posed problems by adding alpha*||phi||^2 penalty. Recovers stability at the cost of smoothing."; }
 };
 
 class VolterraDemo : public FredholmDemo {
@@ -455,10 +464,19 @@ int main(int argc, char* argv[]) {
             demos[ui.currentMode]->render(renderer, cache, gx, gy, gw, gh, sigma, lambda, freq, jitter, compL, pot, alpha, eigenIdx, kType, nIters, startTime, compensator);
 
             // Shared metadata rendering
-            auto K_theory = [&](double x, double y) { double d = x - y; return (kType < 0.5) ? std::exp(-d*d / (2*sigma*sigma)) : 1.0 / (1.0 + (d*d)/(sigma*sigma)); };
+            auto K_theory = KernelFactory::create((int)kType, sigma);
             double condNum = Solver::estimateConditionNumber(0, 1, lambda, K_theory, 16);
             std::stringstream statSS; statSS << "Stability Index: " << std::fixed << std::setprecision(3) << condNum;
             cache.renderText(statSS.str(), {150, 200, 255, 255}, 20, 800);
+
+            // Stability Gauge
+            SDL_Rect gr_bg = {20, 780, 200, 10}; SDL_SetRenderDrawColor(renderer, 50, 50, 55, 255); SDL_RenderFillRect(renderer, &gr_bg);
+            int gw_fill = (int)(std::min(1.0, 1.0 / condNum) * 200);
+            SDL_Rect gr_fill = {20, 780, gw_fill, 10};
+            if (condNum > 5.0) SDL_SetRenderDrawColor(renderer, 255, 100, 100, 255);
+            else SDL_SetRenderDrawColor(renderer, 100, 255, 100, 255);
+            SDL_RenderFillRect(renderer, &gr_fill);
+
             if (condNum > 5.0) cache.renderText("DIVERGENCE RISK: HIGH", {255, 100, 100, 255}, 20, 820);
             int mx, my; SDL_GetMouseState(&mx, &my);
             if (mx >= gx && mx <= gx + gw && my >= gy && my <= gy + gh) {
