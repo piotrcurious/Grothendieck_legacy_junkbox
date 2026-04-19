@@ -305,6 +305,20 @@ private:
         return seen.count();
     }
 
+    // Detect periodicity using Roots of Unity (Simplified Galois-Fourier)
+    bool detectGaloisPeriodicity(const DataPoint* data, size_t n) {
+        if (n < 10) return false;
+        // Integer-based shift invariance check
+        for (size_t k = 2; k <= n / 2; ++k) {
+            uint32_t matches = 0;
+            for (size_t i = 0; i < n - k; ++i) {
+                if (std::abs((int)floatToGF(data[i].value) - (int)floatToGF(data[i+k].value)) <= 5) matches++;
+            }
+            if (matches > (n - k) * 0.7) return true;
+        }
+        return false;
+    }
+
     // Efficient noise estimation using moving median
     float estimateNoiseLevel(const DataPoint* data, size_t n) {
         if (n < 2) return 0.0f;
@@ -412,6 +426,7 @@ private:
     uint8_t classifyFeature(const GFPolynomial& poly, int varietyDim, const DataPoint* data, size_t n) {
         // Calculate autocorrelation efficiently using fixed-point arithmetic
         int32_t autocorr = calculateFixedPointAutocorrelation(data, n);
+        bool galois_periodic = detectGaloisPeriodicity(data, n);
         
         uint8_t degree = poly.getDegree();
         uint8_t type = 7; // Default to unknown
@@ -422,7 +437,7 @@ private:
         } else if (degree == 2) {
             // Check for vertex vs transition using derivative
             type = hasUniqueExtremum(poly) ? 1 : 2;
-        } else if (autocorr > (1 << 14)) { // threshold in fixed-point
+        } else if (autocorr > (1 << 14) || galois_periodic) { // threshold in fixed-point
             type = 3; // periodic
         } else if (varietyDim < (n >> 2)) {
             type = 4; // constant_piecewise

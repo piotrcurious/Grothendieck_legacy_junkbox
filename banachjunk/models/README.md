@@ -19,7 +19,12 @@ Key mathematical tools include:
 
 - `annihilator.md`: Defines a hyperdimensional subquantum ontological model.
 - `annihilator_orthogonal.md`: Introduces an advanced discriminator for distinguishing genuine orthogonal structures.
-- `unified_solver.py`: A runnable Python implementation that integrates the core logic from various models into a single solver framework.
+- `unified_solver.py`: Implements a `HybridQuantumAlgebraicSolver` and `TwoLevelLindbladSolver`. Key features:
+    - **Unitary Evolution**: Numerical dynamics via Crank-Nicolson method.
+    - **Open Systems**: Multi-channel Lindblad dynamics (relaxation/dephasing) for TLS.
+    - **Coherent Control**: Simulation of Rabi oscillations with external drives.
+    - **Algebraic Core**: Structural resolution via Gröbner bases and invariant (Annihilator) checks.
+    - **Parameter Inference**: Density-based fitting with numerical sensitivity analysis.
 - `gpt4o/`: Contains specialized discussions and derivations related to annihilator solvers, reality-as-process, and Hamiltonian particle dynamics.
 
 ## Running the Solver and Tests

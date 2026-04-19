@@ -38,6 +38,13 @@ void test_exponent_stats() {
         };
         statisticalSpace.addStatisticalDataPoint(point);
     }
+
+    std::cout << "\nTesting Hurst and ApEn with longer sequence..." << std::endl;
+    statisticalSpace.reset();
+    for(int i = 0; i < 40; ++i) {
+        float val = std::sin(i * 0.5f) + random(100) / 500.0f;
+        statisticalSpace.addStatisticalDataPoint({val, val*2, val*0.5f});
+    }
     statisticalSpace.performStatisticalAnalysis();
 
     // Test entropy and covariance (if public)
