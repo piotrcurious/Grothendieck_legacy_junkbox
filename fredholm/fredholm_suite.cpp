@@ -54,7 +54,7 @@ public:
 class UI {
 public:
     struct Slider { std::string label; float* value; float min, max; SDL_Rect rect; bool dragging = false; };
-    struct Button { std::string label; AppMode mode; SDL_Rect rect; };
+    struct Button { std::string label; AppMode mode; SDL_Rect rect; bool hovered = false; };
     std::vector<Slider> sliders;
     std::vector<Button> buttons;
     TTF_Font* font;
@@ -65,25 +65,35 @@ public:
     void addSlider(std::string label, float* val, float min, float max, int x, int y) { sliders.push_back({label, val, min, max, {x, y, 200, 20}, false}); }
     void addButton(std::string label, AppMode mode, int x, int y) { buttons.push_back({label, mode, {x, y, 90, 40}}); }
     void handleEvent(SDL_Event& e) {
+        int mx, my; SDL_GetMouseState(&mx, &my);
+        for (auto& b : buttons) b.hovered = (mx >= b.rect.x && mx <= b.rect.x + b.rect.w && my >= b.rect.y && my <= b.rect.y + b.rect.h);
+
         if (e.type == SDL_MOUSEBUTTONDOWN) {
-            int mx = e.button.x, my = e.button.y;
-            for (auto& s : sliders) if (mx >= s.rect.x && mx <= s.rect.x + s.rect.w && my >= s.rect.y && my <= s.rect.y + s.rect.h) s.dragging = true;
-            for (auto& b : buttons) if (mx >= b.rect.x && mx <= b.rect.x + b.rect.w && my >= b.rect.y && my <= b.rect.y + b.rect.h) currentMode = b.mode;
+            int bx = e.button.x, by = e.button.y;
+            for (auto& s : sliders) if (bx >= s.rect.x && bx <= s.rect.x + s.rect.w && by >= s.rect.y && by <= s.rect.y + s.rect.h) s.dragging = true;
+            for (auto& b : buttons) if (bx >= b.rect.x && bx <= b.rect.x + b.rect.w && by >= b.rect.y && by <= b.rect.y + b.rect.h) currentMode = b.mode;
         } else if (e.type == SDL_MOUSEBUTTONUP) { for (auto& s : sliders) s.dragging = false; }
         else if (e.type == SDL_MOUSEMOTION) {
-            int mx = e.motion.x; for (auto& s : sliders) if (s.dragging) *s.value = std::clamp(s.min + (float)(mx - s.rect.x) / s.rect.w * (s.max - s.min), s.min, s.max);
+            int mx_m = e.motion.x; for (auto& s : sliders) if (s.dragging) *s.value = std::clamp(s.min + (float)(mx_m - s.rect.x) / s.rect.w * (s.max - s.min), s.min, s.max);
         }
     }
     void draw(SDL_Renderer* ren) {
+        int mx, my; SDL_GetMouseState(&mx, &my);
         for (auto& s : sliders) {
+            bool s_hover = (mx >= s.rect.x && mx <= s.rect.x + s.rect.w && my >= s.rect.y && my <= s.rect.y + s.rect.h);
             std::stringstream ss; ss << s.label << ": " << std::fixed << std::setprecision(2) << *s.value;
             cache.renderText(ss.str(), {255,255,255,255}, s.rect.x, s.rect.y - 25);
             SDL_SetRenderDrawColor(ren, 100, 100, 100, 255); SDL_RenderFillRect(ren, &s.rect);
             float pct = std::clamp((*s.value - s.min) / (s.max - s.min), 0.0f, 1.0f);
-            SDL_Rect hr = {s.rect.x + (int)(pct * s.rect.w) - 5, s.rect.y - 5, 10, 30}; SDL_SetRenderDrawColor(ren, 200, 200, 200, 255); SDL_RenderFillRect(ren, &hr);
+            SDL_Rect hr = {s.rect.x + (int)(pct * s.rect.w) - 5, s.rect.y - 5, 10, 30};
+            SDL_SetRenderDrawColor(ren, (s.dragging || s_hover) ? 255 : 200, (s.dragging || s_hover) ? 255 : 200, (s.dragging || s_hover) ? 100 : 200, 255);
+            SDL_RenderFillRect(ren, &hr);
         }
         for (auto& b : buttons) {
-            SDL_SetRenderDrawColor(ren, currentMode == b.mode ? 100 : 70, currentMode == b.mode ? 150 : 70, currentMode == b.mode ? 100 : 70, 255);
+            int r = currentMode == b.mode ? 100 : 70;
+            int g = currentMode == b.mode ? 150 : (b.hovered ? 90 : 70);
+            int bl = currentMode == b.mode ? 100 : 70;
+            SDL_SetRenderDrawColor(ren, r, g, bl, 255);
             SDL_RenderFillRect(ren, &b.rect); SDL_SetRenderDrawColor(ren, 200, 200, 200, 255); SDL_RenderDrawRect(ren, &b.rect);
             cache.renderText(b.label, {255,255,255,255}, b.rect.x + b.rect.w/2, b.rect.y + b.rect.h/2 - 10, true);
         }
@@ -98,10 +108,26 @@ void drawGraph(SDL_Renderer* ren, int x, int y, int w, int h, const std::vector<
         return y + h/2 - (int)(normalized * h);
     };
     if (drawAxes) {
+        // Grid lines
+        SDL_SetRenderDrawColor(ren, 40, 40, 45, 255);
+        for(int i=1; i<10; i++) {
+            int gx = x + (i * w) / 10;
+            SDL_RenderDrawLine(ren, gx, y, gx, y + h);
+        }
         int y0 = transform(0.0);
         SDL_SetRenderDrawColor(ren, 60, 60, 65, 255);
         if (y0 >= y && y0 <= y+h) SDL_RenderDrawLine(ren, x, y0, x + w, y0);
         SDL_RenderDrawLine(ren, x, y, x, y + h);
+
+        // Axis Labels
+        std::stringstream ss_min, ss_max;
+        ss_min << std::fixed << std::setprecision(1) << (midV + panY - (maxV - minV) / (2.0 * zoom));
+        ss_max << std::fixed << std::setprecision(1) << (midV + panY + (maxV - minV) / (2.0 * zoom));
+        cache.renderText(ss_max.str(), {150, 150, 150, 255}, x - 35, y);
+        cache.renderText(ss_min.str(), {150, 150, 150, 255}, x - 35, y + h - 15);
+        cache.renderText("0", {100, 100, 100, 255}, x + 5, y + h/2 + 5);
+        cache.renderText("x=0", {100, 100, 100, 255}, x, y + h + 5);
+        cache.renderText("x=1", {100, 100, 100, 255}, x + w - 30, y + h + 5);
     }
     SDL_SetRenderDrawColor(ren, color.r, color.g, color.b, color.a);
     for (size_t i = 0; i < data.size() - 1; ++i) {
@@ -201,6 +227,7 @@ public:
         int cx = 20, cy = 450, cs = 200;
         SDL_SetRenderDrawColor(ren, 40, 40, 45, 255); SDL_Rect cr = {cx, cy, cs, cs}; SDL_RenderFillRect(ren, &cr);
         SDL_SetRenderDrawColor(ren, 80, 80, 85, 255); SDL_RenderDrawLine(ren, cx, cy + cs/2, cx + cs, cy + cs/2); SDL_RenderDrawLine(ren, cx + cs/2, cy, cx + cs/2, cy + cs);
+        cache.renderText("Complex Plane: mu", {150, 150, 150, 255}, cx, cy - 20);
         for(double ev : evals) {
             int px = cx + cs/2 + (int)(ev * cs/2); int py = cy + cs/2;
             if (px >= cx && px <= cx+cs) {
@@ -234,7 +261,7 @@ public:
     }
     void render(SDL_Renderer* ren, TextureCache& cache, int gx, int gy, int gw, int gh, float sigma, float lambda, float freq, float jitter, float compLambda, float potential, float alpha, float index, float kType, float nIters, std::chrono::steady_clock::time_point start, AdaptiveCompensator<double>& comp) override {
         auto now = std::chrono::steady_clock::now(); float t = std::chrono::duration<float>(now - start).count();
-        float raw = std::fmod(t * 1.0f, 2.0f * M_PI), noisy = raw + ((rand() % 1000) / 1000.0f - 0.5f) * jitter, quantized = std::floor(noisy * 16.0f) / 16.0f;
+        float raw = std::fmod(t * 0.5f, 2.0f * M_PI), noisy = raw + ((rand() % 1000) / 1000.0f - 0.5f) * jitter, quantized = std::floor(noisy * 16.0f) / 16.0f;
         comp.setParams(0.1, compLambda); float corrected = comp.compensate(quantized);
         auto drawPtr = [&](int cx, int cy, float angle, const char* lbl) {
             int r = 80; SDL_SetRenderDrawColor(ren, 150, 150, 150, 255); for(int i=0; i<360; i++) SDL_RenderDrawPoint(ren, cx + r*cos(i*M_PI/180), cy + r*sin(i*M_PI/180));
@@ -242,6 +269,7 @@ public:
             cache.renderText(lbl, {255,255,255,255}, cx, cy + r + 10, true);
         };
         drawPtr(550, 300, quantized, "Quantized"); drawPtr(850, 300, corrected, "Corrected");
+        cache.renderText("Adaptive Smoothing Feedback Loop", {150, 200, 255, 255}, 550, 150);
     }
     std::string getEquation() const override { return "y_corr(t) = y_raw(t) - lambda * integral[ K(t-s) (y_corr(s) - y_raw(s)) ds ]"; }
     std::string getTheory() const override { return "Self-correcting feedback loop: the error is fed back through an integral operator to smooth the signal."; }
@@ -422,6 +450,7 @@ public:
         // SVD Visualization
         int sx = 20, sy = 450, ss = 200;
         SDL_SetRenderDrawColor(ren, 40, 40, 45, 255); SDL_Rect sr = {sx, sy, ss, ss}; SDL_RenderFillRect(ren, &sr);
+        cache.renderText("Singular Value Spectrum", {150, 150, 150, 255}, sx, sy - 20);
         Fredholm::Matrix M(16, 16);
         for(int i=0; i<16; i++) for(int j=0; j<16; j++) M(i,j) = 0.5 * Quadrature::GaussLegendre16().weights[j] * K(0.5*Quadrature::GaussLegendre16().points[i]+0.5, 0.5*Quadrature::GaussLegendre16().points[j]+0.5);
         Fredholm::Matrix U(16, 16), V(16, 16); std::vector<double> S; Fredholm::computeSVD(M, U, S, V);
