@@ -92,6 +92,27 @@ void testEdgeCases() {
     std::cout << "  Passed!" << std::endl;
 }
 
+void testKernelFactory() {
+    std::cout << "Testing KernelFactory..." << std::endl;
+    for(int i=0; i<5; i++) {
+        auto K = KernelFactory::create(i, 0.2);
+        double val = K(0.5, 0.5);
+        assert(!std::isnan(val));
+        std::cout << "  Kernel " << i << " (" << KernelFactory::getName(i) << ") valid." << std::endl;
+    }
+    std::cout << "  Passed!" << std::endl;
+}
+
+void testConditionNumber() {
+    std::cout << "Testing Condition Number..." << std::endl;
+    // Rank-1 kernel should be very ill-conditioned
+    auto K = [](double x, double y) { return 1.0; };
+    double cond = Solver::estimateConditionNumber(0, 1, 1.0, K, 8);
+    std::cout << "  Cond(Identity - K) with K=1: " << cond << std::endl;
+    assert(cond > 1e10 || std::isinf(cond));
+    std::cout << "  Passed!" << std::endl;
+}
+
 int main() {
     try {
         testLinearSolver();
@@ -100,6 +121,8 @@ int main() {
         testFredholm();
         testSVD();
         testEdgeCases();
+        testKernelFactory();
+        testConditionNumber();
         std::cout << "\nAll Engine Tests Passed Successfully!" << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "Test failed: " << e.what() << std::endl;

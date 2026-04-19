@@ -95,7 +95,7 @@ void drawGraph(SDL_Renderer* ren, int x, int y, int w, int h, const std::vector<
     double midV = (minV + maxV) / 2.0;
     auto transform = [&](double val) {
         double normalized = (val - (midV + panY)) / ((maxV - minV) / zoom);
-        return y + h/2 - (int)(normalized * h/2);
+        return y + h/2 - (int)(normalized * h);
     };
     if (drawAxes) {
         int y0 = transform(0.0);
@@ -151,7 +151,7 @@ class TheoryDemo : public FredholmDemo {
 public:
     void setupSliders(UI& ui, float& sigma, float& lambda, float& freq, float& jitter, float& compLambda, float& potential, float& alpha, float& index, float& kType, float& nIters) override {
         ui.addSlider("Sigma", &sigma, 0.01f, 1.0f, 50, 120); ui.addSlider("Lambda", &lambda, -2.0f, 2.0f, 50, 190); ui.addSlider("Freq", &freq, 0.1f, 10.0f, 50, 260); ui.addSlider("Kernel", &kType, 0.0f, 4.99f, 50, 330);
-        ui.addSlider("Compare", &nIters, 0.0f, 1.0f, 50, 400);
+        ui.addSlider("Compare", &nIters, 0.0f, 1.0f, 50, 400); ui.addSlider("Deg", &index, 1.0f, 12.0f, 50, 470);
     }
     void render(SDL_Renderer* ren, TextureCache& cache, int gx, int gy, int gw, int gh, float sigma, float lambda, float freq, float jitter, float compLambda, float potential, float alpha, float index, float kType, float nIters, std::chrono::steady_clock::time_point start, AdaptiveCompensator<double>& comp) override {
         auto K = KernelFactory::create((int)kType, sigma);
@@ -168,10 +168,12 @@ public:
         drawGraph(ren, gx, gy, gw, gh, phi_v, {100, 255, 100, 255}, -2, 2, cache, false, zoom, panY);
 
         if (nIters > 0.5f) {
-            auto coeffs = Solver::solveGalerkinOptimized(0, 1, lambda, K, f, 5);
+            int deg = (int)index;
+            auto coeffs = Solver::solveGalerkinOptimized(0, 1, lambda, K, f, deg);
             std::vector<double> phi_g; for(int i=0; i<=100; i++) { double x = i/100.0, val = 0; for(int j=0; j<(int)coeffs.size(); j++) val += coeffs[j] * Solver::legendreP(j, 2.0*x - 1.0); phi_g.push_back(val); }
             drawGraph(ren, gx, gy, gw, gh, phi_g, {100, 100, 255, 255}, -2, 2, cache, false, zoom, panY);
-            cache.renderText("Blue: Galerkin (Order 5)", {100,100,255,255}, 450, 495);
+            std::stringstream ss; ss << "Blue: Galerkin (Order " << deg << ")";
+            cache.renderText(ss.str(), {100,100,255,255}, 450, 495);
         }
 
         cache.renderText("Theory: Fredholm Equation of the Second Kind", {200,200,200,255}, 450, 420);
@@ -192,7 +194,7 @@ public:
     void render(SDL_Renderer* ren, TextureCache& cache, int gx, int gy, int gw, int gh, float sigma, float lambda, float freq, float jitter, float compLambda, float potential, float alpha, float index, float kType, float nIters, std::chrono::steady_clock::time_point start, AdaptiveCompensator<double>& comp) override {
         int N = 16; Fredholm::Matrix M(N, N); Quadrature q = Quadrature::GaussLegendre16();
         auto K = [&](double x, double y) { double d = x - y; return std::exp(-d*d / (2*sigma*sigma)); };
-        for(int i=0; i<N; i++) for(int j=0; j<N; j++) M(i, j) = q.weights[j] * K(0.5*q.points[i]+0.5, 0.5*q.points[j]+0.5);
+        for(int i=0; i<N; i++) for(int j=0; j<N; j++) M(i, j) = 0.5 * q.weights[j] * K(0.5*q.points[i]+0.5, 0.5*q.points[j]+0.5);
         std::vector<double> evals; std::vector<std::vector<double>> evecs; Fredholm::computeEigen(M, evals, evecs);
 
         // Complex Plane Visualization
@@ -207,8 +209,16 @@ public:
         }
 
         int idx = std::clamp((int)index, 0, N-1); std::vector<double> ev_v; lastX.clear(); lastY.clear();
-        for(int i=0; i<N; i++) { double x = (double)i/(N-1); ev_v.push_back(evecs[idx][i]); lastX.push_back(x); lastY.push_back(evecs[idx][i]); }
-        drawGraph(ren, gx, gy, gw, gh, ev_v, {100, 255, 255, 255}, -1, 1, cache);
+        double max_phi = 0;
+        for(int i=0; i<=100; i++) {
+            double x = i/100.0, sum = 0;
+            for(int j=0; j<N; j++) sum += (0.5 * q.weights[j]) * K(x, 0.5*q.points[j]+0.5) * evecs[idx][j];
+            double val = (std::abs(evals[idx]) > 1e-9) ? sum / evals[idx] : sum;
+            ev_v.push_back(val); if(std::abs(val) > max_phi) max_phi = std::abs(val);
+        }
+        if (max_phi > 1e-9) for(auto& v : ev_v) v /= max_phi;
+        for(int i=0; i<=100; i++) { lastX.push_back(i/100.0); lastY.push_back(ev_v[i]); }
+        drawGraph(ren, gx, gy, gw, gh, ev_v, {100, 255, 255, 255}, -1.1, 1.1, cache, true, zoom, panY);
         std::stringstream ss; ss << "Eigenvalue: " << evals[idx];
         cache.renderText("Spectral Mode: Natural oscillations of the Kernel", {200,200,200,255}, 450, 420);
         cache.renderText(ss.str(), {200,200,200,255}, 450, 445);
@@ -379,7 +389,7 @@ public:
         auto K = [&](double x, double y) { double d = x - y; return std::exp(-d*d / (2*sigma*sigma)); };
         auto f = [&](double x) { return std::sin(freq * M_PI * x); };
         auto phi_nodes = Solver::solveFirstKind(0, 1, K, f, 16, alpha);
-        std::vector<double> phi_v; lastX.clear(); lastY.clear();
+        std::vector<double> Kf_v, sol_v; lastX.clear(); lastY.clear();
         for(int i=0; i<=100; i++) {
             double x = i/100.0, val = 0;
             if (!phi_nodes.empty()) {
@@ -389,11 +399,25 @@ public:
                     val += w_j * K(x, y_j) * phi_nodes[j];
                 }
             }
-            phi_v.push_back(val); lastX.push_back(x); lastY.push_back(val);
+            Kf_v.push_back(val);
+
+            // Solution phi(x) interpolation (simplified)
+            double sol_val = 0;
+            if (!phi_nodes.empty()) {
+                for(int j=0; j<16; j++) {
+                    double y_j = 0.5 * Quadrature::GaussLegendre16().points[j] + 0.5;
+                    double d = x - y_j;
+                    sol_val += phi_nodes[j] * std::exp(-d*d * 500.0); // Narrow Gaussian RBF for visualization
+                }
+            }
+            sol_v.push_back(sol_val);
+            lastX.push_back(x); lastY.push_back(sol_val);
         }
         std::vector<double> f_v; for(int i=0; i<=100; i++) f_v.push_back(f(i/100.0));
-        drawGraph(ren, gx, gy, gw, gh, f_v, {255, 100, 100, 255}, -1.5, 1.5, cache);
-        drawGraph(ren, gx, gy, gw, gh, phi_v, {255, 100, 255, 255}, -1.5, 1.5, cache);
+        drawGraph(ren, gx, gy, gw, gh, f_v, {255, 100, 100, 255}, -1.5, 1.5, cache, true, zoom, panY);
+        drawGraph(ren, gx, gy, gw, gh, Kf_v, {100, 255, 100, 255}, -1.5, 1.5, cache, false, zoom, panY);
+        drawGraph(ren, gx, gy, gw, gh, sol_v, {100, 100, 255, 255}, -5.0, 5.0, cache, false, zoom, panY);
+        cache.renderText("Red: f, Green: K*phi, Blue: phi (sol)", {200,200,200,255}, 450, 420);
 
         // SVD Visualization
         int sx = 20, sy = 450, ss = 200;
@@ -515,7 +539,10 @@ int main(int argc, char* argv[]) {
                 if (ui.currentMode == AppMode::VOLTERRA || ui.currentMode == AppMode::ALTERNATIVE) { v_min = -10.0; v_max = 10.0; }
                 else if (ui.currentMode == AppMode::BVP) { v_min = -0.5; v_max = 0.5; }
                 else if (ui.currentMode == AppMode::SPECTRAL) { v_min = -1.0; v_max = 1.0; }
-                double vy = v_min + (double)(gy + gh - my) / gh * (v_max - v_min);
+
+                double norm_y = (double)(gy + gh/2.0 - my) / gh;
+                double vy = norm_y * ((v_max - v_min) / demos[ui.currentMode]->zoom) + ( (v_min + v_max)/2.0 + demos[ui.currentMode]->panY );
+
                 std::stringstream ss; ss << std::fixed << std::setprecision(3) << "(" << vx << ", " << vy << ")";
                 cache.renderText(ss.str(), {255, 255, 255, 255}, mx + 10, my - 20);
             }
