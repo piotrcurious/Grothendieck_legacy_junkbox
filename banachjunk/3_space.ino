@@ -17,6 +17,7 @@ private:
         T completenessIndex;
         T dimensionalCoherence;
         std::vector<T> spectralFlatness;
+        std::vector<std::vector<T>> instantaneousCoherence;
     };
 
     // Projection and Transformation Operators
@@ -60,6 +61,7 @@ private:
         metrics.completenessIndex = computeCompleteness();
         metrics.dimensionalCoherence = computeDimensionalCoherence();
         metrics.spectralFlatness = computeSpectralFlatness();
+        metrics.instantaneousCoherence = computeInstantaneousCoherence(5);
         
         return metrics;
     }
@@ -136,6 +138,41 @@ public:
         }
         
         return coherenceScore;
+    }
+
+    // Instantaneous Coherence between dimensions using a sliding window
+    std::vector<std::vector<T>> computeInstantaneousCoherence(size_t windowSize = 5) {
+        if (dimensionalData.size() < 2) return {};
+        size_t n = dimensionalData[0].size();
+        if (n < windowSize) return {};
+
+        std::vector<std::vector<T>> coherenceMatrix(Dimension, std::vector<T>(Dimension, 1.0));
+
+        for (size_t i = 0; i < Dimension; ++i) {
+            for (size_t j = i + 1; j < Dimension; ++j) {
+                // Compute correlation over the last 'windowSize' points
+                T mean1 = 0, mean2 = 0;
+                for (size_t k = n - windowSize; k < n; ++k) {
+                    mean1 += dimensionalData[i][k];
+                    mean2 += dimensionalData[j][k];
+                }
+                mean1 /= windowSize;
+                mean2 /= windowSize;
+
+                T num = 0, den1 = 0, den2 = 0;
+                for (size_t k = n - windowSize; k < n; ++k) {
+                    T d1 = dimensionalData[i][k] - mean1;
+                    T d2 = dimensionalData[j][k] - mean2;
+                    num += d1 * d2;
+                    den1 += d1 * d1;
+                    den2 += d2 * d2;
+                }
+                T score = (den1 * den2 > 1e-9) ? num / std::sqrt(den1 * den2) : 0;
+                coherenceMatrix[i][j] = score;
+                coherenceMatrix[j][i] = score;
+            }
+        }
+        return coherenceMatrix;
     }
 
     // Spectral Flatness (Wiener Entropy proxy) using Lebesgue-weighted geometric/arithmetic means
@@ -277,6 +314,14 @@ public:
             Serial.printf("Dim %zu: %f\n", i, static_cast<float>(metrics.spectralFlatness[i]));
         }
         
+        Serial.println("\nInstantaneous Coherence (Last Window):");
+        for (size_t i = 0; i < metrics.instantaneousCoherence.size(); ++i) {
+            for (size_t j = 0; j < metrics.instantaneousCoherence[i].size(); ++j) {
+                Serial.printf("%f ", static_cast<float>(metrics.instantaneousCoherence[i][j]));
+            }
+            Serial.println();
+        }
+
         Serial.println("\nLinear Projection:");
         for (const auto& val : linearProjectedSpace) {
             Serial.printf("%f ", static_cast<float>(val));

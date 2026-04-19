@@ -71,5 +71,16 @@ class TestTwoLevelSolver(unittest.TestCase):
         excited_pops = [np.real(r[1,1]) for r in traj]
         self.assertGreater(max(excited_pops), 0.4)
 
+    def test_unitarity_check(self):
+        # Just verify it runs and returns a reasonable deviation for small dt
+        H = 0.5 * np.eye(2)
+        dev = self.tls.lindbladian(H) # Wait, tls doesn't have verify_unitarity. HybridSolver has.
+        # Rerunning setup for Hybrid Solver
+        from unified_solver import HybridQuantumAlgebraicSolver
+        hsol = HybridQuantumAlgebraicSolver(N=50)
+        H_rand = hsol.hamiltonian([1.0, 0.5])
+        dev = hsol.verify_unitarity(H_rand, dt=0.01)
+        self.assertLess(dev, 1e-10)
+
 if __name__ == '__main__':
     unittest.main()

@@ -60,6 +60,49 @@ private:
     previousNorm = currentNorm;
     return converged;
   }
+
+  // Calculate Spectral Flatness (Wiener entropy proxy)
+  float calculateFlatness(const DataPoint* signal, int startIdx, int size) {
+    float logSum = 0, arithSum = 0, totalDt = 0;
+    for(int i=0; i<size-1; ++i) {
+        float dt = signal[startIdx+i+1].timestamp - signal[startIdx+i].timestamp;
+        if(dt <= 0) continue;
+        float val = (abs(signal[startIdx+i].value) + abs(signal[startIdx+i+1].value)) / 2.0f;
+        if(val < 1e-6) val = 1e-6;
+        logSum += log(val) * dt;
+        arithSum += val * dt;
+        totalDt += dt;
+    }
+    if(totalDt < 1e-9 || arithSum < 1e-9) return 0;
+    return exp(logSum / totalDt) / (arithSum / totalDt);
+  }
+
+  // Hurst Exponent estimation (R/S analysis)
+  float calculateHurst(const DataPoint* signal, int startIdx, int size) {
+    float mean = 0, totalDt = 0;
+    for(int i=0; i<size-1; ++i) {
+        float dt = signal[startIdx+i+1].timestamp - signal[startIdx+i].timestamp;
+        if(dt <= 0) continue;
+        mean += (signal[startIdx+i].value + signal[startIdx+i+1].value) / 2.0f * dt;
+        totalDt += dt;
+    }
+    if(totalDt < 1e-9) return 0.5;
+    mean /= totalDt;
+
+    float cumSum = 0, minZ = 1e30, maxZ = -1e30, sqSum = 0;
+    for(int i=0; i<size; ++i) {
+        float val = signal[startIdx+i].value;
+        cumSum += (val - mean);
+        if(cumSum < minZ) minZ = cumSum;
+        if(cumSum > maxZ) maxZ = cumSum;
+        sqSum += (val - mean) * (val - mean);
+    }
+    float sdev = sqrt(sqSum / size);
+    if(sdev < 1e-9) return 0.5;
+    float rs = (maxZ - minZ) / sdev;
+    if(rs <= 0) return 0.5;
+    return log(rs) / log(size);
+  }
   
 public:
   struct Feature {
@@ -86,8 +129,15 @@ public:
       float l2Norm = calculateL2Norm(signal, i, WINDOW_SIZE);
       float lInfNorm = calculateLInfNorm(windowValues, WINDOW_SIZE);
       
+      // Complexity gating: ignore high-entropy noise
+      float flatness = calculateFlatness(signal, i, WINDOW_SIZE);
+      float hurst = calculateHurst(signal, i, WINDOW_SIZE);
+
       // Feature detection criteria using Banach space properties
-      if (checkConvergence(l2Norm)) {
+      // Gated by complexity: stationary noise (flatness -> 1, hurst -> 0.5) is ignored
+      bool isSignificant = (l2Norm > 0.1) && (flatness < 0.9 || abs(hurst - 0.5) > 0.2);
+
+      if (checkConvergence(l2Norm) && isSignificant) {
         // Analyze relationship between norms to classify feature
         float l2Norm_scaled = l2Norm * sqrt(WINDOW_SIZE);
         float normRatio = (l2Norm_scaled > 1e-9) ? (l1Norm / l2Norm_scaled) : 0;
