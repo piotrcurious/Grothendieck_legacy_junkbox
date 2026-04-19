@@ -258,6 +258,11 @@ public:
   }
 };
 
+struct UIContext {
+  ShowcaseGL *gl;
+  Fl_Input *input;
+};
+
 int main() {
   Fl_Window *win = new Fl_Window(
       1200, 600, "Algebraic Field Extensions: Companion Matrix & Roots");
@@ -269,12 +274,14 @@ int main() {
   inp->tooltip("Comma separated coefficients from low to high degree. e.g. -2, "
                "0, 1 for x^2 - 2");
 
+  UIContext *ctx = new UIContext{gl, inp};
+
   Fl_Button *btn = new Fl_Button(420, 530, 150, 30, "Update Polynomial");
   btn->callback(
-      [](Fl_Widget *w, void *v) {
-        ShowcaseGL *g = (ShowcaseGL *)v;
-        Fl_Input *i = (Fl_Input *)w->parent()->child(0);
-        string s = i->value();
+      [](Fl_Widget *, void *v) {
+        UIContext *c = (UIContext *)v;
+        string s = c->input->value();
+        ShowcaseGL *g = c->gl;
         vector<int> co;
         stringstream ss(s);
         string t;
@@ -289,7 +296,7 @@ int main() {
           g->update_data();
         }
       },
-      gl);
+      ctx);
 
   Fl_Box *help =
       new Fl_Box(600, 530, 500, 30,
