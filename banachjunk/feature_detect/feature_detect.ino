@@ -2,6 +2,9 @@
 // For ESP32 Arduino
 // Uses functional analysis concepts to detect features in time-series data
 
+#include <vector>
+#include "../math_utils.h"
+
 struct DataPoint {
   float timestamp;
   float value;
@@ -17,32 +20,19 @@ private:
   // Store the norm history for convergence checking
   float previousNorm = 0;
   
-  // Calculate L1 norm (Manhattan distance) using Lebesgue-style weighting
+  // Unified metrics from math_utils
   float calculateL1Norm(const DataPoint* signal, int startIdx, int size) {
-    float integral = 0;
-    float totalDt = 0;
-    for (int i = 0; i < size - 1; i++) {
-      float dt = signal[startIdx + i + 1].timestamp - signal[startIdx + i].timestamp;
-      if (dt <= 0) continue;
-      integral += (abs(signal[startIdx + i].value) + abs(signal[startIdx + i + 1].value)) / 2.0 * dt;
-      totalDt += dt;
-    }
-    return (totalDt > 1e-9) ? (integral / totalDt) * size : 0;
+    std::vector<std::vector<float>> data(1);
+    std::vector<float> ts;
+    for(int j=0; j<size; ++j) { data[0].push_back(signal[startIdx+j].value); ts.push_back(signal[startIdx+j].timestamp); }
+    return (float)banach::Statistics::calculateLpNorm(data, ts, 1);
   }
   
-  // Calculate L2 norm (Euclidean distance) using Lebesgue-style weighting
   float calculateL2Norm(const DataPoint* signal, int startIdx, int size) {
-    float integral = 0;
-    float totalDt = 0;
-    for (int i = 0; i < size - 1; i++) {
-      float dt = signal[startIdx + i + 1].timestamp - signal[startIdx + i].timestamp;
-      if (dt <= 0) continue;
-      float v1 = signal[startIdx + i].value;
-      float v2 = signal[startIdx + i + 1].value;
-      integral += (v1 * v1 + v2 * v2) / 2.0 * dt;
-      totalDt += dt;
-    }
-    return (totalDt > 1e-9) ? sqrt(integral / totalDt) * sqrt(size) : 0;
+    std::vector<std::vector<float>> data(1);
+    std::vector<float> ts;
+    for(int j=0; j<size; ++j) { data[0].push_back(signal[startIdx+j].value); ts.push_back(signal[startIdx+j].timestamp); }
+    return (float)banach::Statistics::calculateLpNorm(data, ts, 2);
   }
   
   // Calculate Lp norm for p=infinity (Maximum norm)
@@ -61,47 +51,17 @@ private:
     return converged;
   }
 
-  // Calculate Spectral Flatness (Wiener entropy proxy)
+  // Unified metrics from math_utils
   float calculateFlatness(const DataPoint* signal, int startIdx, int size) {
-    float logSum = 0, arithSum = 0, totalDt = 0;
-    for(int i=0; i<size-1; ++i) {
-        float dt = signal[startIdx+i+1].timestamp - signal[startIdx+i].timestamp;
-        if(dt <= 0) continue;
-        float val = (abs(signal[startIdx+i].value) + abs(signal[startIdx+i+1].value)) / 2.0f;
-        if(val < 1e-6) val = 1e-6;
-        logSum += log(val) * dt;
-        arithSum += val * dt;
-        totalDt += dt;
-    }
-    if(totalDt < 1e-9 || arithSum < 1e-9) return 0;
-    return exp(logSum / totalDt) / (arithSum / totalDt);
+    std::vector<float> v, t;
+    for(int j=0; j<size; ++j) { v.push_back(signal[startIdx+j].value); t.push_back(signal[startIdx+j].timestamp); }
+    return banach::Statistics::calculateFlatness(v, t);
   }
 
-  // Hurst Exponent estimation (R/S analysis)
   float calculateHurst(const DataPoint* signal, int startIdx, int size) {
-    float mean = 0, totalDt = 0;
-    for(int i=0; i<size-1; ++i) {
-        float dt = signal[startIdx+i+1].timestamp - signal[startIdx+i].timestamp;
-        if(dt <= 0) continue;
-        mean += (signal[startIdx+i].value + signal[startIdx+i+1].value) / 2.0f * dt;
-        totalDt += dt;
-    }
-    if(totalDt < 1e-9) return 0.5;
-    mean /= totalDt;
-
-    float cumSum = 0, minZ = 1e30, maxZ = -1e30, sqSum = 0;
-    for(int i=0; i<size; ++i) {
-        float val = signal[startIdx+i].value;
-        cumSum += (val - mean);
-        if(cumSum < minZ) minZ = cumSum;
-        if(cumSum > maxZ) maxZ = cumSum;
-        sqSum += (val - mean) * (val - mean);
-    }
-    float sdev = sqrt(sqSum / size);
-    if(sdev < 1e-9) return 0.5;
-    float rs = (maxZ - minZ) / sdev;
-    if(rs <= 0) return 0.5;
-    return log(rs) / log(size);
+    std::vector<float> v, t;
+    for(int j=0; j<size; ++j) { v.push_back(signal[startIdx+j].value); t.push_back(signal[startIdx+j].timestamp); }
+    return banach::Statistics::calculateHurst(v, t);
   }
   
 public:
