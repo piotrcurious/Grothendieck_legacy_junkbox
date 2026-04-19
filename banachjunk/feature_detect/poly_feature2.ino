@@ -7,6 +7,7 @@
 #include <optional>
 #include <cmath>
 #include <algorithm>
+#include "../math_utils.h"
 
 // Configuration constants
 namespace Config {
@@ -263,50 +264,15 @@ public:
 class Statistics {
 public:
     static float calculateMean(const std::vector<float>& values, const std::vector<float>& timestamps) {
-        if (values.empty() || timestamps.size() < 2) return 0.0f;
-        float integral = 0.0f;
-        float totalDt = timestamps.back() - timestamps.front();
-        if (totalDt < 1e-9f) return values[0];
-
-        for (size_t i = 0; i < values.size() - 1; i++) {
-            float dt = timestamps[i + 1] - timestamps[i];
-            integral += (values[i] + values[i + 1]) / 2.0f * dt;
-        }
-        return integral / totalDt;
+        return banach::Statistics::calculateMean(values, timestamps);
     }
 
     static float calculateVariance(const std::vector<float>& values, const std::vector<float>& timestamps) {
-        if (values.size() < 2 || timestamps.size() < 2) return 0.0f;
-        float mean = calculateMean(values, timestamps);
-        float integral = 0.0f;
-        float totalDt = timestamps.back() - timestamps.front();
-        if (totalDt < 1e-9f) return 0.0f;
-
-        for (size_t i = 0; i < values.size() - 1; i++) {
-            float dt = timestamps[i + 1] - timestamps[i];
-            float d1 = values[i] - mean;
-            float d2 = values[i + 1] - mean;
-            integral += (d1 * d1 + d2 * d2) / 2.0f * dt;
-        }
-        return integral / totalDt;
+        return banach::Statistics::calculateVariance(values, timestamps);
     }
 
     static float calculateAutocorrelation(const std::vector<float>& values, const std::vector<float>& timestamps, int lag) {
-        if (values.size() <= lag || timestamps.size() <= lag) return 0.0f;
-        float mean = calculateMean(values, timestamps);
-        float variance = calculateVariance(values, timestamps);
-        if (variance < 1e-9f) return 0.0f;
-
-        float integral = 0.0f;
-        float totalDt = 0.0f;
-        for (size_t i = 0; i < values.size() - lag - 1; i++) {
-            float dt = timestamps[i + 1] - timestamps[i];
-            float d1 = (values[i] - mean) * (values[i + lag] - mean);
-            float d2 = (values[i + 1] - mean) * (values[i + lag + 1] - mean);
-            integral += (d1 + d2) / 2.0f * dt;
-            totalDt += dt;
-        }
-        return (totalDt > 1e-9f) ? (integral / totalDt) / variance : 0.0f;
+        return banach::Statistics::calculateAutoCorrelation(values, timestamps, lag);
     }
 };
 

@@ -99,6 +99,19 @@ class HybridQuantumAlgebraicSolver:
         entropy = -np.sum(prob * np.log(prob))
         return entropy
 
+    def adiabatic_sweep(self, theta_start, theta_end, psi0, dt, steps):
+        """Evolves the wavefunction with a time-varying Hamiltonian (theta sweep)."""
+        psi = psi0.copy()
+        trajectory = [psi]
+        for i in range(steps):
+            # Linearly interpolate parameters
+            frac = i / steps
+            theta_t = [s + frac * (e - s) for s, e in zip(theta_start, theta_end)]
+            H = self.hamiltonian(theta_t)
+            psi = self.crank_nicolson_step(psi, H, dt)
+            trajectory.append(psi)
+        return np.array(trajectory)
+
     def calculate_momentum(self, psi):
         """Calculates expectation value and variance of momentum <P> and Delta P."""
         # P = -i * hbar * d/dx
@@ -328,6 +341,12 @@ def main():
     x_delta = np.sqrt(max(0.0, avg_x2 - avg_x**2))
     logging.info(f"Momentum: <P>={p_avg:.4f}, Delta P={p_delta:.4f}")
     logging.info(f"Uncertainty: Delta X * Delta P = {x_delta * p_delta:.4f} (hbar/2={solver.hbar/2.0:.4f})")
+
+    logging.info("9. Adiabatic Parameter Sweep (Schrödinger)")
+    theta_start, theta_end = [1.0, 0.5], [1.0, 2.0]
+    traj_sweep = solver.adiabatic_sweep(theta_start, theta_end, psi0, dt=0.05, steps=50)
+    final_energy = solver.calculate_energy(traj_sweep[-1], theta_end)
+    logging.info(f"Adiabatic Sweep: Final Energy at theta_end: {final_energy:.4f}")
 
     logging.info("6. Rabi Oscillation Simulation")
     traj_rabi = tls.rabi_oscillation(rho0, dt=0.1, steps=100, drive_amp=1.0)
