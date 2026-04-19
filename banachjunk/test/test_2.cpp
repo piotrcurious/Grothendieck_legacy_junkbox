@@ -3,20 +3,19 @@
 #include <cassert>
 #include <cmath>
 #include "../test/Arduino.h"
+#include "test_data_generator.h"
 
 // For 2.ino
 #include "../2.ino"
 
 void test_banach_galois_analyzer() {
-    std::cout << "Testing BanachGaloisAnalyzer (from 2.ino)..." << std::endl;
+    std::cout << "Testing BanachGaloisAnalyzer with representative data..." << std::endl;
     BanachGaloisAnalyzer<17> analyzer;
-    float simulatedData[] = {
-        1.2, 2.4, 4.8, 9.6, 19.2,
-        3.5, 7.0, 14.0, 28.0,
-        2.1, 4.2, 8.4, 16.8
-    };
-    for (float data : simulatedData) {
-        analyzer.addDataPoint(data);
+
+    // Multi-segment trend from generator
+    auto trend = banach::test::DataGenerator::generateComplexTrend(60, 0.05f);
+    for (const auto& p : trend) {
+        analyzer.addDataPoint(p.v, p.t);
     }
     analyzer.performAnalysis();
 

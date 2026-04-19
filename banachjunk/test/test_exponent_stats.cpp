@@ -3,19 +3,17 @@
 #include <cassert>
 #include <cmath>
 #include "../test/Arduino.h"
+#include "test_data_generator.h"
 
 // For exponent_stats.ino
 #include "../exponent_stats.ino"
 
 void test_exponent_stats() {
-    std::cout << "Testing ExponentialDetector (from exponent_stats.ino)..." << std::endl;
+    std::cout << "Testing ExponentialDetector with representative data..." << std::endl;
 
-    std::vector<float> exponentialData = {
-        1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0
-    };
-
-    for (const auto& val : exponentialData) {
-        expDetector.addDataPoint(val);
+    // Generate clean exponential growth: y = exp(0.5 * t)
+    for (int i = 0; i < 20; ++i) {
+        expDetector.addDataPoint(std::exp(0.5f * i * 0.1f));
     }
 
     auto expCharacteristics = expDetector.analyzeExponentialProperties();
@@ -39,17 +37,26 @@ void test_exponent_stats() {
         statisticalSpace.addStatisticalDataPoint(point);
     }
 
-    std::cout << "\nTesting Hurst and ApEn with longer sequence..." << std::endl;
+    std::cout << "\nTesting StatisticalBanachSpace with complex stochastic data..." << std::endl;
     statisticalSpace.reset();
-    for(int i = 0; i < 40; ++i) {
-        float val = std::sin(i * 0.5f) + random(100) / 500.0f;
-        statisticalSpace.addStatisticalDataPoint({val, val*2, val*0.5f});
+
+    // Use Generator for a Random Walk (High Hurst, low entropy if drift is clear)
+    auto rw = banach::test::DataGenerator::generateRandomWalk(100, 0.1f, 0.5f);
+    for(const auto& p : rw) {
+        statisticalSpace.addStatisticalDataPoint({p.v, p.v * 1.5f, std::sin(p.t)}, p.t);
     }
+
+    std::cout << "Analysis for Random Walk + Drift + Sine segment:" << std::endl;
     statisticalSpace.performStatisticalAnalysis();
 
-    // Verify properties of Hurst exponent
-    // For a sine wave, we expect Hurst to be relatively high (persistent trend)
-    // Actually R/S for sine is complex but deterministic.
+    // Specific Hurst check for Random Walk (expect > 0.5)
+    // and ApEn check for Sine vs Noise
+    statisticalSpace.reset();
+    auto noisySine = banach::test::DataGenerator::generateNoisySine(100, 1.0f, 1.0f, 0.05f);
+    for(const auto& p : noisySine) statisticalSpace.addStatisticalDataPoint({p.v, p.v, p.v}, p.t);
+
+    std::cout << "\nAnalysis for Noisy Sine Wave (N=100):" << std::endl;
+    statisticalSpace.performStatisticalAnalysis();
 
     // Test entropy and covariance (if public)
 
