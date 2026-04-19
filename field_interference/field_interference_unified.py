@@ -35,18 +35,22 @@ class UnifiedFieldExplorer:
         self.radio.on_clicked(self.change_mode)
         
         # Sliders (shared space, visibility toggled by mode)
-        self.ax_s1 = self.fig.add_axes([0.25, 0.12, 0.5, 0.02], facecolor='#222222')
-        self.s1 = Slider(self.ax_s1, 'Degree/p ', 1, 11, valinit=3, valstep=1)
+        self.ax_s1 = self.fig.add_axes([0.25, 0.14, 0.5, 0.015], facecolor='#222222')
+        self.s1 = Slider(self.ax_s1, 'Degree/p ', 1, 31, valinit=3, valstep=1)
         
-        self.ax_s2 = self.fig.add_axes([0.25, 0.08, 0.5, 0.02], facecolor='#222222')
+        self.ax_s2 = self.fig.add_axes([0.25, 0.11, 0.5, 0.015], facecolor='#222222')
         self.s2 = Slider(self.ax_s2, 'Coeff/n ', 1, 20, valinit=5, valstep=1)
         
-        self.ax_s3 = self.fig.add_axes([0.25, 0.04, 0.5, 0.02], facecolor='#222222')
+        self.ax_s3 = self.fig.add_axes([0.25, 0.08, 0.5, 0.015], facecolor='#222222')
         self.s3 = Slider(self.ax_s3, 'Blur ', 0.1, 3.0, valinit=1.0)
+
+        self.ax_s4 = self.fig.add_axes([0.25, 0.05, 0.5, 0.015], facecolor='#222222')
+        self.s4 = Slider(self.ax_s4, 'Samples ', 1e4, 1e6, valinit=3e5, valstep=1e4)
         
         self.s1.on_changed(self.update)
         self.s2.on_changed(self.update)
         self.s3.on_changed(self.update)
+        self.s4.on_changed(self.update)
 
     def change_mode(self, label):
         self.mode = label
@@ -60,24 +64,33 @@ class UnifiedFieldExplorer:
             self.ax_s3.set_visible(False)
         self.update(None)
 
-    def draw_algebraic(self, deg, coeff, sigma):
-        res = 400
-        Z = np.zeros((res, res))
-        x_range = (-2, 2)
+    def draw_algebraic(self, deg, coeff, sigma, num_samples):
+        res = 600
+        all_roots = []
         for d in range(1, deg + 1):
-            num_samples = 10000 // d
-            for _ in range(num_samples):
-                poly = np.random.randint(-coeff, coeff + 1, d + 1)
-                if poly[-1] == 0: poly[-1] = 1
-                roots = np.roots(poly[::-1])
-                for r in roots:
-                    re, im = r.real, r.imag
-                    if x_range[0] <= re <= x_range[1] and x_range[0] <= im <= x_range[1]:
-                        ix = int((re - x_range[0]) / 4 * (res - 1))
-                        iy = int((im - x_range[0]) / 4 * (res - 1))
-                        Z[iy, ix] += 1
-        Z_blur = gaussian_filter(Z, sigma=sigma)
-        self.ax.imshow(Z_blur, extent=[-2, 2, -2, 2], origin='lower', cmap='magma', norm=LogNorm(vmin=0.1))
+            ns = int(num_samples // (2 * d))
+            polys = np.random.randint(-coeff, coeff + 1, (ns, d + 1)).astype(float)
+            polys[polys[:, -1] == 0, -1] = 1
+
+            if d == 1:
+                all_roots.extend(-polys[:, 0] / polys[:, 1])
+            else:
+                monic = polys[:, :-1] / polys[:, -1:]
+                matrices = np.zeros((ns, d, d))
+                matrices[:, 1:, :-1] = np.eye(d - 1)
+                matrices[:, :, -1] = -monic
+                roots = np.linalg.eigvals(matrices)
+                all_roots.extend(roots.flatten())
+
+        all_roots = np.array(all_roots)
+        mask = (np.abs(all_roots.real) <= 2.5) & (np.abs(all_roots.imag) <= 2.5)
+        roots = all_roots[mask]
+
+        H, _, _ = np.histogram2d(roots.real, roots.imag, bins=res, range=[[-2.5, 2.5], [-2.5, 2.5]])
+        Z_blur = gaussian_filter(H.T, sigma=sigma)
+        vmin = 0.1
+        vmax = max(vmin + 1.0, np.max(Z_blur))
+        self.ax.imshow(Z_blur, extent=[-2.5, 2.5, -2.5, 2.5], origin='lower', cmap='magma', norm=LogNorm(vmin=vmin, vmax=vmax))
         self.ax.set_title(r"Field Interference: Algebraic Number Density in $\mathbb{C}$", color='white', fontsize=15)
 
     def draw_finite(self, p, n):
@@ -120,9 +133,10 @@ class UnifiedFieldExplorer:
         v1 = int(self.s1.val) if self.interactive else 3
         v2 = int(self.s2.val) if self.interactive else 5
         v3 = self.s3.val if self.interactive else 1.0
+        v4 = int(self.s4.val) if self.interactive else 100000
         
         if self.mode == 'Algebraic':
-            self.draw_algebraic(v1, v2, v3)
+            self.draw_algebraic(v1, v2, v3, v4)
         else:
             self.draw_finite(v1, v2)
             

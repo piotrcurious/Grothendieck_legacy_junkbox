@@ -18,7 +18,7 @@ Visualizes the interplay between the **additive vector space** structure of $GF(
 ![Finite Field Demo](docs/images/demo01_screenshot.png)
 
 - **Irreducible Search**: Automatically finds valid irreducible polynomials for extension degrees 1-4.
-- **Generator Orbit**: Traces the cyclic multiplicative structure with color gradients.
+- **Generator Orbit**: Traces the cyclic multiplicative structure with color gradients using mathematically correct polynomial reduction.
 - **Key Concept**: Every finite field $GF(q)$ is a vector space over its prime subfield $GF(p)$. Simultaneously, its non-zero elements form a cyclic group under multiplication.
 
 ### Grothendieck Viewpoint (`demo02.cpp`)
@@ -55,9 +55,11 @@ Features high-performance OpenGL texture rendering for root-density heatmaps, al
 Visualizes field structures in 3D, including "Basis Towers" for extensions and a Riemann Sphere projection.
 
 ![3D Explorer Demo](docs/images/demo0c_screenshot.png)
+![Torus Mapping Demo](docs/images/demo0c_torus.png)
 
 - **Riemann Sphere**: Maps the complex plane and its field extensions onto a unit sphere, exposing symmetries at infinity.
 - **Galois Towers**: Plots basis components along the Z-axis to show the hierarchy of extensions.
+- **Torus Mapping**: Visualizes the periodic additive structure of finite fields by mapping elements to a 3D torus.
 
 ---
 
