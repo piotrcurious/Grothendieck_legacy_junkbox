@@ -117,6 +117,8 @@ private:
         std::vector<T> totalVariation;
         std::vector<T> confidenceIntervalLower;
         std::vector<T> confidenceIntervalUpper;
+        std::vector<T> hurstExponent;
+        std::vector<T> approxEntropy;
     };
 
     // Compute Comprehensive Statistical Metrics using Lebesgue-style measure weighting
@@ -131,6 +133,8 @@ private:
         metrics.totalVariation.resize(Dimension, 0);
         metrics.confidenceIntervalLower.resize(Dimension, 0);
         metrics.confidenceIntervalUpper.resize(Dimension, 0);
+        metrics.hurstExponent.resize(Dimension, 0.5);
+        metrics.approxEntropy.resize(Dimension, 0);
 
         if (statisticalData.empty() || timestamps.size() < 2) return metrics;
         T totalMeasure = timestamps.back() - timestamps.front();
@@ -209,6 +213,47 @@ private:
             T marginOfError = 1.96 * (sdev / std::sqrt(static_cast<T>(dimData.size())));
             metrics.confidenceIntervalLower[dim] = mean - marginOfError;
             metrics.confidenceIntervalUpper[dim] = mean + marginOfError;
+
+            // Hurst Exponent Estimation (Simplified R/S Analysis)
+            if (dimData.size() > 10 && sdev > 1e-9) {
+                T cumSum = 0;
+                T minZ = 1e30, maxZ = -1e30;
+                for (T val : dimData) {
+                    cumSum += (val - mean);
+                    if (cumSum < minZ) minZ = cumSum;
+                    if (cumSum > maxZ) maxZ = cumSum;
+                }
+                T RS = (maxZ - minZ) / sdev;
+                if (RS > 1e-9) {
+                    metrics.hurstExponent[dim] = std::log(RS) / std::log(static_cast<T>(dimData.size()));
+                }
+            }
+
+            // Approximate Entropy (ApEn) - Simplified implementation (m=2)
+            if (dimData.size() > 15) {
+                auto phi = [&](int m) {
+                    int N = dimData.size();
+                    T r = 0.2 * sdev;
+                    if (r < 1e-9) r = 0.01;
+                    T sumLogC = 0;
+                    for (int i = 0; i <= N - m; ++i) {
+                        int count = 0;
+                        for (int j = 0; j <= N - m; ++j) {
+                            bool match = true;
+                            for (int k = 0; k < m; ++k) {
+                                if (std::abs(dimData[i+k] - dimData[j+k]) > r) {
+                                    match = false;
+                                    break;
+                                }
+                            }
+                            if (match) count++;
+                        }
+                        sumLogC += std::log(static_cast<T>(count) / (N - m + 1));
+                    }
+                    return sumLogC / (N - m + 1);
+                };
+                metrics.approxEntropy[dim] = std::abs(phi(2) - phi(3));
+            }
         }
 
         return metrics;
@@ -286,6 +331,8 @@ public:
             Serial.printf("  Skewness: %f\n", static_cast<float>(metrics.skewness[dim]));
             Serial.printf("  Kurtosis: %f\n", static_cast<float>(metrics.kurtosis[dim]));
             Serial.printf("  Entropy: %f\n", static_cast<float>(metrics.entropy[dim]));
+            Serial.printf("  Hurst Exponent: %f\n", static_cast<float>(metrics.hurstExponent[dim]));
+            Serial.printf("  Approx Entropy: %f\n", static_cast<float>(metrics.approxEntropy[dim]));
             Serial.printf("  Total Variation: %f\n", static_cast<float>(metrics.totalVariation[dim]));
             Serial.printf("  95%% CI Mean: [%f, %f]\n",
                 static_cast<float>(metrics.confidenceIntervalLower[dim]),

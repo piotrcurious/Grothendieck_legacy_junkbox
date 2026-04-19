@@ -12,9 +12,9 @@ A collection of experimental Arduino (ESP32) sketches and C++ components explori
 ## Directory Structure
 
 - `2.ino`: Banach Space Analyzer incorporating Galois Field concepts for polynomial fitting and spectral characteristics.
-- `3_space.ino`: Abstract Banach Space representation with multi-dimensional numerical projections and Lp-norm metrics.
-- `exponent_stats.ino`: Statistical analysis in Banach spaces, featuring exponential growth detection, Shannon entropy, and covariance matrices.
-- `not_strict.ino`: Robust polynomial fitting using Gaussian elimination with pivoting.
+- `3_space.ino`: Abstract Banach Space representation with multi-dimensional numerical projections, Lp-norm metrics, and Lebesgue-weighted spectral flatness.
+- `exponent_stats.ino`: Statistical analysis in Banach spaces, featuring exponential growth detection, Hurst exponent, Approximate Entropy (ApEn), Shannon entropy, and covariance matrices.
+- `not_strict.ino`: Robust polynomial fitting using Gaussian elimination with pivoting, matrix conditioning analysis, and orthogonal basis projection (Legendre).
 - `feature_detect/`:
   - `feature_detect.ino`: Signal feature detection using norm ratios.
   - `poly_features.ino`: Advanced feature detection using Lagrange interpolation over Galois Fields.

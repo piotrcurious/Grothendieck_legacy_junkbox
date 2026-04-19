@@ -27,7 +27,7 @@ private:
     }
 
     // Least squares method for polynomial fitting using Lebesgue-weighted Ridge Regression
-    PolynomialCoefficients fitPolynomial(const std::vector<float>& data, double lambda = 1e-4) {
+    PolynomialCoefficients fitPolynomial(const std::vector<float>& data, float& conditionProxy, double lambda = 1e-4) {
         int n = data.size();
         const int m = 4; // cubic fit: a*x^3 + b*x^2 + c*x + d
         double matrix[m][m];
@@ -87,6 +87,15 @@ private:
                 for (int k = i; k < m; k++) matrix[j][k] -= factor * matrix[i][k];
             }
         }
+
+        // Estimate condition proxy: ratio of max to min diagonal elements
+        double d_min = 1e30, d_max = -1e30;
+        for (int i = 0; i < m; i++) {
+            double abs_d = std::abs(matrix[i][i]);
+            if (abs_d < d_min) d_min = abs_d;
+            if (abs_d > d_max) d_max = abs_d;
+        }
+        conditionProxy = (d_min > 1e-12) ? (float)(d_max / d_min) : 1e12f;
 
         float coeffs_arr[m];
         for (int i = m - 1; i >= 0; i--) {
@@ -180,7 +189,8 @@ public:
         if (dataBuffer.size() < 4) return;  // Need minimum 4 points for 3rd order polynomial
 
         // Fit polynomial using Ridge Regression for stability
-        PolynomialCoefficients poly = fitPolynomial(dataBuffer, 1e-4);
+        float conditionProxy = 0;
+        PolynomialCoefficients poly = fitPolynomial(dataBuffer, conditionProxy, 1e-4);
         
         // Compute Standard Error of Estimate (weighted)
         float rss = 0;
@@ -218,6 +228,7 @@ public:
         Serial.printf("Linear Term: %f\n", derivative.c);
         
         Serial.printf("\nRate of Change: %f\n", rateOfChange);
+        Serial.printf("Matrix Condition Proxy: %f %s\n", conditionProxy, (conditionProxy > 1e5) ? "(Poor Conditioning)" : "(Stable)");
 
         // Orthogonal Projection
         std::vector<float> legendreCoeffs = projectLegendre(3);

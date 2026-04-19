@@ -16,6 +16,7 @@ private:
         T normedDistance;
         T completenessIndex;
         T dimensionalCoherence;
+        std::vector<T> spectralFlatness;
     };
 
     // Projection and Transformation Operators
@@ -58,6 +59,7 @@ private:
         metrics.normedDistance = computeLpNorm(2);  // L2 norm
         metrics.completenessIndex = computeCompleteness();
         metrics.dimensionalCoherence = computeDimensionalCoherence();
+        metrics.spectralFlatness = computeSpectralFlatness();
         
         return metrics;
     }
@@ -134,6 +136,35 @@ public:
         }
         
         return coherenceScore;
+    }
+
+    // Spectral Flatness (Wiener Entropy proxy) using Lebesgue-weighted geometric/arithmetic means
+    std::vector<T> computeSpectralFlatness() {
+        std::vector<T> flatness(Dimension, 0);
+        if (dimensionalData.empty() || timestamps.size() < 2) return flatness;
+        T totalMeasure = timestamps.back() - timestamps.front();
+        if (std::abs(totalMeasure) < 1e-9) return flatness;
+
+        for (size_t dim = 0; dim < Dimension; ++dim) {
+            const auto& data = dimensionalData[dim];
+            if (data.size() < 2) continue;
+
+            T logSum = 0;
+            T arithSum = 0;
+            for (size_t i = 0; i < data.size() - 1; ++i) {
+                T dt = timestamps[i+1] - timestamps[i];
+                T val = (std::abs(data[i]) + std::abs(data[i+1])) / 2.0;
+                if (val < 1e-9) val = 1e-9; // Small epsilon for log
+                logSum += std::log(val) * dt;
+                arithSum += val * dt;
+            }
+            T geomMean = std::exp(logSum / totalMeasure);
+            T arithMean = arithSum / totalMeasure;
+
+            if (arithMean > 1e-9) flatness[dim] = geomMean / arithMean;
+            else flatness[dim] = 0;
+        }
+        return flatness;
     }
 
     // Correlation between Dimensions
@@ -240,6 +271,11 @@ public:
             static_cast<float>(metrics.completenessIndex));
         Serial.printf("Dimensional Coherence: %f\n", 
             static_cast<float>(metrics.dimensionalCoherence));
+
+        Serial.println("\nSpectral Flatness (per dimension):");
+        for (size_t i = 0; i < Dimension; ++i) {
+            Serial.printf("Dim %zu: %f\n", i, static_cast<float>(metrics.spectralFlatness[i]));
+        }
         
         Serial.println("\nLinear Projection:");
         for (const auto& val : linearProjectedSpace) {

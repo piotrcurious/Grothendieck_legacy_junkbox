@@ -84,6 +84,19 @@ class HybridQuantumAlgebraicSolver:
                        bounds=[(0.01, 5), (0.01, 5)]) # Add bounds for physical parameters
         return res
 
+    def calculate_sensitivity(self, theta, data_densities, psi0, dt, steps):
+        """Computes numerical gradient of the loss function."""
+        eps = 1e-4
+        grad = np.zeros_like(theta)
+        for i in range(len(theta)):
+            t_plus = np.array(theta, dtype=float)
+            t_plus[i] += eps
+            t_minus = np.array(theta, dtype=float)
+            t_minus[i] -= eps
+            grad[i] = (self.inference_loss(t_plus, data_densities, psi0, dt, steps) -
+                       self.inference_loss(t_minus, data_densities, psi0, dt, steps)) / (2 * eps)
+        return grad
+
     def check_annihilator(self, theta):
         """Checks if the parameters theta satisfy the discovered annihilator (invariant)."""
         rho, kappa = theta
@@ -99,9 +112,10 @@ class HybridQuantumAlgebraicSolver:
         return True, f"Latent state y^2 solutions: {y2_plus}, {y2_minus}"
 
 class TwoLevelLindbladSolver:
-    def __init__(self, omega=1.0, gamma=0.1):
+    def __init__(self, omega=1.0, gamma=0.1, gamma_dephase=0.0):
         self.omega = omega
         self.gamma = gamma
+        self.gamma_dephase = gamma_dephase
         self.sigma_z = np.array([[1, 0], [0, -1]])
         self.sigma_x = np.array([[0, 1], [1, 0]])
         # |0> is ground [1,0]^T, |1> is excited [0,1]^T
@@ -109,14 +123,24 @@ class TwoLevelLindbladSolver:
         self.sigma_m = np.array([[0, 1], [0, 0]]) # Lowering: |1> -> |0>
 
     def lindbladian(self, rho):
-        """Computes the Lindbladian for a 2-level system."""
+        """Computes the Lindbladian for a 2-level system with multi-channel collapse."""
         H = 0.5 * self.omega * self.sigma_z
         # Hamiltonian part: -i[H, rho]
         comm = -1j * (H @ rho - rho @ H)
-        # Dissipation part (lowering)
-        L = self.sigma_m
-        L_dag = L.T.conj()
-        diss = self.gamma * (L @ rho @ L_dag - 0.5 * (L_dag @ L @ rho + rho @ L_dag @ L))
+
+        diss = np.zeros_like(rho, dtype=complex)
+        # Channel 1: Relaxation (lowering)
+        if self.gamma > 0:
+            L1 = self.sigma_m
+            L1d = L1.T.conj()
+            diss += self.gamma * (L1 @ rho @ L1d - 0.5 * (L1d @ L1 @ rho + rho @ L1d @ L1))
+
+        # Channel 2: Pure Dephasing (sigma_z)
+        if self.gamma_dephase > 0:
+            L2 = self.sigma_z
+            L2d = L2.T.conj()
+            diss += self.gamma_dephase * (L2 @ rho @ L2d - 0.5 * (L2d @ L2 @ rho + rho @ L2d @ L2))
+
         return comm + diss
 
     def solve_dynamics(self, rho0, dt, steps):
@@ -128,6 +152,31 @@ class TwoLevelLindbladSolver:
             k2 = self.lindbladian(rho + 0.5 * dt * k1)
             k3 = self.lindbladian(rho + 0.5 * dt * k2)
             k4 = self.lindbladian(rho + dt * k3)
+            rho = rho + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+            trajectory.append(rho)
+        return np.array(trajectory)
+
+    def rabi_oscillation(self, rho0, dt, steps, drive_amp=0.5):
+        """Simulates Rabi oscillations with a coherent drive sigma_x."""
+        original_omega = self.omega
+        # Effective Hamiltonian in rotating frame (resonance)
+        H_drive = 0.5 * drive_amp * self.sigma_x
+
+        def driven_lindbladian(rho):
+            comm = -1j * (H_drive @ rho - rho @ H_drive)
+            diss = np.zeros_like(rho, dtype=complex)
+            if self.gamma > 0:
+                L = self.sigma_m
+                diss += self.gamma * (L @ rho @ L.T.conj() - 0.5 * (L.T.conj() @ L @ rho + rho @ L.T.conj() @ L))
+            return comm + diss
+
+        rho = rho0.copy()
+        trajectory = [rho]
+        for _ in range(steps):
+            k1 = driven_lindbladian(rho)
+            k2 = driven_lindbladian(rho + 0.5 * dt * k1)
+            k3 = driven_lindbladian(rho + 0.5 * dt * k2)
+            k4 = driven_lindbladian(rho + dt * k3)
             rho = rho + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
             trajectory.append(rho)
         return np.array(trajectory)
@@ -155,18 +204,27 @@ def main():
     res = solver.estimate_parameters(data_densities, psi0, dt, steps, [0.8, 0.3])
     logging.info(f"Estimated parameters: {res.x} (True: {theta_true})")
 
+    sens = solver.calculate_sensitivity(res.x, data_densities, psi0, dt, steps)
+    logging.info(f"Parameter Sensitivity (Gradient): {sens}")
+
     logging.info("4. Annihilator Check")
     valid, msg = solver.check_annihilator(res.x)
     logging.info(f"Annihilator valid: {valid}. {msg}")
 
-    logging.info("5. Two-Level System (Lindblad) Evolution")
-    tls = TwoLevelLindbladSolver(omega=2.0, gamma=0.5)
-    rho0 = np.array([[0, 0], [0, 1]]) # Excited state
+    logging.info("5. Two-Level System (Lindblad) Evolution (Multi-Channel)")
+    tls = TwoLevelLindbladSolver(omega=2.0, gamma=0.5, gamma_dephase=0.2)
+    rho0 = np.array([[0.5, 0.5], [0.5, 0.5]]) # Superposition
     steps_tls = 50
     dt_tls = 0.1
     traj_tls = tls.solve_dynamics(rho0, dt_tls, steps_tls)
     ground_pops = [np.real(r[0,0]) for r in traj_tls]
-    logging.info(f"TLS Evolution: Ground state pop after {steps_tls} steps: {ground_pops[-1]:.4f}")
+    coherences = [np.abs(r[0,1]) for r in traj_tls]
+    logging.info(f"TLS Evolution: Ground state pop: {ground_pops[-1]:.4f}, Coherence: {coherences[-1]:.4f}")
+
+    logging.info("6. Rabi Oscillation Simulation")
+    traj_rabi = tls.rabi_oscillation(rho0, dt=0.1, steps=100, drive_amp=1.0)
+    excited_pops = [np.real(r[1,1]) for r in traj_rabi]
+    logging.info(f"Rabi Simulation: Max excited pop: {max(excited_pops):.4f}")
 
 if __name__ == "__main__":
     main()

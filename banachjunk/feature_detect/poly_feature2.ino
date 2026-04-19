@@ -135,6 +135,10 @@ public:
         }
     }
 
+    uint8_t getPrimitiveRoot() const {
+        return findPrimitiveRoot();
+    }
+
     int findPrimitiveRoot() const {
         std::vector<int> factors;
         int phi = prime - 1;
@@ -397,6 +401,22 @@ private:
         return dimension;
     }
 
+    // Detect periodicity using Roots of Unity in Galois Field (Simplified Galois-Fourier)
+    bool detectGaloisPeriodicity(const std::vector<uint8_t>& y) {
+        if (y.size() < 10) return false;
+        // Search for a period k such that y[i] approx y[i+k]
+        // Since we are in a field, we look for invariants under cyclic shifts
+        int n = y.size();
+        for (int k = 2; k <= n / 2; ++k) {
+            int matches = 0;
+            for (int i = 0; i < n - k; ++i) {
+                if (std::abs((int)y[i] - (int)y[i+k]) <= 5) matches++;
+            }
+            if (matches > (n - k) * 0.7) return true;
+        }
+        return false;
+    }
+
     float estimateNoiseLevel(const std::vector<DataPoint>& data) {
         if (data.size() < Config::NUM_SAMPLES_FOR_NOISE) return 0.0f;
         
@@ -486,13 +506,15 @@ public:
                 Config::WINDOW_SIZE / 4
             );
 
+            bool galois_periodic = detectGaloisPeriodicity(windowY);
+
             if (fitted.degree() <= 1) {
                 newFeature.type = "linear";
             } else if (fitted.degree() == 2 && roots.size() == 1) {
                 newFeature.type = "quadratic_vertex";
             } else if (fitted.degree() == 2) {
                 newFeature.type = "quadratic_transition";
-            } else if (autocorr > 0.7f) {
+            } else if (autocorr > 0.7f || galois_periodic) {
                 newFeature.type = "periodic";
             } else if (varietyDim < Config::WINDOW_SIZE / 4) {
                 newFeature.type = "constant_piecewise";
