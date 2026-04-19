@@ -7,13 +7,16 @@
 // For not_strict.ino
 #include "../not_strict.ino"
 
+#include "test_data_generator.h"
+
 void test_not_strict() {
-    std::cout << "Testing BanachSpaceAnalyzer (from not_strict.ino)..." << std::endl;
-    // Note: BanachSpaceAnalyzer name is reused from other files, but here it's different class.
-    // In this context it refers to the one in not_strict.ino
-    float simulatedData[] = {1.0, 2.2, 4.1, 7.5, 12.3, 18.9, 27.4};
-    for (float data : simulatedData) {
-        banachAnalyzer.addData(data);
+    std::cout << "Testing BanachSpaceAnalyzer with noisy representative data..." << std::endl;
+    banachAnalyzer.reset();
+
+    // Generate complex trend with noise
+    auto signal = banach::test::DataGenerator::generateComplexTrend(100, 0.1f);
+    for (const auto& p : signal) {
+        banachAnalyzer.addData(p.v, p.t);
     }
     banachAnalyzer.analyzeBanachSpace();
 

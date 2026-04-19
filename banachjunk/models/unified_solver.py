@@ -99,6 +99,25 @@ class HybridQuantumAlgebraicSolver:
         entropy = -np.sum(prob * np.log(prob))
         return entropy
 
+    def calculate_momentum(self, psi):
+        """Calculates expectation value and variance of momentum <P> and Delta P."""
+        # P = -i * hbar * d/dx
+        # Finite difference gradient
+        dpsi_dx = np.gradient(psi, self.dx)
+        p_psi = -1j * self.hbar * dpsi_dx
+
+        norm_sq = np.vdot(psi, psi).real
+        if norm_sq < 1e-12: return 0.0, 0.0
+
+        avg_p = np.vdot(psi, p_psi).real / norm_sq
+
+        # P^2 = -hbar^2 * d^2/dx^2 (already in T = P^2/2m)
+        p2_psi = 2 * self.m * (self.T @ psi)
+        avg_p2 = np.vdot(psi, p2_psi).real / norm_sq
+
+        delta_p = np.sqrt(max(0.0, avg_p2 - avg_p**2))
+        return avg_p, delta_p
+
     def algebraic_constraints(self):
         """Computes symbolic Groebner basis for structure resolution."""
         x, y, rho, kappa = symbols('x y rho kappa')
@@ -299,6 +318,16 @@ def main():
     entropy_initial = solver.calculate_entanglement_entropy(traj[0])
     entropy_final = solver.calculate_entanglement_entropy(traj[-1])
     logging.info(f"Spatial Entropy: Initial={entropy_initial:.4f}, Final={entropy_final:.4f}")
+
+    logging.info("8. Momentum and Uncertainty Analysis")
+    p_avg, p_delta = solver.calculate_momentum(traj[-1])
+    # Delta X estimate
+    prob = np.abs(traj[-1])**2 / np.sum(np.abs(traj[-1])**2)
+    avg_x = np.sum(solver.x_grid * prob)
+    avg_x2 = np.sum(solver.x_grid**2 * prob)
+    x_delta = np.sqrt(max(0.0, avg_x2 - avg_x**2))
+    logging.info(f"Momentum: <P>={p_avg:.4f}, Delta P={p_delta:.4f}")
+    logging.info(f"Uncertainty: Delta X * Delta P = {x_delta * p_delta:.4f} (hbar/2={solver.hbar/2.0:.4f})")
 
     logging.info("6. Rabi Oscillation Simulation")
     traj_rabi = tls.rabi_oscillation(rho0, dt=0.1, steps=100, drive_amp=1.0)

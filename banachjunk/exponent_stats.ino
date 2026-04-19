@@ -120,6 +120,7 @@ private:
         std::vector<T> confidenceIntervalUpper;
         std::vector<T> hurstExponent;
         std::vector<T> approxEntropy;
+        std::vector<std::vector<T>> klDivergence;
     };
 
     // Compute Comprehensive Statistical Metrics using Lebesgue-style measure weighting
@@ -229,6 +230,34 @@ public:
         }
     }
 
+    // Statistical Distance (KL Divergence Proxy) between two dimensions
+    T computeKLDivergence(size_t dim1, size_t dim2) {
+        if (dim1 >= Dimension || dim2 >= Dimension) return 0;
+        const auto& d1 = statisticalData[dim1];
+        const auto& d2 = statisticalData[dim2];
+        if (d1.size() < 10 || d2.size() < 10) return 0;
+
+        // Simplified histogram-based KL: D_KL(P || Q)
+        const int bins = 10;
+        T min1 = *std::min_element(d1.begin(), d1.end()), max1 = *std::max_element(d1.begin(), d1.end());
+        T min2 = *std::min_element(d2.begin(), d2.end()), max2 = *std::max_element(d2.begin(), d2.end());
+        T minV = std::min(min1, min2), maxV = std::max(max1, max2), range = maxV - minV;
+        if (range < 1e-9) return 0;
+
+        std::vector<T> p(bins, 1e-6), q(bins, 1e-6); // Laplace smoothing
+        for(T v : d1) p[static_cast<int>((v-minV)/range*(bins-1))] += 1.0;
+        for(T v : d2) q[static_cast<int>((v-minV)/range*(bins-1))] += 1.0;
+
+        // Normalize
+        T sumP = 0, sumQ = 0;
+        for(int i=0; i<bins; ++i) { sumP += p[i]; sumQ += q[i]; }
+        for(int i=0; i<bins; ++i) { p[i] /= sumP; q[i] /= sumQ; }
+
+        T kl = 0;
+        for(int i=0; i<bins; ++i) kl += p[i] * std::log(p[i] / q[i]);
+        return std::max((T)0, kl);
+    }
+
     // Compute covariance between two dimensions (Lebesgue-weighted)
     T computeCovariance(size_t dim1, size_t dim2) {
         if (dim1 >= Dimension || dim2 >= Dimension) return 0;
@@ -287,6 +316,14 @@ public:
         for (size_t i = 0; i < Dimension; ++i) {
             for (size_t j = 0; j < Dimension; ++j) {
                 Serial.printf("%f ", static_cast<float>(computeCovariance(i, j)));
+            }
+            Serial.println();
+        }
+
+        Serial.println("\nStatistical Distance (KL Divergence Proxy):");
+        for (size_t i = 0; i < Dimension; ++i) {
+            for (size_t j = 0; j < Dimension; ++j) {
+                Serial.printf("%f ", static_cast<float>(computeKLDivergence(i, j)));
             }
             Serial.println();
         }
