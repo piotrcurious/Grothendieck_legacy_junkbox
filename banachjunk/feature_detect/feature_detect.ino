@@ -97,9 +97,9 @@ public:
 
       // Feature detection criteria using Banach space properties
       // Gated by complexity: stationary noise (flatness -> 1, hurst -> 0.5) is ignored
-      bool isSignificant = (l2Norm > 0.1) && (flatness < 0.9 || abs(hurst - 0.5) > 0.2);
+      bool isSignificant = (l2Norm > 0.05) && (flatness < 0.95 || abs(hurst - 0.5) > 0.15);
 
-      if (checkConvergence(l2Norm) && isSignificant) {
+      if (isSignificant) {
         // Analyze relationship between norms to classify feature
         float l2Norm_scaled = l2Norm * sqrt(WINDOW_SIZE);
         float normRatio = (l2Norm_scaled > 1e-9) ? (l1Norm / l2Norm_scaled) : 0;
@@ -110,12 +110,14 @@ public:
         newFeature.strength = l2Norm;
         
         // Improved feature classification
-        if (l2Norm > 1e-9 && lInfNorm / l2Norm > 0.8) {
+        if (l2Norm > 1e-9 && lInfNorm / l2Norm > 1.2) {
           newFeature.type = "spike";
-        } else if (normRatio > 1.2) {
+        } else if (normRatio > 1.1) {
           newFeature.type = "step";
-        } else if (normRatio < 0.6 && normRatio > 0) {
+        } else if (normRatio < 0.8 && normRatio > 0) {
           newFeature.type = "oscillation";
+        } else if (hurst > 0.7) {
+          newFeature.type = "trend";
         } else {
           newFeature.type = "transition";
         }
@@ -134,7 +136,7 @@ public:
         }
         
         // Skip overlapping windows
-        i += WINDOW_SIZE/2;
+        i += WINDOW_SIZE/4;
       }
     }
     

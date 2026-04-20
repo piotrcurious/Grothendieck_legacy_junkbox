@@ -32,6 +32,54 @@ public:
         return signal;
     }
 
+    struct LabeledFeature {
+        float t;
+        std::string type;
+    };
+
+    struct LabeledSignal {
+        std::vector<SignalPoint> signal;
+        std::vector<LabeledFeature> truth;
+    };
+
+    // Generates a sequence: Linear -> Sine -> Spike -> Linear
+    static LabeledSignal generateLabeledSignal() {
+        LabeledSignal ls;
+        float t = 0;
+        float dt = 0.1f;
+
+        // 1. Linear (t=0 to 4)
+        ls.truth.push_back({2.0f, "linear"});
+        for(int i=0; i<40; ++i) {
+            ls.signal.push_back({t, 0.5f * t});
+            t += dt;
+        }
+
+        // 2. Periodic/Sine (t=4 to 9)
+        ls.truth.push_back({6.5f, "periodic"});
+        for(int i=0; i<50; ++i) {
+            ls.signal.push_back({t, 2.0f + std::sin(2.0f * PI * 1.0f * t)});
+            t += dt;
+        }
+
+        // 3. Spike (t=9 to 11)
+        ls.truth.push_back({10.0f, "spike"});
+        for(int i=0; i<20; ++i) {
+            float val = (i == 10) ? 10.0f : 2.0f;
+            ls.signal.push_back({t, val});
+            t += dt;
+        }
+
+        // 4. Linear (t=11 to 15)
+        ls.truth.push_back({13.0f, "linear"});
+        for(int i=0; i<40; ++i) {
+            ls.signal.push_back({t, 2.0f - 0.2f * (t-11.0f)});
+            t += dt;
+        }
+
+        return ls;
+    }
+
     // Generates a multi-segment signal (Linear + Quadratic + Constant)
     static std::vector<SignalPoint> generateComplexTrend(int n, float noise_std) {
         std::vector<SignalPoint> signal;

@@ -108,19 +108,21 @@ private:
   // Convert float to Galois Field element
   uint8_t floatToGF(float value) {
     // Map float to field element using scaling and rounding
-    int scaled = (int)((value + 1) * (FIELD_PRIME - 1) / 2);
+    // Ensure value is in a reasonable range for mapping
+    float v = std::clamp(value, -5.0f, 5.0f);
+    int scaled = (int)((v + 5.0f) * (FIELD_PRIME - 1) / 10.0f);
     return (uint8_t)std::max(0, std::min(FIELD_PRIME - 1, scaled));
   }
 
   // Convert Galois Field element back to float
   float gfToFloat(uint8_t value) {
-    return (2.0f * value / (FIELD_PRIME - 1)) - 1.0f;
+    return (10.0f * value / (FIELD_PRIME - 1)) - 5.0f;
   }
 
   // Fit polynomial to data points using Lagrange interpolation over GF
   // Uses points distributed across the window for better representation
   GFPolynomial fitPolynomial(const std::vector<uint8_t>& x, const std::vector<uint8_t>& y) {
-    int n_total = x.size();
+    int n_total = (int)x.size();
     int n = std::min(n_total, MAX_POLY_DEGREE + 1);
     
     // Selection of representative points
@@ -184,10 +186,12 @@ private:
     std::vector<bool> seen(FIELD_PRIME, false);
     
     for (uint8_t val : values) {
-      if (!seen[val]) {
-        seen[val] = true;
-        dimension++;
-      }
+        if (val < FIELD_PRIME) {
+            if (!seen[val]) {
+                seen[val] = true;
+                dimension++;
+            }
+        }
     }
     
     return dimension;
@@ -229,9 +233,11 @@ public:
 
       // Classify features based on algebraic properties
       // Periodicity check: Low variety dimension relative to polynomial degree
-      bool periodic_proxy = (varietyDim < WINDOW_SIZE / 3) && (fitted.degree() > 2);
+      bool periodic_proxy = (varietyDim < WINDOW_SIZE / 2.5) && (fitted.degree() > 1);
 
-      if (fitted.degree() <= 1) {
+      if (varietyDim < 3) {
+          newFeature.type = "plateau";
+      } else if (fitted.degree() <= 1) {
         newFeature.type = "linear";
       } else if (fitted.degree() == 2) {
         newFeature.type = "quadratic";
@@ -250,7 +256,7 @@ public:
       }
 
       // Skip overlapping windows for efficiency
-      i += WINDOW_SIZE/4;
+      i += WINDOW_SIZE/10;
     }
     
     return featureCount;
