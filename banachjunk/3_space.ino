@@ -18,6 +18,7 @@ private:
         T completenessIndex;
         T dimensionalCoherence;
         std::vector<T> spectralFlatness;
+        std::vector<T> sparsity;
         std::vector<std::vector<T>> instantaneousCoherence;
         T phaseSpaceArea;
     };
@@ -63,6 +64,7 @@ private:
         metrics.completenessIndex = computeCompleteness();
         metrics.dimensionalCoherence = computeDimensionalCoherence();
         metrics.spectralFlatness = computeSpectralFlatness();
+        metrics.sparsity = computeSparsity();
         metrics.instantaneousCoherence = computeInstantaneousCoherence(5);
         metrics.phaseSpaceArea = computePhaseSpaceArea();
         
@@ -155,6 +157,14 @@ public:
         return flatness;
     }
 
+    std::vector<T> computeSparsity() {
+        std::vector<T> sparsity(Dimension, 0);
+        for (size_t dim = 0; dim < Dimension; ++dim) {
+            sparsity[dim] = static_cast<T>(banach::Statistics::calculateSparsity(dimensionalData[dim]));
+        }
+        return sparsity;
+    }
+
     // Correlation between Dimensions
     T computeDimensionCorrelation(
         const std::vector<T>& dim1, 
@@ -197,7 +207,7 @@ public:
     // Add multi-dimensional data point with timestamp
     void addDataPoint(const std::vector<T>& point, T timestamp = -1.0) {
         if (point.size() != Dimension) return;
-        
+
         if (dimensionalData.size() < Dimension) dimensionalData.resize(Dimension);
 
         // Auto-increment timestamp if not provided
@@ -265,6 +275,11 @@ public:
         Serial.println("\nSpectral Flatness (per dimension):");
         for (size_t i = 0; i < Dimension; ++i) {
             Serial.printf("Dim %zu: %f\n", i, static_cast<float>(metrics.spectralFlatness[i]));
+        }
+
+        Serial.println("\nSparsity (Hoyer Metric):");
+        for (size_t i = 0; i < Dimension; ++i) {
+            Serial.printf("Dim %zu: %f\n", i, static_cast<float>(metrics.sparsity[i]));
         }
         
         Serial.println("\nInstantaneous Coherence (Last Window):");

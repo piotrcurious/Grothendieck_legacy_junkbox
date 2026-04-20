@@ -120,6 +120,7 @@ private:
         std::vector<T> confidenceIntervalUpper;
         std::vector<T> hurstExponent;
         std::vector<T> approxEntropy;
+        std::vector<T> sampleEntropy;
         std::vector<std::vector<T>> klDivergence;
     };
 
@@ -137,6 +138,7 @@ private:
         metrics.confidenceIntervalUpper.resize(Dimension, 0);
         metrics.hurstExponent.resize(Dimension, 0.5);
         metrics.approxEntropy.resize(Dimension, 0);
+        metrics.sampleEntropy.resize(Dimension, 0);
 
         if (statisticalData.empty() || timestamps.size() < 2) return metrics;
         T totalMeasure = timestamps.back() - timestamps.front();
@@ -199,6 +201,7 @@ private:
             // Unified metrics from math_utils
             metrics.hurstExponent[dim] = static_cast<T>(banach::Statistics::calculateHurst(dimData, timestamps));
             metrics.approxEntropy[dim] = static_cast<T>(banach::Statistics::calculateApEn(dimData));
+            metrics.sampleEntropy[dim] = static_cast<T>(banach::Statistics::calculateSampEn(dimData));
         }
 
         return metrics;
@@ -306,6 +309,7 @@ public:
             Serial.printf("  Entropy: %f\n", static_cast<float>(metrics.entropy[dim]));
             Serial.printf("  Hurst Exponent: %f\n", static_cast<float>(metrics.hurstExponent[dim]));
             Serial.printf("  Approx Entropy: %f\n", static_cast<float>(metrics.approxEntropy[dim]));
+            Serial.printf("  Sample Entropy: %f\n", static_cast<float>(metrics.sampleEntropy[dim]));
             Serial.printf("  Total Variation: %f\n", static_cast<float>(metrics.totalVariation[dim]));
             Serial.printf("  95%% CI Mean: [%f, %f]\n",
                 static_cast<float>(metrics.confidenceIntervalLower[dim]),

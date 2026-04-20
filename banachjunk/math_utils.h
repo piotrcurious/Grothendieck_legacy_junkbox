@@ -28,6 +28,57 @@ public:
     }
 
     template<typename T>
+    static float calculateSampEn(const std::vector<T>& data, int m = 2) {
+        if (data.size() < (size_t)m + 1) return 0;
+        int N = data.size();
+
+        auto countMatches = [&](int _m) {
+            double sum = 0, sqSum = 0;
+            for(auto v : data) { sum += v; sqSum += v*v; }
+            double mean = sum / N;
+            double sdev = std::sqrt(std::max(0.0, sqSum / N - mean * mean));
+            double r = 0.2 * sdev;
+            if (r < 1e-9) r = 0.01;
+
+            long matches = 0;
+            for (int i = 0; i < N - _m; ++i) {
+                for (int j = i + 1; j < N - _m; ++j) {
+                    bool match = true;
+                    for (int k = 0; k < _m; ++k) {
+                        if (std::abs((double)data[i+k] - (double)data[j+k]) > r) {
+                            match = false;
+                            break;
+                        }
+                    }
+                    if (match) matches++;
+                }
+            }
+            return static_cast<double>(matches);
+        };
+
+        double A = countMatches(m + 1);
+        double B = countMatches(m);
+        return (A > 0 && B > 0) ? (float)(-std::log(A / B)) : 0.0f;
+    }
+
+    template<typename T>
+    static float calculateSparsity(const std::vector<T>& data) {
+        if (data.empty()) return 0;
+        double l1 = 0, l2_sq = 0;
+        for (auto v : data) {
+            double av = std::abs((double)v);
+            l1 += av;
+            l2_sq += av * av;
+        }
+        double l2 = std::sqrt(l2_sq);
+        if (l2 < 1e-9) return 0;
+
+        // Hoyer Metric: (sqrt(N) - L1/L2) / (sqrt(N) - 1)
+        double n = data.size();
+        return (float)((std::sqrt(n) - (l1 / l2)) / (std::sqrt(n) - 1.0));
+    }
+
+    template<typename T>
     static T calculateVariance(const std::vector<T>& values, const std::vector<T>& timestamps) {
         if (values.size() < 2 || timestamps.size() < 2) return 0;
         T mean = calculateMean(values, timestamps);
