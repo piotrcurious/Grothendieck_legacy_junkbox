@@ -24,7 +24,10 @@ public:
         std::string text; SDL_Color color;
         bool operator<(const CacheKey& other) const {
             if (text != other.text) return text < other.text;
-            return *(uint32_t*)&color < *(uint32_t*)&other.color;
+            if (color.r != other.color.r) return color.r < other.color.r;
+            if (color.g != other.color.g) return color.g < other.color.g;
+            if (color.b != other.color.b) return color.b < other.color.b;
+            return color.a < other.color.a;
         }
     };
     std::map<CacheKey, SDL_Texture*> cache;
@@ -38,16 +41,30 @@ public:
     void renderText(const std::string& text, SDL_Color color, int x, int y, bool centered = false) {
         if (text.empty()) return;
         CacheKey key = {text, color};
-        if (cache.find(key) == cache.end()) {
+        auto it = cache.find(key);
+        if (it == cache.end()) {
             SDL_Surface* surf = TTF_RenderText_Blended(font, text.c_str(), color);
             if (!surf) return;
-            cache[key] = SDL_CreateTextureFromSurface(renderer, surf);
+            it = cache.emplace(key, SDL_CreateTextureFromSurface(renderer, surf)).first;
             SDL_FreeSurface(surf);
         }
-        SDL_Texture* tex = cache[key];
+        SDL_Texture* tex = it->second;
         int w, h; SDL_QueryTexture(tex, NULL, NULL, &w, &h);
         SDL_Rect dst = {centered ? x - w/2 : x, y, w, h};
         SDL_RenderCopy(renderer, tex, NULL, &dst);
+    }
+
+    // Bypass cache for dynamic strings (e.g. coordinates) to prevent memory leak
+    void renderTextInstant(const std::string& text, SDL_Color color, int x, int y, bool centered = false) {
+        if (text.empty()) return;
+        SDL_Surface* surf = TTF_RenderText_Blended(font, text.c_str(), color);
+        if (!surf) return;
+        SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, surf);
+        int w, h; SDL_QueryTexture(tex, NULL, NULL, &w, &h);
+        SDL_Rect dst = {centered ? x - w/2 : x, y, w, h};
+        SDL_RenderCopy(renderer, tex, NULL, &dst);
+        SDL_DestroyTexture(tex);
+        SDL_FreeSurface(surf);
     }
 };
 
@@ -60,6 +77,8 @@ public:
     TTF_Font* font;
     TextureCache& cache;
     AppMode currentMode = AppMode::THEORY;
+    AppMode lastMode = AppMode::THEORY;
+    bool modeChanged = true;
 
     UI(TTF_Font* f, TextureCache& c) : font(f), cache(c) {}
     void addSlider(std::string label, float* val, float min, float max, int x, int y) { sliders.push_back({label, val, min, max, {x, y, 200, 20}, false}); }
@@ -71,7 +90,12 @@ public:
         if (e.type == SDL_MOUSEBUTTONDOWN) {
             int bx = e.button.x, by = e.button.y;
             for (auto& s : sliders) if (bx >= s.rect.x && bx <= s.rect.x + s.rect.w && by >= s.rect.y && by <= s.rect.y + s.rect.h) s.dragging = true;
-            for (auto& b : buttons) if (bx >= b.rect.x && bx <= b.rect.x + b.rect.w && by >= b.rect.y && by <= b.rect.y + b.rect.h) currentMode = b.mode;
+            for (auto& b : buttons) if (bx >= b.rect.x && bx <= b.rect.x + b.rect.w && by >= b.rect.y && by <= b.rect.y + b.rect.h) {
+                if (currentMode != b.mode) {
+                    currentMode = b.mode;
+                    modeChanged = true;
+                }
+            }
         } else if (e.type == SDL_MOUSEBUTTONUP) { for (auto& s : sliders) s.dragging = false; }
         else if (e.type == SDL_MOUSEMOTION) {
             int mx_m = e.motion.x; for (auto& s : sliders) if (s.dragging) *s.value = std::clamp(s.min + (float)(mx_m - s.rect.x) / s.rect.w * (s.max - s.min), s.min, s.max);
@@ -82,7 +106,9 @@ public:
         for (auto& s : sliders) {
             bool s_hover = (mx >= s.rect.x && mx <= s.rect.x + s.rect.w && my >= s.rect.y && my <= s.rect.y + s.rect.h);
             std::stringstream ss; ss << s.label << ": " << std::fixed << std::setprecision(2) << *s.value;
-            cache.renderText(ss.str(), {255,255,255,255}, s.rect.x, s.rect.y - 25);
+            // Value is dynamic, but label prefix is somewhat static.
+            // However, it's safer to use Instant for the whole string here to avoid leak.
+            cache.renderTextInstant(ss.str(), {255,255,255,255}, s.rect.x, s.rect.y - 25);
             SDL_SetRenderDrawColor(ren, 100, 100, 100, 255); SDL_RenderFillRect(ren, &s.rect);
             float pct = std::clamp((*s.value - s.min) / (s.max - s.min), 0.0f, 1.0f);
             SDL_Rect hr = {s.rect.x + (int)(pct * s.rect.w) - 5, s.rect.y - 5, 10, 30};
@@ -119,12 +145,12 @@ void drawGraph(SDL_Renderer* ren, int x, int y, int w, int h, const std::vector<
         if (y0 >= y && y0 <= y+h) SDL_RenderDrawLine(ren, x, y0, x + w, y0);
         SDL_RenderDrawLine(ren, x, y, x, y + h);
 
-        // Axis Labels
+        // Axis Labels (Dynamic due to pan/zoom)
         std::stringstream ss_min, ss_max;
         ss_min << std::fixed << std::setprecision(1) << (midV + panY - (maxV - minV) / (2.0 * zoom));
         ss_max << std::fixed << std::setprecision(1) << (midV + panY + (maxV - minV) / (2.0 * zoom));
-        cache.renderText(ss_max.str(), {150, 150, 150, 255}, x - 35, y);
-        cache.renderText(ss_min.str(), {150, 150, 150, 255}, x - 35, y + h - 15);
+        cache.renderTextInstant(ss_max.str(), {150, 150, 150, 255}, x - 35, y);
+        cache.renderTextInstant(ss_min.str(), {150, 150, 150, 255}, x - 35, y + h - 15);
         cache.renderText("0", {100, 100, 100, 255}, x + 5, y + h/2 + 5);
         cache.renderText("x=0", {100, 100, 100, 255}, x, y + h + 5);
         cache.renderText("x=1", {100, 100, 100, 255}, x + w - 30, y + h + 5);
@@ -167,7 +193,7 @@ public:
             double ky_val = (double)(my - ky) / 200.0;
             double val = K(kx_val, ky_val);
             std::stringstream ss; ss << "K(" << std::fixed << std::setprecision(2) << kx_val << "," << ky_val << ")=" << val;
-            cache.renderText(ss.str(), {255,255,255,255}, mx + 10, my - 20);
+            cache.renderTextInstant(ss.str(), {255,255,255,255}, mx + 10, my - 20);
             SDL_Rect r_out = {kx, ky, 200, 200}; SDL_SetRenderDrawColor(ren, 255, 255, 255, 150); SDL_RenderDrawRect(ren, &r_out);
         }
     }
@@ -467,6 +493,7 @@ public:
 
 int main(int argc, char* argv[]) {
     bool galleryMode = (argc > 1 && std::string(argv[1]) == "--gallery");
+    bool interactTest = (argc > 1 && std::string(argv[1]) == "--interact-test");
     if (SDL_Init(SDL_INIT_VIDEO) < 0 || TTF_Init() < 0) return 1;
     SDL_Window* window = SDL_CreateWindow("Fredholm Architect Suite", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
@@ -503,7 +530,23 @@ int main(int argc, char* argv[]) {
     bool quit = false; SDL_Event e; Fredholm::AdaptiveCompensator<double> compensator; auto startTime = std::chrono::steady_clock::now();
     int frameCount = 0;
     while (!quit) {
-        if (galleryMode) {
+        if (interactTest) {
+            if (frameCount == 10) { ui.currentMode = AppMode::THEORY; SDL_WarpMouseInWindow(window, 65, 40); } // Hover button
+            if (frameCount == 30) { SDL_WarpMouseInWindow(window, 150, 120); } // Hover slider
+            if (frameCount == 50) { SDL_WarpMouseInWindow(window, 120, 550); } // Hover heatmap
+            if (frameCount == 70) { SDL_WarpMouseInWindow(window, 600, 200); } // Hover graph
+            if (frameCount == 90) { SDL_WarpMouseInWindow(window, 500, 450); } // Hover theory card
+            if (frameCount % 10 == 0) {
+                SDL_Surface* ss = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_WIDTH, SCREEN_HEIGHT, 32, SDL_PIXELFORMAT_ARGB8888);
+                SDL_RenderReadPixels(renderer, NULL, SDL_PIXELFORMAT_ARGB8888, ss->pixels, ss->pitch);
+                std::string fn = "interact_" + std::to_string(frameCount) + ".bmp";
+                SDL_SaveBMP(ss, fn.c_str());
+                SDL_FreeSurface(ss);
+            }
+            if (frameCount >= 100) quit = true;
+            frameCount++;
+        }
+        else if (galleryMode) {
             int modeIdx = (frameCount / 20) % 10;
             AppMode modes[] = {AppMode::THEORY, AppMode::COMPENSATOR, AppMode::BVP, AppMode::DEBLUR, AppMode::SPECTRAL, AppMode::VOLTERRA, AppMode::ALTERNATIVE, AppMode::NEUMANN, AppMode::GALERKIN, AppMode::KINDS};
             ui.currentMode = modes[modeIdx];
@@ -521,6 +564,9 @@ int main(int argc, char* argv[]) {
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) quit = true;
             ui.handleEvent(e);
+            if (interactTest && e.type == SDL_USEREVENT) { // Fake mode change for test
+                ui.modeChanged = true;
+            }
             if (e.type == SDL_MOUSEWHEEL) {
                 if (demos.count(ui.currentMode)) {
                     if (e.wheel.y > 0) demos[ui.currentMode]->zoom *= 1.1;
@@ -538,10 +584,16 @@ int main(int argc, char* argv[]) {
         }
 
         SDL_SetRenderDrawColor(renderer, 20, 20, 25, 255); SDL_RenderClear(renderer);
-        ui.sliders.clear();
+
+        if (ui.modeChanged) {
+            ui.sliders.clear();
+            if (demos.count(ui.currentMode)) {
+                demos[ui.currentMode]->setupSliders(ui, sigma, lambda, freq, jitter, compL, pot, alpha, eigenIdx, kType, nIters);
+            }
+            ui.modeChanged = false;
+        }
 
         if(demos.count(ui.currentMode)) {
-            demos[ui.currentMode]->setupSliders(ui, sigma, lambda, freq, jitter, compL, pot, alpha, eigenIdx, kType, nIters);
             int gx = 450, gy = 100, gw = 700, gh = 300; SDL_SetRenderDrawColor(renderer, 35, 35, 40, 255); SDL_Rect gr = {gx, gy, gw, gh}; SDL_RenderFillRect(renderer, &gr);
             demos[ui.currentMode]->render(renderer, cache, gx, gy, gw, gh, sigma, lambda, freq, jitter, compL, pot, alpha, eigenIdx, kType, nIters, startTime, compensator);
 
@@ -549,7 +601,7 @@ int main(int argc, char* argv[]) {
             auto K_theory = KernelFactory::create((int)kType, sigma);
             double condNum = Solver::estimateConditionNumber(0, 1, lambda, K_theory, 16);
             std::stringstream statSS; statSS << "Stability Index: " << std::fixed << std::setprecision(3) << condNum;
-            cache.renderText(statSS.str(), {150, 200, 255, 255}, 20, 800);
+            cache.renderTextInstant(statSS.str(), {150, 200, 255, 255}, 20, 800);
 
             // Stability Gauge
             SDL_Rect gr_bg = {20, 780, 200, 10}; SDL_SetRenderDrawColor(renderer, 50, 50, 55, 255); SDL_RenderFillRect(renderer, &gr_bg);
@@ -573,7 +625,7 @@ int main(int argc, char* argv[]) {
                 double vy = norm_y * ((v_max - v_min) / demos[ui.currentMode]->zoom) + ( (v_min + v_max)/2.0 + demos[ui.currentMode]->panY );
 
                 std::stringstream ss; ss << std::fixed << std::setprecision(3) << "(" << vx << ", " << vy << ")";
-                cache.renderText(ss.str(), {255, 255, 255, 255}, mx + 10, my - 20);
+                cache.renderTextInstant(ss.str(), {255, 255, 255, 255}, mx + 10, my - 20);
             }
             // Tooltip for Equation & Theory
             if (my >= 420 && my <= 480 && mx >= 450 && mx <= 950) {
