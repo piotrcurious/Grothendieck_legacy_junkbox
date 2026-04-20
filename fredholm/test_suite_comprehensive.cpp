@@ -5,6 +5,7 @@
 #include <vector>
 
 using namespace Fredholm;
+void testConvergence();
 
 void testLinearSolver() {
     std::cout << "Testing Linear Solver..." << std::endl;
@@ -122,11 +123,31 @@ int main() {
         testSVD();
         testEdgeCases();
         testKernelFactory();
-        testConditionNumber();
+        testConditionNumber(); testConvergence();
         std::cout << "\nAll Engine Tests Passed Successfully!" << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "Test failed: " << e.what() << std::endl;
         return 1;
     }
     return 0;
+}
+
+void testConvergence() {
+    std::cout << "Testing Convergence (Nystrom vs Galerkin)..." << std::endl;
+    auto K = [](double x, double y) { return std::exp(-(x-y)*(x-y)); };
+    auto f = [](double x) { return std::sin(M_PI * x); };
+    double lambda = 0.5;
+
+    auto phi_nystrom = Fredholm::Solver::solveFredholm(0, 1, lambda, K, f, 32);
+    auto coeffs_galerkin = Fredholm::Solver::solveGalerkinOptimized(0, 1, lambda, K, f, 8);
+
+    double x = 0.5;
+    double val_nystrom = Fredholm::Solver::interpolateFredholm(x, 0, 1, lambda, K, f, phi_nystrom, 32);
+    double val_galerkin = 0;
+    for(int i=0; i<(int)coeffs_galerkin.size(); i++) val_galerkin += coeffs_galerkin[i] * Fredholm::Solver::legendreP(i, 2.0*x - 1.0);
+
+    double diff = std::abs(val_nystrom - val_galerkin);
+    std::cout << "  Nystrom: " << val_nystrom << ", Galerkin: " << val_galerkin << ", Diff: " << diff << std::endl;
+    if (diff < 2e-4) std::cout << "  Passed!" << std::endl;
+    else { std::cout << "  Failed! Diff too large." << std::endl; exit(1); }
 }
