@@ -1,19 +1,10 @@
-// Unified Field Explorer (Enhanced Production Version)
+// Unified Field Explorer (High-Performance Edition)
 //
-// Description:
-//   A high-performance C++ tool using FLTK and OpenGL to visualize:
-//   1. Algebraic Numbers: Root density heatmaps of random polynomials.
-//   2. Finite Fields: Visual representations of GF(p^n) and their
-//   multiplicative cycles.
-//   3. Field Extensions: Lattice grids formed by adjoining roots (e.g., Q(i),
-//   Q(sqrt(2))).
-//
-// Build Instructions (Linux):
-//   g++ -std=c++17 -O3 unified_galois_visual.cpp -o unified_galois_visual \
-//       -lfltk -lfltk_gl -lGL -lGLU -lm
-//
-// Usage:
-//   ./unified_galois_visual
+// Features:
+//   - Hardware-Accelerated Root Density Heatmaps
+//   - Rational Resonance Analysis
+//   - Finite Field Structure Exploration
+//   - Field Extensions via Companion Matrices
 
 #include <FL/Fl.H>
 #include <FL/Fl_Box.H>
@@ -25,23 +16,21 @@
 #include <FL/Fl_Group.H>
 #include <FL/Fl_Input.H>
 #include <FL/Fl_Multiline_Output.H>
-#include <FL/Fl_Native_File_Chooser.H>
 #include <FL/Fl_Value_Slider.H>
 #include <FL/Fl_Window.H>
-#include <FL/fl_ask.H>
 #include <FL/gl.h>
 #include <GL/glu.h>
 
 #include <algorithm>
 #include <cmath>
 #include <complex>
-#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <random>
 #include <sstream>
 #include <string>
 #include <vector>
+#include "../../galois_math.h"
 
 using namespace std;
 using cd = complex<double>;
@@ -50,640 +39,276 @@ using cd = complex<double>;
 #define M_PI 3.14159265358979323846
 #endif
 
-// ------------------ Mathematical Utilities ------------------ //
+// ------------------ Mathematical Core ------------------ //
 
-static inline double clamp01(double x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
-
-// Durand-Kerner method for finding all roots of a polynomial simultaneously.
-vector<cd> durand_kerner(const vector<cd> &input_coeffs, int max_iters = 400,
-                         double tol = 1e-12) {
+vector<cd> solve_roots(const vector<cd> &input_coeffs) {
   vector<cd> coeffs = input_coeffs;
-  while (coeffs.size() > 1 && abs(coeffs.back()) < 1e-9)
-    coeffs.pop_back();
-
+  while (coeffs.size() > 1 && abs(coeffs.back()) < 1e-9) coeffs.pop_back();
   int n = (int)coeffs.size() - 1;
-  if (n <= 0)
-    return {};
+  if (n <= 0) return {};
   vector<cd> roots(n);
-
   cd leading = coeffs[n];
-  for (auto &c : coeffs)
-    c /= leading;
-
-  double max_a = 0.0;
-  for (int i = 0; i < n; ++i)
-    max_a = max(max_a, abs(coeffs[i]));
-  double radius = 1.0 + max_a;
-
-  for (int i = 0; i < n; ++i) {
-    roots[i] = polar(radius, 2.0 * M_PI * i / n + 0.1);
-  }
-
-  for (int iter = 0; iter < max_iters; ++iter) {
+  for (auto &c : coeffs) c /= leading;
+  double radius = 1.0;
+  for (int i = 0; i < n; ++i) radius = max(radius, 1.0 + abs(coeffs[i]));
+  for (int i = 0; i < n; ++i) roots[i] = polar(radius, 2.0 * M_PI * i / n + 0.1);
+  for (int iter = 0; iter < 100; ++iter) {
     double max_change = 0.0;
     for (int i = 0; i < n; ++i) {
-      cd xi = roots[i];
       cd p_val = coeffs[n];
-      for (int k = n - 1; k >= 0; --k)
-        p_val = p_val * xi + coeffs[k];
+      for (int k = n - 1; k >= 0; --k) p_val = p_val * roots[i] + coeffs[k];
       cd prod = 1.0;
-      for (int j = 0; j < n; ++j)
-        if (i != j)
-          prod *= (xi - roots[j]);
-      if (abs(prod) < 1e-18)
-        prod = 1e-18;
-      cd delta = p_val / prod;
+      for (int j = 0; j < n; ++j) if (i != j) prod *= (roots[i] - roots[j]);
+      cd delta = p_val / (prod == 0.0 ? 1e-18 : prod);
       roots[i] -= delta;
       max_change = max(max_change, abs(delta));
     }
-    if (max_change < tol)
-      break;
+    if (max_change < 1e-11) break;
   }
   return roots;
 }
 
-vector<double> companion_matrix(const vector<int> &coeffs) {
-  int n = (int)coeffs.size() - 1;
-  if (n < 1)
-    return {};
-  vector<double> M(n * n, 0.0);
-  for (int i = 1; i < n; ++i)
-    M[i * n + (i - 1)] = 1.0;
+// Simple Continued Fraction for Rational Resonance
+vector<double> get_convergents(double x, int n = 8) {
+  vector<double> res;
+  double a = floor(x);
+  res.push_back(a);
+  double rem = x - a;
   for (int i = 0; i < n; ++i) {
-    double val = (i < (int)coeffs.size()) ? (double)coeffs[i] : 0.0;
-    M[i * n + (n - 1)] = -val;
+    if (abs(rem) < 1e-10) break;
+    double inv = 1.0 / rem;
+    a = floor(inv);
+    res.push_back(a);
+    rem = inv - a;
   }
-  return M;
-}
-
-string companion_matrix_to_csv(const vector<double> &M) {
-  if (M.empty())
-    return "";
-  int n = (int)sqrt((double)M.size());
-  ostringstream ss;
-  ss << fixed << setprecision(6);
-  for (int r = 0; r < n; ++r) {
-    for (int c = 0; c < n; ++c) {
-      ss << setw(10) << M[r * n + c] << (c + 1 < n ? "," : "");
+  vector<double> results;
+  for (int i = 1; i <= (int)res.size(); ++i) {
+    double p = 1, q = 0;
+    for (int j = i - 1; j >= 0; --j) {
+      double next_p = res[j] * p + q;
+      q = p; p = next_p;
     }
-    ss << "\n";
+    results.push_back(p / q);
   }
-  return ss.str();
+  return results;
 }
 
-cd eval_poly_at_alpha(const vector<int> &coeffs, const cd &alpha) {
-  cd acc(0, 0), powa(1, 0);
-  for (int c : coeffs) {
-    acc += powa * (double)c;
-    powa *= alpha;
-  }
-  return acc;
-}
-
-// ------------------ Image Processing ------------------ //
-
-vector<double> gaussian_kernel(double sigma, int &ksize_out) {
-  if (sigma <= 0.0) {
-    ksize_out = 1;
-    return {1.0};
-  }
-  int radius = (int)ceil(3.0 * sigma);
-  int ksize = 2 * radius + 1;
-  vector<double> k(ksize);
-  double s2 = 2.0 * sigma * sigma;
-  double sum = 0.0;
-  for (int i = -radius; i <= radius; ++i) {
-    double v = exp(-(i * i) / s2);
-    k[i + radius] = v;
-    sum += v;
-  }
-  for (auto &x : k)
-    x /= sum;
-  ksize_out = ksize;
-  return k;
-}
-
-void separable_blur(vector<double> &grid, int res, double sigma) {
-  if (sigma <= 0.0)
-    return;
-  int ksize;
-  vector<double> k = gaussian_kernel(sigma, ksize);
-  int radius = (ksize - 1) / 2;
-  vector<double> tmp(res * res, 0.0);
-  for (int y = 0; y < res; ++y) {
-    for (int x = 0; x < res; ++x) {
-      double s = 0;
-      for (int j = -radius; j <= radius; ++j) {
-        int xx = std::max(0, std::min(res - 1, x + j));
-        s += k[j + radius] * grid[y * res + xx];
-      }
-      tmp[y * res + x] = s;
-    }
-  }
-  for (int x = 0; x < res; ++x) {
-    for (int y = 0; y < res; ++y) {
-      double s = 0;
-      for (int j = -radius; j <= radius; ++j) {
-        int yy = std::max(0, std::min(res - 1, y + j));
-        s += k[j + radius] * tmp[yy * res + x];
-      }
-      grid[y * res + x] = s;
-    }
-  }
-}
-
-void magma_colormap(double t, unsigned char &r, unsigned char &g,
-                    unsigned char &b) {
-  t = clamp01(t);
-  r = (unsigned char)(pow(t, 0.4) * 255.0);
-  g = (unsigned char)(pow(t, 1.9) * 180.0);
-  b = (unsigned char)(pow(1.0 - t, 1.2) * 220.0);
-  if (t > 0.98) {
-    r = 255;
-    g = 255;
-    b = 230;
-  }
-}
-
-// ------------------ Visualization Widget ------------------ //
+// ------------------ Rendering Engine ------------------ //
 
 class UnifiedGL : public Fl_Gl_Window {
 public:
-  // Display modes
   bool mode_algebraic = true;
+  bool mode_resonance = false;
   bool show_edges = true;
 
-  // Viewport logic
-  double view_x = 0.0, view_y = 0.0;
-  double view_zoom = 1.0;
-  int mouse_last_x = 0, mouse_last_y = 0;
+  double v_x = 0, v_y = 0, v_zoom = 1.0;
+  int last_mx = 0, last_my = 0;
 
-  // Parameters
-  int max_degree = 5;
-  int max_coeff = 5;
-  double sigma = 1.0;
-  int prime_p = 3;
-  int ext_n = 2;
-  double lattice_scale = 1.0;
+  int max_deg = 5, max_c = 5;
+  int p_prime = 3, n_ext = 2;
+  double blur_sigma = 0.8;
 
-  // Internal Buffers
-  const int grid_res = 512;
-  vector<double> heat;
-  vector<unsigned char> image;
-  std::mt19937 rng;
-  bool dirty_compute = true;
+  const int res = 512;
+  vector<unsigned char> tex_data;
   GLuint tex_id = 0;
+  bool dirty_compute = true;
 
-  // Algebra Data
-  vector<int> adjoin_coeffs;
-  vector<cd> adjoin_roots;
-  int chosen_root_index = -1;
-  cd chosen_alpha;
-  vector<double> companion_M;
+  vector<int> adj_coeffs;
+  vector<cd> adj_roots;
+  cd chosen_alpha = 0;
 
-  UnifiedGL(int X, int Y, int W, int H, const char *L = 0)
-      : Fl_Gl_Window(X, Y, W, H, L) {
-    heat.resize(grid_res * grid_res);
-    image.resize(grid_res * grid_res * 3);
-    rng.seed(std::random_device{}());
-    end();
+  UnifiedGL(int X, int Y, int W, int H) : Fl_Gl_Window(X, Y, W, H) {
+    tex_data.resize(res * res * 3, 0);
   }
 
-  int handle(int event) override {
-    switch (event) {
-    case FL_PUSH:
-      mouse_last_x = Fl::event_x();
-      mouse_last_y = Fl::event_y();
-      return 1;
-    case FL_DRAG: {
-      int dx = Fl::event_x() - mouse_last_x;
-      int dy = Fl::event_y() - mouse_last_y;
-      if (Fl::event_button() == FL_LEFT_MOUSE) {
-        view_x -= (double)dx / w() * 4.0 / view_zoom;
-        view_y += (double)dy / h() * 4.0 / view_zoom;
-      } else if (Fl::event_button() == FL_RIGHT_MOUSE) {
-        view_zoom *= (1.0 + (double)dy / 100.0);
-        if (view_zoom < 0.01)
-          view_zoom = 0.01;
-      }
-      mouse_last_x = Fl::event_x();
-      mouse_last_y = Fl::event_y();
-      redraw();
-      return 1;
-    }
-    case FL_MOUSEWHEEL:
-      view_zoom *= (1.0 - (double)Fl::event_dy() / 10.0);
-      if (view_zoom < 0.01)
-        view_zoom = 0.01;
-      redraw();
-      return 1;
-    }
-    return Fl_Gl_Window::handle(event);
+  void magma_color(double t, unsigned char *rgb) {
+    t = max(0.0, min(1.0, t));
+    rgb[0] = (unsigned char)(pow(t, 0.4) * 255);
+    rgb[1] = (unsigned char)(pow(t, 1.8) * 180);
+    rgb[2] = (unsigned char)(pow(1.0 - t, 1.2) * 220);
   }
 
-  bool map_to_grid(const cd &z, int &ix, int &iy) {
-    double re = z.real(), im = z.imag(), limit = 2.0;
-    if (re < -limit || re > limit || im < -limit || im > limit)
-      return false;
-    ix = (int)((re + limit) / (2.0 * limit) * (grid_res - 1));
-    iy = (int)((im + limit) / (2.0 * limit) * (grid_res - 1));
-    return true;
+  void compute_heatmap() {
+    vector<double> heat(res * res, 0.0);
+    mt19937 rng(1337);
+    uniform_int_distribution<int> c_dist(-max_c, max_c);
+
+    int num_samples = mode_resonance ? 10000 : 40000;
+
+    for (int i = 0; i < num_samples; ++i) {
+      int d = (i % max_deg) + 1;
+      vector<cd> c(d + 1);
+      for (int k = 0; k <= d; ++k) c[k] = (double)c_dist(rng);
+      if (abs(c.back()) < 0.1) c.back() = 1.0;
+
+      auto roots = solve_roots(c);
+      for (auto &r : roots) {
+        double val = 1.0;
+        if (mode_resonance) {
+          auto convs = get_convergents(r.real());
+          double min_d = 1e9;
+          for (double cv : convs) min_d = min(min_d, abs(r - cv));
+          val = -log10(min_d + 1e-12);
+        }
+        int ix = (int)((r.real() + 2.0) / 4.0 * res);
+        int iy = (int)((r.imag() + 2.0) / 4.0 * res);
+        if (ix >= 0 && ix < res && iy >= 0 && iy < res) {
+          if (mode_resonance) heat[iy * res + ix] = max(heat[iy * res + ix], val);
+          else heat[iy * res + ix] += 1.0;
+        }
+      }
+    }
+
+    double mv = 0;
+    for (double v : heat) mv = max(mv, v);
+    for (int i = 0; i < res * res; ++i) {
+      double t = (mv > 0) ? (mode_resonance ? (heat[i]/mv) : log(1.0 + heat[i]*5)/log(1.0 + mv*5)) : 0;
+      magma_color(t, &tex_data[i * 3]);
+    }
+
+    if (tex_id == 0) glGenTextures(1, &tex_id);
+    glBindTexture(GL_TEXTURE_2D, tex_id);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, res, res, 0, GL_RGB, GL_UNSIGNED_BYTE, tex_data.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   }
 
-  void compute_algebraic() {
-    std::fill(heat.begin(), heat.end(), 0.0);
-    std::uniform_int_distribution<int> coeff_dist(-max_coeff, max_coeff);
-    int samples = 50000;
-    for (int i = 0; i < samples; ++i) {
-      std::uniform_int_distribution<int> deg_dist(1, max_degree);
-      int d = deg_dist(rng);
-      vector<cd> coeffs(d + 1);
-      for (int k = 0; k <= d; ++k) {
-        int c = coeff_dist(rng);
-        if (k == d && c == 0)
-          c = 1;
-        coeffs[k] = cd((double)c, 0.0);
-      }
-      auto roots = durand_kerner(coeffs);
-      for (const auto &r : roots) {
-        int ix, iy;
-        if (map_to_grid(r, ix, iy))
-          heat[iy * grid_res + ix] += 1.0;
-      }
+  int handle(int e) override {
+    if (e == FL_PUSH) { last_mx = Fl::event_x(); last_my = Fl::event_y(); return 1; }
+    if (e == FL_DRAG) {
+      double dx = Fl::event_x() - last_mx, dy = Fl::event_y() - last_my;
+      if (Fl::event_button() == 1) { v_x -= (dx / w()) * (4.0 / v_zoom); v_y += (dy / h()) * (4.0 / v_zoom); }
+      else { v_zoom *= (1.0 - dy / 100.0); }
+      last_mx = Fl::event_x(); last_my = Fl::event_y(); redraw(); return 1;
     }
-    separable_blur(heat, grid_res, sigma);
-    double maxv = 0.0;
-    for (double v : heat)
-      if (v > maxv)
-        maxv = v;
-    if (maxv < 1e-9)
-      maxv = 1.0;
-    for (int i = 0; i < grid_res * grid_res; ++i) {
-      double t = log(1.0 + heat[i] * 10.0) / log(1.0 + maxv * 10.0);
-      magma_colormap(t, image[i * 3 + 0], image[i * 3 + 1], image[i * 3 + 2]);
-    }
+    if (e == FL_MOUSEWHEEL) { v_zoom *= (1.0 - Fl::event_dy() * 0.1); redraw(); return 1; }
+    return Fl_Gl_Window::handle(e);
   }
 
   void draw() override {
     if (!valid()) {
       valid(1);
-      glDisable(GL_DEPTH_TEST);
-      glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-      glEnable(GL_BLEND);
-      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-      if (tex_id == 0)
-        glGenTextures(1, &tex_id);
+      glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     }
-    if (dirty_compute && mode_algebraic) {
-      compute_algebraic();
-      glBindTexture(GL_TEXTURE_2D, tex_id);
-      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, grid_res, grid_res, 0, GL_RGB,
-                   GL_UNSIGNED_BYTE, image.data());
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-      dirty_compute = false;
-    }
-    glClearColor(0.04f, 0.04f, 0.05f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
+    if (dirty_compute && mode_algebraic) { compute_heatmap(); dirty_compute = false; }
+    glClearColor(0.02f, 0.02f, 0.05f, 1.0f); glClear(GL_COLOR_BUFFER_BIT);
 
-    // Dynamic Projection for Zoom/Pan
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
+    glMatrixMode(GL_PROJECTION); glLoadIdentity();
     double aspect = (double)w() / h();
-    double half_w = 2.0 * aspect / view_zoom;
-    double half_h = 2.0 / view_zoom;
-    glOrtho(view_x - half_w, view_x + half_w, view_y - half_h, view_y + half_h,
-            -1, 1);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
+    double hw = 2.0 * aspect / v_zoom, hh = 2.0 / v_zoom;
+    glOrtho(v_x - hw, v_x + hw, v_y - hh, v_y + hh, -1, 1);
+    glMatrixMode(GL_MODELVIEW); glLoadIdentity();
 
-    if (mode_algebraic)
-      render_algebraic_view();
-    else
-      render_finite_view();
+    if (mode_algebraic) {
+      glEnable(GL_TEXTURE_2D); glBindTexture(GL_TEXTURE_2D, tex_id); glColor4f(1, 1, 1, 1);
+      glBegin(GL_QUADS);
+      glTexCoord2f(0, 0); glVertex2f(-2, -2);
+      glTexCoord2f(1, 0); glVertex2f(2, -2);
+      glTexCoord2f(1, 1); glVertex2f(2, 2);
+      glTexCoord2f(0, 1); glVertex2f(-2, 2);
+      glEnd(); glDisable(GL_TEXTURE_2D);
+    } else render_finite();
+
+    draw_extension_lattice();
     draw_overlays();
   }
 
-  void render_algebraic_view() {
-    // Improved logic using hardware textures for smooth panning and zooming
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, tex_id);
-    glColor4f(1, 1, 1, 1);
-    glBegin(GL_QUADS);
-    glTexCoord2f(0, 0);
-    glVertex2f(-2, -2);
-    glTexCoord2f(1, 0);
-    glVertex2f(2, -2);
-    glTexCoord2f(1, 1);
-    glVertex2f(2, 2);
-    glTexCoord2f(0, 1);
-    glVertex2f(-2, 2);
-    glEnd();
-    glDisable(GL_TEXTURE_2D);
-  }
+  void render_finite() {
+    int p = max(2, p_prime), n = max(1, n_ext);
+    int N = (int)pow(p, n); if (N > 10000) N = 10000;
+    vector<int> irred = gf_find_irreducible(p, n);
+    GFElement alpha = gf_find_primitive(p, n, irred);
 
-  void render_finite_view() {
-    int p = max(2, prime_p), n = max(1, ext_n);
-    int N = (int)pow(p, n);
-    if (N > 20000)
-      N = 20000;
-    vector<cd> elems;
-    for (int i = 0; i < N; ++i) {
-      int t = i;
-      cd z(0, 0);
-      for (int j = 0; j < n; ++j) {
-        int coeff = t % p;
-        t /= p;
-        z += polar(lattice_scale, 2.0 * M_PI * j / n) * (double)coeff;
-      }
-      elems.push_back(z);
-    }
+    auto map_to_2d = [&](const GFElement &e) {
+      cd z(0, 0); for (int j = 0; j < n; ++j) z += polar(1.0, 2 * M_PI * j / n) * (double)e[j];
+      return z;
+    };
 
     if (show_edges && N < 5000) {
-      glLineWidth(1.2f);
-      glBegin(GL_LINE_STRIP);
-      int step = (p == 2) ? 1 : (p - 1);
-      int curr = 1;
-      for (int k = 0; k < N && k < 1000; ++k) {
-        cd z = elems[curr];
-        float t = (float)k / 1000.0f;
-        glColor4f(0.3f, 0.7f, 1.0f, 0.3f * (1.0f - t));
-        glVertex2f((float)z.real(), (float)z.imag());
-        curr = (curr * step) % N;
-        if (curr == 0)
-          curr = 1;
+      GFElement curr(n, 0); curr[0] = 1;
+      glLineWidth(1.0f); glBegin(GL_LINE_STRIP);
+      for (int k = 0; k < min(N, 1200); ++k) {
+        cd z = map_to_2d(curr);
+        glColor4f(0.3f, 0.7f, 1.0f, 0.5f * (1.0f - (float)k / 1200));
+        glVertex2f(z.real(), z.imag());
+        curr = gf_multiply(curr, alpha, irred, p);
+        if (gf_is_one(curr)) break;
       }
       glEnd();
     }
+    glPointSize(4.0f); glBegin(GL_POINTS);
+    for (int i = 0; i < N; ++i) {
+      int t = i; GFElement e(n); for (int j = 0; j < n; ++j) { e[j] = t % p; t /= p; }
+      cd z = map_to_2d(e); glColor3f(0.4f, 0.6f, 1.0f); glVertex2f(z.real(), z.imag());
+    }
+    glEnd();
+  }
 
-    glPointSize(5.0f * (float)sqrt(view_zoom));
-    glBegin(GL_POINTS);
-    for (const auto &z : elems) {
-      float hue = (float)(arg(z) / (2.0 * M_PI) + 0.5),
-            mag = (float)(abs(z) / (n * p));
-      glColor4f(0.4f + 0.6f * mag, 0.3f + 0.7f * hue, 1.0f - 0.2f * mag, 0.9f);
-      glVertex2f((float)z.real(), (float)z.imag());
+  void draw_extension_lattice() {
+    if (adj_coeffs.size() < 2) return;
+    int deg = adj_coeffs.size() - 1, b = 3;
+    glPointSize(6.0f); glBegin(GL_POINTS);
+    int total = (int)pow(2 * b + 1, min(deg, 3));
+    for (int i = 0; i < total; ++i) {
+      int t = i; cd z(0, 0);
+      for (int k = 0; k < min(deg, 3); ++k) {
+        int c = (t % (2 * b + 1)) - b; t /= (2 * b + 1);
+        z += (double)c * pow(chosen_alpha, k);
+      }
+      glColor4f(1, 0.8f, 0.1f, 0.9f); glVertex2f(z.real(), z.imag());
     }
     glEnd();
   }
 
   void draw_overlays() {
-    // Reference grid in world space
-    glLineWidth(1.0f);
-    glBegin(GL_LINES);
-    glColor4f(1, 1, 1, 0.15f);
-    glVertex2f(-100, 0);
-    glVertex2f(100, 0);
-    glVertex2f(0, -100);
-    glVertex2f(0, 100);
+    glLineWidth(1.0f); glBegin(GL_LINES); glColor4f(1, 1, 1, 0.2f);
+    glVertex2f(-10, 0); glVertex2f(10, 0); glVertex2f(0, -10); glVertex2f(0, 10);
     glEnd();
-
-    // Unit circle
-    glBegin(GL_LINE_LOOP);
-    glColor4f(1, 1, 0.4, 0.3f);
-    for (int i = 0; i < 100; ++i) {
-      double th = 2.0 * M_PI * i / 100.0;
-      glVertex2f(cos(th), sin(th));
-    }
-    glEnd();
-
-    // Field Extension Lattice
-    if (!adjoin_coeffs.empty() && chosen_root_index >= 0) {
-      int deg = (int)adjoin_coeffs.size() - 1, bound = 3;
-      if (show_edges) {
-        glLineWidth(2.5f);
-        glBegin(GL_LINES);
-        glColor4f(1, 0.3, 0.3, 0.9);
-        glVertex2f(0, 0);
-        glVertex2f(1, 0); // Basis 1
-        glColor4f(0.3, 1, 0.3, 0.9);
-        glVertex2f(0, 0);
-        glVertex2f(chosen_alpha.real(), chosen_alpha.imag()); // Basis alpha
-        glEnd();
-      }
-      glPointSize(6.0f);
-      glBegin(GL_POINTS);
-      int total = (int)pow((2 * bound + 1), min(deg, 3));
-      for (int idx = 0; idx < total && idx < 10000; ++idx) {
-        int t = idx;
-        vector<int> pc(deg, 0);
-        bool orig = true;
-        for (int k = 0; k < min(deg, 3); ++k) {
-          pc[k] = (t % (2 * bound + 1)) - bound;
-          if (pc[k] != 0)
-            orig = false;
-          t /= (2 * bound + 1);
-        }
-        cd z = eval_poly_at_alpha(pc, chosen_alpha);
-        glColor4f(orig ? 1.0f : 0.5f, 0.8f, 1.0f, 0.8f);
-        glVertex2f((float)z.real(), (float)z.imag());
-      }
-      glEnd();
-    }
-  }
-
-  void trigger_regen() {
-    dirty_compute = true;
-    redraw();
-  }
-  void reset_view() {
-    view_x = 0;
-    view_y = 0;
-    view_zoom = 1.0;
-    redraw();
+    glBegin(GL_LINE_LOOP); for (int i = 0; i < 100; ++i) { double a = 2*M_PI*i/100; glVertex2f(cos(a), sin(a)); } glEnd();
   }
 };
 
-// ------------------------ UI & Main ------------------------ //
-
-struct AdjoinContext {
-  UnifiedGL *gl;
-  Fl_Input *inp;
-  Fl_Browser *list;
-  Fl_Multiline_Output *mat;
-};
+struct UI { UnifiedGL *gl; Fl_Input *poly; Fl_Browser *roots; };
 
 int main(int argc, char **argv) {
-  Fl_Window *win = new Fl_Window(1300, 860, "Unified Field Explorer");
-  UnifiedGL *gl = new UnifiedGL(10, 10, 900, 840);
-  Fl_Group *panel = new Fl_Group(920, 10, 370, 840);
+  Fl_Window *win = new Fl_Window(1200, 800, "Unified Field Explorer - Advanced");
+  UnifiedGL *gl = new UnifiedGL(10, 10, 850, 780);
+  Fl_Group *ctrl = new Fl_Group(870, 10, 320, 780);
 
-  Fl_Box *lbl_mode =
-      new Fl_Box(920, 20, 370, 25, "--- Visualization & View ---");
-  lbl_mode->labelfont(FL_BOLD);
+  Fl_Choice *mode = new Fl_Choice(970, 40, 200, 25, "Mode");
+  mode->add("Algebraic"); mode->add("Finite Field"); mode->value(0);
 
-  Fl_Choice *mode_choice = new Fl_Choice(1020, 50, 200, 25, "Mode:");
-  mode_choice->add("Algebraic (Roots)");
-  mode_choice->add("Finite Field");
-  mode_choice->value(0);
-  mode_choice->callback(
-      [](Fl_Widget *w, void *v) {
-        UnifiedGL *g = (UnifiedGL *)v;
-        g->mode_algebraic = (((Fl_Choice *)w)->value() == 0);
-        g->trigger_regen();
-      },
-      gl);
+  Fl_Check_Button *res_btn = new Fl_Check_Button(970, 75, 200, 25, "Rational Resonance");
 
-  Fl_Button *btn_reset = new Fl_Button(1020, 80, 200, 25, "Reset Camera");
-  btn_reset->callback(
-      [](Fl_Widget *, void *v) { ((UnifiedGL *)v)->reset_view(); }, gl);
+  Fl_Value_Slider *s1 = new Fl_Value_Slider(970, 110, 200, 20, "Deg/P");
+  s1->type(FL_HOR_NICE_SLIDER); s1->bounds(1, 31); s1->value(5);
 
-  Fl_Value_Slider *s1 = new Fl_Value_Slider(1020, 120, 260, 20, "Deg / P");
-  s1->type(FL_HOR_NICE_SLIDER);
-  s1->bounds(1, 31);
-  s1->step(1);
-  s1->value(5);
-  s1->callback(
-      [](Fl_Widget *w, void *v) {
-        UnifiedGL *g = (UnifiedGL *)v;
-        g->max_degree = g->prime_p = (int)((Fl_Value_Slider *)w)->value();
-        g->trigger_regen();
-      },
-      gl);
+  Fl_Value_Slider *s2 = new Fl_Value_Slider(970, 140, 200, 20, "Cof/N");
+  s2->type(FL_HOR_NICE_SLIDER); s2->bounds(1, 15); s2->value(5);
 
-  Fl_Value_Slider *s2 = new Fl_Value_Slider(1020, 150, 260, 20, "Coeff / N");
-  s2->type(FL_HOR_NICE_SLIDER);
-  s2->bounds(1, 20);
-  s2->step(1);
-  s2->value(5);
-  s2->callback(
-      [](Fl_Widget *w, void *v) {
-        UnifiedGL *g = (UnifiedGL *)v;
-        g->max_coeff = g->ext_n = (int)((Fl_Value_Slider *)w)->value();
-        g->trigger_regen();
-      },
-      gl);
+  Fl_Input *poly = new Fl_Input(970, 200, 200, 25, "Adjoin Poly"); poly->value("1,0,1");
+  Fl_Browser *roots = new Fl_Browser(870, 270, 310, 150, "Roots (Alpha)"); roots->type(FL_HOLD_BROWSER);
 
-  Fl_Value_Slider *s_lat =
-      new Fl_Value_Slider(1020, 180, 260, 20, "Lattice Scale");
-  s_lat->type(FL_HOR_NICE_SLIDER);
-  s_lat->bounds(0.1, 5.0);
-  s_lat->value(1.0);
-  s_lat->callback(
-      [](Fl_Widget *w, void *v) {
-        ((UnifiedGL *)v)->lattice_scale = ((Fl_Value_Slider *)w)->value();
-        ((UnifiedGL *)v)->redraw();
-      },
-      gl);
+  UI *ui = new UI{gl, poly, roots};
 
-  Fl_Check_Button *cb_edges =
-      new Fl_Check_Button(1020, 210, 200, 20, "Show Connections");
-  cb_edges->value(1);
-  cb_edges->callback(
-      [](Fl_Widget *w, void *v) {
-        ((UnifiedGL *)v)->show_edges = ((Fl_Check_Button *)w)->value();
-        ((UnifiedGL *)v)->redraw();
-      },
-      gl);
-
-  Fl_Box *lbl_ext = new Fl_Box(920, 250, 370, 25, "--- Galois Extensions ---");
-  lbl_ext->labelfont(FL_BOLD);
-
-  Fl_Choice *ch_preset = new Fl_Choice(1020, 280, 260, 25, "Preset:");
-  ch_preset->add("Gaussian (x^2+1)");
-  ch_preset->add("Eisenstein (x^2+x+1)");
-  ch_preset->add("Silver (x^2-2x-1)");
-  ch_preset->add("CubeRoot2 (x^3-2)");
-  ch_preset->add("Cyclotomic5 (x^4+x^3+x^2+x+1)");
-
-  Fl_Input *inp_poly = new Fl_Input(1020, 315, 260, 25, "Coeffs:");
-  inp_poly->value("1,0,1");
-
-  Fl_Browser *br_roots =
-      new Fl_Browser(930, 385, 350, 100, "Select Generator (alpha):");
-  br_roots->type(FL_HOLD_BROWSER);
-
-  Fl_Multiline_Output *out_matrix =
-      new Fl_Multiline_Output(930, 520, 350, 160, "Companion Matrix");
-  out_matrix->textfont(FL_COURIER);
-
-  AdjoinContext *ctx = new AdjoinContext{gl, inp_poly, br_roots, out_matrix};
-
-  auto do_adjoin = [](Fl_Widget *, void *v) {
-    auto c = (AdjoinContext *)v;
-    string s = c->inp->value(), tmp;
-    vector<int> coeffs;
-    for (char ch : s) {
-      if (ch == ',' || ch == ' ') {
-        if (!tmp.empty()) {
-          try {
-            coeffs.push_back(stoi(tmp));
-          } catch (...) {
-          }
-          tmp.clear();
-        }
-      } else
-        tmp.push_back(ch);
-    }
-    if (!tmp.empty())
-      try {
-        coeffs.push_back(stoi(tmp));
-      } catch (...) {
-      }
-    if (coeffs.size() < 2)
-      return;
-
-    c->gl->adjoin_coeffs = coeffs;
-    vector<cd> c_cd;
-    for (int k : coeffs)
-      c_cd.push_back(cd((double)k, 0));
-    c->gl->adjoin_roots = durand_kerner(c_cd);
-
-    c->list->clear();
-    for (size_t i = 0; i < c->gl->adjoin_roots.size(); ++i) {
-      ostringstream ss;
-      ss << "Root " << i << ": " << fixed << setprecision(3)
-         << c->gl->adjoin_roots[i];
-      c->list->add(ss.str().c_str());
-    }
-    if (!c->gl->adjoin_roots.empty()) {
-      c->list->select(1);
-      c->gl->chosen_root_index = 0;
-      c->gl->chosen_alpha = c->gl->adjoin_roots[0];
-    }
-    c->gl->companion_M = companion_matrix(coeffs);
-    c->mat->value(companion_matrix_to_csv(c->gl->companion_M).c_str());
-    c->gl->redraw();
+  auto upd = [](Fl_Widget *, void *v) {
+    UI *u = (UI *)v; string s = u->poly->value(), t; vector<int> co; stringstream ss(s);
+    while (getline(ss, t, ',')) co.push_back(stoi(t));
+    if (co.size() < 2) return;
+    u->gl->adj_coeffs = co; vector<cd> cdc; for (int k : co) cdc.push_back((double)k);
+    u->gl->adj_roots = solve_roots(cdc); u->roots->clear();
+    for (auto &r : u->gl->adj_roots) { ostringstream os; os << r; u->roots->add(os.str().c_str()); }
+    if (!u->gl->adj_roots.empty()) { u->roots->select(1); u->gl->chosen_alpha = u->gl->adj_roots[0]; }
+    u->gl->redraw();
   };
 
-  Fl_Button *btn_adjoin =
-      new Fl_Button(930, 350, 350, 25, "Update Field Extension");
-  btn_adjoin->callback(do_adjoin, ctx);
+  mode->callback([](Fl_Widget *w, void *v) { ((UnifiedGL *)v)->mode_algebraic = (((Fl_Choice *)w)->value() == 0); ((UnifiedGL *)v)->dirty_compute = true; ((UnifiedGL *)v)->redraw(); }, gl);
+  res_btn->callback([](Fl_Widget *w, void *v) { ((UnifiedGL *)v)->mode_resonance = ((Fl_Check_Button *)w)->value(); ((UnifiedGL *)v)->dirty_compute = true; ((UnifiedGL *)v)->redraw(); }, gl);
+  s1->callback([](Fl_Widget *w, void *v) { ((UnifiedGL *)v)->max_deg = ((UnifiedGL *)v)->p_prime = (int)((Fl_Value_Slider *)w)->value(); ((UnifiedGL *)v)->dirty_compute = true; ((UnifiedGL *)v)->redraw(); }, gl);
+  s2->callback([](Fl_Widget *w, void *v) { ((UnifiedGL *)v)->max_c = ((UnifiedGL *)v)->n_ext = (int)((Fl_Value_Slider *)w)->value(); ((UnifiedGL *)v)->dirty_compute = true; ((UnifiedGL *)v)->redraw(); }, gl);
+  Fl_Button *apply_btn = new Fl_Button(870, 230, 310, 30, "Apply Adjunction");
+  apply_btn->callback(upd, ui);
+  roots->callback([](Fl_Widget *w, void *v) { UnifiedGL *gl = (UnifiedGL *)v; int s = ((Fl_Browser *)w)->value(); if (s > 0) { gl->chosen_alpha = gl->adj_roots[s - 1]; gl->redraw(); } }, gl);
 
-  ch_preset->callback(
-      [](Fl_Widget *w, void *v) {
-        AdjoinContext *c = (AdjoinContext *)v;
-        int val = ((Fl_Choice *)w)->value();
-        if (val == 0)
-          c->inp->value("1,0,1");
-        if (val == 1)
-          c->inp->value("1,1,1");
-        if (val == 2)
-          c->inp->value("-1,-2,1");
-        if (val == 3)
-          c->inp->value("-2,0,0,1");
-        if (val == 4)
-          c->inp->value("1,1,1,1,1");
-        c->gl->redraw();
-      },
-      ctx);
-
-  br_roots->callback(
-      [](Fl_Widget *w, void *v) {
-        AdjoinContext *c = (AdjoinContext *)v;
-        int sel = ((Fl_Browser *)w)->value();
-        if (sel > 0 && sel <= (int)c->gl->adjoin_roots.size()) {
-          c->gl->chosen_root_index = sel - 1;
-          c->gl->chosen_alpha = c->gl->adjoin_roots[sel - 1];
-          c->gl->redraw();
-        }
-      },
-      ctx);
-
-  panel->end();
-  win->end();
-  win->resizable(gl);
-  win->show(argc, argv);
-  gl->trigger_regen();
-  return Fl::run();
+  ctrl->end(); win->end(); win->resizable(gl); win->show(); return Fl::run();
 }
