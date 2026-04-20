@@ -99,6 +99,20 @@ class HybridQuantumAlgebraicSolver:
         entropy = -np.sum(prob * np.log(prob))
         return entropy
 
+    def calculate_qfi_proxy(self, theta, psi0, dt, steps):
+        """Calculates a proxy for Quantum Fisher Information (QFI) with respect to rho."""
+        eps = 1e-3
+        theta_plus = [theta[0] + eps, theta[1]]
+        theta_minus = [theta[0] - eps, theta[1]]
+
+        psi_plus = self.solve_dynamics(theta_plus, psi0, dt, steps)[-1]
+        psi_minus = self.solve_dynamics(theta_minus, psi0, dt, steps)[-1]
+
+        # Bures distance proxy: 4 * (1 - sqrt(Fidelity)) / eps^2
+        fid = self.calculate_fidelity(psi_plus, psi_minus)
+        qfi = 8 * (1.0 - np.sqrt(fid)) / (4 * eps**2)
+        return qfi
+
     def adiabatic_sweep(self, theta_start, theta_end, psi0, dt, steps):
         """Evolves the wavefunction with a time-varying Hamiltonian (theta sweep)."""
         psi = psi0.copy()
@@ -347,6 +361,10 @@ def main():
     traj_sweep = solver.adiabatic_sweep(theta_start, theta_end, psi0, dt=0.05, steps=50)
     final_energy = solver.calculate_energy(traj_sweep[-1], theta_end)
     logging.info(f"Adiabatic Sweep: Final Energy at theta_end: {final_energy:.4f}")
+
+    logging.info("10. Quantum Fisher Information (QFI) Proxy")
+    qfi_val = solver.calculate_qfi_proxy(theta_true, psi0, dt=0.1, steps=10)
+    logging.info(f"QFI Proxy (w.r.t rho): {qfi_val:.4e}")
 
     logging.info("6. Rabi Oscillation Simulation")
     traj_rabi = tls.rabi_oscillation(rho0, dt=0.1, steps=100, drive_amp=1.0)
