@@ -99,6 +99,20 @@ class HybridQuantumAlgebraicSolver:
         entropy = -np.sum(prob * np.log(prob))
         return entropy
 
+    def calculate_wigner_proxy(self, psi):
+        """Calculates a simplified phase-space distribution (Husimi-like proxy)."""
+        # Joint probability of X and P
+        p_avg, p_delta = self.calculate_momentum(psi)
+        # Spatial prob
+        prob_x = np.abs(psi)**2
+        # For this toy model, we return a measure of the phase-space area occupied:
+        prob_sum = np.sum(prob_x)
+        if prob_sum < 1e-12: return 0
+        avg_x2 = np.sum(self.x_grid**2 * prob_x) / prob_sum
+        avg_x = np.sum(self.x_grid * prob_x) / prob_sum
+        delta_x = np.sqrt(max(0.0, avg_x2 - avg_x**2))
+        return delta_x * p_delta # Minimum uncertainty is hbar/2
+
     def calculate_qfi_proxy(self, theta, psi0, dt, steps):
         """Calculates a proxy for Quantum Fisher Information (QFI) with respect to rho."""
         eps = 1e-3
@@ -345,6 +359,10 @@ def main():
     entropy_initial = solver.calculate_entanglement_entropy(traj[0])
     entropy_final = solver.calculate_entanglement_entropy(traj[-1])
     logging.info(f"Spatial Entropy: Initial={entropy_initial:.4f}, Final={entropy_final:.4f}")
+
+    logging.info("11. Wigner Phase-Space Volume Proxy")
+    wigner_proxy = solver.calculate_wigner_proxy(traj[-1])
+    logging.info(f"Phase-Space Volume Proxy (Delta X * Delta P): {wigner_proxy:.4f}")
 
     logging.info("8. Momentum and Uncertainty Analysis")
     p_avg, p_delta = solver.calculate_momentum(traj[-1])

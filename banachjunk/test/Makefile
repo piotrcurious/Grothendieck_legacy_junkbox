@@ -3,7 +3,7 @@ CXXFLAGS = -std=c++17 -I.
 LDFLAGS =
 
 SRCS = Arduino.cpp
-TEST_SRCS = test_2.cpp test_3.cpp test_not_strict.cpp test_feature_detect test_exponent_stats test_poly_features test_poly_feat_opt1 test_poly_feature2 test_uneven_sampling test_stability.cpp test_artifacts.cpp test_complexity.cpp test_accuracy_banach.cpp test_accuracy_algebraic.cpp
+TEST_SRCS = test_2.cpp test_3.cpp test_not_strict.cpp test_feature_detect.cpp test_exponent_stats.cpp test_poly_features.cpp test_poly_feat_opt1.cpp test_poly_feature2.cpp test_uneven_sampling.cpp test_stability.cpp test_artifacts.cpp test_complexity.cpp test_accuracy_banach.cpp test_accuracy_algebraic.cpp
 TEST_BINS = $(TEST_SRCS:.cpp=)
 
 all: $(TEST_BINS)
