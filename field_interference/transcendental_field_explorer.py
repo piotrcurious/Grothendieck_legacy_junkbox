@@ -155,6 +155,20 @@ class TranscendentalFieldExplorer:
         self.ax_cmap.set_visible(is_trans)
         self.ax_coeff.set_visible(is_trans)
 
+        if self.mode == 'Algebraic':
+            self.s1.label.set_text('Max Degree ')
+            self.s2.label.set_text('Max Coeff ')
+            self.ax_s3.set_visible(True)
+        elif self.mode == 'Finite':
+            self.s1.label.set_text('Prime p ')
+            self.s2.label.set_text('Degree n ')
+            self.ax_s3.set_visible(False)
+        else:
+            self.s1.label.set_text('Extension Deg ')
+            self.s2.label.set_text('Coeff Range ')
+            self.ax_s3.set_visible(True)
+        self.update(None)
+
     def change_coord(self, label):
         self.coord_system = label
         self.update(None)
@@ -165,19 +179,6 @@ class TranscendentalFieldExplorer:
 
     def change_coeff_set(self, label):
         self.coeff_set = label
-        self.update(None)
-        if self.mode == 'Algebraic':
-            self.s1.label.set_text('Max Degree ')
-            self.s2.label.set_text('Max Coeff ')
-            self.ax_s3.set_visible(True)
-        elif self.mode == 'Finite':
-            self.s1.label.set_text('Prime p ')
-            self.s2.label.set_text('Degree n ')
-            self.ax_s3.set_visible(False)
-        else: # Transcendental
-            self.s1.label.set_text('Extension Deg ')
-            self.s2.label.set_text('Coeff Range ')
-            self.ax_s3.set_visible(True)
         self.update(None)
 
     def change_base(self, label):
@@ -259,13 +260,9 @@ class TranscendentalFieldExplorer:
         return results
 
     def draw_transcendental(self, deg, coeff_range, sigma, mode='Transcendental', zoom=1.0, num_samples=300000, rotation=0.0):
-        """
-        Visualizes the 'interference' of a transcendental base using vectorized computation.
-        """
         res = int(min(1200, 400 + 200 * np.log10(num_samples/1e4) * np.sqrt(zoom)))
         base = self.current_base_val * np.exp(1j * rotation)
 
-        # Vectorized coefficient generation
         def get_coeffs(ns, d):
             if self.coeff_set == 'Binary':
                 c = np.random.randint(0, 2, (ns, d + 1))
@@ -281,38 +278,28 @@ class TranscendentalFieldExplorer:
             powers = base ** np.arange(deg + 1)
             vals = coeffs @ powers
         else:
-            # Full interaction: sum_{i,j} c_ij * A^i * B^j
-            # Coupled degrees: i + j <= deg
             d_sub = max(1, deg // 2)
             pa = base ** np.arange(d_sub + 1)
             pb = self.secondary_base_val ** np.arange(d_sub + 1)
             p_matrix = np.outer(pa, pb).flatten()
-
             n_terms = len(p_matrix)
             coeffs = get_coeffs(num_samples, n_terms - 1)
             vals = coeffs @ p_matrix
 
-        # Apply Coordinate Mapping
         if self.coord_system == 'Log-Polar':
-            # r' = log(r), theta' = theta
             r = np.abs(vals)
             theta = np.angle(vals)
-            # Avoid log(0)
             r[r < 1e-9] = 1e-9
             mapped_vals = np.log(r) + 1j * theta
         elif self.coord_system == 'Reciprocal':
-            # w = 1/z
             mask = np.abs(vals) > 1e-9
             mapped_vals = np.zeros_like(vals)
             mapped_vals[mask] = 1.0 / vals[mask]
         elif self.coord_system == 'Joukowsky':
-            # w = z + 1/z
             mask = np.abs(vals) > 1e-9
             mapped_vals = np.zeros_like(vals)
             mapped_vals[mask] = vals[mask] + 1.0 / vals[mask]
         elif self.coord_system == 'Euler Space':
-            # Mapping based on Euler's identity principles: z -> exp(i*pi * z / base)
-            # This often regularizes the 'rotational' interference
             scale = np.abs(base) if np.abs(base) > 0 else 1.0
             mapped_vals = np.exp(1j * np.pi * vals / scale)
         else:
@@ -323,15 +310,13 @@ class TranscendentalFieldExplorer:
             x_range = (-limit, limit)
             y_range = (-limit, limit)
         else:
-            # Fixed range [-10, 10] adjusted by zoom
             limit = 10.0 / zoom
             x_range = (-limit, limit)
             y_range = (-limit, limit)
         
         title_base = self.current_base_name.replace('_', '\\_')
-        
+
         if mode != 'Transcendental':
-            # Map vals to pixel coords
             ix = ((mapped_vals.real - x_range[0]) / (x_range[1] - x_range[0]) * (res - 1)).astype(int)
             iy = ((mapped_vals.imag - y_range[0]) / (y_range[1] - y_range[0]) * (res - 1)).astype(int)
             mask = (ix >= 0) & (ix < res) & (iy >= 0) & (iy < res)
@@ -344,14 +329,17 @@ class TranscendentalFieldExplorer:
                 np.minimum.at(Z_metric, (iy[mask], ix[mask]), metric[mask].astype(float))
                 Z_metric[np.isinf(Z_metric)] = np.nan
             elif mode == 'Dominant':
-                terms = np.abs(coeffs * powers)
+                if self.secondary_base_val is None:
+                    terms = np.abs(coeffs * powers)
+                else:
+                    terms = np.abs(coeffs * p_matrix)
                 metric = np.argmax(terms, axis=1)
                 label = 'Dominant Power Index'
                 Z_metric = np.full((res, res), -1.0)
                 np.maximum.at(Z_metric, (iy[mask], ix[mask]), metric[mask].astype(float))
                 Z_metric[Z_metric == -1.0] = np.nan
             elif mode == 'Resonance':
-                convs = np.array(self.get_convergents(base.real, n=12)) if abs(base.imag) < 1e-9 else np.array([0, 1, 1j, -1, -1j])
+                convs = np.array(self.get_convergents(base, n=12)) if abs(base.imag) < 1e-9 else np.array([0, 1, 1j, -1, -1j])
                 dists = np.abs(vals[:, np.newaxis] - convs)
                 metric = np.min(dists, axis=1)
                 metric = -np.log10(metric + 1e-12)
@@ -359,21 +347,18 @@ class TranscendentalFieldExplorer:
                 Z_metric = np.full((res, res), -15.0)
                 np.maximum.at(Z_metric, (iy[mask], ix[mask]), metric[mask].astype(float))
                 Z_metric[Z_metric == -15.0] = np.nan
-            elif mode in ['Alignment', 'L1 Norm', 'Mean Coeff']:
+            elif mode in ['Alignment', 'L1 Norm']:
                 if mode == 'Alignment':
                     if self.secondary_base_val is None:
-                        terms = coeffs * (base ** np.arange(deg + 1))
+                        terms = coeffs * powers
                     else:
-                        terms = coeffs * (base ** np.arange(len(coeffs[0])))
+                        terms = coeffs * p_matrix
                     args = np.angle(terms)
                     metric = 1.0 - np.abs(np.mean(np.exp(1j * args), axis=1))
                     label = 'Phase Symmetrization Index'
-                elif mode == 'L1 Norm':
+                else: # L1 Norm
                     metric = np.sum(np.abs(coeffs), axis=1)
                     label = 'Sum of Absolute Coeffs'
-                else: # Mean Coeff
-                    metric = np.mean(np.abs(coeffs), axis=1)
-                    label = 'Mean Coefficient Magnitude'
 
                 H_sum, _, _ = np.histogram2d(mapped_vals.real[mask], mapped_vals.imag[mask], bins=res,
                                              range=[[x_range[0], x_range[1]], [y_range[0], y_range[1]]],
@@ -407,19 +392,13 @@ class TranscendentalFieldExplorer:
             self.colorbar = self.fig.colorbar(im, ax=self.ax, label=label)
             self.colorbar.ax.yaxis.label.set_color('white')
             self.colorbar.ax.tick_params(colors='white')
-
-            self.ax.set_title(rf"Transcendental Analysis: $\mathbb{{Q}}({title_base})$" + "\n" +
-                              f"{label} across the extension",
-                              color='white', fontsize=14)
+            self.ax.set_title(rf"Transcendental Analysis: $\mathbb{{Q}}({title_base})$" + "\n" + f"{label} across the extension", color='white', fontsize=14)
         else:
             if self.colorbar:
                 self.colorbar.remove()
                 self.colorbar = None
-
-            H, xedges, yedges = np.histogram2d(mapped_vals.real, mapped_vals.imag, bins=res,
-                                               range=[[x_range[0], x_range[1]], [y_range[0], y_range[1]]])
+            H, _, _ = np.histogram2d(mapped_vals.real, mapped_vals.imag, bins=res, range=[[x_range[0], x_range[1]], [y_range[0], y_range[1]]])
             Z_final = gaussian_filter(H.T, sigma=sigma)
-
             if self.show_gradient:
                 gy, gx = np.gradient(Z_final)
                 Z_final = np.sqrt(gx**2 + gy**2)
@@ -428,94 +407,54 @@ class TranscendentalFieldExplorer:
                 vmin = 1.0
                 vmax = max(vmin + 1.0, np.max(Z_final))
                 norm = LogNorm(vmin=vmin, vmax=vmax)
-
-            self.ax.imshow(Z_final, extent=[x_range[0], x_range[1], y_range[0], y_range[1]],
-                            origin='lower', cmap=self.current_cmap, norm=norm)
-
+            self.ax.imshow(Z_final, extent=[x_range[0], x_range[1], y_range[0], y_range[1]], origin='lower', cmap=self.current_cmap, norm=norm)
             title = rf"$\mathbb{{Q}}({title_base}"
             if self.secondary_base_val is not None:
                 title_b = self.secondary_base_name.replace('_', '\\_')
                 title += f", {title_b}"
             title += ")$"
+            self.ax.set_title(f"Transcendental Field Interference: {title}\n" + rf"Coupled Extension micro-structures", color='white', fontsize=14)
 
-            self.ax.set_title(f"Transcendental Field Interference: {title}\n" +
-                              rf"Coupled Extension micro-structures",
-                              color='white', fontsize=14)
-
-        # Plot Rational Convergents if base is real
         if not np.iscomplex(base) and self.show_overlays:
             convs = self.get_convergents(base)
-            self.ax.scatter(convs, np.zeros_like(convs), color='red', s=50, marker='x',
-                            label='Rational Convergents', zorder=5)
+            self.ax.scatter(convs, np.zeros_like(convs), color='red', s=50, marker='x', label='Rational Convergents', zorder=5)
             self.ax.legend(facecolor='#111111', labelcolor='white')
-
         if self.show_overlays:
             self.draw_reference_overlays(x_range, y_range)
 
     def draw_reference_overlays(self, x_range, y_range):
-        # Unit Circle
         t = np.linspace(0, 2*np.pi, 500)
         circle = np.exp(1j * t)
-
-        # Apply transformation if needed
         if self.coord_system == 'Log-Polar':
             mapped_circle = np.log(np.abs(circle) + 1e-9) + 1j * np.angle(circle)
         elif self.coord_system == 'Reciprocal':
             mapped_circle = 1.0 / circle
         else:
             mapped_circle = circle
-
-        self.ax.plot(mapped_circle.real, mapped_circle.imag, color='white',
-                     linestyle='--', alpha=0.3, lw=1, label='Unit Circle')
-
-        # Grid axes
+        self.ax.plot(mapped_circle.real, mapped_circle.imag, color='white', linestyle='--', alpha=0.3, lw=1, label='Unit Circle')
         self.ax.axhline(0, color='white', alpha=0.1, lw=0.5)
         self.ax.axvline(0, color='white', alpha=0.1, lw=0.5)
-
-        # Roots of Unity (e.g., 8-th roots)
-        n_roots = 8
-        roots = np.exp(1j * 2 * np.pi * np.arange(n_roots) / n_roots)
-        if self.coord_system == 'Log-Polar':
-            mapped_roots = np.log(np.abs(roots) + 1e-9) + 1j * np.angle(roots)
-        elif self.coord_system == 'Reciprocal':
-            mapped_roots = 1.0 / roots
-        else:
-            mapped_roots = roots
-
-        self.ax.scatter(mapped_roots.real, mapped_roots.imag, color='cyan', s=10, alpha=0.5, label=f'{n_roots}-th Roots')
 
     def draw_algebraic(self, deg, coeff, sigma):
         res = 500
         all_roots = []
         for d in range(1, deg + 1):
             num_samples = 20000 // d
-            # Shape (num_samples, d+1)
             polys = np.random.randint(-coeff, coeff + 1, (num_samples, d + 1)).astype(float)
-            polys[polys[:, -1] == 0, -1] = 1 # Lead coefficient != 0
-
+            polys[polys[:, -1] == 0, -1] = 1
             if d == 1:
-                # ax + b = 0 -> x = -b/a
                 all_roots.extend(-polys[:, 0] / polys[:, 1])
             else:
-                # Use companion matrix batch eigenvalue solver for speed
-                # monic: x^d + (c_{d-1}/c_d)x^{d-1} + ... + (c_0/c_d)
                 monic = polys[:, :-1] / polys[:, -1:]
-
-                # Construct companion matrices: (num_samples, d, d)
                 matrices = np.zeros((num_samples, d, d))
                 matrices[:, 1:, :-1] = np.eye(d - 1)
                 matrices[:, :, -1] = -monic
-
-                # Batch eigenvalues
                 roots = np.linalg.eigvals(matrices)
                 all_roots.extend(roots.flatten())
-
         all_roots = np.array(all_roots)
-        # Filter roots in range
         mask = (np.abs(all_roots.real) <= 2.5) & (np.abs(all_roots.imag) <= 2.5)
         roots = all_roots[mask]
-
-        H, xedges, yedges = np.histogram2d(roots.real, roots.imag, bins=res, range=[[-2.5, 2.5], [-2.5, 2.5]])
+        H, _, _ = np.histogram2d(roots.real, roots.imag, bins=res, range=[[-2.5, 2.5], [-2.5, 2.5]])
         Z_blur = gaussian_filter(H.T, sigma=sigma)
         vmin = 0.1
         vmax = max(vmin + 1.0, np.max(Z_blur))
@@ -523,7 +462,7 @@ class TranscendentalFieldExplorer:
         self.ax.set_title(r"Field Interference: Algebraic Number Density in $\mathbb{C}$", color='white', fontsize=15)
 
     def draw_finite(self, p, n):
-        primes = [2, 3, 5, 7, 11, 13, 17, 19]
+        primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]
         p = min(primes, key=lambda x:abs(x-p))
         elements = []
         for i in range(p**n):
@@ -549,14 +488,12 @@ class TranscendentalFieldExplorer:
         v4 = self.s4.val if self.interactive else 1.0
         v5 = int(self.s5.val) if self.interactive else 300000
         v6 = self.s6.val if self.interactive else 0.0
-        
         if self.mode == 'Algebraic':
             self.draw_algebraic(v1, v2, v3)
         elif self.mode == 'Finite':
             self.draw_finite(v1, v2)
         else:
             self.draw_transcendental(v1, v2, v3, mode=self.mode, zoom=v4, num_samples=v5, rotation=v6)
-            
         self.ax.tick_params(colors='white')
         if self.interactive:
             self.fig.canvas.draw_idle()
@@ -566,8 +503,6 @@ if __name__ == "__main__":
     if "--static" in sys.argv:
         explorer = TranscendentalFieldExplorer(interactive=False)
         explorer.mode = 'Transcendental'
-        explorer.current_base_name = 'pi'
-        explorer.current_base_val = np.pi
         explorer.update(None)
         plt.savefig('./transcendental_interference_static.png', dpi=300, facecolor='#050505')
     else:

@@ -31,6 +31,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "../../galois_math.h"
 
 using namespace std;
 using cd = complex<double>;
@@ -289,6 +290,10 @@ public:
     int N = (int)pow(p, n);
     if (N > 15000)
       N = 15000;
+
+    vector<int> irred = gf_find_irreducible(p, n);
+    GFElement alpha_gen = gf_find_primitive(p, n, irred);
+
     vector<cd> points(N);
     for (int i = 0; i < N; ++i) {
       int t = i;
@@ -303,14 +308,14 @@ public:
     if (show_edges && N < 5000) {
       glLineWidth(1.2f);
       glBegin(GL_LINE_STRIP);
-      int curr = 1, step = (p == 2) ? 1 : p - 1;
+      GFElement curr(n, 0); curr[0] = 1;
       for (int k = 0; k < min(N, 1200); ++k) {
-        float alpha = 0.5f * (1.0f - (float)k / 1200);
-        glColor4f(0.3f, 0.7f, 1.0f, alpha);
-        glVertex2f(points[curr].real(), points[curr].imag());
-        curr = (curr * step) % N;
-        if (curr == 0)
-          curr = 1;
+        cd z(0, 0); for(int j=0; j<n; ++j) z += polar(l_scale, 2.0 * M_PI * j / n) * (double)curr[j];
+        float alpha_v = 0.5f * (1.0f - (float)k / 1200);
+        glColor4f(0.3f, 0.7f, 1.0f, alpha_v);
+        glVertex2f(z.real(), z.imag());
+        curr = gf_multiply(curr, alpha_gen, irred, p);
+        if (gf_is_one(curr)) break;
       }
       glEnd();
     }

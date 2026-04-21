@@ -1,8 +1,7 @@
 // Unified Field Explorer (3D Enhanced Version)
 //
 // Features:
-//   - 3D Synchronized Viewport (Rotate: Right-Click, Pan: Left-Click, Zoom:
-//   Scroll)
+//   - 3D Synchronized Viewport (Rotate: Right-Click, Pan: Left-Click, Zoom: Scroll)
 //   - Z-Axis Stacking for Extension Lattices (Visualizing Degree as Height)
 //   - Helical Multiplicative Cycles for Finite Fields
 //   - High-Fidelity Heatmaps on a 3D Plane
@@ -31,6 +30,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "../../galois_math.h"
 
 using namespace std;
 using cd = complex<double>;
@@ -250,6 +250,10 @@ public:
     int N = (int)pow(p, n);
     if (N > 10000)
       N = 10000;
+
+    vector<int> irred = gf_find_irreducible(p, n);
+    GFElement alpha_gen = gf_find_primitive(p, n, irred);
+
     vector<cd> points(N);
     for (int i = 0; i < N; ++i) {
       int t = i;
@@ -264,16 +268,15 @@ public:
     if (show_edges && N < 5000) {
       glLineWidth(1.5f);
       glBegin(GL_LINE_STRIP);
-      int curr = 1, step = (p == 2) ? 1 : p - 1;
+      GFElement curr(n, 0); curr[0] = 1;
       for (int k = 0; k < min(N, 1000); ++k) {
-        float alpha = 0.6f * (1.0f - (float)k / 1000);
+        cd z(0, 0); for(int j=0; j<n; ++j) z += polar(l_scale, 2.0 * M_PI * j / n) * (double)curr[j];
+        float alpha_val = 0.6f * (1.0f - (float)k / 1000);
         float z_offset = (float)k * 0.002f; // Helical lift
-        glColor4f(0.2f, 0.8f, 1.0f, alpha);
-        glVertex3f((float)points[curr].real(), (float)points[curr].imag(),
-                   z_offset);
-        curr = (curr * step) % N;
-        if (curr == 0)
-          curr = 1;
+        glColor4f(0.2f, 0.8f, 1.0f, alpha_val);
+        glVertex3f((float)z.real(), (float)z.imag(), z_offset);
+        curr = gf_multiply(curr, alpha_gen, irred, p);
+        if (gf_is_one(curr)) break;
       }
       glEnd();
     }
