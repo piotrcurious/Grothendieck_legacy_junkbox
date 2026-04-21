@@ -378,51 +378,6 @@ public:
     }
 };
 
-// Filtering Utilities
-class Filters {
-public:
-    template<typename T>
-    static std::vector<T> medianFilter(const std::vector<T>& data, size_t windowSize = 3) {
-        if (data.size() < windowSize) return data;
-        std::vector<T> result;
-        result.reserve(data.size());
-
-        for (size_t i = 0; i < data.size(); ++i) {
-            std::vector<T> window;
-            for (int j = -(int)windowSize/2; j <= (int)windowSize/2; ++j) {
-                int idx = (int)i + j;
-                if (idx >= 0 && idx < (int)data.size()) {
-                    window.push_back(data[idx]);
-                }
-            }
-            std::sort(window.begin(), window.end());
-            result.push_back(window[window.size()/2]);
-        }
-        return result;
-    }
-
-    template<typename T>
-    static std::vector<T> movingAverage(const std::vector<T>& data, size_t windowSize = 3) {
-        if (data.size() < windowSize) return data;
-        std::vector<T> result;
-        result.reserve(data.size());
-
-        for (size_t i = 0; i < data.size(); ++i) {
-            double sum = 0;
-            int count = 0;
-            for (int j = -(int)windowSize/2; j <= (int)windowSize/2; ++j) {
-                int idx = (int)i + j;
-                if (idx >= 0 && idx < (int)data.size()) {
-                    sum += data[idx];
-                    count++;
-                }
-            }
-            result.push_back(static_cast<T>(sum / count));
-        }
-        return result;
-    }
-};
-
 // Circular buffer for real-time processing
 template<typename T, size_t Size>
 class CircularBuffer {

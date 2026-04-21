@@ -433,12 +433,11 @@ public:
 
         if (windowData.size() < Config::WINDOW_SIZE) return newFeatures;
 
-        // Pre-filter window to reduce discretization noise
-        std::vector<float> filteredY = banach::Filters::medianFilter(rawY, 3);
+        // Map window data directly to Galois Field
         std::vector<uint8_t> windowX, windowY;
         for(size_t i=0; i<windowData.size(); ++i) {
             windowX.push_back(floatToGF(windowData[i].timestamp));
-            windowY.push_back(floatToGF(filteredY[i]));
+            windowY.push_back(floatToGF(rawY[i]));
         }
 
         // Update noise estimate

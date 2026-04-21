@@ -382,12 +382,10 @@ std::vector<Feature> detectAndUpdateFeatures() {
         if (windowSize < Config::WINDOW_SIZE) return newFeatures;
 
         try {
-            // Pre-filter window for better mapping
-            std::vector<float> rawY_vec(rawY.begin(), rawY.end());
-            auto filteredY = banach::Filters::medianFilter(rawY_vec, 3);
+            // Map window data directly to Galois Field
             for(size_t i=0; i<windowSize; ++i) {
                 windowX[i] = floatToGF(windowData[i].timestamp);
-                windowY[i] = floatToGF(filteredY[i]);
+                windowY[i] = floatToGF(rawY[i]);
             }
 
             // Update noise estimate using stack-based calculation
