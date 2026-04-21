@@ -7,6 +7,7 @@
 #include <cmath>
 #include <algorithm>
 #include <bitset>
+#include "../math_utils.h"
 
 // Configuration using constexpr for compile-time optimization
 namespace Config {
@@ -368,12 +369,12 @@ std::vector<Feature> detectAndUpdateFeatures() {
         size_t windowSize = 0;
 
         // Fill window arrays using stack memory
+        std::array<float, Config::WINDOW_SIZE> rawY;
         for (size_t i = 0; i < Config::WINDOW_SIZE; i++) {
             auto point = buffer.pop();
             if (!point) break;
             windowData[i] = *point;
-            windowX[i] = floatToGF(point->timestamp);
-            windowY[i] = floatToGF(point->value);
+            rawY[i] = point->value;
             buffer.push(*point);
             windowSize++;
         }
@@ -381,6 +382,12 @@ std::vector<Feature> detectAndUpdateFeatures() {
         if (windowSize < Config::WINDOW_SIZE) return newFeatures;
 
         try {
+            // Map window data directly to Galois Field
+            for(size_t i=0; i<windowSize; ++i) {
+                windowX[i] = floatToGF(windowData[i].timestamp);
+                windowY[i] = floatToGF(rawY[i]);
+            }
+
             // Update noise estimate using stack-based calculation
             noiseLevel = estimateNoiseLevel(windowData.data(), windowSize);
 

@@ -419,8 +419,7 @@ public:
 
     std::vector<Feature> detectAndUpdateFeatures() {
         std::vector<DataPoint> windowData;
-        std::vector<uint8_t> windowX;
-        std::vector<uint8_t> windowY;
+        std::vector<float> rawY;
         std::vector<Feature> newFeatures;
 
         // Extract window data
@@ -428,12 +427,18 @@ public:
             auto point = buffer.pop();
             if (!point) break;
             windowData.push_back(*point);
-            windowX.push_back(floatToGF(point->timestamp));
-            windowY.push_back(floatToGF(point->value));
+            rawY.push_back(point->value);
             buffer.push(*point);
         }
 
         if (windowData.size() < Config::WINDOW_SIZE) return newFeatures;
+
+        // Map window data directly to Galois Field
+        std::vector<uint8_t> windowX, windowY;
+        for(size_t i=0; i<windowData.size(); ++i) {
+            windowX.push_back(floatToGF(windowData[i].timestamp));
+            windowY.push_back(floatToGF(rawY[i]));
+        }
 
         // Update noise estimate
         noiseLevel = estimateNoiseLevel(windowData);

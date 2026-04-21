@@ -21,6 +21,7 @@ private:
         std::vector<T> sparsity;
         std::vector<std::vector<T>> instantaneousCoherence;
         T phaseSpaceArea;
+        T averageCurvature;
     };
 
     // Projection and Transformation Operators
@@ -67,6 +68,7 @@ private:
         metrics.sparsity = computeSparsity();
         metrics.instantaneousCoherence = computeInstantaneousCoherence(5);
         metrics.phaseSpaceArea = computePhaseSpaceArea();
+        metrics.averageCurvature = computeAverageCurvature();
         
         return metrics;
     }
@@ -146,6 +148,27 @@ public:
             area += (d0[i-1] * d1[i] - d0[i] * d1[i-1]);
         }
         return std::abs(area) / 2.0;
+    }
+
+    // Menger Curvature Proxy: 1/R for circumcircle of 3 consecutive points in projection
+    T computeAverageCurvature() {
+        if (Dimension < 2 || dimensionalData[0].size() < 3) return 0;
+        T totalCurv = 0;
+        const auto& d0 = dimensionalData[0];
+        const auto& d1 = dimensionalData[1];
+        int count = 0;
+        for (size_t i = 1; i < d0.size() - 1; ++i) {
+            // Triangle sides
+            T a = std::sqrt(std::pow(d0[i]-d0[i-1], 2) + std::pow(d1[i]-d1[i-1], 2));
+            T b = std::sqrt(std::pow(d0[i+1]-d0[i], 2) + std::pow(d1[i+1]-d1[i], 2));
+            T c = std::sqrt(std::pow(d0[i+1]-d0[i-1], 2) + std::pow(d1[i+1]-d1[i-1], 2));
+            T area = 0.5 * std::abs(d0[i-1]*(d1[i]-d1[i+1]) + d0[i]*(d1[i+1]-d1[i-1]) + d0[i+1]*(d1[i]-d1[i]));
+            if (a*b*c > 1e-9) {
+                totalCurv += 4.0 * area / (a*b*c);
+                count++;
+            }
+        }
+        return (count > 0) ? totalCurv / count : 0;
     }
 
     // Spectral Flatness (Wiener Entropy proxy) using Lebesgue-weighted geometric/arithmetic means
@@ -271,6 +294,8 @@ public:
             static_cast<float>(metrics.dimensionalCoherence));
         Serial.printf("Phase Space Area (D0 x D1): %f\n",
             static_cast<float>(metrics.phaseSpaceArea));
+        Serial.printf("Average Trajectory Curvature: %f\n",
+            static_cast<float>(metrics.averageCurvature));
 
         Serial.println("\nSpectral Flatness (per dimension):");
         for (size_t i = 0; i < Dimension; ++i) {
