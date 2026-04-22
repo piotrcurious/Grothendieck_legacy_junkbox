@@ -288,13 +288,32 @@ struct AdjoinContext { UnifiedGL *gl; Fl_Input *inp; Fl_Browser *list; Fl_Multil
 int main(int argc, char **argv) {
   Fl_Window *win = new Fl_Window(1300, 860, "Unified Field Explorer");
   UnifiedGL *gl = new UnifiedGL(10, 10, 900, 840);
+  Fl_Choice *mode = new Fl_Choice(1020, 50, 200, 25, "Mode:");
+  mode->add("Algebraic"); mode->add("Finite Field"); mode->value(0);
   Fl_Group *panel = new Fl_Group(920, 10, 370, 840);
-  Fl_Choice *mode_choice = new Fl_Choice(1020, 50, 200, 25, "Mode:");
-  mode_choice->add("Algebraic"); mode_choice->add("Finite Field"); mode_choice->value(0);
-  mode_choice->callback([](Fl_Widget *w, void *v) { UnifiedGL *g = (UnifiedGL *)v; g->mode_algebraic = (((Fl_Choice *)w)->value() == 0); g->trigger_regen(); }, gl);
+  mode->callback([](Fl_Widget *w, void *v) { UnifiedGL *g = (UnifiedGL *)v; g->mode_algebraic = (((Fl_Choice *)w)->value() == 0); g->trigger_regen();
+    Fl_Box *b = nullptr;
+    for(int i=0; i<w->parent()->children(); ++i) {
+        if(w->parent()->child(i)->label() && std::string(w->parent()->child(i)->label()) == "") { // Hacky check for our warn box
+             // verify if previous child is the slider
+             if(i>0 && w->parent()->child(i-1)->label() && (std::string(w->parent()->child(i-1)->label()) == "Deg / P" || std::string(w->parent()->child(i-1)->label()) == "Deg/P")) {
+                 b = (Fl_Box*)w->parent()->child(i); break;
+             }
+        }
+    }
+    UnifiedGL *gl_ptr = (UnifiedGL *)v;
+    if(b) { if(!gl_ptr->mode_algebraic && !is_prime(gl_ptr->p_prime)) b->label("Warning: p not prime"); else b->label(""); }
+}, gl);
   Fl_Value_Slider *s1 = new Fl_Value_Slider(1020, 90, 260, 20, "Deg/P");
+  Fl_Box *prime_warn = new Fl_Box(1020, 110, 260, 15, "");
+  prime_warn->labelcolor(FL_RED);
+  prime_warn->labelsize(12);
+
   s1->type(FL_HOR_NICE_SLIDER); s1->bounds(1, 15); s1->value(5);
-  s1->callback([](Fl_Widget *w, void *v) { UnifiedGL *g = (UnifiedGL *)v; g->max_degree = g->p_prime = (int)((Fl_Value_Slider *)w)->value(); g->trigger_regen(); }, gl);
+  s1->callback([](Fl_Widget *w, void *v) { UnifiedGL *g = (UnifiedGL *)v; g->max_degree = g->p_prime = (int)((Fl_Value_Slider *)w)->value(); g->trigger_regen();
+    Fl_Box *b = (Fl_Box *)w->parent()->child(w->parent()->find(w) + 1);
+    UnifiedGL *gl_ptr = (UnifiedGL *)v;
+    if (!gl_ptr->mode_algebraic && !is_prime(gl_ptr->p_prime)) b->label("Warning: p not prime"); else b->label("");}, gl);
   Fl_Value_Slider *s2 = new Fl_Value_Slider(1020, 120, 260, 20, "Coeff/N");
   s2->type(FL_HOR_NICE_SLIDER); s2->bounds(1, 20); s2->value(5);
   s2->callback([](Fl_Widget *w, void *v) { UnifiedGL *g = (UnifiedGL *)v; g->max_coeff = g->n_ext = (int)((Fl_Value_Slider *)w)->value(); g->trigger_regen(); }, gl);

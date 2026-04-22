@@ -190,8 +190,15 @@ int main(int argc, char **argv) {
   mode->add("Algebraic"); mode->add("Finite Field"); mode->value(0);
   mode->callback([](Fl_Widget *w, void *v) { ((UnifiedGL *)v)->mode_algebraic = (((Fl_Choice *)w)->value() == 0); ((UnifiedGL *)v)->redraw(); }, gl);
   Fl_Value_Slider *s_deg = new Fl_Value_Slider(1040, 120, 240, 20, "Deg / P");
+  Fl_Box *prime_warn = new Fl_Box(1040, 140, 240, 15, "");
+  prime_warn->labelcolor(FL_RED);
+  prime_warn->labelsize(12);
+
   s_deg->type(FL_HOR_NICE_SLIDER); s_deg->bounds(1, 30); s_deg->value(5);
-  s_deg->callback([](Fl_Widget *w, void *v) { UnifiedGL *g = (UnifiedGL *)v; g->max_deg = g->p_prime = (int)((Fl_Value_Slider *)w)->value(); g->dirty_compute = true; g->redraw(); }, gl);
+  s_deg->callback([](Fl_Widget *w, void *v) { UnifiedGL *g = (UnifiedGL *)v; g->max_deg = g->p_prime = (int)((Fl_Value_Slider *)w)->value(); g->dirty_compute = true; g->redraw();
+    Fl_Box *b = (Fl_Box *)w->parent()->child(w->parent()->find(w) + 1);
+    UnifiedGL *gl_ptr = (UnifiedGL *)v;
+    if (!gl_ptr->mode_algebraic && !is_prime(gl_ptr->p_prime)) b->label("Warning: p not prime"); else b->label("");}, gl);
   Fl_Value_Slider *s_cof = new Fl_Value_Slider(1040, 150, 240, 20, "Coeff / N");
   s_cof->type(FL_HOR_NICE_SLIDER); s_cof->bounds(1, 20); s_cof->value(5);
   s_cof->callback([](Fl_Widget *w, void *v) { UnifiedGL *g = (UnifiedGL *)v; g->max_c = g->n_ext = (int)((Fl_Value_Slider *)w)->value(); g->dirty_compute = true; g->redraw(); }, gl);
