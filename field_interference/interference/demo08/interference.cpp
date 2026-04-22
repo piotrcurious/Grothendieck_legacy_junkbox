@@ -22,33 +22,9 @@
 #include <string>
 #include <vector>
 #include "../../galois_math.h"
+#include "../../complex_math.h"
 
 using namespace std;
-using cd = complex<double>;
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-vector<cd> durand_kerner(const vector<cd> &input_coeffs) {
-  vector<cd> coeffs = input_coeffs;
-  while (coeffs.size() > 1 && abs(coeffs.back()) < 1e-9) coeffs.pop_back();
-  int n = (int)coeffs.size() - 1; if (n <= 0) return {};
-  vector<cd> roots(n); cd leading = coeffs[n]; for (auto &c : coeffs) c /= leading;
-  double radius = 1.0; for (int i = 0; i < n; ++i) radius = max(radius, 1.0 + abs(coeffs[i]));
-  for (int i = 0; i < n; ++i) roots[i] = polar(radius, 2.0 * M_PI * i / n + 0.1);
-  for (int iter = 0; iter < 100; ++iter) {
-    double max_change = 0.0;
-    for (int i = 0; i < n; ++i) {
-      cd p_val = coeffs[n]; for (int k = n - 1; k >= 0; --k) p_val = p_val * roots[i] + coeffs[k];
-      cd prod = 1.0; for (int j = 0; j < n; ++j) if (i != j) prod *= (roots[i] - roots[j]);
-      cd delta = p_val / (prod == 0.0 ? 1e-18 : prod);
-      roots[i] -= delta; max_change = max(max_change, abs(delta));
-    }
-    if (max_change < 1e-10) break;
-  }
-  return roots;
-}
 
 void magma_colormap(double t, unsigned char *rgb) {
   t = t < 0 ? 0 : (t > 1 ? 1 : t);
@@ -82,7 +58,7 @@ public:
       int d = (i % max_deg) + 1; vector<cd> coeffs(d + 1);
       for (int k = 0; k <= d; ++k) coeffs[k] = (double)c_dist(rng);
       if (abs(coeffs.back()) < 0.5) coeffs.back() = 1.0;
-      for (auto &r : durand_kerner(coeffs)) {
+      for (auto &r : dk_solve_roots(coeffs)) {
         int ix = (int)((r.real() + 2.0) / 4.0 * res), iy = (int)((r.imag() + 2.0) / 4.0 * res);
         if (ix >= 0 && ix < res && iy >= 0 && iy < res) heat[iy * res + ix] += 1.0;
       }
@@ -205,7 +181,7 @@ int main(int argc, char **argv) {
     Context *c = (Context *)v; string s = c->in->value(), t; vector<int> co; stringstream ss(s);
     while (getline(ss, t, ',')) co.push_back(stoi(t));
     c->gl->adj_coeffs = co; vector<cd> cd_co; for (int k : co) cd_co.push_back((double)k);
-    c->gl->adj_roots = durand_kerner(cd_co); c->br->clear();
+    c->gl->adj_roots = dk_solve_roots(cd_co); c->br->clear();
     for (auto &r : c->gl->adj_roots) { ostringstream os; os << r; c->br->add(os.str().c_str()); }
     if (!c->gl->adj_roots.empty()) { c->br->select(1); c->gl->chosen_alpha = c->gl->adj_roots[0]; }
     c->gl->redraw();

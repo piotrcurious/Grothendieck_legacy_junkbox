@@ -32,36 +32,9 @@
 #include <string>
 #include <vector>
 #include "../../galois_math.h"
+#include "../../complex_math.h"
 
 using namespace std;
-using cd = complex<double>;
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-// ------------------ Numerical Core ------------------ //
-
-vector<cd> solve_roots(const vector<cd> &coeffs) {
-  int n = (int)coeffs.size() - 1;
-  if (n <= 0) return {};
-  vector<cd> roots(n);
-  for (int i = 0; i < n; ++i) roots[i] = polar(1.5, 2.0 * M_PI * i / n + 0.2);
-  for (int iter = 0; iter < 100; ++iter) {
-    double max_err = 0;
-    for (int i = 0; i < n; ++i) {
-      cd val = coeffs[n];
-      for (int j = n - 1; j >= 0; --j) val = val * roots[i] + coeffs[j];
-      cd denom = 1.0;
-      for (int j = 0; j < n; ++j) if (i != j) denom *= (roots[i] - roots[j]);
-      cd delta = val / (denom == 0.0 ? 1e-15 : denom);
-      roots[i] -= delta;
-      max_err = max(max_err, abs(delta));
-    }
-    if (max_err < 1e-10) break;
-  }
-  return roots;
-}
 
 vector<double> get_companion(const vector<int> &c) {
   int n = (int)c.size() - 1;
@@ -111,7 +84,7 @@ public:
       vector<cd> c(d + 1);
       for (int k = 0; k <= d; ++k) c[k] = (double)c_dist(rng);
       if (abs(c.back()) < 0.1) c.back() = 1.0;
-      for (auto &r : solve_roots(c)) {
+      for (auto &r : dk_solve_roots(c)) {
         int ix = (int)((r.real() + 2.0) / 4.0 * res);
         int iy = (int)((r.imag() + 2.0) / 4.0 * res);
         if (ix >= 0 && ix < res && iy >= 0 && iy < res) heat[iy * res + ix] += 1.0;
@@ -210,7 +183,6 @@ public:
   }
 
   void project_to_torus(cd z, float &X, float &Y, float &Z) {
-    // Map periodic field to Torus
     float R = 1.5f, r = 0.5f;
     float theta = (float)z.real() * 2 * M_PI / p_prime;
     float phi = (float)z.imag() * 2 * M_PI / p_prime;
@@ -226,7 +198,6 @@ public:
 
     vector<int> irred = gf_find_irreducible(p, n);
     GFElement alpha = gf_find_primitive(p, n, irred);
-    GFElement curr(n, 0); curr[0] = 1;
 
     glPointSize(3.0f);
     glBegin(GL_POINTS);
@@ -248,7 +219,7 @@ public:
     if (show_edges && N < 3000) {
       glLineWidth(1.5f);
       glBegin(GL_LINE_STRIP);
-      curr[0] = 1; for(int j=1; j<n; ++j) curr[j]=0;
+      GFElement curr(n, 0); curr[0] = 1;
       for (int k = 0; k < min(N, 1500); ++k) {
         cd z(0, 0); for(int j=0; j<n; ++j) z += polar(1.0, 2*M_PI*j/n)*(double)curr[j];
         float X, Y, Z;
@@ -366,7 +337,7 @@ int main(int argc, char **argv) {
     if (co.size() < 2) return;
     u->gl->adj_coeffs = co;
     vector<cd> cdc; for (int k : co) cdc.push_back((double)k);
-    u->gl->adj_roots = solve_roots(cdc);
+    u->gl->adj_roots = dk_solve_roots(cdc);
     u->roots->clear();
     for (size_t i = 0; i < u->gl->adj_roots.size(); ++i) {
       ostringstream os; os << "α[" << i << "]: " << fixed << setprecision(2) << u->gl->adj_roots[i];
