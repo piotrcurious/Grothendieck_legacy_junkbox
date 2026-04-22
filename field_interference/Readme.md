@@ -17,25 +17,18 @@ Visualizes the interplay between the **additive vector space** structure of $GF(
 
 ![Finite Field Demo](docs/images/demo01_screenshot.png)
 
-- **Irreducible Search**: Automatically finds valid irreducible polynomials for extension degrees 1-4.
+- **Irreducible Search**: Automatically finds valid irreducible polynomials for extension degrees 1-5 using a rigorous GCD-based test.
 - **Generator Orbit**: Traces the cyclic multiplicative structure with color gradients using mathematically correct polynomial reduction.
-- **Key Concept**: Every finite field $GF(q)$ is a vector space over its prime subfield $GF(p)$. Simultaneously, its non-zero elements form a cyclic group under multiplication.
 
 ### Grothendieck Viewpoint (`demo02.cpp`)
 Illustrates how functions defined on polynomial quotient rings $GF(p)[x]/(g)$ are essentially functions restricted to the variety $V(g)$.
 
-![Grothendieck Demo](docs/images/demo02_screenshot.png)
-
-- **Splitting Field Mode**: Approximates roots in $\mathbb{C}$ to show how the function $f$ evaluates at the variety's points.
-- **Quotient Mapping**: Visualizes the "descent" of algebraic functions to geometric varieties.
+![Grothendieck Viewpoint](docs/images/demo02_screenshot.png)
 
 ### Companion Matrices & Field Extensions (`demo03.cpp`)
 Demonstrates the relationship between algebraic field extensions $Q(\alpha)$, companion matrices, and their roots (eigenvalues) in the complex plane.
 
 ![Companion Matrix Demo](docs/images/demo03_screenshot.png)
-
-- **Eigenvalue Equivalence**: Explicitly lists computed eigenvalues next to the companion matrix structure.
-- **Visualization**: Left side shows the roots in $\mathbb{C}$. Right side shows the companion matrix $M$, where eigenvalues = roots.
 
 ---
 
@@ -48,63 +41,58 @@ Features high-performance OpenGL texture rendering for root-density heatmaps, al
 
 ![Root Density Demo](docs/images/demo07_screenshot.png)
 
+- **Rational Resonance**: Highlights roots that are near rational convergents of their real components, exposing constructive interference zones.
 - **Hardware Acceleration**: Uses OpenGL textures for fluid interactive exploration.
-- **Algebraic Interference**: Visualizes the density of roots for random Littlewood polynomials.
 
 ### Professional 3D Explorer (`demo0c/`)
-Visualizes field structures in 3D, including "Basis Towers" for extensions and a Riemann Sphere projection.
+Visualizes field structures in 3D, including "Basis Towers" for extensions, a Riemann Sphere projection, and Torus mapping.
 
-![3D Explorer Demo](docs/images/demo0c_screenshot.png)
-![Torus Mapping Demo](docs/images/demo0c_torus.png)
-
-- **Riemann Sphere**: Maps the complex plane and its field extensions onto a unit sphere, exposing symmetries at infinity.
-- **Galois Towers**: Plots basis components along the Z-axis to show the hierarchy of extensions.
-- **Torus Mapping**: Visualizes the periodic additive structure of finite fields by mapping elements to a 3D torus.
+![3D Explorer](docs/images/demo0c_screenshot.png)
+![Torus Mapping](docs/images/demo0c_torus.png)
 
 ---
 
 ## 3. Python Analysis Tools
 
 ### Unified Field Explorer (`field_interference_unified.py`)
-A versatile tool for generating high-resolution distributions of algebraic numbers and visualizing finite field lattice connections.
+A versatile tool for generating high-resolution distributions of algebraic numbers and visualizing finite field lattice connections and multiplicative orbits.
 
 ![Unified Explorer](docs/images/unified_explorer.png)
 
 ### Transcendental Field Explorer (`transcendental_field_explorer.py`)
-Visualizes the resonance of $\mathbb{Q}(\alpha)$ for transcendental $\alpha$ (like $\pi$ or $e$), exploring how these extensions form dense subfields that "interfere" with the standard complex plane.
+Visualizes the resonance of $\mathbb{Q}(\alpha)$ for transcendental $\alpha$ (like $\pi$, $e$, or $\zeta(3)$), exploring how these extensions form dense subfields that "interfere" with the standard complex plane.
 
 ![Transcendental Explorer](docs/images/transcendental_explorer.png)
 
-- **Vectorized Engine**: High-performance NumPy implementation with dynamic binning for real-time micro-structure analysis. Now includes a batch-eigenvalue solver for Algebraic mode.
-- **Coordinate Mappings**: Supports Standard, Log-Polar, Reciprocal, Joukowsky, and **Euler Space** mappings to expose deep rotational and periodic symmetries.
-- **Multi-Base Support**: Explore coupled extensions $\mathbb{Q}(A, B)$ and visualize the interaction of two transcendental generators.
-- **Interference Analysis**:
-    - **Rational Resonance**: Highlights proximity to continued fraction convergents where field elements constructive interfere with rational approximations.
-    - **Phase Alignment**: Visualizes circular variance of individual expansion terms to show coherent summation zones.
-- **Custom Bases & Rotation**: Supports arbitrary complex expressions and real-time base rotation.
-- **Advanced Metrics**: Visualizes "Min Complexity", "Dominant Power Index", "Parity", and "L1 Norm".
-- **Coefficient Sets**: Choice of 'Standard', 'Binary' {0, 1}, or 'Littlewood' {-1, 1} distributions.
-
-![Transcendental Resonance](docs/images/transcendental_resonance.png)
-![Transcendental Euler Space](docs/images/transcendental_eulerspace.png)
-![Transcendental Alignment](docs/images/transcendental_alignment.png)
-![Transcendental Log-Polar](docs/images/transcendental_logpolar.png)
+- **Vectorized Engine**: High-performance NumPy implementation supporting up to 2 million samples with chunked processing for memory efficiency.
+- **Coordinate Mappings**:
+    - **Standard**: Standard complex plane.
+    - **Log-Polar**: Exposes radial and angular scaling symmetries. ![Log-Polar](docs/images/transcendental_logpolar.png)
+    - **Reciprocal**: Visualizes the field near the origin and at infinity. ![Reciprocal](docs/images/transcendental_reciprocal.png)
+    - **Joukowsky**: Aerodynamic transformation highlighting conformal symmetries. ![Joukowsky](docs/images/transcendental_joukowsky.png)
+    - **Mobius**: Standard Mobius transformation $(z-1)/(z+1)$. ![Mobius](docs/images/transcendental_mobius.png)
+    - **Euler Space**: Mapping $z \to \exp(i \pi z / \text{base})$ to expose periodic symmetries. ![Euler Space](docs/images/transcendental_eulerspace.png)
+- **Advanced Metrics**:
+    - **Rational Resonance**: Intensity based on proximity to continued fraction convergents (real) or Lattice anchors (Gaussian/Eisenstein integers). ![Resonance](docs/images/transcendental_resonance.png)
+    - **Rotation Sensitivity**: Visualizes how field density shifts under infinitesimal base rotations. ![Sensitivity](docs/images/transcendental_sensitivity.png)
+    - **Phase Alignment**: Measures coherence of expansion terms. ![Alignment](docs/images/transcendental_alignment.png)
+    - **Algebraic Mode**: Now supports 'Binary', 'Littlewood', and 'Standard' coefficient sets. ![Algebraic Littlewood](docs/images/algebraic_littlewood.png)
+- **Custom Bases**: Supports arbitrary complex expressions including `gamma` and `zeta` functions with extended `_safe_eval`.
+- **Export**: High-resolution PNG images and JSON raw data export for further numerical analysis.
 
 ---
 
 ## Requirements
 
 ### C++ Explorers
-- **FLTK 1.3+**: GUI framework.
-- **OpenGL / GLU**: Hardware-accelerated rendering.
+- **FLTK 1.3+**, **OpenGL / GLU**
 - **Build**: `g++ -std=c++17 -O3 <file>.cpp -o explorer -lfltk -lfltk_gl -lGL -lGLU -lm`
 
 ### Python Tools
-- `numpy`, `matplotlib`, `scipy`, `sympy`
+- `numpy`, `matplotlib`, `scipy`
 
 ## Usage Instructions
 
 1. **Navigate** to a demo directory (e.g., `interference/demo07`).
-2. **Build** the executable using the provided build command or `compile_interference.sh`.
-3. **Run** the explorer. Use the side panel to adjust parameters like polynomial degree, coefficient range, or field prime $p$.
-4. **Interact**: Left-click to pan, scroll or right-click to zoom.
+2. **Build** the executable or run the Python tool.
+3. **Interact**: Use side panels for parameter tuning. In 3D: Left-click (Pan), Right-click (Rotate), Scroll (Zoom).

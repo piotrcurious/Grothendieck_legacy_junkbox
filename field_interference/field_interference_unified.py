@@ -4,6 +4,83 @@ from matplotlib.widgets import Slider, RadioButtons
 from scipy.ndimage import gaussian_filter
 from matplotlib.colors import LogNorm
 
+# --- Finite Field Math (Python Implementation) ---
+
+def gf_is_irreducible(poly, p):
+    n = len(poly) - 1
+    if n < 1: return False
+    if n == 1: return True
+    for i in range(p):
+        val = 0
+        x_pow = 1
+        for c in poly:
+            val = (val + c * x_pow) % p
+            x_pow = (x_pow * i) % p
+        if val == 0: return False
+    if n == 4:
+        for a in range(p):
+            for b in range(p):
+                has_root = False
+                for i in range(p):
+                    if (i*i + a*i + b) % p == 0:
+                        has_root = True; break
+                if has_root: continue
+                rem = list(poly)
+                for i in range(4, 1, -1):
+                    factor = rem[i]
+                    if factor == 0: continue
+                    rem[i-1] = (rem[i-1] - factor * a) % p
+                    rem[i-2] = (rem[i-2] - factor * b) % p
+                    rem[i] = 0
+                if rem[0] == 0 and rem[1] == 0: return False
+    return True
+
+def gf_find_irreducible(p, n):
+    if n == 1: return [0, 1]
+    poly = [0] * (n + 1); poly[n] = 1
+    for i in range(1, p**n):
+        temp = i
+        for j in range(n):
+            poly[j] = temp % p; temp //= p
+        if gf_is_irreducible(poly, p): return poly
+    return poly
+
+def gf_multiply(a, b, g, p):
+    n = len(g) - 1; res = [0] * (2 * n)
+    for i in range(len(a)):
+        for j in range(len(b)):
+            res[i+j] = (res[i+j] + a[i] * b[j]) % p
+    for i in range(len(res)-1, n-1, -1):
+        if res[i] == 0: continue
+        factor = res[i]
+        for j in range(n + 1):
+            res[i-n+j] = (res[i-n+j] - factor * g[j]) % p
+    return [x % p for x in res[:n]]
+
+def gf_find_primitive(p, n, g):
+    q = p**n; q_minus_1 = q - 1; factors = []; temp = q_minus_1; d = 2
+    while d * d <= temp:
+        if temp % d == 0:
+            factors.append(d)
+            while temp % d == 0: temp //= d
+        d += 1
+    if temp > 1: factors.append(temp)
+    for i in range(1, q):
+        alpha = [0] * n; temp = i
+        for j in range(n):
+            alpha[j] = temp % p; temp //= p
+        if all(x == 0 for x in alpha): continue
+        is_primitive = True
+        for f in factors:
+            exp = q_minus_1 // f; res = [0] * n; res[0] = 1; base = list(alpha); curr_exp = exp
+            while curr_exp > 0:
+                if curr_exp % 2 == 1: res = gf_multiply(res, base, g, p)
+                base = gf_multiply(base, base, g, p); curr_exp //= 2
+            if all(x == (1 if j == 0 else 0) for j, x in enumerate(res)):
+                is_primitive = False; break
+        if is_primitive: return alpha
+    return [0, 1] + [0]*(n-2) if n > 1 else [1]
+
 class UnifiedFieldExplorer:
     def __init__(self, interactive=True):
         self.interactive = interactive
@@ -94,34 +171,47 @@ class UnifiedFieldExplorer:
         self.ax.set_title(r"Field Interference: Algebraic Number Density in $\mathbb{C}$", color='white', fontsize=15)
 
     def draw_finite(self, p, n):
-        # Ensure p is prime (simple check for visualization)
-        primes = [2, 3, 5, 7, 11, 13, 17, 19]
+        primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]
         p = min(primes, key=lambda x:abs(x-p))
+        q = p**n
+        g = gf_find_irreducible(p, n)
+        alpha_gen = gf_find_primitive(p, n, g)
         
         elements = []
-        for i in range(p**n):
-            val = 0
-            temp = i
+        for i in range(q):
+            val = 0; temp = i; coeffs = []
             for j in range(n):
-                c = temp % p
-                temp //= p
-                if n == 2:
-                    val += c * (1 if j == 0 else 1j)
-                else:
-                    val += c * np.exp(1j * 2 * np.pi * j / n)
-            elements.append(val)
+                c = temp % p; temp //= p; coeffs.append(c)
+                if n == 2: val += c * (1 if j == 0 else 1j)
+                else: val += c * np.exp(1j * 2 * np.pi * j / n)
+            elements.append((val, coeffs))
         
-        re = [e.real for e in elements]
-        im = [e.imag for e in elements]
-        self.ax.scatter(re, im, c=np.abs(elements), cmap='cool', s=100, edgecolors='white', zorder=3)
-        self.ax.scatter(re[:p], im[:p], color='yellow', s=150, edgecolors='red', label=f'Base Field GF({p})')
+        re = [e[0].real for e in elements]; im = [e[0].imag for e in elements]
         
-        # Lattice lines
-        for i in range(len(elements)):
-            for j in range(i + 1, len(elements)):
-                if np.isclose(np.abs(elements[i] - elements[j]), 1.0, atol=0.1):
-                    self.ax.plot([elements[i].real, elements[j].real], [elements[i].imag, elements[j].imag], 
-                                 color='#00d4ff', alpha=0.2, lw=0.5)
+        # Additive Lattice
+        for i in range(q):
+            for j in range(i + 1, q):
+                diff_count = 0
+                for k in range(n):
+                    if elements[i][1][k] != elements[j][1][k]: diff_count += 1
+                if diff_count == 1:
+                    self.ax.plot([re[i], re[j]], [im[i], im[j]], color='#00d4ff', alpha=0.15, lw=0.8, zorder=1)
+
+        # Multiplicative Orbit
+        if q > 1:
+            curr = [0] * n; curr[0] = 1; orbit = []
+            for _ in range(q):
+                val = 0
+                for j in range(n):
+                    if n == 2: val += curr[j] * (1 if j == 0 else 1j)
+                    else: val += curr[j] * np.exp(1j * 2 * np.pi * j / n)
+                orbit.append(val); curr = gf_multiply(curr, alpha_gen, g, p)
+                if all(x == (1 if j == 0 else 0) for j, x in enumerate(curr)):
+                    orbit.append(orbit[0]); break
+            self.ax.plot([z.real for z in orbit], [z.imag for z in orbit], color='yellow', alpha=0.6, lw=1.5, zorder=2, label='Multiplicative Orbit')
+
+        self.ax.scatter(re, im, c=np.abs([e[0] for e in elements]), cmap='cool', s=100, edgecolors='white', zorder=3)
+        self.ax.scatter(re[:p], im[:p], color='yellow', s=150, edgecolors='red', label=f'Base Field GF({p})', zorder=4)
         
         self.ax.set_title(f"Finite Field Extension: $GF({p}^{n})$ over $GF({p})$", color='white', fontsize=15)
         self.ax.legend(facecolor='#111111', labelcolor='white')

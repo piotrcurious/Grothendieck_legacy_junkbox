@@ -32,51 +32,9 @@
 #include <string>
 #include <vector>
 #include "../../galois_math.h"
+#include "../../complex_math.h"
 
 using namespace std;
-using cd = complex<double>;
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-// ------------------ Mathematical Utilities ------------------ //
-
-vector<cd> durand_kerner(const vector<cd> &input_coeffs) {
-  vector<cd> coeffs = input_coeffs;
-  while (coeffs.size() > 1 && abs(coeffs.back()) < 1e-9)
-    coeffs.pop_back();
-  int n = (int)coeffs.size() - 1;
-  if (n <= 0)
-    return {};
-  vector<cd> roots(n);
-  cd leading = coeffs[n];
-  for (auto &c : coeffs)
-    c /= leading;
-  double radius = 1.0;
-  for (int i = 0; i < n; ++i)
-    radius = max(radius, 1.0 + abs(coeffs[i]));
-  for (int i = 0; i < n; ++i)
-    roots[i] = polar(radius, 2.0 * M_PI * i / n + 0.1);
-  for (int iter = 0; iter < 150; ++iter) {
-    double max_change = 0.0;
-    for (int i = 0; i < n; ++i) {
-      cd p_val = coeffs[n];
-      for (int k = n - 1; k >= 0; --k)
-        p_val = p_val * roots[i] + coeffs[k];
-      cd prod = 1.0;
-      for (int j = 0; j < n; ++j)
-        if (i != j)
-          prod *= (roots[i] - roots[j]);
-      cd delta = p_val / (prod == 0.0 ? 1e-18 : prod);
-      roots[i] -= delta;
-      max_change = max(max_change, abs(delta));
-    }
-    if (max_change < 1e-11)
-      break;
-  }
-  return roots;
-}
 
 vector<double> companion_matrix(const vector<int> &coeffs) {
   int n = (int)coeffs.size() - 1;
@@ -180,7 +138,7 @@ public:
       if (abs(coeffs.back()) < 0.5)
         coeffs.back() = 1.0;
 
-      auto roots = durand_kerner(coeffs);
+      auto roots = dk_solve_roots(coeffs);
       for (auto &r : roots) {
         int ix = (int)((r.real() + 2.0) / 4.0 * res);
         int iy = (int)((r.imag() + 2.0) / 4.0 * res);
@@ -223,10 +181,7 @@ public:
       } else {
         v_zoom *= (1.0 - dy / 100.0);
       }
-      last_mx = Fl::event_x();
-      last_my = Fl::event_y();
-      redraw();
-      return 1;
+      last_mx = Fl::event_x(); last_my = Fl::event_y(); redraw(); return 1;
     }
     if (e == FL_MOUSEWHEEL) {
       v_zoom *= (1.0 - Fl::event_dy() * 0.1);
@@ -501,7 +456,7 @@ int main(int argc, char **argv) {
     vector<cd> cd_co;
     for (int k : co)
       cd_co.push_back((double)k);
-    c->gl->adj_roots = durand_kerner(cd_co);
+    c->gl->adj_roots = dk_solve_roots(cd_co);
     c->root_br->clear();
     for (size_t i = 0; i < c->gl->adj_roots.size(); ++i) {
       ostringstream os;
