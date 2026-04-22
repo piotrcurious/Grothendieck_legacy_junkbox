@@ -595,12 +595,20 @@ int main(int argc, char **argv) {
   s1->step(1);
   s1->value(5);
   s1->align(FL_ALIGN_LEFT);
+
+  Fl_Box *prime_warn = new Fl_Box(1020, 110, 260, 15, "");
+  prime_warn->labelcolor(FL_RED);
+  prime_warn->labelsize(12);
+
   s1->callback(
       [](Fl_Widget *w, void *v) {
         UnifiedGL *gl = (UnifiedGL *)v;
         int val = (int)((Fl_Value_Slider *)w)->value();
         gl->max_degree = val;
         gl->p_prime = max(2, val);
+        Fl_Box *b = (Fl_Box *)w->parent()->child(4); // prime_warn
+        if (!gl->mode_algebraic && !is_prime(gl->p_prime)) b->label("Warning: p is not prime!");
+        else b->label("");
         gl->trigger_regen();
       },
       gl);

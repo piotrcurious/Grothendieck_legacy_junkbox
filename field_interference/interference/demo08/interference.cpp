@@ -169,10 +169,17 @@ int main(int argc, char **argv) {
   m->add("Algebraic"); m->add("Finite"); m->value(0);
   m->callback([](Fl_Widget *w, void *v) { ((UnifiedGL *)v)->mode_algebraic = (((Fl_Choice *)w)->value() == 0); ((UnifiedGL *)v)->redraw(); }, gl);
   Fl_Value_Slider *s1 = new Fl_Value_Slider(950, 80, 200, 20, "Deg/P");
+  Fl_Box *prime_warn = new Fl_Box(950, 100, 200, 15, "");
+  prime_warn->labelcolor(FL_RED);
+  prime_warn->labelsize(12);
+
   s1->type(FL_HOR_NICE_SLIDER); s1->bounds(1, 20); s1->value(5);
   s1->callback([](Fl_Widget *w, void *v) {
     UnifiedGL *gl = (UnifiedGL *)v; gl->max_deg = gl->p_prime = (int)((Fl_Value_Slider *)w)->value(); gl->dirty_compute = true; gl->redraw();
-  }, gl);
+
+    Fl_Box *b = (Fl_Box *)w->parent()->child(w->parent()->find(w) + 1);
+    UnifiedGL *gl_ptr = (UnifiedGL *)v;
+    if (!gl_ptr->mode_algebraic && !is_prime(gl_ptr->p_prime)) b->label("Warning: p not prime"); else b->label("");}, gl);
   Fl_Input *in = new Fl_Input(950, 120, 200, 25, "Poly"); in->value("1,0,1");
   Fl_Browser *br = new Fl_Browser(870, 180, 310, 150, "Roots"); br->type(FL_HOLD_BROWSER);
   Context *ctx = new Context{gl, in, br};

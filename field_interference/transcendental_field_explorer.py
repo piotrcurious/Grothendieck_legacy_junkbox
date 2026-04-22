@@ -104,6 +104,10 @@ class TranscendentalFieldExplorer:
 
     def setup_widgets(self):
         px = 0.01; pw = 0.12
+        self.ax_warn = self.fig.add_axes([px, 0.97, pw, 0.02], facecolor='black')
+        self.ax_warn.axis('off')
+        self.prime_warn_text = self.ax_warn.text(0.5, 0.5, '', color='red', ha='center', va='center', fontsize=8, fontweight='bold')
+
         ax_mode = self.fig.add_axes([px, 0.80, pw, 0.17], facecolor='#111111')
         self.radio = RadioButtons(ax_mode, ('Algebraic', 'Finite', 'Transcendental', 'Complexity', 'Dominant', 'Resonance', 'Alignment', 'Phase', 'Radial', 'Parity', 'L1 Norm', 'Sensitivity', 'Entropy'), activecolor='#00d4ff')
         for l in self.radio.labels: l.set_color('white')
@@ -369,8 +373,19 @@ class TranscendentalFieldExplorer:
         self.ax.scatter(re, im, c=np.abs([e[0] for e in elements]), cmap='cool', s=80, edgecolors='white', zorder=3)
         self.ax.set_title(f"Finite Field Extension: $GF({p}^{n})$", color='white', fontsize=15); self.ax.set_aspect('equal'); self.ax.legend(facecolor='#111111', labelcolor='white')
 
+    def is_prime(self, n):
+        if n < 2: return False
+        for i in range(2, int(n**0.5) + 1):
+            if n % i == 0: return False
+        return True
+
     def update(self, val):
         self.ax.clear(); self.ax.set_facecolor('black')
+        if self.interactive:
+            if self.mode == 'Finite' and not self.is_prime(int(self.s1.val)):
+                self.prime_warn_text.set_text("Warning: p not prime")
+            else:
+                self.prime_warn_text.set_text("")
         v1 = int(self.s1.val) if self.interactive else 3; v2 = int(self.s2.val) if self.interactive else 5
         v3 = self.s3.val if self.interactive else 1.0; v4 = self.s4.val if self.interactive else 1.0; v5 = int(self.s5.val) if self.interactive else 300000
         cur_base = complex(self.sr.val, self.si.val) if self.interactive else self.current_base_val

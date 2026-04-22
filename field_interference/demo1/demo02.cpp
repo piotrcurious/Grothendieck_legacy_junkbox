@@ -111,6 +111,9 @@ int main() {
   Fl_Group *ctrl = new Fl_Group(800, 10, 290, 780); ctrl->box(FL_UP_BOX);
   Fl_Value_Slider *s_p = new Fl_Value_Slider(810, 40, 270, 25, "Field Prime p");
   s_p->type(FL_HOR_NICE_SLIDER); s_p->bounds(2, 101); s_p->value(11);
+
+  Fl_Box *prime_warn = new Fl_Box(810, 70, 270, 20, "");
+  prime_warn->labelcolor(FL_RED);
   Fl_Input *g_inp = new Fl_Input(810, 100, 270, 25, "Poly g(x)"); g_inp->value("-2, 0, 1");
   Fl_Input *f_inp = new Fl_Input(810, 160, 270, 25, "Func f(x)"); f_inp->value("1, 1");
   UIContext *ctx = new UIContext{gl, g_inp, f_inp};
@@ -123,7 +126,15 @@ int main() {
     };
     c->gl->g = parse(c->g_in->value()); c->gl->f = parse(c->f_in->value()); c->gl->redraw();
   };
-  s_p->callback([](Fl_Widget *w, void *v) { ((VarietyGL *)v)->p = (int)((Fl_Value_Slider *)w)->value(); ((VarietyGL *)v)->redraw(); }, gl);
+  s_p->callback([](Fl_Widget *w, void *v) {
+    VarietyGL *vgl = (VarietyGL *)v;
+    vgl->p = (int)((Fl_Value_Slider *)w)->value();
+    Fl_Box *b = (Fl_Box *)w->parent()->child(1); // prime_warn
+    auto is_p = [](int n) { if (n < 2) return false; for (int i = 2; i*i <= n; ++i) if (n%i == 0) return false; return true; };
+    if (!is_p(vgl->p)) b->label("Warning: p is not prime!");
+    else b->label("");
+    vgl->redraw();
+  }, gl);
   Fl_Button *upd_btn = new Fl_Button(810, 200, 270, 30, "Update Polynomials");
   upd_btn->callback(upd, ctx);
   Fl_Check_Button *split = new Fl_Check_Button(810, 250, 270, 25, "Splitting Field (C)");

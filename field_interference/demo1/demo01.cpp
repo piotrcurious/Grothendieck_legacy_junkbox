@@ -174,6 +174,23 @@ int main() {
   Fl_Box *info = new Fl_Box(910, 150, 170, 100, "Yellow line: Multiplicative orbit\nBlue lines: Additive lattice");
   info->align(FL_ALIGN_WRAP | FL_ALIGN_INSIDE | FL_ALIGN_TOP);
 
+  Fl_Box *prime_warn = new Fl_Box(910, 260, 170, 30, "");
+  prime_warn->labelcolor(FL_RED);
+  auto check_p = [](Fl_Value_Slider *s, Fl_Box *b) {
+    if (!is_prime((int)s->value())) b->label("Warning: p is not prime!");
+    else b->label("");
+  };
+  check_p(s_p, prime_warn);
+  s_p->callback([](Fl_Widget *w, void *v) {
+    auto *gl_win = (GaloisGL *)v;
+    gl_win->p = (int)((Fl_Value_Slider *)w)->value();
+    // Find the box to update - bit hacky but works for this demo
+    Fl_Box *b = (Fl_Box *)w->parent()->child(3);
+    if (!is_prime(gl_win->p)) b->label("Warning: p is not prime!");
+    else b->label("");
+    gl_win->redraw();
+  }, gl);
+
   panel->end();
   win->end();
   win->resizable(gl);
