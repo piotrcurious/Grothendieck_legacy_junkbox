@@ -82,6 +82,13 @@ namespace interference {
     void compute_threaded(int total_samples, int res, int max_deg, int max_c, std::vector<double>& heat, Mapper map_func) {
         compute_weighted_threaded(total_samples, res, max_deg, max_c, heat, map_func, [](cd){ return 1.0; }, false);
     }
+
+    inline void magma_color(double t, unsigned char* rgb) {
+        t = (t < 0) ? 0 : (t > 1 ? 1 : t);
+        rgb[0] = (unsigned char)(pow(t, 0.4) * 255);
+        rgb[1] = (unsigned char)(pow(t, 1.8) * 180);
+        rgb[2] = (unsigned char)(pow(1.0 - t, 1.2) * 220);
+    }
 }
 
 #endif
