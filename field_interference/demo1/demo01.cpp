@@ -1,14 +1,8 @@
-// demo01.cpp
-// Educational Demo: Finite Fields GF(p) and Extensions GF(p^n)
-//
-// This demo showcases the "interference" between:
-// 1. The additive structure (vector space over GF(p))
-// 2. The multiplicative structure (cyclic group of order p^n - 1)
-
 #include <FL/Fl.H>
 #include <FL/Fl_Box.H>
 #include <FL/Fl_Button.H>
 #include <FL/Fl_Choice.H>
+#include <FL/Fl_Check_Button.H>
 #include <FL/Fl_Gl_Window.H>
 #include <FL/Fl_Group.H>
 #include <FL/Fl_Value_Slider.H>
@@ -34,6 +28,7 @@ class GaloisGL : public Fl_Gl_Window {
 public:
   int p = 3;
   int n = 2;
+  bool show_inverse = false;
 
   GaloisGL(int X, int Y, int W, int H, const char *L = 0)
       : Fl_Gl_Window(X, Y, W, H, L) {}
@@ -58,7 +53,7 @@ public:
   }
 
   void draw_logic() {
-    int total = pow(p, n);
+    int total = (int)pow(p, n);
     if (total > 5000) total = 5000;
 
     vector<int> g = gf_find_irreducible(p, n);
@@ -108,7 +103,7 @@ public:
     if (total > 1 && total < 2000) {
       GFElement alpha = gf_find_primitive(p, n, g);
       GFElement current(n, 0);
-      current[0] = 1; // 1
+      current[0] = 1; // element '1'
 
       glBegin(GL_LINE_STRIP);
       for (int i = 0; i < total; ++i) {
@@ -127,7 +122,7 @@ public:
       glEnd();
     }
 
-    // 3. Elements
+    // 3. Elements and potentially their inverses
     glPointSize(8.0f);
     glBegin(GL_POINTS);
     for (int i = 0; i < total; ++i) {
@@ -137,12 +132,33 @@ public:
       else
         glColor3f(0, 1, 1);
       glVertex2f(z.real(), z.imag());
+
+      if (show_inverse && !gf_is_zero(elements[i])) {
+          GFElement inv_e = gf_poly_inv(elements[i], g, p);
+          cd z_inv = map_to_2d(inv_e);
+          glColor4f(1, 0.5, 0, 0.5);
+          glVertex2f(z_inv.real(), z_inv.imag());
+      }
     }
     glEnd();
+
+    if (show_inverse) {
+        glBegin(GL_LINES);
+        glColor4f(1, 1, 0, 0.1);
+        for (int i = 0; i < total; ++i) {
+            if (gf_is_zero(elements[i])) continue;
+            cd z = map_to_2d(elements[i]);
+            GFElement inv_e = gf_poly_inv(elements[i], g, p);
+            cd z_inv = map_to_2d(inv_e);
+            glVertex2f(z.real(), z.imag());
+            glVertex2f(z_inv.real(), z_inv.imag());
+        }
+        glEnd();
+    }
   }
 };
 
-int main() {
+int main(int argc, char **argv) {
   Fl_Window *win = new Fl_Window(1100, 900, "Galois Theory: Additive vs Multiplicative Interference");
   GaloisGL *gl = new GaloisGL(10, 10, 880, 880);
 
@@ -154,22 +170,6 @@ int main() {
   s_p->bounds(2, 31);
   s_p->step(1);
   s_p->value(3);
-  s_p->callback([](Fl_Widget *w, void *v) {
-    GaloisGL *g = (GaloisGL *)v;
-    g->p = (int)((Fl_Value_Slider *)w)->value();
-    g->redraw();
-  }, gl);
-
-  Fl_Value_Slider *s_n = new Fl_Value_Slider(910, 90, 170, 25, "Extension n");
-  s_n->type(FL_HOR_NICE_SLIDER);
-  s_n->bounds(1, 4);
-  s_n->step(1);
-  s_n->value(2);
-  s_n->callback([](Fl_Widget *w, void *v) {
-    GaloisGL *g = (GaloisGL *)v;
-    g->n = (int)((Fl_Value_Slider *)w)->value();
-    g->redraw();
-  }, gl);
 
   Fl_Box *info = new Fl_Box(910, 150, 170, 100, "Yellow line: Multiplicative orbit\nBlue lines: Additive lattice");
   info->align(FL_ALIGN_WRAP | FL_ALIGN_INSIDE | FL_ALIGN_TOP);
@@ -184,16 +184,32 @@ int main() {
   s_p->callback([](Fl_Widget *w, void *v) {
     auto *gl_win = (GaloisGL *)v;
     gl_win->p = (int)((Fl_Value_Slider *)w)->value();
-    // Find the box to update - bit hacky but works for this demo
     Fl_Box *b = (Fl_Box *)w->parent()->child(3);
     if (!is_prime(gl_win->p)) b->label("Warning: p is not prime!");
     else b->label("");
     gl_win->redraw();
   }, gl);
 
+  Fl_Value_Slider *s_n = new Fl_Value_Slider(910, 90, 170, 25, "Extension n");
+  s_n->type(FL_HOR_NICE_SLIDER);
+  s_n->bounds(1, 4);
+  s_n->step(1);
+  s_n->value(2);
+  s_n->callback([](Fl_Widget *w, void *v) {
+    GaloisGL *g = (GaloisGL *)v;
+    g->n = (int)((Fl_Value_Slider *)w)->value();
+    g->redraw();
+  }, gl);
+
+  Fl_Check_Button *chk_inv = new Fl_Check_Button(910, 300, 170, 25, "Show Inverses");
+  chk_inv->callback([](Fl_Widget *w, void *v) {
+      ((GaloisGL *)v)->show_inverse = ((Fl_Check_Button *)w)->value();
+      ((GaloisGL *)v)->redraw();
+  }, gl);
+
   panel->end();
   win->end();
   win->resizable(gl);
-  win->show();
+  win->show(argc, argv);
   return Fl::run();
 }
