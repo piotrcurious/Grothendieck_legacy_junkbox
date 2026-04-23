@@ -1,143 +1,132 @@
-// demo02.cpp
-// Grothendieck Viewpoint: Varieties and Quotient Rings
-//
-// Shows how functions in a quotient ring GF(p)[x]/(g) are well-defined
-// on the variety V(g) (the roots of g).
-
 #include <FL/Fl.H>
-#include <FL/Fl_Box.H>
-#include <FL/Fl_Button.H>
-#include <FL/Fl_Check_Button.H>
-#include <FL/Fl_Choice.H>
-#include <FL/Fl_Gl_Window.H>
-#include <FL/Fl_Group.H>
-#include <FL/Fl_Input.H>
-#include <FL/Fl_Value_Slider.H>
 #include <FL/Fl_Window.H>
+#include <FL/Fl_Box.H>
+#include <FL/Fl_Choice.H>
+#include <FL/Fl_Value_Slider.H>
+#include <FL/Fl_Button.H>
+#include <FL/Fl_Input.H>
+#include <FL/Fl_Check_Button.H>
+#include <FL/Fl_Gl_Window.H>
 #include <FL/gl.h>
 
-#include <algorithm>
-#include <cmath>
-#include <complex>
-#include <iostream>
-#include <sstream>
-#include <string>
 #include <vector>
+#include <string>
+#include <complex>
+#include <sstream>
+#include <algorithm>
+#include <iostream>
+
 #include "../complex_math.h"
+#include "../galois_math.h"
 
 using namespace std;
 
-struct GFpPoly {
-  int p;
-  vector<int> coeffs;
-  GFpPoly(int _p) : p(_p) {}
-  int eval(int x) const {
-    int res = 0;
-    for (int i = (int)coeffs.size() - 1; i >= 0; --i) {
-      res = (res * x + coeffs[i]) % p;
-    }
-    return (res + p) % p;
-  }
-};
-
-class VarietyGL : public Fl_Gl_Window {
+class GrothendieckGL : public Fl_Gl_Window {
 public:
-  int p = 11;
-  vector<int> g = {-2, 0, 1}; // x^2 - 2
-  vector<int> f = {1, 1};     // x + 1
-  bool show_splitting = false;
+    int p = 11;
+    GFElement g = {2, 0, 1};
+    GFElement A = {1, 2, 1};
+    bool show_splitting = false;
 
-  VarietyGL(int X, int Y, int W, int H, const char *L = 0)
-      : Fl_Gl_Window(X, Y, W, H, L) {}
+    GrothendieckGL(int X, int Y, int W, int H) : Fl_Gl_Window(X, Y, W, H) {}
 
-  void draw() override {
-    if (!valid()) { valid(1); }
-    glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-    glMatrixMode(GL_PROJECTION); glLoadIdentity();
-    glOrtho(-0.5, p - 0.5, -0.5, p - 0.5, -1, 1);
-    glMatrixMode(GL_MODELVIEW); glLoadIdentity();
-    draw_logic();
-  }
-
-  void draw_logic() {
-    GFpPoly poly_g(p); poly_g.coeffs = g;
-    GFpPoly poly_f(p); poly_f.coeffs = f;
-
-    if (!show_splitting) {
-      glPointSize(5.0f); glBegin(GL_POINTS);
-      for (int x = 0; x < p; ++x) {
-        int val = poly_f.eval(x); glColor3f(0.5, 0.5, 0.5); glVertex2f(x, val);
-      }
-      glEnd();
-      glPointSize(10.0f); glBegin(GL_POINTS);
-      for (int x = 0; x < p; ++x) {
-        if (poly_g.eval(x) == 0) {
-          int val = poly_f.eval(x); glColor3f(1.0, 1.0, 0.0); glVertex2f(x, val);
+    void draw() override {
+        if (!valid()) {
+            valid(1);
+            glEnable(GL_POINT_SMOOTH);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         }
-      }
-      glEnd();
-    } else {
-      glMatrixMode(GL_PROJECTION); glLoadIdentity(); glOrtho(-3, 3, -3, 3, -1, 1);
-      glBegin(GL_LINES); glColor4f(1, 1, 1, 0.2f);
-      glVertex2f(-10, 0); glVertex2f(10, 0); glVertex2f(0, -10); glVertex2f(0, 10);
-      glEnd();
-      vector<cd> g_coeffs; for (int c : g) g_coeffs.push_back(cd(c, 0));
-      auto roots = dk_solve_roots(g_coeffs);
-      glPointSize(12.0f); glBegin(GL_POINTS);
-      for (auto &r : roots) {
-        vector<cd> f_coeffs; for (int c : f) f_coeffs.push_back(cd(c, 0));
-        cd fr = complex_eval_poly(f_coeffs, r);
-        glColor3f(1, 1, 0); glVertex2f(r.real(), r.imag());
-        glColor3f(0, 1, 1); glVertex2f(fr.real(), fr.imag());
-      }
-      glEnd();
-      glLineWidth(1.5f); glBegin(GL_LINES);
-      for (auto &r : roots) {
-        vector<cd> f_coeffs; for (int c : f) f_coeffs.push_back(cd(c, 0));
-        cd fr = complex_eval_poly(f_coeffs, r);
-        glColor4f(1, 1, 1, 0.4f); glVertex2f(r.real(), r.imag()); glVertex2f(fr.real(), fr.imag());
-      }
-      glEnd();
+        glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        int W = w(), H = h();
+        if (!show_splitting) draw_field_view(W, H);
+        else draw_complex_splitting(W, H);
     }
-  }
+
+    void draw_field_view(int W, int H) {
+        glViewport(0, 0, W/2, H);
+        glMatrixMode(GL_PROJECTION); glLoadIdentity();
+        glOrtho(-0.5, p - 0.5, -1, p, -1, 1);
+        glColor4f(1, 1, 1, 0.05f);
+        glBegin(GL_LINES);
+        for(int i=0; i<p; ++i) { glVertex2f(i, -1); glVertex2f(i, p); glVertex2f(-1, i); glVertex2f(p, i); }
+        glEnd();
+        GFElement r = gf_poly_mod(A, g, p);
+        glPointSize(8.0f);
+        glBegin(GL_POINTS);
+        for (int x = 0; x < p; ++x) {
+            int valA = eval_gf(A, x), valr = eval_gf(r, x);
+            glColor4f(0.3f, 0.6f, 1.0f, 0.6f); glVertex2f(x, valA);
+            glColor4f(1.0f, 0.3f, 0.3f, 0.6f); glVertex2f(x, valr);
+            if (eval_gf(g, x) == 0) { glColor3f(1, 1, 0); glPointSize(12); glVertex2f(x, valA); glPointSize(8); }
+        }
+        glEnd();
+        glBegin(GL_LINES);
+        for (int x = 0; x < p; ++x) {
+            int valA = eval_gf(A, x), valr = eval_gf(r, x);
+            if (valA == valr) glColor4f(1, 1, 0, 0.2f); else glColor4f(1, 1, 1, 0.1f);
+            glVertex2f(x, valA); glVertex2f(x, valr);
+        }
+        glEnd();
+        glViewport(W/2, 0, W/2, H);
+        glMatrixMode(GL_PROJECTION); glLoadIdentity(); glOrtho(-1, 1, -1, 1, -1, 1);
+        glBegin(GL_LINE_LOOP); glColor4f(0.5, 0.5, 0.5, 0.5);
+        for(int i=0; i<64; ++i) { double th = 2*M_PI*i/64; glVertex2f(0.7*cos(th), 0.7*sin(th)); }
+        glEnd();
+        glPointSize(6.0f); glBegin(GL_POINTS);
+        for(int i=0; i<p; ++i) {
+            double th = 2*M_PI*i/p;
+            if (eval_gf(g, i) == 0) glColor3f(1, 1, 0); else glColor3f(0.4, 0.4, 0.4);
+            glVertex2f(0.7*cos(th), 0.7*sin(th));
+        }
+        glEnd();
+    }
+
+    void draw_complex_splitting(int W, int H) {
+        glViewport(0, 0, W, H);
+        glMatrixMode(GL_PROJECTION); glLoadIdentity();
+        double aspect = (double)W/H; glOrtho(-2*aspect, 2*aspect, -2, 2, -1, 1);
+        glColor4f(1, 1, 1, 0.2); glBegin(GL_LINES); glVertex2f(-10,0); glVertex2f(10,0); glVertex2f(0,-10); glVertex2f(0,10); glEnd();
+        vector<cd> gc; for(int c : g) gc.push_back(cd(c, 0));
+        auto roots = dk_solve_roots(gc);
+        vector<cd> Ac; for(int c : A) Ac.push_back(cd(c, 0));
+        glPointSize(10.0f);
+        for (auto& alpha : roots) {
+            cd valA = complex_eval_poly(Ac, alpha);
+            glBegin(GL_POINTS); glColor3f(1, 1, 0); glVertex2f(alpha.real(), alpha.imag()); glColor3f(0, 1, 1); glVertex2f(valA.real(), valA.imag()); glEnd();
+            glBegin(GL_LINES); glColor4f(1, 1, 1, 0.3); glVertex2f(alpha.real(), alpha.imag()); glVertex2f(valA.real(), valA.imag()); glEnd();
+        }
+    }
+
+    int eval_gf(const GFElement& poly, int x) {
+        int res = 0; long long xp = 1;
+        for (int c : poly) { res = (int)((res + 1LL * c * xp) % p); xp = (xp * x) % p; }
+        return (res + p) % p;
+    }
 };
 
-struct UIContext { VarietyGL *gl; Fl_Input *g_in; Fl_Input *f_in; };
+struct UI { GrothendieckGL* gl; Fl_Value_Slider* sp; Fl_Input* ig; Fl_Input* iA; };
 
-int main() {
-  Fl_Window *win = new Fl_Window(1100, 800, "Grothendieck Viewpoint: Varieties and Quotients");
-  VarietyGL *gl = new VarietyGL(10, 10, 780, 780);
-  Fl_Group *ctrl = new Fl_Group(800, 10, 290, 780); ctrl->box(FL_UP_BOX);
-  Fl_Value_Slider *s_p = new Fl_Value_Slider(810, 40, 270, 25, "Field Prime p");
-  s_p->type(FL_HOR_NICE_SLIDER); s_p->bounds(2, 101); s_p->value(11);
-
-  Fl_Box *prime_warn = new Fl_Box(810, 70, 270, 20, "");
-  prime_warn->labelcolor(FL_RED);
-  Fl_Input *g_inp = new Fl_Input(810, 100, 270, 25, "Poly g(x)"); g_inp->value("-2, 0, 1");
-  Fl_Input *f_inp = new Fl_Input(810, 160, 270, 25, "Func f(x)"); f_inp->value("1, 1");
-  UIContext *ctx = new UIContext{gl, g_inp, f_inp};
-  auto upd = [](Fl_Widget *, void *v) {
-    UIContext *c = (UIContext *)v;
-    auto parse = [](string s) {
-      vector<int> res; stringstream ss(s); string t;
-      while(getline(ss, t, ',')) { try { res.push_back(stoi(t)); } catch(...) {} }
-      return res;
+int main(int argc, char **argv) {
+    Fl_Window *win = new Fl_Window(1200, 800, "Grothendieck Viewpoint");
+    GrothendieckGL *gl = new GrothendieckGL(10, 10, 880, 780);
+    Fl_Group *ctrl = new Fl_Group(900, 10, 290, 780); ctrl->box(FL_UP_BOX);
+    Fl_Value_Slider *s_p = new Fl_Value_Slider(910, 40, 270, 25, "p"); s_p->type(FL_HOR_NICE_SLIDER); s_p->bounds(2, 53); s_p->value(11); s_p->step(1);
+    Fl_Input *in_g = new Fl_Input(910, 100, 270, 25, "g(x)"); in_g->value("-1, 0, 1");
+    Fl_Input *in_A = new Fl_Input(910, 160, 270, 25, "A(x)"); in_A->value("1, 2, 1");
+    Fl_Check_Button *chk = new Fl_Check_Button(910, 210, 270, 25, "Split");
+    UI *ui = new UI{gl, s_p, in_g, in_A};
+    auto upd = [](Fl_Widget*, void* v) {
+        UI* u = (UI*)v; u->gl->p = (int)u->sp->value();
+        auto parse = [](string s) {
+            GFElement res; for(auto &c:s) if(c==',') c=' ';
+            stringstream ss(s); int val; while(ss >> val) res.push_back(val);
+            return res;
+        };
+        u->gl->g = parse(u->ig->value()); u->gl->A = parse(u->iA->value()); u->gl->redraw();
     };
-    c->gl->g = parse(c->g_in->value()); c->gl->f = parse(c->f_in->value()); c->gl->redraw();
-  };
-  s_p->callback([](Fl_Widget *w, void *v) {
-    VarietyGL *vgl = (VarietyGL *)v;
-    vgl->p = (int)((Fl_Value_Slider *)w)->value();
-    Fl_Box *b = (Fl_Box *)w->parent()->child(1); // prime_warn
-    auto is_p = [](int n) { if (n < 2) return false; for (int i = 2; i*i <= n; ++i) if (n%i == 0) return false; return true; };
-    if (!is_p(vgl->p)) b->label("Warning: p is not prime!");
-    else b->label("");
-    vgl->redraw();
-  }, gl);
-  Fl_Button *upd_btn = new Fl_Button(810, 200, 270, 30, "Update Polynomials");
-  upd_btn->callback(upd, ctx);
-  Fl_Check_Button *split = new Fl_Check_Button(810, 250, 270, 25, "Splitting Field (C)");
-  split->callback([](Fl_Widget *w, void *v) { ((VarietyGL *)v)->show_splitting = ((Fl_Check_Button *)w)->value(); ((VarietyGL *)v)->redraw(); }, gl);
-  ctrl->end(); win->end(); win->resizable(gl); win->show(); return Fl::run();
+    s_p->callback(upd, ui); in_g->callback(upd, ui); in_A->callback(upd, ui);
+    chk->callback([](Fl_Widget* w, void* v){ ((GrothendieckGL*)v)->show_splitting = ((Fl_Check_Button*)w)->value(); ((GrothendieckGL*)v)->redraw(); }, gl);
+    ctrl->end(); win->end(); win->show(); return Fl::run();
 }

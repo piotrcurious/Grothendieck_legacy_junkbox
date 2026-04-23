@@ -1,11 +1,3 @@
-// Unified Field Explorer (High-Performance Edition)
-//
-// Features:
-//   - Hardware-Accelerated Root Density Heatmaps
-//   - Lattice Resonance Analysis (Rational, Gaussian, Eisenstein)
-//   - Advanced Mappings (Log-Polar, Mobius, Euler Space)
-//   - Finite Field Structure Exploration
-
 #include <FL/Fl.H>
 #include <FL/Fl_Box.H>
 #include <FL/Fl_Browser.H>
@@ -30,8 +22,11 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
 #include "../../galois_math.h"
 #include "../../complex_math.h"
+#include "../../interference_core.h"
+#include "../../mappings.h"
 
 using namespace std;
 
@@ -65,6 +60,7 @@ public:
   bool mode_algebraic = true;
   bool mode_resonance = false;
   bool show_edges = true;
+  bool show_inverse = false;
   int mapping_type = 0;
   double v_x = 0, v_y = 0, v_zoom = 1.0;
   int last_mx = 0, last_my = 0;
@@ -78,23 +74,11 @@ public:
   vector<int> adj_coeffs;
   vector<cd> adj_roots;
   cd chosen_alpha = 0;
+  std::vector<double> heat;
 
   UnifiedGL(int X, int Y, int W, int H) : Fl_Gl_Window(X, Y, W, H) {
     tex_data.resize(res * res * 3, 0);
-  }
-
-  cd apply_mapping(cd z) {
-    if (mapping_type == 1) {
-      double r = abs(z); double t = arg(z);
-      return cd(log(max(1e-15, r)), t);
-    }
-    if (mapping_type == 2) {
-      return (z - cd(0, 1)) / (z + cd(0, 1) + 1e-15);
-    }
-    if (mapping_type == 3) {
-      return exp(cd(0, 1) * M_PI * z / l_scale);
-    }
-    return z;
+    heat.resize(res * res);
   }
 
   void magma_color(double t, unsigned char *rgb) {
@@ -105,29 +89,23 @@ public:
   }
 
   void compute_heatmap() {
-    vector<double> heat(res * res, 0.0);
-    mt19937 rng(1337); uniform_int_distribution<int> c_dist(-max_c, max_c);
     int num_samples = mode_resonance ? quality_samples / 4 : quality_samples;
-    for (int i = 0; i < num_samples; ++i) {
-      int d = (i % max_deg) + 1; vector<cd> c(d + 1);
-      for (int k = 0; k <= d; ++k) c[k] = (double)c_dist(rng);
-      if (abs(c.back()) < 0.1) c.back() = 1.0;
-      for (auto &r : dk_solve_roots(c)) {
-        double val = 1.0;
-        if (mode_resonance) {
-          auto anchors = get_anchors(r);
-          double min_d = 1e9;
-          for (auto &an : anchors) min_d = min(min_d, abs(r - an));
-          val = -log10(min_d + 1e-15);
-        }
-        cd mr = apply_mapping(r);
-        int ix = (int)((mr.real() + 2.0) / 4.0 * res), iy = (int)((mr.imag() + 2.0) / 4.0 * res);
-        if (ix >= 0 && ix < res && iy >= 0 && iy < res) {
-          if (mode_resonance) heat[iy * res + ix] = max(heat[iy * res + ix], val);
-          else heat[iy * res + ix] += 1.0;
-        }
-      }
-    }
+    auto mapper = [&](cd z) {
+        cd mz = interference::apply_mapping(z, (interference::MappingType)mapping_type, l_scale);
+        if (show_inverse) mz = 1.0 / (mz + 1e-15);
+        return mz;
+    };
+
+    auto weighter = [&](cd z) {
+        if (!mode_resonance) return 1.0;
+        auto anchors = get_anchors(z);
+        double min_d = 1e9;
+        for (auto &an : anchors) min_d = min(min_d, abs(z - an));
+        return -log10(min_d + 1e-15);
+    };
+
+    interference::compute_weighted_threaded(num_samples, res, max_deg, max_c, heat, mapper, weighter, mode_resonance);
+
     double mv = 0; for (double v : heat) mv = max(mv, v);
     for (int i = 0; i < res * res; ++i) {
       double t = (mv > 0) ? (mode_resonance ? (heat[i]/mv) : log(1.0 + heat[i]*5)/log(1.0 + mv*5)) : 0;
@@ -174,7 +152,9 @@ public:
     vector<int> irred = gf_find_irreducible(p, n); GFElement alpha = gf_find_primitive(p, n, irred);
     auto map_to_2d = [&](const GFElement &e) {
       cd z(0, 0); for (int j = 0; j < n; ++j) z += polar(l_scale, 2 * M_PI * j / n) * (double)e[j];
-      return apply_mapping(z);
+      cd mz = interference::apply_mapping(z, (interference::MappingType)mapping_type, l_scale);
+      if (show_inverse) mz = 1.0 / (mz + 1e-15);
+      return mz;
     };
     if (show_edges && N < 5000) {
       GFElement curr(n, 0); curr[0] = 1; glLineWidth(1.0f); glBegin(GL_LINE_STRIP);
@@ -197,9 +177,13 @@ public:
     int deg = adj_coeffs.size() - 1, b = 3; glPointSize(6.0f); glBegin(GL_POINTS);
     int total = (int)pow(2 * b + 1, min(deg, 3));
     for (int i = 0; i < total; ++i) {
-      int t = i; vector<cd> pc(deg);
-      for (int k = 0; k < deg; ++k) { pc[k] = cd((t % (2 * b + 1)) - b, 0); t /= (2 * b + 1); }
-      cd z = apply_mapping(complex_eval_poly(pc, chosen_alpha)); glColor4f(1, 0.8f, 0.1f, 0.9f); glVertex2f(z.real(), z.imag());
+      int t = i; vector<int> pi_int(deg);
+      for (int k = 0; k < deg; ++k) { pi_int[k] = (t % (2 * b + 1)) - b; t /= (2 * b + 1); }
+      vector<cd> pc; for(int x:pi_int) pc.push_back(cd(x,0));
+      cd z = complex_eval_poly(pc, chosen_alpha);
+      cd mz = interference::apply_mapping(z, (interference::MappingType)mapping_type, l_scale);
+      if (show_inverse) mz = 1.0 / (mz + 1e-15);
+      glColor4f(1, 0.8f, 0.1f, 0.9f); glVertex2f(mz.real(), mz.imag());
     }
     glEnd();
   }
@@ -209,7 +193,9 @@ public:
     glVertex2f(-10, 0); glVertex2f(10, 0); glVertex2f(0, -10); glVertex2f(0, 10);
     glEnd();
     glBegin(GL_LINE_LOOP); for (int i = 0; i < 100; ++i) {
-      cd z = apply_mapping(polar(1.0, 2 * M_PI * i / 100.0)); glVertex2f(z.real(), z.imag());
+      cd z = interference::apply_mapping(polar(1.0, 2 * M_PI * i / 100.0), (interference::MappingType)mapping_type, l_scale);
+      if (show_inverse) z = 1.0 / (z + 1e-15);
+      glVertex2f(z.real(), z.imag());
     } glEnd();
   }
 };
@@ -223,24 +209,25 @@ int main(int argc, char **argv) {
   Fl_Choice *mode = new Fl_Choice(970, 40, 200, 25, "Mode");
   mode->add("Algebraic"); mode->add("Finite Field"); mode->value(0);
   Fl_Choice *map = new Fl_Choice(970, 75, 200, 25, "Mapping");
-  map->add("Standard"); map->add("Log-Polar"); map->add("Mobius"); map->add("Euler Space"); map->value(0);
-  Fl_Check_Button *res_btn = new Fl_Check_Button(970, 110, 200, 25, "Lattice Resonance");
-  Fl_Value_Slider *sq = new Fl_Value_Slider(970, 145, 200, 20, "Samples");
-  sq->type(FL_HOR_NICE_SLIDER); sq->bounds(1000, 200000); sq->step(1000); sq->value(40000);
-  Fl_Value_Slider *s1 = new Fl_Value_Slider(970, 175, 200, 20, "Deg/P");
-  Fl_Box *prime_warn = new Fl_Box(970, 195, 200, 15, "");
-  prime_warn->labelcolor(FL_RED);
-  prime_warn->labelsize(12);
+  map->add("Standard"); map->add("Log-Polar"); map->add("Mobius"); map->add("Euler Space"); map->add("Reciprocal"); map->add("Joukowsky"); map->value(0);
 
+  Fl_Check_Button *res_btn = new Fl_Check_Button(970, 110, 200, 25, "Lattice Resonance");
+  Fl_Check_Button *inv_btn = new Fl_Check_Button(970, 140, 200, 25, "Invert View");
+
+  Fl_Value_Slider *sq = new Fl_Value_Slider(970, 175, 200, 20, "Samples");
+  sq->type(FL_HOR_NICE_SLIDER); sq->bounds(1000, 200000); sq->step(1000); sq->value(40000);
+  Fl_Value_Slider *s1 = new Fl_Value_Slider(970, 205, 200, 20, "Deg/P");
   s1->type(FL_HOR_NICE_SLIDER); s1->bounds(1, 31); s1->value(5);
-  Fl_Value_Slider *s2 = new Fl_Value_Slider(970, 205, 200, 20, "Cof/N");
+  Fl_Value_Slider *s2 = new Fl_Value_Slider(970, 235, 200, 20, "Cof/N");
   s2->type(FL_HOR_NICE_SLIDER); s2->bounds(1, 15); s2->value(5);
-  Fl_Input *poly = new Fl_Input(970, 265, 200, 25, "Adjoin Poly"); poly->value("1,0,1");
-  Fl_Browser *roots = new Fl_Browser(870, 335, 310, 150, "Roots (Alpha)"); roots->type(FL_HOLD_BROWSER);
+
+  Fl_Input *poly = new Fl_Input(970, 295, 200, 25, "Adjoin Poly"); poly->value("1,0,1");
+  Fl_Browser *roots = new Fl_Browser(870, 365, 310, 150, "Roots (Alpha)"); roots->type(FL_HOLD_BROWSER);
   UI *ui = new UI{gl, poly, roots};
   auto upd = [](Fl_Widget *, void *v) {
-    UI *u = (UI *)v; string s = u->poly->value(), t; vector<int> co; stringstream ss(s);
-    while (getline(ss, t, ',')) { try { co.push_back(stoi(t)); } catch (...) {} }
+    UI *u = (UI *)v; string s = u->poly->value(), t; vector<int> co;
+    for(size_t i=0; i<s.size(); ++i) if(s[i]==',') s[i]=' ';
+    stringstream ss(s); int val; while(ss >> val) co.push_back(val);
     if (co.size() < 2) return;
     u->gl->adj_coeffs = co; vector<cd> cdc; for (int k : co) cdc.push_back((double)k);
     u->gl->adj_roots = dk_solve_roots(cdc); u->roots->clear();
@@ -251,13 +238,11 @@ int main(int argc, char **argv) {
   mode->callback([](Fl_Widget *w, void *v) { ((UnifiedGL *)v)->mode_algebraic = (((Fl_Choice *)w)->value() == 0); ((UnifiedGL *)v)->dirty_compute = true; ((UnifiedGL *)v)->redraw(); }, gl);
   map->callback([](Fl_Widget *w, void *v) { ((UnifiedGL *)v)->mapping_type = ((Fl_Choice *)w)->value(); ((UnifiedGL *)v)->dirty_compute = true; ((UnifiedGL *)v)->redraw(); }, gl);
   res_btn->callback([](Fl_Widget *w, void *v) { ((UnifiedGL *)v)->mode_resonance = ((Fl_Check_Button *)w)->value(); ((UnifiedGL *)v)->dirty_compute = true; ((UnifiedGL *)v)->redraw(); }, gl);
+  inv_btn->callback([](Fl_Widget *w, void *v) { ((UnifiedGL *)v)->show_inverse = ((Fl_Check_Button *)w)->value(); ((UnifiedGL *)v)->dirty_compute = true; ((UnifiedGL *)v)->redraw(); }, gl);
   sq->callback([](Fl_Widget *w, void *v) { ((UnifiedGL *)v)->quality_samples = (int)((Fl_Value_Slider *)w)->value(); ((UnifiedGL *)v)->dirty_compute = true; ((UnifiedGL *)v)->redraw(); }, gl);
-  s1->callback([](Fl_Widget *w, void *v) { ((UnifiedGL *)v)->max_deg = ((UnifiedGL *)v)->p_prime = (int)((Fl_Value_Slider *)w)->value(); ((UnifiedGL *)v)->dirty_compute = true; ((UnifiedGL *)v)->redraw();
-    Fl_Box *b = (Fl_Box *)w->parent()->child(w->parent()->find(w) + 1);
-    UnifiedGL *gl_ptr = (UnifiedGL *)v;
-    if (!gl_ptr->mode_algebraic && !is_prime(gl_ptr->p_prime)) b->label("Warning: p not prime"); else b->label("");}, gl);
+  s1->callback([](Fl_Widget *w, void *v) { ((UnifiedGL *)v)->max_deg = ((UnifiedGL *)v)->p_prime = (int)((Fl_Value_Slider *)w)->value(); ((UnifiedGL *)v)->dirty_compute = true; ((UnifiedGL *)v)->redraw(); }, gl);
   s2->callback([](Fl_Widget *w, void *v) { ((UnifiedGL *)v)->max_c = ((UnifiedGL *)v)->n_ext = (int)((Fl_Value_Slider *)w)->value(); ((UnifiedGL *)v)->dirty_compute = true; ((UnifiedGL *)v)->redraw(); }, gl);
-  Fl_Button *apply_btn = new Fl_Button(870, 295, 310, 30, "Apply Adjunction"); apply_btn->callback(upd, ui);
+  Fl_Button *apply_btn = new Fl_Button(870, 325, 310, 30, "Apply Adjunction"); apply_btn->callback(upd, ui);
   roots->callback([](Fl_Widget *w, void *v) { UnifiedGL *gl = (UnifiedGL *)v; int s = ((Fl_Browser *)w)->value(); if (s > 0) { gl->chosen_alpha = gl->adj_roots[s - 1]; gl->redraw(); } }, gl);
   ctrl->end(); win->end(); win->resizable(gl); win->show(); return Fl::run();
 }
