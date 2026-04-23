@@ -184,7 +184,7 @@ int main(int argc, char **argv) {
   s_p->callback([](Fl_Widget *w, void *v) {
     auto *gl_win = (GaloisGL *)v;
     gl_win->p = (int)((Fl_Value_Slider *)w)->value();
-    Fl_Box *b = (Fl_Box *)w->parent()->child(3);
+    Fl_Box *b = (Fl_Box *)w->parent()->child(2);
     if (!is_prime(gl_win->p)) b->label("Warning: p is not prime!");
     else b->label("");
     gl_win->redraw();

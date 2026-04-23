@@ -44,33 +44,6 @@ using cd = complex<double>;
 
 // ------------------ Mathematical Utilities ------------------ //
 
-vector<cd> durand_kerner(const vector<cd>& input_coeffs) {
-    vector<cd> coeffs = input_coeffs;
-    while (coeffs.size() > 1 && abs(coeffs.back()) < 1e-9) coeffs.pop_back();
-    int n = (int)coeffs.size() - 1;
-    if (n <= 0) return {};
-    vector<cd> roots(n);
-    cd leading = coeffs[n];
-    for (auto& c : coeffs) c /= leading;
-    double radius = 1.0;
-    for (int i = 0; i < n; ++i) radius = max(radius, 1.0 + abs(coeffs[i]));
-    for (int i = 0; i < n; ++i) roots[i] = polar(radius, 2.0 * M_PI * i / n + 0.1);
-    for (int iter = 0; iter < 100; ++iter) {
-        double max_change = 0.0;
-        for (int i = 0; i < n; ++i) {
-            cd p_val = coeffs[n];
-            for (int k = n - 1; k >= 0; --k) p_val = p_val * roots[i] + coeffs[k];
-            cd prod = 1.0;
-            for (int j = 0; j < n; ++j) if (i != j) prod *= (roots[i] - roots[j]);
-            cd delta = p_val / (prod == 0.0 ? 1e-18 : prod);
-            roots[i] -= delta;
-            max_change = max(max_change, abs(delta));
-        }
-        if (max_change < 1e-10) break;
-    }
-    return roots;
-}
-
 vector<double> companion_matrix(const vector<int>& coeffs) {
     int n = (int)coeffs.size() - 1;
     if (n < 1) return {};
@@ -78,13 +51,6 @@ vector<double> companion_matrix(const vector<int>& coeffs) {
     for (int i = 1; i < n; ++i) M[i * n + (i - 1)] = 1.0;
     for (int i = 0; i < n; ++i) M[i * n + (n - 1)] = -(double)coeffs[i] / coeffs[n];
     return M;
-}
-
-void magma_colormap(double t, unsigned char* rgb) {
-    t = t < 0 ? 0 : (t > 1 ? 1 : t);
-    rgb[0] = (unsigned char)(pow(t, 0.4) * 255.0);
-    rgb[1] = (unsigned char)(pow(t, 1.9) * 180.0);
-    rgb[2] = (unsigned char)(pow(1.0 - t, 1.2) * 220.0);
 }
 
 // ------------------ Main Visualizer ------------------ //
@@ -118,31 +84,17 @@ public:
 
     UnifiedGL(int X, int Y, int W, int H) : Fl_Gl_Window(X,Y,W,H) {
         tex_data.resize(res * res * 3, 0);
+        heat.resize(res * res);
     }
 
     void compute_heatmap() {
-        vector<double> heat(res * res, 0.0);
-        mt19937 rng(42);
-        uniform_int_distribution<int> c_dist(-max_c, max_c);
-
-        for (int i = 0; i < 30000; ++i) {
-            int d = (i % max_deg) + 1;
-            vector<cd> coeffs(d + 1);
-            for (int k = 0; k <= d; ++k) coeffs[k] = (double)c_dist(rng);
-            if (abs(coeffs.back()) < 0.5) coeffs.back() = 1.0;
-
-            for (auto& r : durand_kerner(coeffs)) {
-                int ix = (int)((r.real() + 2.0) / 4.0 * res);
-                int iy = (int)((r.imag() + 2.0) / 4.0 * res);
-                if (ix >= 0 && ix < res && iy >= 0 && iy < res) heat[iy * res + ix] += 1.0;
-            }
-        }
+        interference::compute_threaded(30000, res, max_deg, max_c, heat, [](cd r){ return r; });
 
         double max_v = 0;
         for (double v : heat) max_v = max(max_v, v);
         for (int i = 0; i < res * res; ++i) {
-            double t = log(1.0 + heat[i]) / log(1.0 + max_v);
-            magma_colormap(t, &tex_data[i * 3]);
+            double t = log(1.0 + heat[i]*5.0) / log(1.0 + max_v*5.0);
+            interference::magma_color(t, &tex_data[i * 3]);
         }
 
         if (tex_id == 0) glGenTextures(1, &tex_id);
@@ -327,7 +279,7 @@ int main(int argc, char** argv) {
         stringstream ss(s); while(getline(ss, t, ',')) { try{co.push_back(stoi(t));}catch(...){} }
         if(co.size() < 2) return;
         c->gl->adj_coeffs = co; vector<cd> cd_co; for(int k:co) cd_co.push_back((double)k);
-        c->gl->adj_roots = durand_kerner(cd_co);
+        c->gl->adj_roots = dk_solve_roots(cd_co);
         c->root_br->clear();
         for(size_t i=0; i<c->gl->adj_roots.size(); ++i) {
             ostringstream os; os << "Root " << i << ": " << fixed << setprecision(3) << c->gl->adj_roots[i];
