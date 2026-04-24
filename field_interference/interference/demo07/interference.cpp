@@ -62,6 +62,7 @@ public:
   bool show_edges = true;
   bool show_inverse = false;
   int mapping_type = 0;
+  int colormap_type = 0;
   double v_x = 0, v_y = 0, v_zoom = 1.0;
   int last_mx = 0, last_my = 0;
   int max_deg = 5, max_c = 5, p_prime = 3, n_ext = 2;
@@ -79,13 +80,6 @@ public:
   UnifiedGL(int X, int Y, int W, int H) : Fl_Gl_Window(X, Y, W, H) {
     tex_data.resize(res * res * 3, 0);
     heat.resize(res * res);
-  }
-
-  void magma_color(double t, unsigned char *rgb) {
-    t = max(0.0, min(1.0, t));
-    rgb[0] = (unsigned char)(pow(t, 0.4) * 255);
-    rgb[1] = (unsigned char)(pow(t, 1.8) * 180);
-    rgb[2] = (unsigned char)(pow(1.0 - t, 1.2) * 220);
   }
 
   void compute_heatmap() {
@@ -108,8 +102,8 @@ public:
 
     double mv = 0; for (double v : heat) mv = max(mv, v);
     for (int i = 0; i < res * res; ++i) {
-      double t = (mv > 0) ? (mode_resonance ? (heat[i]/mv) : log(1.0 + heat[i]*5)/log(1.0 + mv*5)) : 0;
-      magma_color(t, &tex_data[i * 3]);
+      double t = (mv > 0) ? (mode_resonance ? (heat[i]/mv) : log(1.0 + heat[i]*5.0)/log(1.0 + mv*5.0)) : 0;
+      interference::apply_color(colormap_type, t, &tex_data[i * 3]);
     }
     if (tex_id == 0) glGenTextures(1, &tex_id);
     glBindTexture(GL_TEXTURE_2D, tex_id);
@@ -151,7 +145,7 @@ public:
     int N = (int)pow(p, n); if (N > 10000) N = 10000;
     vector<int> irred = gf_find_irreducible(p, n); GFElement alpha = gf_find_primitive(p, n, irred);
     auto map_to_2d = [&](const GFElement &e) {
-      cd z(0, 0); for (int j = 0; j < n; ++j) z += polar(l_scale, 2 * M_PI * j / n) * (double)e[j];
+      cd z(0, 0); for (int j = 0; j < n; ++j) z += ((n == 2) ? (j == 0 ? cd(1.0, 0.0) : cd(0.0, 1.0)) : polar(1.0, 2.0 * M_PI * j / n)) * (double)e[j] * l_scale;
       cd mz = interference::apply_mapping(z, (interference::MappingType)mapping_type, l_scale);
       if (show_inverse) mz = 1.0 / (mz + 1e-15);
       return mz;
@@ -211,18 +205,22 @@ int main(int argc, char **argv) {
   Fl_Choice *map = new Fl_Choice(970, 75, 200, 25, "Mapping");
   map->add("Standard"); map->add("Log-Polar"); map->add("Mobius"); map->add("Euler Space"); map->add("Reciprocal"); map->add("Joukowsky"); map->value(0);
 
-  Fl_Check_Button *res_btn = new Fl_Check_Button(970, 110, 200, 25, "Lattice Resonance");
-  Fl_Check_Button *inv_btn = new Fl_Check_Button(970, 140, 200, 25, "Invert View");
+  Fl_Choice *cmap = new Fl_Choice(970, 110, 200, 25, "Colormap");
+  cmap->add("Magma"); cmap->add("Plasma"); cmap->add("Viridis"); cmap->value(0);
+  cmap->callback([](Fl_Widget *w, void *v) { ((UnifiedGL *)v)->colormap_type = ((Fl_Choice *)w)->value(); ((UnifiedGL *)v)->dirty_compute = true; ((UnifiedGL *)v)->redraw(); }, gl);
 
-  Fl_Value_Slider *sq = new Fl_Value_Slider(970, 175, 200, 20, "Samples");
+  Fl_Check_Button *res_btn = new Fl_Check_Button(970, 145, 200, 25, "Lattice Resonance");
+  Fl_Check_Button *inv_btn = new Fl_Check_Button(970, 175, 200, 25, "Invert View");
+
+  Fl_Value_Slider *sq = new Fl_Value_Slider(970, 210, 200, 20, "Samples");
   sq->type(FL_HOR_NICE_SLIDER); sq->bounds(1000, 200000); sq->step(1000); sq->value(40000);
-  Fl_Value_Slider *s1 = new Fl_Value_Slider(970, 205, 200, 20, "Deg/P");
+  Fl_Value_Slider *s1 = new Fl_Value_Slider(970, 240, 200, 20, "Deg/P");
   s1->type(FL_HOR_NICE_SLIDER); s1->bounds(1, 31); s1->value(5);
-  Fl_Value_Slider *s2 = new Fl_Value_Slider(970, 235, 200, 20, "Cof/N");
+  Fl_Value_Slider *s2 = new Fl_Value_Slider(970, 270, 200, 20, "Cof/N");
   s2->type(FL_HOR_NICE_SLIDER); s2->bounds(1, 15); s2->value(5);
 
-  Fl_Input *poly = new Fl_Input(970, 295, 200, 25, "Adjoin Poly"); poly->value("1,0,1");
-  Fl_Browser *roots = new Fl_Browser(870, 365, 310, 150, "Roots (Alpha)"); roots->type(FL_HOLD_BROWSER);
+  Fl_Input *poly = new Fl_Input(970, 330, 200, 25, "Adjoin Poly"); poly->value("1,0,1");
+  Fl_Browser *roots = new Fl_Browser(870, 400, 310, 150, "Roots (Alpha)"); roots->type(FL_HOLD_BROWSER);
   UI *ui = new UI{gl, poly, roots};
   auto upd = [](Fl_Widget *, void *v) {
     UI *u = (UI *)v; string s = u->poly->value(), t; vector<int> co;
@@ -242,7 +240,7 @@ int main(int argc, char **argv) {
   sq->callback([](Fl_Widget *w, void *v) { ((UnifiedGL *)v)->quality_samples = (int)((Fl_Value_Slider *)w)->value(); ((UnifiedGL *)v)->dirty_compute = true; ((UnifiedGL *)v)->redraw(); }, gl);
   s1->callback([](Fl_Widget *w, void *v) { ((UnifiedGL *)v)->max_deg = ((UnifiedGL *)v)->p_prime = (int)((Fl_Value_Slider *)w)->value(); ((UnifiedGL *)v)->dirty_compute = true; ((UnifiedGL *)v)->redraw(); }, gl);
   s2->callback([](Fl_Widget *w, void *v) { ((UnifiedGL *)v)->max_c = ((UnifiedGL *)v)->n_ext = (int)((Fl_Value_Slider *)w)->value(); ((UnifiedGL *)v)->dirty_compute = true; ((UnifiedGL *)v)->redraw(); }, gl);
-  Fl_Button *apply_btn = new Fl_Button(870, 325, 310, 30, "Apply Adjunction"); apply_btn->callback(upd, ui);
+  Fl_Button *apply_btn = new Fl_Button(870, 360, 310, 30, "Apply Adjunction"); apply_btn->callback(upd, ui);
   roots->callback([](Fl_Widget *w, void *v) { UnifiedGL *gl = (UnifiedGL *)v; int s = ((Fl_Browser *)w)->value(); if (s > 0) { gl->chosen_alpha = gl->adj_roots[s - 1]; gl->redraw(); } }, gl);
   ctrl->end(); win->end(); win->resizable(gl); win->show(); return Fl::run();
 }

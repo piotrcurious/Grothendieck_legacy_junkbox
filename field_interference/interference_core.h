@@ -17,7 +17,7 @@ namespace interference {
     template<typename Mapper, typename Weighter>
     void compute_weighted_threaded(int total_samples, int res, int max_deg, int max_c,
                                   std::vector<double>& heat, Mapper map_func, Weighter weight_func,
-                                  bool use_max = false) {
+                                  bool use_max = false, double cx = 0.0, double cy = 0.0, double range = 2.0) {
         int num_threads = std::thread::hardware_concurrency();
         if (num_threads < 1) num_threads = 1;
         int samples_per_thread = total_samples / num_threads;
@@ -44,9 +44,8 @@ namespace interference {
                     for (const auto& r : roots) {
                         cd mr = map_func(r);
                         double w = weight_func(r);
-                        double limit = 2.0;
-                        int ix = (int)((mr.real() + limit) / (2.0 * limit) * (res - 1));
-                        int iy = (int)((mr.imag() + limit) / (2.0 * limit) * (res - 1));
+                        int ix = (int)((mr.real() - (cx - range)) / (2.0 * range) * (res - 1));
+                        int iy = (int)((mr.imag() - (cy - range)) / (2.0 * range) * (res - 1));
                         if (ix >= 0 && ix < res && iy >= 0 && iy < res) {
                             if (use_max) {
                                 if (w > thread_heats[t][iy * res + ix]) thread_heats[t][iy * res + ix] = w;
@@ -79,8 +78,8 @@ namespace interference {
 
     // Convenience for backward compatibility
     template<typename Mapper>
-    void compute_threaded(int total_samples, int res, int max_deg, int max_c, std::vector<double>& heat, Mapper map_func) {
-        compute_weighted_threaded(total_samples, res, max_deg, max_c, heat, map_func, [](cd){ return 1.0; }, false);
+    void compute_threaded(int total_samples, int res, int max_deg, int max_c, std::vector<double>& heat, Mapper map_func, double cx = 0.0, double cy = 0.0, double range = 2.0) {
+        compute_weighted_threaded(total_samples, res, max_deg, max_c, heat, map_func, [](cd){ return 1.0; }, false, cx, cy, range);
     }
 
     inline void magma_color(double t, unsigned char* rgb) {
@@ -88,6 +87,29 @@ namespace interference {
         rgb[0] = (unsigned char)(pow(t, 0.4) * 255);
         rgb[1] = (unsigned char)(pow(t, 1.8) * 180);
         rgb[2] = (unsigned char)(pow(1.0 - t, 1.2) * 220);
+    }
+
+    inline void plasma_color(double t, unsigned char* rgb) {
+        t = (t < 0) ? 0 : (t > 1 ? 1 : t);
+        rgb[0] = (unsigned char)(pow(t, 0.3) * 255);
+        rgb[1] = (unsigned char)(t * 150);
+        rgb[2] = (unsigned char)((1.0 - pow(t, 2.0)) * 255);
+    }
+
+    inline void viridis_color(double t, unsigned char* rgb) {
+        t = (t < 0) ? 0 : (t > 1 ? 1 : t);
+        rgb[0] = (unsigned char)((1.0 - t) * 70);
+        rgb[1] = (unsigned char)(t * 220);
+        rgb[2] = (unsigned char)(pow(t, 0.5) * 150 + 50);
+    }
+
+    inline void apply_color(int type, double t, unsigned char* rgb) {
+        switch(type) {
+            case 1: plasma_color(t, rgb); break;
+            case 2: viridis_color(t, rgb); break;
+            case 0:
+            default: magma_color(t, rgb); break;
+        }
     }
 }
 

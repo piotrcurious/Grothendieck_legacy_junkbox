@@ -96,6 +96,12 @@ class UnifiedFieldExplorer:
         self.radio = RadioButtons(ax_mode, ('Algebraic', 'Finite'), activecolor='#00d4ff')
         for label in self.radio.labels: label.set_color('white')
         self.radio.on_clicked(self.change_mode)
+
+        ax_map = self.fig.add_axes([0.02, 0.6, 0.1, 0.15], facecolor='#111111')
+        self.map_radio = RadioButtons(ax_map, ('Standard', 'Log-Polar', 'Mobius', 'Joukowsky'), activecolor='#00ff88')
+        for label in self.map_radio.labels: label.set_color('white')
+        self.map_radio.on_clicked(self.update)
+
         self.ax_s1 = self.fig.add_axes([0.25, 0.12, 0.5, 0.02], facecolor='#222222')
         self.s1 = Slider(self.ax_s1, 'Degree/p ', 1, 31, valinit=3, valstep=1)
         self.ax_s2 = self.fig.add_axes([0.25, 0.08, 0.5, 0.02], facecolor='#222222')
@@ -103,6 +109,15 @@ class UnifiedFieldExplorer:
         self.ax_s3 = self.fig.add_axes([0.25, 0.04, 0.5, 0.02], facecolor='#222222')
         self.s3 = Slider(self.ax_s3, 'Blur ', 0.1, 3.0, valinit=1.0)
         for s in [self.s1, self.s2, self.s3]: s.on_changed(self.update)
+
+    def apply_mapping(self, z, mapping):
+        if mapping == 'Log-Polar':
+            return np.log(np.abs(z) + 1e-15) + 1j * np.angle(z)
+        elif mapping == 'Mobius':
+            return (z - 1j) / (z + 1j + 1e-15)
+        elif mapping == 'Joukowsky':
+            return z + 1.0 / (z + 1e-15)
+        return z
 
     def change_mode(self, label):
         self.mode = label
@@ -116,24 +131,28 @@ class UnifiedFieldExplorer:
             self.ax_s3.set_visible(False)
         self.update(None)
 
-    def draw_algebraic(self, deg, coeff, sigma):
+    def draw_algebraic(self, deg, coeff, sigma, mapping):
         res = 400; Z = np.zeros((res, res))
         for d in range(1, deg + 1):
-            num_samples = 10000 // d
+            num_samples = 15000 // d
+            all_roots = []
             for _ in range(num_samples):
                 poly = np.random.randint(-coeff, coeff + 1, d + 1)
                 if poly[-1] == 0: poly[-1] = 1
-                roots = np.roots(poly[::-1])
-                for r in roots:
-                    if abs(r.real) <= 2 and abs(r.imag) <= 2:
-                        ix = int((r.real + 2) / 4 * (res - 1))
-                        iy = int((r.imag + 2) / 4 * (res - 1))
-                        Z[iy, ix] += 1
+                all_roots.extend(np.roots(poly[::-1]))
+            roots = np.array(all_roots)
+            mrs = self.apply_mapping(roots, mapping)
+            mask = (mrs.real >= -2) & (mrs.real <= 2) & (mrs.imag >= -2) & (mrs.imag <= 2)
+            valid = mrs[mask]
+            ix = ((valid.real + 2) / 4 * (res - 1)).astype(int)
+            iy = ((valid.imag + 2) / 4 * (res - 1)).astype(int)
+            np.add.at(Z, (iy, ix), 1)
+
         Z_blur = gaussian_filter(Z, sigma=sigma)
         self.ax.imshow(Z_blur, extent=[-2, 2, -2, 2], origin='lower', cmap='magma', norm=LogNorm(vmin=0.1))
-        self.ax.set_title("Field Interference: Algebraic Number Density in Complex Plane", color='white')
+        self.ax.set_title(f"Field Interference ({mapping}): Algebraic Number Density", color='white')
 
-    def draw_finite(self, p, n):
+    def draw_finite(self, p, n, mapping):
         primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]; p = min(primes, key=lambda x:abs(x-p))
         g = gf_find_irreducible(p, n); alpha_gen = gf_find_primitive(p, n, g)
         elements = []
@@ -141,8 +160,11 @@ class UnifiedFieldExplorer:
             v = 0; temp = i; cs = []
             for j in range(n):
                 c = temp % p; temp //= p; cs.append(c)
-                v += c * (np.exp(1j * 2 * np.pi * j / n) if n > 2 else (1 if j==0 else 1j))
-            elements.append((v, cs))
+                if n == 2:
+                    v += c * (1 if j==0 else 1j)
+                else:
+                    v += c * (np.exp(1j * 2 * np.pi * j / n))
+            elements.append((self.apply_mapping(v, mapping), cs))
         re, im = [e[0].real for e in elements], [e[0].imag for e in elements]
         self.ax.scatter(re, im, c=np.abs([e[0] for e in elements]), cmap='cool', s=100, edgecolors='white', zorder=3)
         if p**n < 1500:
@@ -150,15 +172,16 @@ class UnifiedFieldExplorer:
                 for j in range(i + 1, len(elements)):
                     if sum(elements[i][1][k] != elements[j][1][k] for k in range(n)) == 1:
                         self.ax.plot([re[i], re[j]], [im[i], im[j]], color='#00d4ff', alpha=0.1, lw=0.5)
-        self.ax.set_title(f"Finite Field Extension: $GF({p}^{n})$", color='white'); self.ax.set_aspect('equal')
+        self.ax.set_title(f"Finite Field Extension ({mapping}): $GF({p}^{n})$", color='white'); self.ax.set_aspect('equal')
 
     def update(self, val):
         self.ax.clear(); self.ax.set_facecolor('black')
         v1 = int(self.s1.val) if self.interactive else 3
         v2 = int(self.s2.val) if self.interactive else 5
         v3 = self.s3.val if self.interactive else 1.0
-        if self.mode == 'Algebraic': self.draw_algebraic(v1, v2, v3)
-        else: self.draw_finite(v1, v2)
+        mapping = self.map_radio.val if self.interactive else 'Standard'
+        if self.mode == 'Algebraic': self.draw_algebraic(v1, v2, v3, mapping)
+        else: self.draw_finite(v1, v2, mapping)
         self.ax.tick_params(colors='white')
         if self.interactive: self.fig.canvas.draw_idle()
 

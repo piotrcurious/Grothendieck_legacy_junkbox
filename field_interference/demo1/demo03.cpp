@@ -48,6 +48,7 @@ public:
   IntPoly current_poly;
   vector<cd> roots;
   vector<double> matrix;
+  double trace = 0, det = 0;
 
   ShowcaseGL(int X, int Y, int W, int H)
       : Fl_Gl_Window(X, Y, W, H), current_poly(2) {
@@ -59,6 +60,11 @@ public:
     vector<cd> c_cd; for (int c : current_poly.coeffs) c_cd.push_back(cd(c, 0));
     roots = dk_solve_roots(c_cd);
     matrix = get_companion_matrix(current_poly);
+    int n = current_poly.deg();
+    if (n >= 1) {
+        trace = - (double)current_poly.coeffs[n-1] / current_poly.coeffs[n];
+        det = (n % 2 == 0 ? 1 : -1) * (double)current_poly.coeffs[0] / current_poly.coeffs[n];
+    }
     redraw();
   }
 
@@ -110,6 +116,8 @@ public:
       }
     }
     draw_text(0.1, 0.92, "Companion Matrix M (Eigenvalues = Roots)");
+    ostringstream ss; ss << fixed << setprecision(2) << "Trace: " << trace << "  Det: " << det;
+    draw_text(0.1, 0.05, ss.str());
   }
 
   void draw_text(float x, float y, const string &s) {

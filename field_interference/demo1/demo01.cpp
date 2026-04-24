@@ -75,7 +75,7 @@ public:
         z = cd(e[0] - p/2.0, 0);
       } else {
         for (int j = 0; j < n; ++j) {
-          z += cd(e[j], 0) * polar(1.0, 2.0 * M_PI * j / n);
+          z += cd(e[j], 0) * ((n == 2) ? (j == 0 ? cd(1.0, 0.0) : cd(0.0, 1.0)) : polar(1.0, 2.0 * M_PI * j / n));
         }
       }
       return z;
@@ -111,13 +111,12 @@ public:
         glColor4f(1.0f, 0.8f - 0.4f * t, 0.0f, 0.7f);
         cd z = map_to_2d(current);
         glVertex2f(z.real(), z.imag());
-        GFElement next = gf_multiply(current, alpha, g, p);
-        if (gf_is_one(next)) {
-          cd z0 = map_to_2d(next);
+        current = gf_multiply(current, alpha, g, p);
+        if (gf_is_one(current)) {
+          cd z0 = map_to_2d(current);
           glVertex2f(z0.real(), z0.imag());
           break;
         }
-        current = next;
       }
       glEnd();
     }
