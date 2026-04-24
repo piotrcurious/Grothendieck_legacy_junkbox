@@ -76,15 +76,22 @@ class TranscendentalFieldExplorer:
         self.update(None)
 
     def setup_widgets(self):
-        ax_mode = self.fig.add_axes([0.02, 0.8, 0.1, 0.1], facecolor='#111111')
+        ax_mode = self.fig.add_axes([0.02, 0.85, 0.12, 0.1], facecolor='#111111')
         self.radio = RadioButtons(ax_mode, ('Algebraic', 'Finite', 'Transcendental'), activecolor='#00d4ff')
         for label in self.radio.labels: label.set_color('white')
         self.radio.on_clicked(self.change_mode)
-        self.ax_base = self.fig.add_axes([0.02, 0.6, 0.1, 0.15], facecolor='#111111')
+
+        ax_map = self.fig.add_axes([0.02, 0.7, 0.12, 0.12], facecolor='#111111')
+        self.map_radio = RadioButtons(ax_map, ('Standard', 'Log-Polar', 'Mobius', 'Joukowsky', 'Reciprocal'), activecolor='#00ff88')
+        for label in self.map_radio.labels: label.set_color('white')
+        self.map_radio.on_clicked(self.update)
+
+        self.ax_base = self.fig.add_axes([0.02, 0.5, 0.12, 0.15], facecolor='#111111')
         self.base_radio = RadioButtons(self.ax_base, list(self.bases.keys()), activecolor='#ff007f')
         for label in self.base_radio.labels: label.set_color('white')
         self.base_radio.on_clicked(self.change_base)
         self.ax_base.set_visible(False)
+
         self.ax_s1 = self.fig.add_axes([0.25, 0.12, 0.5, 0.02], facecolor='#222222')
         self.s1 = Slider(self.ax_s1, 'Degree/p ', 1, 11, valinit=3, valstep=1)
         self.ax_s2 = self.fig.add_axes([0.25, 0.08, 0.5, 0.02], facecolor='#222222')
@@ -110,65 +117,93 @@ class TranscendentalFieldExplorer:
             self.ax_s3.set_visible(True)
         self.update(None)
 
+    def apply_mapping(self, z, mapping):
+        if mapping == 'Log-Polar':
+            return np.log(np.abs(z) + 1e-15) + 1j * np.angle(z)
+        elif mapping == 'Mobius':
+            return (z - 1j) / (z + 1j + 1e-15)
+        elif mapping == 'Joukowsky':
+            return z + 1.0 / (z + 1e-15)
+        elif mapping == 'Reciprocal':
+            return 1.0 / (z + 1e-15)
+        return z
+
     def change_base(self, label):
         self.current_base_name = label
         self.current_base_val = self.bases[label]
         self.update(None)
 
-    def draw_transcendental(self, deg, coeff_range, sigma):
+    def draw_transcendental(self, deg, coeff_range, sigma, mapping):
         res = 500; Z = np.zeros((res, res))
         limit = (np.abs(self.current_base_val) ** deg) * coeff_range * 0.5
         x_range = (-limit, limit); y_range = (-limit, limit)
-        num_samples = 50000; base = self.current_base_val
-        for _ in range(num_samples):
-            coeffs = np.random.randint(-coeff_range, coeff_range + 1, deg + 1)
-            val = np.polyval(coeffs, base)
-            if x_range[0] <= val.real <= x_range[1] and y_range[0] <= val.imag <= y_range[1]:
-                ix = int((val.real - x_range[0]) / (x_range[1] - x_range[0]) * (res - 1))
-                iy = int((val.imag - y_range[0]) / (y_range[1] - y_range[0]) * (res - 1))
-                Z[iy, ix] += 1
+        num_samples = 100000; base = self.current_base_val
+
+        # Vectorized generation
+        coeffs = np.random.randint(-coeff_range, coeff_range + 1, (num_samples, deg + 1))
+        powers = base ** np.arange(deg + 1)
+        vals = coeffs @ powers
+        mvals = self.apply_mapping(vals, mapping)
+
+        mask = (mvals.real >= x_range[0]) & (mvals.real <= x_range[1]) & \
+               (mvals.imag >= y_range[0]) & (mvals.imag <= y_range[1])
+        valid_vals = mvals[mask]
+
+        ix = ((valid_vals.real - x_range[0]) / (x_range[1] - x_range[0]) * (res - 1)).astype(int)
+        iy = ((valid_vals.imag - y_range[0]) / (y_range[1] - y_range[0]) * (res - 1)).astype(int)
+        np.add.at(Z, (iy, ix), 1)
+
         Z_blur = gaussian_filter(Z, sigma=sigma)
         self.ax.imshow(Z_blur, extent=[x_range[0], x_range[1], y_range[0], y_range[1]], origin='lower', cmap='plasma', norm=LogNorm(vmin=0.1))
-        self.ax.set_title(rf"Transcendental Field Interference: $\mathbb{{Q}}({self.current_base_name})$", color='white')
+        self.ax.set_title(rf"Transcendental Field Interference ({mapping}): $\mathbb{{Q}}({self.current_base_name})$", color='white')
 
-    def draw_algebraic(self, deg, coeff, sigma):
+    def draw_algebraic(self, deg, coeff, sigma, mapping):
         res = 400; Z = np.zeros((res, res))
         for d in range(1, deg + 1):
-            num_samples = 10000 // d
+            num_samples = 20000 // d
+            all_roots = []
             for _ in range(num_samples):
                 poly = np.random.randint(-coeff, coeff + 1, d + 1)
                 if poly[-1] == 0: poly[-1] = 1
-                roots = np.roots(poly[::-1])
-                for r in roots:
-                    if abs(r.real) <= 2 and abs(r.imag) <= 2:
-                        ix = int((r.real + 2) / 4 * (res - 1))
-                        iy = int((r.imag + 2) / 4 * (res - 1))
-                        Z[iy, ix] += 1
+                all_roots.extend(np.roots(poly[::-1]))
+
+            roots = np.array(all_roots)
+            mrs = self.apply_mapping(roots, mapping)
+            mask = (mrs.real >= -2) & (mrs.real <= 2) & (mrs.imag >= -2) & (mrs.imag <= 2)
+            valid = mrs[mask]
+            ix = ((valid.real + 2) / 4 * (res - 1)).astype(int)
+            iy = ((valid.imag + 2) / 4 * (res - 1)).astype(int)
+            np.add.at(Z, (iy, ix), 1)
+
         Z_blur = gaussian_filter(Z, sigma=sigma)
         self.ax.imshow(Z_blur, extent=[-2, 2, -2, 2], origin='lower', cmap='magma', norm=LogNorm(vmin=0.1))
-        self.ax.set_title("Field Interference: Algebraic Number Density", color='white')
+        self.ax.set_title(f"Field Interference ({mapping}): Algebraic Number Density", color='white')
 
-    def draw_finite(self, p, n):
+    def draw_finite(self, p, n, mapping):
         primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]; p = min(primes, key=lambda x:abs(x-p))
         elements = []
         for i in range(min(p**n, 5000)):
             v = 0; temp = i
             for j in range(n):
                 c = temp % p; temp //= p
-                v += c * (np.exp(1j * 2 * np.pi * j / n) if n > 2 else (1 if j==0 else 1j))
-            elements.append(v)
+                if n == 2:
+                    v += c * (1 if j==0 else 1j)
+                else:
+                    v += c * (np.exp(1j * 2 * np.pi * j / n))
+            elements.append(self.apply_mapping(v, mapping))
         re, im = [e.real for e in elements], [e.imag for e in elements]
         self.ax.scatter(re, im, c=np.abs(elements), cmap='cool', s=100, edgecolors='white', zorder=3)
-        self.ax.set_title(f"Finite Field Extension: $GF({p}^{n})$", color='white'); self.ax.set_aspect('equal')
+        self.ax.set_title(f"Finite Field Extension ({mapping}): $GF({p}^{n})$", color='white'); self.ax.set_aspect('equal')
 
     def update(self, val):
         self.ax.clear(); self.ax.set_facecolor('black')
         v1 = int(self.s1.val) if self.interactive else 3
         v2 = int(self.s2.val) if self.interactive else 5
         v3 = self.s3.val if self.interactive else 1.0
-        if self.mode == 'Algebraic': self.draw_algebraic(v1, v2, v3)
-        elif self.mode == 'Finite': self.draw_finite(v1, v2)
-        else: self.draw_transcendental(v1, v2, v3)
+        mapping = self.map_radio.val if self.interactive else 'Standard'
+        if self.mode == 'Algebraic': self.draw_algebraic(v1, v2, v3, mapping)
+        elif self.mode == 'Finite': self.draw_finite(v1, v2, mapping)
+        else: self.draw_transcendental(v1, v2, v3, mapping)
         self.ax.tick_params(colors='white')
         if self.interactive: self.fig.canvas.draw_idle()
 

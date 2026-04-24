@@ -59,6 +59,7 @@ vector<double> get_companion(const vector<int>& c) {
 
 class UnifiedGL : public Fl_Gl_Window {
 public:
+    int colormap_type = 0;
     bool mode_algebraic = true;
     bool show_edges = true;
     int mapping_type = 0;
@@ -90,12 +91,12 @@ public:
         auto mapper = [&](cd z) {
             return interference::apply_mapping(z, (interference::MappingType)mapping_type, l_scale);
         };
-        interference::compute_threaded(40000, res, max_deg, max_c, heat, mapper);
+        interference::compute_threaded(40000, res, max_deg, max_c, heat, mapper, v_x, v_y, 2.0 / v_zoom);
 
         double mv = 0; for (double v : heat) mv = max(mv, v);
         for (int i = 0; i < res * res; ++i) {
             double t = log(1.0 + heat[i]*10) / log(1.0 + mv*10);
-            interference::magma_color(t, &tex_data[i*3]);
+            interference::apply_color(colormap_type, t, &tex_data[i*3]);
         }
         if (tex_id == 0) glGenTextures(1, &tex_id);
         glBindTexture(GL_TEXTURE_2D, tex_id);
@@ -160,7 +161,7 @@ public:
         vector<cd> pts(N);
         for (int i=0; i<N; ++i) {
             int t=i; cd z(0,0);
-            for (int j=0; j<n; ++j) { z += polar(l_scale, 2*M_PI*j/n) * (double)(t%p); t/=p; }
+            for (int j=0; j<n; ++j) { z += ((n == 2) ? (j == 0 ? cd(1, 0) : cd(0, 1)) : polar(1.0, 2.0 * M_PI * j / n)) * (double)(t % p) * l_scale; t/=p; }
             pts[i] = interference::apply_mapping(z, (interference::MappingType)mapping_type, l_scale);
         }
         if (show_edges && N < 3000) {
@@ -218,6 +219,12 @@ int main(int argc, char** argv) {
 
     Fl_Choice* mode = new Fl_Choice(1000, 30, 230, 25, "Mode");
     mode->add("Complex Plane"); mode->add("Finite GF(p^n)"); mode->value(0);
+    Fl_Choice* cmap = new Fl_Choice(1040, 200, 240, 25, "Colormap");
+    cmap->add("Magma"); cmap->add("Plasma"); cmap->add("Viridis"); cmap->value(0);
+    cmap->callback([](Fl_Widget* w, void* v){
+        UnifiedGL* g = (UnifiedGL*)v; g->colormap_type = ((Fl_Choice*)w)->value(); g->dirty_compute = true; g->redraw();
+    }, gl);
+
 
     Fl_Choice* map = new Fl_Choice(1000, 65, 230, 25, "Mapping");
     map->add("Standard"); map->add("Log-Polar"); map->add("Mobius"); map->add("Euler Space"); map->add("Reciprocal"); map->add("Joukowsky"); map->value(0);

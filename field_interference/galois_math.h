@@ -113,6 +113,26 @@ inline GFElement gf_multiply(const GFElement &a, const GFElement &b, const GFEle
   return gf_poly_mod(gf_poly_mul(a, b, p), g, p);
 }
 
+inline int gf_element_eval(const GFElement &poly, int x, int p) {
+  int res = 0;
+  long long xp = 1;
+  for (int c : poly) {
+    res = (int)((res + 1LL * c * xp) % p);
+    xp = (xp * x) % p;
+  }
+  return (res + p) % p;
+}
+
+inline GFElement gf_element_pow(GFElement base, long long exp, const GFElement &g, int p) {
+  GFElement res = {1};
+  while (exp > 0) {
+    if (exp % 2 == 1) res = gf_multiply(res, base, g, p);
+    base = gf_multiply(base, base, g, p);
+    exp /= 2;
+  }
+  return res;
+}
+
 inline GFElement gf_poly_gcd(GFElement a, GFElement b, int p) {
   while (!gf_is_zero(b)) {
     GFElement r = gf_poly_mod(a, b, p);

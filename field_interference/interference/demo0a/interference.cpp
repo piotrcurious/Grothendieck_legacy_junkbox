@@ -22,12 +22,12 @@
 #include <FL/Fl_Multiline_Output.H>
 #include <FL/gl.h>
 #include <GL/glu.h>
-
-#include <vector>
-#include "../../galois_math.h"
-#include "../../complex_math.h"
 #include "../../interference_core.h"
 #include "../../mappings.h"
+#include "../../complex_math.h"
+#include "../../galois_math.h"
+
+#include <vector>
 #include <string>
 #include <cmath>
 #include <complex>
@@ -127,6 +127,7 @@ void magma_colormap(double t, unsigned char* rgb) {
 
 class UnifiedGL : public Fl_Gl_Window {
 public:
+    int colormap_type = 0;
     bool mode_algebraic = true;
     bool show_edges = true;
 
@@ -144,7 +145,6 @@ public:
     vector<unsigned char> tex_data;
     GLuint tex_id = 0;
     bool dirty_compute = true;
-    std::vector<double> heat;
 
     // Galois / Extensions
     vector<int> adj_coeffs;
@@ -157,15 +157,32 @@ public:
     }
 
     void compute_heatmap() {
-        if (heat.size() != (size_t)(res * res)) heat.resize(res * res);
-        interference::compute_threaded(40000, res, max_deg, max_c, heat, [](cd r){ return r; });
+        vector<double> heat(res * res, 0.0);
+        mt19937 rng(1337);
+        uniform_int_distribution<int> c_dist(-max_c, max_c);
+
+        int samples = 40000;
+        for (int i = 0; i < samples; ++i) {
+            int d = (i % max_deg) + 1;
+            vector<cd> coeffs(d + 1);
+            for (int k = 0; k <= d; ++k) coeffs[k] = (double)c_dist(rng);
+            if (abs(coeffs.back()) < 0.5) coeffs.back() = 1.0;
+
+            auto roots = durand_kerner(coeffs);
+            for (auto& r : roots) {
+                int ix = (int)((r.real() + 2.0) / 4.0 * res);
+                int iy = (int)((r.imag() + 2.0) / 4.0 * res);
+                if (ix >= 0 && ix < res && iy >= 0 && iy < res) heat[iy * res + ix] += 1.0;
+            }
+        }
+
         separable_blur(heat, res, blur_sigma);
 
         double max_v = 0;
         for (double v : heat) max_v = max(max_v, v);
         for (int i = 0; i < res * res; ++i) {
             double t = log(1.0 + heat[i] * 5.0) / log(1.0 + max_v * 5.0);
-            magma_colormap(t, &tex_data[i * 3]);
+            interference::apply_color(colormap_type, t, &tex_data[i * 3]);
         }
 
         if (tex_id == 0) glGenTextures(1, &tex_id);
@@ -240,7 +257,7 @@ public:
         for (int i = 0; i < N; ++i) {
             int t = i; cd z(0, 0);
             for (int j = 0; j < n; ++j) {
-                z += polar(l_scale, 2.0 * M_PI * j / n) * (double)(t % p);
+                z += ((n == 2) ? (j == 0 ? cd(1.0, 0.0) : cd(0.0, 1.0)) : polar(1.0, 2.0 * M_PI * j / n)) * (double)(t % p) * l_scale;
                 t /= p;
             }
             points[i] = z;
@@ -314,6 +331,12 @@ int main(int argc, char** argv) {
 
     Fl_Choice* mode = new Fl_Choice(1040, 45, 240, 25, "Mode");
     mode->add("Algebraic (Heatmap)"); mode->add("Finite Field GF(p^n)"); mode->value(0);
+    Fl_Choice* cmap = new Fl_Choice(1040, 200, 240, 25, "Colormap");
+    cmap->add("Magma"); cmap->add("Plasma"); cmap->add("Viridis"); cmap->value(0);
+    cmap->callback([](Fl_Widget* w, void* v){
+        UnifiedGL* g = (UnifiedGL*)v; g->colormap_type = ((Fl_Choice*)w)->value(); g->dirty_compute = true; g->redraw();
+    }, gl);
+
     mode->callback([](Fl_Widget* w, void* v){
         UnifiedGL* g = (UnifiedGL*)v; g->mode_algebraic = (((Fl_Choice*)w)->value() == 0); g->redraw();
     }, gl);
