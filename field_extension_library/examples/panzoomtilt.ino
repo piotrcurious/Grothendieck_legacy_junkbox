@@ -14,20 +14,36 @@ void loop() { static float angle = 0.0f; static float scale = 1.0f;
 
 // Update camera translation and tilt over time camX = 50.0f * sin(angle * 0.5f); camY = 30.0f * cos(angle * 0.3f); camTilt = 0.3f * sin(angle * 0.7f);
 
-// Represent transforms using FieldElements FieldElement<4> theta(angle); FieldElement<4> cosTheta = cos(theta); FieldElement<4> sinTheta = sin(theta); FieldElement<4> zoom(scale); FieldElement<4> tilt(camTilt); FieldElement<4> transX(camX); FieldElement<4> transY(camY);
+// Represent transforms using FieldElements
+FieldElement<16> theta(angle);
+FieldElement<16> cosTheta = cos(theta);
+FieldElement<16> sinTheta = sin(theta);
+FieldElement<16> zoom(scale);
+FieldElement<16> tilt(camTilt);
+FieldElement<16> transX(camX);
+FieldElement<16> transY(camY);
 
-for (int y = 0; y < screenHeight; y++) { for (int x = 0; x < screenWidth; x++) { // Translate to camera and center FieldElement<4> X(x - screenWidth / 2.0f); FieldElement<4> Y(y - screenHeight / 2.0f);
+for (int y = 0; y < screenHeight; y++) {
+    for (int x = 0; x < screenWidth; x++) {
+        // Translate to camera and center
+        FieldElement<16> X(x - screenWidth / 2.0f);
+        FieldElement<16> Y(y - screenHeight / 2.0f);
 
-// Apply camera translation
-  X = X - transX;
-  Y = Y - transY;
+        // Apply camera translation using in-place operators
+        X -= transX;
+        Y -= transY;
 
-  // Apply tilt (simple shear in Y depending on Y depth)
-  FieldElement<4> Ytilted = Y + tilt * X;
+        // Apply tilt (simple shear in Y depending on Y depth)
+        FieldElement<16> Ytilted = Y + tilt * X;
 
-  // Apply rotazoom on tilted coordinates
-  FieldElement<4> rx = (cosTheta * X - sinTheta * Ytilted) / zoom;
-  FieldElement<4> ry = (sinTheta * X + cosTheta * Ytilted) / zoom;
+        // Apply rotazoom using in-place operations
+        FieldElement<16> rx = cosTheta * X;
+        rx -= sinTheta * Ytilted;
+        rx /= zoom;
+
+        FieldElement<16> ry = sinTheta * X;
+        ry += cosTheta * Ytilted;
+        ry /= zoom;
 
   // Map to texture coordinates
   int tx = (int)rx.toFloat() & 15;

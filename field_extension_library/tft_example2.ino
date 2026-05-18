@@ -46,9 +46,9 @@ void drawEarthCurve(FE lat, FE lon) {
 
   // Projected circle as Earth horizon
   for (int angle = 0; angle < 360; angle += 5) {
-    float theta = angle * PI / 180.0;
-    float x = centerX + radius * cos(theta);
-    float y = centerY + radius * sin(theta) * 0.5; // ellipsoid flattening
+    FE theta = (float)angle * FE::pi() / 180.0f;
+    float x = centerX + radius * cos(theta).toFloat();
+    float y = centerY + radius * sin(theta).toFloat() * 0.5f; // ellipsoid flattening
     tft.drawPixel((int)x, (int)y, TFT_BLUE);
   }
 
@@ -70,7 +70,8 @@ void drawSunVector(FE lat, FE lon) {
 
   // Solar altitude (simplified):
   FE sinAlt = sin(lat) * sin(decl) + cos(lat) * cos(decl) * cos(hourAngle);
-  float altitude = asin(sinAlt.toFloat()) * 180.0 / PI;
+  FE alt = asin(sinAlt);
+  float altitude = (alt * 180.0f / FE::pi()).toFloat();
 
   // Visualize sun position
   int sunY = centerY - (int)(altitude * 2.0f); // exaggerate for display

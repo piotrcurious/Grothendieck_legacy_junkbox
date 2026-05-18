@@ -19,6 +19,9 @@ void setup() {
   
   // Transcendental function calculations
   demoTranscendentalFunctions();
+
+  // New math features demo
+  demoAdvancedMath();
 }
 
 void loop() {
@@ -30,19 +33,20 @@ void demoBasicOperations() {
   Serial.println("\n=== Basic Operations ===");
   
   // Create field elements
-  FieldElement4 a(3.5);
+  FieldElement4 a(3.5f);
   FieldElement4 b = FieldElement4::pi();
   FieldElement4 c = FieldElement4::e();
   
-  // Addition
-  FieldElement4 sum = a + b;
+  // Addition using in-place operator
+  FieldElement4 res = a;
+  res += b;
   Serial.print("3.5 + π = ");
-  Serial.println(sum.toFloat());
+  Serial.println(res.toFloat());
   
-  // Multiplication
-  FieldElement4 product = b * c;
-  Serial.print("π × e = ");
-  Serial.println(product.toFloat());
+  // Multiplication using scalar-left
+  FieldElement4 twoPi = 2.0f * b;
+  Serial.print("2 × π = ");
+  Serial.println(twoPi.toFloat());
   
   // More complex calculation
   FieldElement4 result = a * b + c / a;
@@ -51,14 +55,9 @@ void demoBasicOperations() {
   
   // Display the coefficients
   Serial.println("Coefficients of result:");
-  Serial.print("  Constant term: ");
-  Serial.println(result.getCoefficient(0));
-  Serial.print("  π term: ");
-  Serial.println(result.getCoefficient(1));
-  Serial.print("  e term: ");
-  Serial.println(result.getCoefficient(2));
-  Serial.print("  √2 term: ");
-  Serial.println(result.getCoefficient(3));
+  for (int i = 0; i < 4; i++) {
+    Serial.printf("  Term %d: %.6f\n", i, result.getCoefficient(i));
+  }
 }
 
 void demoPrecisionComparison() {
@@ -134,7 +133,7 @@ void demoTranscendentalFunctions() {
   Serial.println("\n=== Transcendental Functions ===");
   
   // Create field elements
-  FieldElement4 x = FieldElement4::pi() * 0.5; // π/2
+  FieldElement4 x = FieldElement4::pi() * 0.5f; // π/2
   
   // Sin and cos
   FieldElement4 sin_x = sin(x);
@@ -147,22 +146,44 @@ void demoTranscendentalFunctions() {
   Serial.println(cos_x.toFloat());
   
   // Verify sin²(x) + cos²(x) = 1
-  FieldElement4 sin_squared = sin_x * sin_x;
-  FieldElement4 cos_squared = cos_x * cos_x;
-  FieldElement4 identity = sin_squared + cos_squared;
-  
+  FieldElement4 identity = sin_x * sin_x + cos_x * cos_x;
   Serial.print("sin²(π/2) + cos²(π/2) = ");
   Serial.println(identity.toFloat());
   
-  // Exponential and logarithm
-  FieldElement4 y = FieldElement4::e();
-  FieldElement4 exp_y = exp(y);
-  FieldElement4 log_exp_y = log(exp_y);
-  
-  Serial.print("e = ");
-  Serial.println(y.toFloat());
-  Serial.print("exp(e) = ");
-  Serial.println(exp_y.toFloat());
-  Serial.print("log(exp(e)) = ");
-  Serial.println(log_exp_y.toFloat());
+  // Symbolic exactness test
+  FieldElement4 pi = FieldElement4::pi();
+  Serial.print("Symbolic exactness: sin(π) = ");
+  Serial.println(sin(pi).getCoefficient(0)); // Should be 0.0 exactly
+}
+
+void demoAdvancedMath() {
+  Serial.println("\n=== Advanced Math Features ===");
+
+  FieldElement4 pi = FieldElement4::pi();
+
+  // Power functions
+  FieldElement4 p2 = pow(pi, 2.0f);
+  Serial.print("π² = ");
+  Serial.println(p2.toFloat());
+
+  FieldElement4 sq = sqrt(p2);
+  Serial.print("sqrt(π²) = ");
+  Serial.println(sq.toFloat());
+
+  // Hyperbolic functions
+  FieldElement4 hx(0.5f);
+  FieldElement4 s = sinh(hx);
+  FieldElement4 c = cosh(hx);
+  FieldElement4 res = c * c - s * s;
+  Serial.print("cosh²(0.5) - sinh²(0.5) = ");
+  Serial.println(res.toFloat());
+
+  // Inverse trig
+  FieldElement4 one(1.0f);
+  FieldElement4 a = atan(one);
+  Serial.print("atan(1) = ");
+  Serial.print(a.toFloat());
+  Serial.print(" (π/4 = ");
+  Serial.print(PI * 0.25f);
+  Serial.println(")");
 }

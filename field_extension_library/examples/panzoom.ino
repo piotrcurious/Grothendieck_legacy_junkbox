@@ -10,23 +10,43 @@ TFT_eSPI tft = TFT_eSPI(); const int screenWidth = 320; const int screenHeight =
 
 void setup() { tft.init(); tft.setRotation(1); }
 
-void loop() { static float angle = 0.0f; static float scale = 1.0f;
+void loop() {
+    static float angle = 0.0f;
+    static float scale = 1.0f;
 
-// Represent transformations using field elements FieldElement<4> theta(angle); FieldElement<4> cosTheta = cos(theta); FieldElement<4> sinTheta = sin(theta); FieldElement<4> zoom(scale); FieldElement<4> transX(camX); FieldElement<4> transY(camY);
+    // Represent transformations using field elements
+    FieldElement<16> theta(angle);
+    FieldElement<16> cosTheta = cos(theta);
+    FieldElement<16> sinTheta = sin(theta);
+    FieldElement<16> zoom(scale);
+    FieldElement<16> transX(camX);
+    FieldElement<16> transY(camY);
 
 // Animate camera in a circular path camX = 50.0f * cos(angle * 0.5f); camY = 30.0f * sin(angle * 0.5f);
 
-// Update field elements after animation transX.setCoefficient(0, camX); transY.setCoefficient(0, camY);
+// Update field elements after animation
+transX.setCoefficient(0, camX);
+transY.setCoefficient(0, camY);
 
-// Loop through screen pixels for (int y = 0; y < screenHeight; y++) { for (int x = 0; x < screenWidth; x++) { // Translate pixel to center FieldElement<4> X(float(x - screenWidth/2)); FieldElement<4> Y(float(y - screenHeight/2));
+// Loop through screen pixels
+for (int y = 0; y < screenHeight; y++) {
+    for (int x = 0; x < screenWidth; x++) {
+        // Translate pixel to center
+        FieldElement<16> X(float(x - screenWidth / 2));
+        FieldElement<16> Y(float(y - screenHeight / 2));
 
-// Apply camera translation
-  X = X - transX;
-  Y = Y - transY;
+        // Apply camera translation using in-place operators
+        X -= transX;
+        Y -= transY;
 
-  // Apply rotation and zoom: X' = (cosθ·X - sinθ·Y) / zoom
-  FieldElement<4> rx = (cosTheta * X - sinTheta * Y) / zoom;
-  FieldElement<4> ry = (sinTheta * X + cosTheta * Y) / zoom;
+        // Apply rotation and zoom using in-place operators
+        FieldElement<16> rx = cosTheta * X;
+        rx -= sinTheta * Y;
+        rx /= zoom;
+
+        FieldElement<16> ry = sinTheta * X;
+        ry += cosTheta * Y;
+        ry /= zoom;
 
   // Convert to texture coordinates
   int tx = int(rx.toFloat()) & 15;
