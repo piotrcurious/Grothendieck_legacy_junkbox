@@ -1,5 +1,5 @@
-#ifndef FIELD_EXTENSION_H
-#define FIELD_EXTENSION_H
+#ifndef FIELD_EXTENSION_H_V3
+#define FIELD_EXTENSION_H_V3
 
 #include <Arduino.h>
 #include <vector>
@@ -49,10 +49,19 @@ public:
         for (const auto& t : other.terms) result.addTerm(t);
         return result;
     }
+    FieldExtension& operator+=(const FieldExtension& other) {
+        for (const auto& t : other.terms) addTerm(t);
+        return *this;
+    }
+    friend FieldExtension operator+(float lhs, const FieldExtension& rhs) { return FieldExtension(lhs) + rhs; }
+    friend FieldExtension operator+(const FieldExtension& lhs, float rhs) { return lhs + FieldExtension(rhs); }
 
     FieldExtension operator-(const FieldExtension& other) const {
         return (*this) + (other * -1.0f);
     }
+    FieldExtension& operator-=(const FieldExtension& other) { return *this = (*this) - other; }
+    friend FieldExtension operator-(float lhs, const FieldExtension& rhs) { return FieldExtension(lhs) - rhs; }
+    friend FieldExtension operator-(const FieldExtension& lhs, float rhs) { return lhs - FieldExtension(rhs); }
 
     // Scalar multiplication
     FieldExtension operator*(float scalar) const {
@@ -62,6 +71,7 @@ public:
         }
         return result;
     }
+    friend FieldExtension operator*(float lhs, const FieldExtension& rhs) { return rhs * lhs; }
 
     // Multiplication (very basic distributive law for basis products)
     FieldExtension operator*(const FieldExtension& other) const {
@@ -71,11 +81,9 @@ public:
                 if (t1.basis == Basis::One) result.addTerm({t1.coeff * t2.coeff, t2.basis});
                 else if (t2.basis == Basis::One) result.addTerm({t1.coeff * t2.coeff, t1.basis});
                 else if (t1.basis == t2.basis) {
-                    // Approximate Pi*Pi as a scalar to keep it compact
                     result.addTerm({t1.evaluate() * t2.evaluate(), Basis::One});
                 }
                 else {
-                    // Out of basis product - evaluate to One
                     float val = t1.evaluate() * t2.evaluate();
                     result.addTerm({val, Basis::One});
                 }
@@ -83,6 +91,7 @@ public:
         }
         return result;
     }
+    FieldExtension& operator*=(const FieldExtension& other) { return *this = (*this) * other; }
 
     FieldExtension recip() const {
         float v = evaluate();
@@ -93,6 +102,9 @@ public:
     FieldExtension operator/(const FieldExtension& other) const {
         return (*this) * other.recip();
     }
+    FieldExtension& operator/=(const FieldExtension& other) { return *this = (*this) / other; }
+    friend FieldExtension operator/(float lhs, const FieldExtension& rhs) { return FieldExtension(lhs) / rhs; }
+    friend FieldExtension operator/(const FieldExtension& lhs, float rhs) { return lhs * (1.0f / rhs); }
 
     friend FieldExtension sin(const FieldExtension& x) { return FieldExtension(std::sin(x.evaluate())); }
     friend FieldExtension cos(const FieldExtension& x) { return FieldExtension(std::cos(x.evaluate())); }
@@ -127,4 +139,4 @@ public:
     }
 };
 
-#endif
+#endif // FIELD_EXTENSION_H_V3

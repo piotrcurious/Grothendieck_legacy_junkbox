@@ -23,28 +23,49 @@ FieldExt operator+(const FieldExt& o) const {
     for (int i = 0; i < N; ++i) r.a[i] = a[i] + o.a[i];
     return r;
 }
+FieldExt& operator+=(const FieldExt& o) {
+    for (int i = 0; i < N; ++i) a[i] += o.a[i];
+    return *this;
+}
+friend FieldExt operator+(T lhs, const FieldExt& rhs) { return FieldExt(lhs) + rhs; }
+friend FieldExt operator+(const FieldExt& lhs, T rhs) { return lhs + FieldExt(rhs); }
+
 FieldExt operator-(const FieldExt& o) const {
     FieldExt r;
     for (int i = 0; i < N; ++i) r.a[i] = a[i] - o.a[i];
     return r;
 }
+FieldExt& operator-=(const FieldExt& o) {
+    for (int i = 0; i < N; ++i) a[i] -= o.a[i];
+    return *this;
+}
+friend FieldExt operator-(T lhs, const FieldExt& rhs) { return FieldExt(lhs) - rhs; }
+friend FieldExt operator-(const FieldExt& lhs, T rhs) { return lhs - FieldExt(rhs); }
 
 // Multiplication (truncated)
 FieldExt operator*(const FieldExt& o) const {
     FieldExt r;
-    // convolution truncated at N
     for (int i = 0; i < N; ++i) {
+        if (a[i] == 0) continue;
         for (int j = 0; j < N - i; ++j) {
             r.a[i + j] += a[i] * o.a[j];
         }
     }
     return r;
 }
+FieldExt& operator*=(const FieldExt& o) { return *this = (*this) * o; }
+friend FieldExt operator*(T lhs, const FieldExt& rhs) { return FieldExt(lhs) * rhs; }
+friend FieldExt operator*(const FieldExt& lhs, T rhs) {
+    FieldExt r;
+    for (int i = 0; i < N; ++i) r.a[i] = lhs.a[i] * rhs;
+    return r;
+}
 
 // Scalar division
 FieldExt operator/(T s) const {
     FieldExt r;
-    for (int i = 0; i < N; ++i) r.a[i] = a[i] / s;
+    T inv = T(1) / s;
+    for (int i = 0; i < N; ++i) r.a[i] = a[i] * inv;
     return r;
 }
 
@@ -66,6 +87,33 @@ FieldExt recip(int iter = 3) const {
 
 FieldExt operator/(const FieldExt& o) const {
     return (*this) * o.recip();
+}
+FieldExt& operator/=(const FieldExt& o) { return *this = (*this) / o; }
+
+friend FieldExt sin(const FieldExt& x) {
+    FieldExt res;
+    res.a[0] = std::sin(x.eval());
+    return res;
+}
+friend FieldExt cos(const FieldExt& x) {
+    FieldExt res;
+    res.a[0] = std::cos(x.eval());
+    return res;
+}
+friend FieldExt exp(const FieldExt& x) {
+    FieldExt res;
+    res.a[0] = std::exp(x.eval());
+    return res;
+}
+friend FieldExt log(const FieldExt& x) {
+    FieldExt res;
+    res.a[0] = std::log(x.eval());
+    return res;
+}
+friend FieldExt sqrt(const FieldExt& x) {
+    FieldExt res;
+    res.a[0] = std::sqrt(x.eval());
+    return res;
 }
 
 // Convert to T by evaluating polynomial: Horner's method
