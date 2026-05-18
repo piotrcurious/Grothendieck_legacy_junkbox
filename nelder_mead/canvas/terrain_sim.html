@@ -1,0 +1,998 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chebyshev Terrain · Nelder–Mead Drop Sim</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&display=swap');
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #0d1117;
+      --panel:   #161b22;
+      --border:  #21262d;
+      --text:    #8b949e;
+      --bright:  #c9d1d9;
+      --accent:  #58a6ff;
+      --green:   #3fb950;
+      --purple:  #bc8cff;
+      --red:     #f85149;
+      --blue:    #79c0ff;
+      --gray:    #6e7681;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'IBM Plex Mono', ui-monospace, monospace;
+      font-size: 11px;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 12px 16px 20px;
+      gap: 10px;
+    }
+
+    header {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      width: 100%;
+      max-width: 820px;
+    }
+
+    h1 {
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: .12em;
+      color: var(--bright);
+      text-transform: uppercase;
+    }
+
+    .subtitle { color: var(--gray); font-size: 10px; }
+
+    /* ── Controls ─────────────────────────────────────────── */
+    .controls {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      width: 100%;
+      max-width: 820px;
+    }
+
+    button {
+      font-family: inherit;
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: .08em;
+      padding: 5px 12px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--panel);
+      color: var(--text);
+      cursor: pointer;
+      transition: border-color .15s, color .15s;
+    }
+    button:hover:not(:disabled) { border-color: var(--accent); color: var(--bright); }
+    button#startBtn:hover:not(:disabled) { border-color: var(--green); color: var(--green); }
+    button#stopBtn:hover:not(:disabled)  { border-color: var(--red);   color: var(--red);   }
+    button:disabled { opacity: .3; cursor: not-allowed; }
+
+    .slider-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--gray);
+    }
+    .slider-group label { white-space: nowrap; }
+    input[type=range] {
+      width: 72px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+    .slider-val { color: var(--accent); min-width: 20px; }
+
+    /* ── Canvas ───────────────────────────────────────────── */
+    canvas {
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      box-shadow: 0 0 40px rgba(0,0,0,.7);
+      cursor: grab;
+      touch-action: none;
+      display: block;
+    }
+    canvas:active { cursor: grabbing; }
+
+    /* ── Stats bar ────────────────────────────────────────── */
+    .statsbar {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      width: 100%;
+      max-width: 820px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 7px 14px;
+    }
+    .stat { display: flex; gap: 6px; align-items: center; }
+    .stat-k { color: var(--gray); }
+    .stat-v { color: var(--accent); font-weight: 500; min-width: 28px; }
+
+    /* ── Legend ───────────────────────────────────────────── */
+    .legend {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .leg { display: flex; align-items: center; gap: 5px; color: var(--gray); }
+    .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    /* ── Hint ─────────────────────────────────────────────── */
+    .hint {
+      color: var(--gray);
+      font-size: 10px;
+      opacity: .7;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Chebyshev Terrain</h1>
+  <span class="subtitle">Nelder–Mead water-drop descent</span>
+</header>
+
+<div class="controls">
+  <button id="startBtn">▶ START</button>
+  <button id="stopBtn" disabled>⏸ STOP</button>
+  <button id="resetBtn">↺ RESET</button>
+
+  <div class="slider-group">
+    <label>Speed</label>
+    <input type="range" id="speedSlider" min="1" max="20" value="5">
+    <span class="slider-val" id="speedVal">5</span>
+  </div>
+  <div class="slider-group">
+    <label>Drops</label>
+    <input type="range" id="dropsSlider" min="5" max="120" value="50">
+    <span class="slider-val" id="dropsVal">50</span>
+  </div>
+</div>
+
+<canvas id="canvas" width="820" height="560"></canvas>
+
+<div class="statsbar">
+  <div class="stat"><span class="stat-k">State</span>  <span class="stat-v" id="sv-state">idle</span></div>
+  <div class="stat"><span class="stat-k">Settled</span><span class="stat-v" id="sv-settled">0</span></div>
+  <div class="stat"><span class="stat-k">Sliding</span><span class="stat-v" id="sv-sliding">0</span></div>
+  <div class="stat"><span class="stat-k">Falling</span><span class="stat-v" id="sv-falling">0</span></div>
+  <div class="stat"><span class="stat-k">angZ</span>   <span class="stat-v" id="sv-angz">0.82</span></div>
+  <div class="stat"><span class="stat-k">scale</span>  <span class="stat-v" id="sv-scale">215</span></div>
+</div>
+
+<div class="legend">
+  <div class="leg"><div class="dot" style="background:#79c0ff"></div>Falling</div>
+  <div class="leg"><div class="dot" style="background:#bc8cff"></div>Optimizing</div>
+  <div class="leg"><div class="dot" style="background:#3fb950"></div>Sliding</div>
+  <div class="leg"><div class="dot" style="background:#f85149"></div>Settled</div>
+  <div class="leg"><div class="dot" style="background:#6e7681"></div>Stuck</div>
+</div>
+
+<div class="hint">Left-drag: rotate · Right-drag / two-finger: pan · Scroll / pinch: zoom</div>
+
+<script>
+'use strict';
+// ═══════════════════════════════════════════════════════════════
+//  Constants
+// ═══════════════════════════════════════════════════════════════
+const GRID      = 72;    // terrain vertex grid (GRID×GRID)
+const NM_TERMS  = 6;     // Chebyshev basis terms
+const MAX_DEG   = 8;     // max polynomial degree per axis
+const AMP       = 1.0;   // height range after normalization
+const BASE_Z    = 0.2;   // floor height
+
+const DROP_FALL  = 0.014;  // base fall speed  (scaled by slider)
+const DROP_SLIDE = 0.006;  // base slide speed
+
+// Nelder–Mead
+const NM_TOL   = 1e-4;
+const NM_ITER  = 200;
+const NM_ALPHA = 1.0;   // reflection
+const NM_GAMMA = 2.0;   // expansion
+const NM_RHO   = 0.5;   // contraction
+const NM_SIGMA = 0.5;   // shrink
+
+// View / navigation
+const LERP_K   = 0.15;
+const MAX_TILT = 22 * Math.PI / 180;
+const ROT_SPD  = 0.0038;
+const ZOOM_SPD = 0.0012;
+const PAN_SPD  = 1.0;
+
+// Trail
+const TRAIL_LEN = 45;
+// Simplex ghost history to show
+const SIMPLEX_GHOST = 7;
+
+// ═══════════════════════════════════════════════════════════════
+//  DOM refs
+// ═══════════════════════════════════════════════════════════════
+const canvas      = document.getElementById('canvas');
+const ctx         = canvas.getContext('2d');
+const startBtn    = document.getElementById('startBtn');
+const stopBtn     = document.getElementById('stopBtn');
+const resetBtn    = document.getElementById('resetBtn');
+const speedSlider = document.getElementById('speedSlider');
+const dropsSlider = document.getElementById('dropsSlider');
+const speedValEl  = document.getElementById('speedVal');
+const dropsValEl  = document.getElementById('dropsVal');
+const svState     = document.getElementById('sv-state');
+const svSettled   = document.getElementById('sv-settled');
+const svSliding   = document.getElementById('sv-sliding');
+const svFalling   = document.getElementById('sv-falling');
+const svAngz      = document.getElementById('sv-angz');
+const svScale     = document.getElementById('sv-scale');
+
+// ═══════════════════════════════════════════════════════════════
+//  View state  (persists across resets)
+// ═══════════════════════════════════════════════════════════════
+let vAngX = 0.40, vAngZ = 0.82, vScale = 215, vPanX = 0, vPanY = 0;
+let tAngX = vAngX, tAngZ = vAngZ, tScale = vScale, tPanX = 0, tPanY = 0;
+
+// ═══════════════════════════════════════════════════════════════
+//  Terrain storage
+// ═══════════════════════════════════════════════════════════════
+// Using typed arrays for cache efficiency
+let terrainH   = [];        // Array of Float32Array, indexed [i][j]
+let tMinZ = 0, tMaxZ = 1;
+let lightCache = [];        // Float32Array per row – per-vertex diffuse in [0,1]
+
+// Pre-allocated quad buffer (reused every frame, no GC)
+const NQUADS = (GRID-1)*(GRID-1);
+const quadBuf = Array.from({length: NQUADS}, () => ({i:0, j:0, depth:0}));
+
+// Pre-allocated projection cache (reused every frame)
+let projCache = Array.from({length: GRID}, () =>
+  Array.from({length: GRID}, () => ({sx:0, sy:0, depth:0}))
+);
+
+// ═══════════════════════════════════════════════════════════════
+//  Simulation state
+// ═══════════════════════════════════════════════════════════════
+let drops = [];
+let rafId = null;
+
+// ═══════════════════════════════════════════════════════════════
+//  Utilities
+// ═══════════════════════════════════════════════════════════════
+const lerp  = (a, b, t) => a + (b-a)*t;
+const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
+
+function normVec3([x,y,z]) {
+  const l = Math.sqrt(x*x + y*y + z*z);
+  return [x/l, y/l, z/l];
+}
+
+// Precomputed light direction (world space, pointing toward light source)
+const LIGHT = normVec3([0.55, -0.35, 1.1]);
+
+// ═══════════════════════════════════════════════════════════════
+//  Chebyshev polynomial  T_n(x),  x ∈ [-1, 1]
+// ═══════════════════════════════════════════════════════════════
+function cheb(x, n) {
+  const t = clamp(x, -1, 1);
+  if (n === 0) return 1;
+  if (n === 1) return t;
+  let a = 1, b = t;
+  for (let k = 2; k <= n; k++) { const c = 2*t*b - a; a = b; b = c; }
+  return b;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Terrain generation
+// ═══════════════════════════════════════════════════════════════
+function generateTerrain() {
+  const terms = Array.from({length: NM_TERMS}, () => ({
+    n: Math.floor(Math.random() * (MAX_DEG + 1)),
+    m: Math.floor(Math.random() * (MAX_DEG + 1)),
+    w: Math.random() * 2 - 1
+  }));
+
+  let rawMin =  Infinity;
+  let rawMax = -Infinity;
+  const raw = Array.from({length: GRID}, () => new Float32Array(GRID));
+
+  for (let i = 0; i < GRID; i++) {
+    const cx = 2*i/(GRID-1) - 1;
+    for (let j = 0; j < GRID; j++) {
+      const cy = 2*j/(GRID-1) - 1;
+      let z = 0;
+      for (const {n, m, w} of terms) z += w * cheb(cx, n) * cheb(cy, m);
+      raw[i][j] = z;
+      if (z < rawMin) rawMin = z;
+      if (z > rawMax) rawMax = z;
+    }
+  }
+
+  const range = rawMax - rawMin || 1;
+  terrainH = Array.from({length: GRID}, (_, i) => {
+    const row = new Float32Array(GRID);
+    for (let j = 0; j < GRID; j++)
+      row[j] = BASE_Z + AMP * (raw[i][j] - rawMin) / range;
+    return row;
+  });
+  tMinZ = BASE_Z;
+  tMaxZ = BASE_Z + AMP;
+
+  buildLightCache();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Bilinear height query  (x, y ∈ [0, 1])
+// ═══════════════════════════════════════════════════════════════
+function heightAt(x, y) {
+  const cx = clamp(x, 0, 1), cy = clamp(y, 0, 1);
+  const gx = cx * (GRID-1),   gy = cy * (GRID-1);
+  const i0 = Math.min(gx | 0, GRID-2);
+  const j0 = Math.min(gy | 0, GRID-2);
+  const ax = gx - i0, ay = gy - j0;
+  return ( terrainH[i0  ][j0  ] * (1-ax) * (1-ay)
+         + terrainH[i0+1][j0  ] *    ax  * (1-ay)
+         + terrainH[i0  ][j0+1] * (1-ax) *    ay
+         + terrainH[i0+1][j0+1] *    ax  *    ay );
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Lighting (computed once per terrain, world-space Lambertian)
+// ═══════════════════════════════════════════════════════════════
+function buildLightCache() {
+  const step = 1 / (GRID-1);
+  const inv2s = 1 / (2 * step);
+  lightCache = Array.from({length: GRID}, (_, i) => {
+    const row = new Float32Array(GRID);
+    for (let j = 0; j < GRID; j++) {
+      const dzdx = (terrainH[Math.min(i+1,GRID-1)][j] - terrainH[Math.max(i-1,0)][j]) * inv2s;
+      const dzdy = (terrainH[i][Math.min(j+1,GRID-1)] - terrainH[i][Math.max(j-1,0)]) * inv2s;
+      // Surface normal (unnormalized): (-dzdx, -dzdy, 1)
+      const len = Math.sqrt(dzdx*dzdx + dzdy*dzdy + 1);
+      const dot = (-dzdx*LIGHT[0] - dzdy*LIGHT[1] + LIGHT[2]) / len;
+      row[j] = 0.22 + 0.78 * Math.max(0, dot);  // ambient + diffuse
+    }
+    return row;
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Terrain color  (elevation palette + Lambertian)
+// ═══════════════════════════════════════════════════════════════
+function terrainColor(h, lighting) {
+  const t = (h - tMinZ) / (tMaxZ - tMinZ);   // [0, 1]
+  let r, g, b;
+  if (t < 0.20) {                              // dark forest
+    const s = t / 0.20;
+    r = lerp(18,  55, s);  g = lerp(72, 120, s);  b = lerp(34, 55, s);
+  } else if (t < 0.48) {                       // meadow green → ochre
+    const s = (t - 0.20) / 0.28;
+    r = lerp(55, 148, s);  g = lerp(120, 122, s); b = lerp(55, 70, s);
+  } else if (t < 0.74) {                       // ochre → slate rock
+    const s = (t - 0.48) / 0.26;
+    r = lerp(148, 105, s); g = lerp(122, 104, s); b = lerp(70, 98, s);
+  } else {                                     // rock → snow
+    const s = clamp((t - 0.74) / 0.26, 0, 1);
+    r = lerp(105, 232, s); g = lerp(104, 236, s); b = lerp(98, 248, s);
+  }
+  const li = clamp(lighting, 0.08, 1.0);
+  return `rgb(${r*li|0},${g*li|0},${b*li|0})`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  3-D → 2-D projection  (oblique isometric)
+// ═══════════════════════════════════════════════════════════════
+function project(x, y, z, out) {
+  const cx = x - 0.5, cy = y - 0.5;
+  const cosX = Math.cos(vAngX), sinX = Math.sin(vAngX);
+  const cosZ = Math.cos(vAngZ), sinZ = Math.sin(vAngZ);
+  const ry = cy*cosX - z*sinX;
+  const rz = cy*sinX + z*cosX;
+  const fx = cx*cosZ - ry*sinZ;
+  const fy = cx*sinZ + ry*cosZ;
+  if (out) {
+    out.sx    = (canvas.width  / 2) + fx*vScale + vPanX;
+    out.sy    = (canvas.height / 2) - fy*vScale + vPanY + 70;
+    out.depth = rz;
+    return out;
+  }
+  return {
+    sx:    (canvas.width  / 2) + fx*vScale + vPanX,
+    sy:    (canvas.height / 2) - fy*vScale + vPanY + 70,
+    depth: rz
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Rebuild projection cache  (called once per frame)
+// ═══════════════════════════════════════════════════════════════
+function rebuildProjCache() {
+  const inv = 1 / (GRID-1);
+  for (let i = 0; i < GRID; i++)
+    for (let j = 0; j < GRID; j++)
+      project(i*inv, j*inv, terrainH[i][j], projCache[i][j]);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Draw terrain  (depth-sorted filled quads, painter's algorithm)
+// ═══════════════════════════════════════════════════════════════
+function drawTerrain() {
+  // 1. Fill quad buffer (reuse pre-allocated objects)
+  let q = 0;
+  for (let i = 0; i < GRID-1; i++) {
+    for (let j = 0; j < GRID-1; j++) {
+      const qo = quadBuf[q++];
+      qo.i     = i;
+      qo.j     = j;
+      qo.depth = ( projCache[i  ][j  ].depth + projCache[i+1][j  ].depth
+                 + projCache[i  ][j+1].depth + projCache[i+1][j+1].depth) * 0.25;
+    }
+  }
+
+  // 2. Sort back-to-front (ascending depth = furthest first)
+  quadBuf.sort((a, b) => a.depth - b.depth);
+
+  // 3. Draw filled quads
+  for (let k = 0; k < NQUADS; k++) {
+    const {i, j} = quadBuf[k];
+    const p00 = projCache[i  ][j  ];
+    const p10 = projCache[i+1][j  ];
+    const p11 = projCache[i+1][j+1];
+    const p01 = projCache[i  ][j+1];
+
+    const avgH = (terrainH[i  ][j  ] + terrainH[i+1][j  ]
+                + terrainH[i  ][j+1] + terrainH[i+1][j+1]) * 0.25;
+    const avgL = (lightCache[i  ][j  ] + lightCache[i+1][j  ]
+                + lightCache[i  ][j+1] + lightCache[i+1][j+1]) * 0.25;
+
+    ctx.fillStyle = terrainColor(avgH, avgL);
+    ctx.beginPath();
+    ctx.moveTo(p00.sx, p00.sy);
+    ctx.lineTo(p10.sx, p10.sy);
+    ctx.lineTo(p11.sx, p11.sy);
+    ctx.lineTo(p01.sx, p01.sy);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // 4. Subtle grid overlay (every 8th line, very faint)
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.055)';
+  ctx.lineWidth   = 0.4;
+  for (let i = 0; i < GRID; i += 8) {
+    ctx.beginPath();
+    for (let j = 0; j < GRID; j++) {
+      const p = projCache[i][j];
+      j === 0 ? ctx.moveTo(p.sx, p.sy) : ctx.lineTo(p.sx, p.sy);
+    }
+    ctx.stroke();
+  }
+  for (let j = 0; j < GRID; j += 8) {
+    ctx.beginPath();
+    for (let i = 0; i < GRID; i++) {
+      const p = projCache[i][j];
+      i === 0 ? ctx.moveTo(p.sx, p.sy) : ctx.lineTo(p.sx, p.sy);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Draw drops + trails + simplex ghosts
+// ═══════════════════════════════════════════════════════════════
+const STATE_COLOR = {
+  falling:    '#79c0ff',
+  optimizing: '#bc8cff',
+  sliding:    '#3fb950',
+  settled:    '#f85149',
+  stuck:      '#6e7681'
+};
+const STATE_GLOW = {
+  falling:    'rgba(121,192,255,0.18)',
+  optimizing: 'rgba(188,140,255,0.22)',
+  sliding:    'rgba( 63,185, 80,0.20)',
+  settled:    'rgba(248, 81, 73,0.18)',
+  stuck:      'rgba(110,118,129,0.10)'
+};
+
+function drawDropTrail(drop) {
+  const T = drop.trail;
+  if (T.length < 2) return;
+  const N = T.length;
+  ctx.save();
+  for (let k = 1; k < N; k++) {
+    const a = T[k-1], b = T[k];
+    const pa = project(a.x, a.y, a.z + 0.005);
+    const pb = project(b.x, b.y, b.z + 0.005);
+    const alpha = (k / N) * 0.35;
+    ctx.strokeStyle = `rgba(121,192,255,${alpha.toFixed(2)})`;
+    ctx.lineWidth   = 0.8 + 1.2 * (k/N);
+    ctx.beginPath();
+    ctx.moveTo(pa.sx, pa.sy);
+    ctx.lineTo(pb.sx, pb.sy);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawSimplexGhosts(drop) {
+  const path = drop.nmPath;
+  if (!path.length) return;
+  const up = Math.min(drop.nmStep, path.length);
+  if (up === 0) return;
+
+  ctx.save();
+  const from = Math.max(0, up - SIMPLEX_GHOST);
+  for (let s = from; s < up; s++) {
+    const sim = path[s];
+    const t   = (s - from + 1) / SIMPLEX_GHOST;    // fades in toward current
+    const alpha = 0.05 + 0.55 * t;
+
+    const pa = project(sim[0].x, sim[0].y, sim[0].z + 0.01);
+    const pb = project(sim[1].x, sim[1].y, sim[1].z + 0.01);
+    const pc = project(sim[2].x, sim[2].y, sim[2].z + 0.01);
+
+    // Filled simplex
+    ctx.fillStyle = `rgba(63,185,80,${(alpha * 0.18).toFixed(3)})`;
+    ctx.beginPath();
+    ctx.moveTo(pa.sx, pa.sy); ctx.lineTo(pb.sx, pb.sy); ctx.lineTo(pc.sx, pc.sy);
+    ctx.closePath(); ctx.fill();
+
+    // Outline
+    ctx.strokeStyle = `rgba(63,185,80,${alpha.toFixed(3)})`;
+    ctx.lineWidth = s === up-1 ? 1.5 : 0.7;
+    ctx.stroke();
+
+    // Vertex dots on current simplex only
+    if (s === up-1) {
+      ctx.fillStyle = `rgba(63,185,80,0.9)`;
+      [pa, pb, pc].forEach(p => {
+        ctx.beginPath(); ctx.arc(p.sx, p.sy, 2.2, 0, Math.PI*2); ctx.fill();
+      });
+    }
+  }
+  ctx.restore();
+}
+
+function drawDrop(drop) {
+  const p = project(drop.x, drop.y, drop.z + 0.012);
+  const col  = STATE_COLOR[drop.state] || '#fff';
+  const glow = STATE_GLOW[drop.state]  || 'transparent';
+
+  // Glow ring
+  ctx.beginPath();
+  ctx.arc(p.sx, p.sy, 9, 0, Math.PI*2);
+  ctx.fillStyle = glow;
+  ctx.fill();
+
+  // Main dot
+  ctx.beginPath();
+  ctx.arc(p.sx, p.sy, 4, 0, Math.PI*2);
+  ctx.fillStyle = col;
+  ctx.fill();
+
+  // Specular highlight
+  ctx.beginPath();
+  ctx.arc(p.sx - 1.2, p.sy - 1.2, 1.6, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(255,255,255,0.65)';
+  ctx.fill();
+}
+
+function drawDrops() {
+  // Sort back-to-front by projected depth
+  const sorted = [...drops].sort((a, b) =>
+    project(a.x, a.y, a.z).depth - project(b.x, b.y, b.z).depth
+  );
+
+  for (const drop of sorted) {
+    drawDropTrail(drop);
+    if (drop.state === 'sliding' || drop.state === 'settled')
+      drawSimplexGhosts(drop);
+    drawDrop(drop);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Nelder–Mead minimization in 2-D  (bug-fixed, clean)
+//
+//  f  : ([x,y]) → number
+//  x0 : [x, y]  initial guess (in [0,1]²)
+//  Returns { x, y, z, path: [{x,y,z}[3]][] }
+// ═══════════════════════════════════════════════════════════════
+function nelderMead(f, x0) {
+  const clampPt = (p) => p.map(v => clamp(v, 0, 1));
+  const d = 0.016;
+
+  // Initial simplex (3 vertices)
+  let pts = [
+    clampPt([x0[0],   x0[1]  ]),
+    clampPt([x0[0]+d, x0[1]  ]),
+    clampPt([x0[0],   x0[1]+d])
+  ];
+  let vals = pts.map(p => f(p));
+  const path = [];
+
+  const sortSimplex = () => {
+    // sort indices 0..2 by ascending f-value
+    const order = [0,1,2].sort((a,b) => vals[a] - vals[b]);
+    pts  = order.map(k => pts[k]);
+    vals = order.map(k => vals[k]);
+  };
+
+  const snap = (p) => {
+    // pts[0] is best (lowest f), pts[2] is worst
+    const out = clampPt(p);
+    return out;
+  };
+
+  sortSimplex();
+  path.push(pts.map((p,k) => ({x:p[0], y:p[1], z:vals[k]})));
+
+  for (let iter = 0; iter < NM_ITER; iter++) {
+    // ── Convergence: mean edge length ──────────────────────
+    const d01 = Math.hypot(pts[1][0]-pts[0][0], pts[1][1]-pts[0][1]);
+    const d02 = Math.hypot(pts[2][0]-pts[0][0], pts[2][1]-pts[0][1]);
+    const d12 = Math.hypot(pts[2][0]-pts[1][0], pts[2][1]-pts[1][1]);
+    if ((d01 + d02 + d12) / 3 < NM_TOL) break;
+
+    // ── Centroid of best n=2 vertices ──────────────────────
+    const xc = [(pts[0][0]+pts[1][0])*0.5, (pts[0][1]+pts[1][1])*0.5];
+
+    // ── Reflection ─────────────────────────────────────────
+    const xr = snap([xc[0] + NM_ALPHA*(xc[0]-pts[2][0]),
+                     xc[1] + NM_ALPHA*(xc[1]-pts[2][1])]);
+    const fr = f(xr);
+
+    if (fr < vals[0]) {
+      // ── Expansion ────────────────────────────────────────
+      const xe = snap([xc[0] + NM_GAMMA*(xr[0]-xc[0]),
+                       xc[1] + NM_GAMMA*(xr[1]-xc[1])]);
+      const fe = f(xe);
+      if (fe < fr) { pts[2] = xe; vals[2] = fe; }
+      else          { pts[2] = xr; vals[2] = fr; }
+
+    } else if (fr < vals[1]) {
+      // Reflection accepted (better than 2nd worst)
+      pts[2] = xr; vals[2] = fr;
+
+    } else {
+      // ── Contraction ──────────────────────────────────────
+      if (fr < vals[2]) {
+        // Outside contraction
+        const xoc = snap([xc[0] + NM_RHO*(xr[0]-xc[0]),
+                          xc[1] + NM_RHO*(xr[1]-xc[1])]);
+        const foc = f(xoc);
+        if (foc <= fr) { pts[2] = xoc; vals[2] = foc; }
+        else {
+          // Shrink
+          pts[1] = snap([pts[0][0] + NM_SIGMA*(pts[1][0]-pts[0][0]),
+                         pts[0][1] + NM_SIGMA*(pts[1][1]-pts[0][1])]);
+          pts[2] = snap([pts[0][0] + NM_SIGMA*(pts[2][0]-pts[0][0]),
+                         pts[0][1] + NM_SIGMA*(pts[2][1]-pts[0][1])]);  // ← bug-fixed
+          vals[1] = f(pts[1]); vals[2] = f(pts[2]);
+        }
+      } else {
+        // Inside contraction
+        const xic = snap([xc[0] + NM_RHO*(pts[2][0]-xc[0]),
+                          xc[1] + NM_RHO*(pts[2][1]-xc[1])]);
+        const fic = f(xic);
+        if (fic < vals[2]) { pts[2] = xic; vals[2] = fic; }
+        else {
+          // Shrink
+          pts[1] = snap([pts[0][0] + NM_SIGMA*(pts[1][0]-pts[0][0]),
+                         pts[0][1] + NM_SIGMA*(pts[1][1]-pts[0][1])]);
+          pts[2] = snap([pts[0][0] + NM_SIGMA*(pts[2][0]-pts[0][0]),
+                         pts[0][1] + NM_SIGMA*(pts[2][1]-pts[0][1])]);  // ← bug-fixed
+          vals[1] = f(pts[1]); vals[2] = f(pts[2]);
+        }
+      }
+    }
+
+    sortSimplex();
+    path.push(pts.map((p,k) => ({x:p[0], y:p[1], z:vals[k]})));
+  }
+
+  return { x: pts[0][0], y: pts[0][1], z: vals[0], path };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Drop initialisation
+// ═══════════════════════════════════════════════════════════════
+function initDrops(count) {
+  const startZ = tMaxZ + 0.5;
+  drops = Array.from({length: count}, (_, id) => ({
+    id,
+    x: Math.random(),
+    y: Math.random(),
+    z: startZ,
+    state:   'falling',
+    targetX: 0, targetY: 0, targetZ: 0,
+    nmPath:  [],
+    nmStep:  0,
+    trail:   []
+  }));
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Simulation update
+// ═══════════════════════════════════════════════════════════════
+let nmBudgetPerFrame = 1;  // how many NM runs per frame
+
+function update() {
+  // ── Smooth view interpolation ──────────────────────────────
+  vAngX  += (tAngX  - vAngX)  * LERP_K;
+  vAngZ  += (tAngZ  - vAngZ)  * LERP_K;
+  vScale += (tScale - vScale) * LERP_K;
+  vPanX  += (tPanX  - vPanX)  * LERP_K;
+  vPanY  += (tPanY  - vPanY)  * LERP_K;
+  vAngX   = clamp(vAngX, -MAX_TILT, MAX_TILT);
+  vScale  = clamp(vScale, 60, 650);
+
+  const spd        = parseInt(speedSlider.value) / 5;  // 0.2 – 4.0
+  const fallSpeed  = DROP_FALL  * spd;
+  const slideSpeed = DROP_SLIDE * spd;
+  const stepsPerF  = Math.max(1, Math.ceil(spd * 1.6));
+
+  let nmBudget = nmBudgetPerFrame;
+
+  for (const d of drops) {
+    switch (d.state) {
+
+      case 'falling': {
+        d.z -= fallSpeed;
+        const gz = heightAt(d.x, d.y);
+        if (d.z <= gz) {
+          d.z     = gz;
+          d.x     = clamp(d.x, 0, 1);
+          d.y     = clamp(d.y, 0, 1);
+          d.state = 'optimizing';
+        }
+        d.trail.push({x:d.x, y:d.y, z:d.z});
+        if (d.trail.length > TRAIL_LEN) d.trail.shift();
+        break;
+      }
+
+      case 'optimizing': {
+        if (nmBudget <= 0) break;
+        nmBudget--;
+        try {
+          const res = nelderMead(p => heightAt(p[0], p[1]), [d.x, d.y]);
+          d.targetX = res.x;
+          d.targetY = res.y;
+          d.targetZ = res.z;
+          d.nmPath  = res.path;
+          d.nmStep  = 0;
+          d.state   = 'sliding';
+        } catch(e) {
+          console.error('NM error drop', d.id, e);
+          d.state = 'stuck';
+        }
+        break;
+      }
+
+      case 'sliding': {
+        // Advance simplex animation
+        d.nmStep = Math.min(d.nmStep + stepsPerF, d.nmPath.length);
+
+        const dx = d.targetX - d.x;
+        const dy = d.targetY - d.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+
+        if (dist < 0.004) {
+          d.x = d.targetX; d.y = d.targetY; d.z = d.targetZ;
+          d.state = 'settled';
+        } else {
+          const step = Math.min(slideSpeed, dist);
+          d.x = clamp(d.x + (dx/dist)*step, 0, 1);
+          d.y = clamp(d.y + (dy/dist)*step, 0, 1);
+          d.z = heightAt(d.x, d.y);
+        }
+        d.trail.push({x:d.x, y:d.y, z:d.z});
+        if (d.trail.length > TRAIL_LEN) d.trail.shift();
+        break;
+      }
+
+      // 'settled' and 'stuck': no-op
+    }
+  }
+
+  updateStats();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Stats HUD
+// ═══════════════════════════════════════════════════════════════
+function updateStats() {
+  let settled=0, sliding=0, falling=0, optimizing=0, stuck=0;
+  for (const d of drops) {
+    switch(d.state) {
+      case 'settled':    settled++;    break;
+      case 'sliding':    sliding++;    break;
+      case 'falling':    falling++;    break;
+      case 'optimizing': optimizing++; break;
+      case 'stuck':      stuck++;      break;
+    }
+  }
+  const total = drops.length;
+  let stateStr = 'idle';
+  if (falling)    stateStr = 'falling';
+  if (optimizing) stateStr = 'optimizing';
+  if (sliding)    stateStr = 'sliding';
+  if (total && settled + stuck === total) stateStr = 'all settled';
+
+  svState.textContent   = stateStr;
+  svSettled.textContent = settled;
+  svSliding.textContent = sliding;
+  svFalling.textContent = falling;
+  svAngz.textContent    = vAngZ.toFixed(2);
+  svScale.textContent   = vScale.toFixed(0);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Render
+// ═══════════════════════════════════════════════════════════════
+function draw() {
+  // Background
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  rebuildProjCache();
+  drawTerrain();
+  drawDrops();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Game loop
+// ═══════════════════════════════════════════════════════════════
+function gameLoop() {
+  update();
+  draw();
+  rafId = requestAnimationFrame(gameLoop);
+}
+
+function initSim() {
+  generateTerrain();
+  initDrops(parseInt(dropsSlider.value));
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Mouse navigation
+// ═══════════════════════════════════════════════════════════════
+let mouseDn = false, mouseBtn = 0, mLastX = 0, mLastY = 0;
+
+canvas.addEventListener('mousedown', e => {
+  mouseDn = true; mouseBtn = e.button;
+  mLastX = e.clientX; mLastY = e.clientY;
+  e.preventDefault();
+});
+window.addEventListener('mouseup', () => { mouseDn = false; });
+canvas.addEventListener('mousemove', e => {
+  if (!mouseDn) return;
+  const dx = e.clientX - mLastX;
+  const dy = e.clientY - mLastY;
+  if (mouseBtn === 0) {
+    tAngZ += dx * ROT_SPD;
+    tAngX  = clamp(tAngX + dy * ROT_SPD, -MAX_TILT, MAX_TILT);
+  } else {
+    tPanX += dx * PAN_SPD;
+    tPanY += dy * PAN_SPD;
+  }
+  mLastX = e.clientX; mLastY = e.clientY;
+  e.preventDefault();
+  if (!rafId) draw();
+});
+canvas.addEventListener('wheel', e => {
+  tScale = clamp(tScale * (1 - e.deltaY * ZOOM_SPD), 60, 650);
+  e.preventDefault();
+  if (!rafId) draw();
+}, {passive: false});
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+// ═══════════════════════════════════════════════════════════════
+//  Touch navigation
+// ═══════════════════════════════════════════════════════════════
+let t1x=null, t1y=null, t2x=null, t2y=null;
+let tCenX=null, tCenY=null, tDist=null;
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  tAngX = vAngX; tAngZ = vAngZ; tScale = vScale; tPanX = vPanX; tPanY = vPanY;
+  if (e.touches.length === 1) {
+    t1x = e.touches[0].clientX; t1y = e.touches[0].clientY;
+    tCenX = null; tDist = null;
+  } else if (e.touches.length >= 2) {
+    t1x = e.touches[0].clientX; t1y = e.touches[0].clientY;
+    t2x = e.touches[1].clientX; t2y = e.touches[1].clientY;
+    tCenX = (t1x+t2x)*0.5; tCenY = (t1y+t2y)*0.5;
+    tDist = Math.hypot(t2x-t1x, t2y-t1y);
+  }
+}, {passive: false});
+
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (e.touches.length === 1 && t1x !== null) {
+    const dx = (e.touches[0].clientX - t1x) * 0.5;
+    const dy = (e.touches[0].clientY - t1y) * 0.5;
+    tAngZ += dx * ROT_SPD * 2;
+    tAngX  = clamp(tAngX + dy * ROT_SPD * 2, -MAX_TILT, MAX_TILT);
+    t1x = e.touches[0].clientX; t1y = e.touches[0].clientY;
+  } else if (e.touches.length >= 2 && tCenX !== null) {
+    const cx = (e.touches[0].clientX + e.touches[1].clientX) * 0.5;
+    const cy = (e.touches[0].clientY + e.touches[1].clientY) * 0.5;
+    const cd = Math.hypot(e.touches[1].clientX - e.touches[0].clientX,
+                          e.touches[1].clientY - e.touches[0].clientY);
+    tPanX += (cx - tCenX) * PAN_SPD;
+    tPanY += (cy - tCenY) * PAN_SPD;
+    if (tDist > 0) tScale = clamp(tScale * (cd / tDist), 60, 650);
+    tCenX = cx; tCenY = cy; tDist = cd;
+    t1x = e.touches[0].clientX; t1y = e.touches[0].clientY;
+    t2x = e.touches[1].clientX; t2y = e.touches[1].clientY;
+  }
+  if (!rafId) draw();
+}, {passive: false});
+
+canvas.addEventListener('touchend',   e => { e.preventDefault(); if (!rafId) draw(); }, {passive:false});
+canvas.addEventListener('touchcancel',e => { e.preventDefault(); t1x=t2x=tCenX=tDist=null; }, {passive:false});
+
+// ═══════════════════════════════════════════════════════════════
+//  Control buttons
+// ═══════════════════════════════════════════════════════════════
+startBtn.addEventListener('click', () => {
+  if (rafId) return;
+  initSim();
+  gameLoop();
+  startBtn.disabled = true;
+  stopBtn.disabled  = false;
+});
+
+stopBtn.addEventListener('click', () => {
+  cancelAnimationFrame(rafId); rafId = null;
+  startBtn.disabled = false;
+  stopBtn.disabled  = true;
+  updateStats();
+});
+
+resetBtn.addEventListener('click', () => {
+  cancelAnimationFrame(rafId); rafId = null;
+  initSim();
+  draw();
+  updateStats();
+  startBtn.disabled = false;
+  stopBtn.disabled  = true;
+});
+
+speedSlider.addEventListener('input', () => {
+  speedValEl.textContent = speedSlider.value;
+});
+dropsSlider.addEventListener('input', () => {
+  dropsValEl.textContent = dropsSlider.value;
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  Boot
+// ═══════════════════════════════════════════════════════════════
+initSim();
+draw();
+updateStats();
+</script>
+</body>
+</html>
