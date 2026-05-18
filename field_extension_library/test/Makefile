@@ -1,9 +1,9 @@
 CXX = g++
 CXXFLAGS = -std=c++20 -I. -Wall
 
-SRCS = Arduino.cpp test_main.cpp test_v2.cpp test_v3.cpp test_expanded.cpp test_rotazoom.cpp test_tft.cpp test_rotazoom2.cpp test_tft2.cpp test_panzoom.cpp test_panzoomtilt.cpp test_tilt2.cpp
+SRCS = Arduino.cpp test_main.cpp test_v2.cpp test_v3.cpp test_expanded.cpp test_rotazoom.cpp test_tft.cpp test_rotazoom2.cpp test_tft2.cpp test_panzoom.cpp test_panzoomtilt.cpp test_tilt2.cpp test_operators.cpp
 OBJS = Arduino.o
-TARGETS = test_field test_v2 test_v3 test_expanded test_rotazoom test_tft test_rotazoom2 test_tft2 test_panzoom test_panzoomtilt test_tilt2
+TARGETS = test_field test_v2 test_v3 test_expanded test_rotazoom test_tft test_rotazoom2 test_tft2 test_panzoom test_panzoomtilt test_tilt2 test_operators
 
 all: $(TARGETS)
 
@@ -40,6 +40,9 @@ test_panzoomtilt: test_panzoomtilt.o $(OBJS)
 test_tilt2: test_tilt2.o $(OBJS)
 	$(CXX) $(CXXFLAGS) -o $@ $^
 
+test_operators: test_operators.o $(OBJS)
+	$(CXX) $(CXXFLAGS) -o $@ $^
+
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -58,3 +61,4 @@ run: all
 	./test_panzoom
 	./test_panzoomtilt
 	./test_tilt2
+	./test_operators

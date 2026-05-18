@@ -93,47 +93,51 @@ public:
     }
 
     /**
-     * Addition operator
+     * Addition operators
      */
     FieldElement operator+(const FieldElement& other) const {
         FieldElement result;
-        for (size_t i = 0; i < N; i++) {
-            result.coefficients[i] = coefficients[i] + other.coefficients[i];
-        }
+        for (size_t i = 0; i < N; i++) result.coefficients[i] = coefficients[i] + other.coefficients[i];
         return result;
     }
+    FieldElement& operator+=(const FieldElement& other) {
+        for (size_t i = 0; i < N; i++) coefficients[i] += other.coefficients[i];
+        return *this;
+    }
+    friend FieldElement operator+(float lhs, const FieldElement& rhs) { return FieldElement(lhs) + rhs; }
+    friend FieldElement operator+(const FieldElement& lhs, float rhs) { return lhs + FieldElement(rhs); }
 
     /**
-     * Subtraction operator
+     * Subtraction operators
      */
     FieldElement operator-(const FieldElement& other) const {
         FieldElement result;
-        for (size_t i = 0; i < N; i++) {
-            result.coefficients[i] = coefficients[i] - other.coefficients[i];
-        }
+        for (size_t i = 0; i < N; i++) result.coefficients[i] = coefficients[i] - other.coefficients[i];
         return result;
     }
+    FieldElement& operator-=(const FieldElement& other) {
+        for (size_t i = 0; i < N; i++) coefficients[i] -= other.coefficients[i];
+        return *this;
+    }
+    friend FieldElement operator-(float lhs, const FieldElement& rhs) { return FieldElement(lhs) - rhs; }
+    friend FieldElement operator-(const FieldElement& lhs, float rhs) { return lhs - FieldElement(rhs); }
 
     /**
-     * Multiplication operator - optimized using a precomputed product table
+     * Multiplication operators - optimized using a precomputed product table
      */
     FieldElement operator*(const FieldElement& other) const {
         FieldElement result;
-        
         for (size_t i = 0; i < N; i++) {
             float ci = coefficients[i];
             if (fabs(ci) < 1e-12) continue;
             for (size_t j = 0; j < N; j++) {
                 float cj = other.coefficients[j];
                 if (fabs(cj) < 1e-12) continue;
-
                 float coeffProduct = ci * cj;
                 ProductEntry entry = PRODUCT_TABLE[i][j];
-                
                 if (entry.term >= 0 && static_cast<size_t>(entry.term) < N) {
                     result.coefficients[entry.term] += coeffProduct * entry.multiplier;
                 } else {
-                    // Entry with negative term index requires fallback to systematic computation
                     uint8_t targetPowers[3];
                     float multiplier;
                     int resTerm = computeProductTerm(i, j, multiplier, targetPowers);
@@ -145,36 +149,44 @@ public:
                 }
             }
         }
-        
         return result;
+    }
+    FieldElement& operator*=(const FieldElement& other) { return *this = (*this) * other; }
+    friend FieldElement operator*(float lhs, const FieldElement& rhs) { return FieldElement(lhs) * rhs; }
+    friend FieldElement operator*(const FieldElement& lhs, float rhs) {
+        FieldElement res;
+        for (size_t i = 0; i < N; i++) res.coefficients[i] = lhs.coefficients[i] * rhs;
+        return res;
     }
     
     /**
-     * Division operator - implemented using Newton-Raphson approximation
+     * Division operators - implemented using Newton-Raphson approximation
      */
     FieldElement operator/(const FieldElement& other) const {
-        // Check if divisor is close to zero
-        if (other.norm() < 1e-6) {
-            // Division by zero - return something indicating an error
+        if (other.norm() < 1e-9) {
             FieldElement result;
             result.coefficients[0] = INFINITY;
             return result;
         }
-        
-        // Start with a good initial guess using floating point division of evaluating values
         float initialGuess = 1.0f / other.toFloat();
         FieldElement x(initialGuess);
-        
-        // Newton-Raphson iterations for division: x = x + x * (1 - other * x)
-        for (int iter = 0; iter < 4; iter++) {  // 4 iterations for better precision
+        for (int iter = 0; iter < 4; iter++) {
             FieldElement temp = other * x;
             FieldElement one(1.0f);
             FieldElement error = one - temp;
             FieldElement correction = x * error;
             x = x + correction;
         }
-        
         return (*this) * x;
+    }
+    FieldElement& operator/=(const FieldElement& other) { return *this = (*this) / other; }
+    friend FieldElement operator/(float lhs, const FieldElement& rhs) { return FieldElement(lhs) / rhs; }
+    friend FieldElement operator/(const FieldElement& lhs, float rhs) {
+        if (std::abs(rhs) < 1e-9) { FieldElement res; res.coefficients[0] = INFINITY; return res; }
+        FieldElement res;
+        float inv = 1.0f / rhs;
+        for (size_t i = 0; i < N; i++) res.coefficients[i] = lhs.coefficients[i] * inv;
+        return res;
     }
     
     /**
@@ -403,6 +415,11 @@ public:
         if (vx == 0 && vy < 0) return FieldElement(-_PI * 0.5f);
         return FieldElement(0.0f); // atan2(0,0) is undefined, return 0
     }
+
+    friend FieldElement abs(const FieldElement& x) { return (x.toFloat() < 0) ? (x * -1.0f) : x; }
+    friend FieldElement floor(const FieldElement& x) { return FieldElement(std::floor(x.toFloat())); }
+    friend FieldElement ceil(const FieldElement& x) { return FieldElement(std::ceil(x.toFloat())); }
+    friend FieldElement round(const FieldElement& x) { return FieldElement(std::round(x.toFloat())); }
     
 private:
     /**
@@ -438,9 +455,23 @@ private:
     void approximateOutOfBasisTerm(FieldElement& result, float coefficient, 
                                   const uint8_t powers[3]) const {
         float val = coefficient;
-        if (powers[0] > 0) val *= pow(_PI, (float)powers[0]);
-        if (powers[1] > 0) val *= pow(_E, (float)powers[1]);
-        if (powers[2] > 0) val *= pow(_SQRT2, (float)powers[2]);
+        switch (powers[0]) {
+            case 1: val *= _PI; break;
+            case 2: val *= _PI2; break;
+            case 3: val *= _PI3; break;
+            case 0: break;
+            default: val *= std::pow(_PI, (float)powers[0]);
+        }
+        switch (powers[1]) {
+            case 1: val *= _E; break;
+            case 2: val *= _E2; break;
+            case 3: val *= _E3; break;
+            case 0: break;
+            default: val *= std::pow(_E, (float)powers[1]);
+        }
+        if (powers[2] == 1) val *= _SQRT2;
+        else if (powers[2] > 1) val *= std::pow(_SQRT2, (float)powers[2]);
+
         result.coefficients[0] += val;
     }
     
