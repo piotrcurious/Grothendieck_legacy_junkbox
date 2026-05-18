@@ -1,119 +1,101 @@
-Here's an example TCL/Tk program illustrating the concept of sheaves for tessellation using polynomial functions, inspired by Alexander Grothendieck's work:
+This program illustrates the concept of **Sheaves** in algebraic geometry—specifically, how local data (polynomial sections) can be glued together to define global structure (the tessellation).
+
+Inspired by Alexander Grothendieck's work, we treat the canvas as a **Base Scheme** and each pixel as a neighborhood where we evaluate local sections of a sheaf.
 
 ```tcl
 package require Tk
 
-# Helper for complex numbers (unity roots etc)
-proc complex {real imag} {
-    return [list $real $imag]
-}
+# -- Categorical Preliminaries --
 
-# Add complex numbers
-proc addComplex {z1 z2} {
-    return [list [expr {[lindex $z1 0] + [lindex $z2 0]}] [expr {[lindex $z1 1] + [lindex $z2 1]}]]
-}
+# Represent a complex number as a list {re im}
+proc complex {re im} { return [list $re $im] }
 
-# Evaluate a simple polynomial: sum(coefs[i] * z^i)
-# We'll use complex multiplication
+# Map (z1, z2) -> z1 * z2
 proc mulComplex {z1 z2} {
-    set r1 [lindex $z1 0]; set i1 [lindex $z1 1]
-    set r2 [lindex $z2 0]; set i2 [lindex $z2 1]
+    lassign $z1 r1 i1
+    lassign $z2 r2 i2
     return [list [expr {$r1*$r2 - $i1*$i2}] [expr {$r1*$i2 + $r2*$i1}]]
 }
 
-proc powComplex {z n} {
-    set res {1.0 0.0}
-    for {set i 0} {$i < $n} {incr i} {
-        set res [mulComplex $res $z]
-    }
-    return $res
-}
-
-proc evalPoly {coefs z} {
+# Evaluate P(z) = sum(c_i * z^i)
+proc evalSection {coefs z} {
     set res {0.0 0.0}
-    set i 0
+    set zi {1.0 0.0}
     foreach c $coefs {
-        set term [mulComplex [list $c 0.0] [powComplex $z $i]]
-        set res [addComplex $res $term]
-        incr i
+        set term [mulComplex [list $c 0.0] $zi]
+        set res [list [expr {[lindex $res 0] + [lindex $term 0]}] [expr {[lindex $res 1] + [lindex $term 1]}]]
+        set zi [mulComplex $zi $z]
     }
     return $res
 }
 
-# Sheaf mock: A collection of local functions
+# -- Sheaf Definition --
+
 oo::class create Sheaf {
-    variable functions
+    variable sections
+
     constructor {} {
-        set functions {}
+        set sections {}
     }
-    method addFunction {coefs} {
-        lappend functions $coefs
+
+    # A Section is a local polynomial function
+    method addSection {coefs} {
+        lappend sections $coefs
     }
-    method evaluate {z} {
-        set results {}
-        foreach f $functions {
-            lappend results [evalPoly $f $z]
+
+    # The Global Section value at z is the aggregate of local sections
+    # Here we use the Minkowski norm of the local evaluations
+    method evaluateGlobal {z} {
+        set total_abs 0.0
+        foreach s $sections {
+            set val [evalSection $s $z]
+            lassign $val r i
+            set total_abs [expr {$total_abs + sqrt($r*$r + $i*$i)}]
         }
-        return $results
-    }
-    method minAbs {z} {
-        set minVal -1
-        foreach val [my evaluate $z] {
-            set r [lindex $val 0]
-            set i [lindex $val 1]
-            set abs [expr {sqrt($r*$r + $i*$i)}]
-            if {$minVal == -1 || $abs < $minVal} {
-                set minVal $abs
-            }
-        }
-        return $minVal
+        return $total_abs
     }
 }
 
-# Main drawing logic
+# -- Visualization of the Morphism --
+
 proc main {argv} {
-    set headless 0
-    if {[lsearch $argv "--headless"] != -1} {
-        set headless 1
-    }
+    set headless [expr {[lsearch $argv "--headless"] != -1}]
+    set width 600; set height 600
 
     if {!$headless} {
-        wm title . "Sheaf-based Tessellation"
-        set canvas [canvas .c -width 600 -height 600 -bg white]
-        pack $canvas
+        wm title . "Grothendieck Sheaf Tessellator"
+        canvas .c -width $width -height $height -bg black
+        pack .c
     }
 
-    set s1 [Sheaf new]
-    # Polynomials representing some grid
-    $s1 addFunction {1 0 -1} ;# 1 - z^2
-    $s1 addFunction {0 1}    ;# z
-
-    set width 600
-    set height 600
-    set step 10
+    # Define the Sheaf Sections
+    set F [Sheaf new]
+    $F addSection {1 0 -1} ;# Local section 1 - z^2
+    $F addSection {0 1}    ;# Local section z
 
     set svg ""
     if {$headless} {
-        append svg "<svg width='$width' height='$height' xmlns='http://www.w3.org/2000/svg'>"
+        set svg "<svg width='$width' height='$height' xmlns='http://www.w3.org/2000/svg' style='background:black'>"
     }
 
+    set step 5
     for {set x 0} {$x < $width} {incr x $step} {
         for {set y 0} {$y < $height} {incr y $step} {
-            set z_real [expr {($x - $width/2.0) / 100.0}]
-            set z_imag [expr {($y - $height/2.0) / 100.0}]
-            set z [list $z_real $z_imag]
+            # Map pixel space to Complex Plane (the "Base")
+            set z_re [expr {($x - $width/2.0) / 100.0}]
+            set z_im [expr {($y - $height/2.0) / 100.0}]
 
-            set val [$s1 minAbs $z]
+            # Valuation at point z
+            set val [$F evaluateGlobal [list $z_re $z_im]]
 
-            # Color based on value
-            set c [expr {int(255 * $val / 5.0)}]
-            if {$c > 255} {set c 255}
-            set color [format "#%02x%02x%02x" $c [expr {255-$c}] 128]
+            # Color is a functor from the Valuation to the RGB space
+            set hue [expr {int($val * 50) % 360}]
+            set color [format "#%02x%02x%02x" [expr {int(128 + 127*cos($val))}] [expr {int(128 + 127*sin($val))}] 200]
 
-            if {!$headless} {
-                .c create rectangle $x $y [expr {$x+$step}] [expr {$y+$step}] -fill $color -outline ""
-            } else {
+            if {$headless} {
                 append svg "<rect x='$x' y='$y' width='$step' height='$step' fill='$color' />"
+            } else {
+                .c create rectangle $x $y [expr {$x+$step}] [expr {$y+$step}] -fill $color -outline ""
             }
         }
     }
@@ -123,7 +105,7 @@ proc main {argv} {
         set f [open "tesselator_sheaf.svg" w]
         puts $f $svg
         close $f
-        puts "Generated tesselator_sheaf.svg"
+        puts "Generated Grothendieck-inspired tesselator_sheaf.svg"
         exit
     }
 }
@@ -131,4 +113,4 @@ proc main {argv} {
 main $argv
 ```
 
-This script demonstrates how a sheaf (represented here as a collection of local polynomial functions) can define a tessellation pattern. Each point in the complex plane is evaluated against the sheaf's sections, and the resulting values determine the visual properties.
+In this implementation, the tessellation pattern emerges from the **stalks** of the sheaf—the local evaluations of the sections. By changing the sections, we change the topology of the resulting image, effectively exploring different morphisms of the underlying number scheme.
