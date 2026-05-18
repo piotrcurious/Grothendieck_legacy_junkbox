@@ -1,27 +1,37 @@
-# morphisms.tcl - Visualizes Scheme Morphisms via IFS
-# Usage: tclsh morphisms.tcl [--headless]
+# morphisms.tcl - Visualizes Scheme Morphisms via categorical Functors
+# Inspired by the "Relative Point of View" in Grothendieck's Algebraic Geometry.
 
-proc transform {p matrix offset} {
-    set x [lindex $p 0]; set y [lindex $p 1]
-    set nx [expr {[lindex $matrix 0]*$x + [lindex $matrix 1]*$y + [lindex $offset 0]}]
-    set ny [expr {[lindex $matrix 2]*$x + [lindex $matrix 3]*$y + [lindex $offset 1]}]
-    return [list $nx $ny]
-}
-
-proc draw_fractal {canvas width height headless} {
-    set points {{0.0 0.0}}
-    set transforms {
-        {{0.5 0.0 0.0 0.5} {0.0 0.0}}
-        {{0.5 0.0 0.0 0.5} {0.5 0.0}}
-        {{0.5 0.0 0.0 0.5} {0.25 0.433}}
+oo::class create Functor {
+    variable matrix offset
+    constructor {m o} {
+        set matrix $m
+        set offset $o
     }
 
-    # Simple Chaos Game / IFS
+    # Map a point in the source scheme to the target scheme
+    method map {p} {
+        lassign $p x y
+        set nx [expr {[lindex $matrix 0]*$x + [lindex $matrix 1]*$y + [lindex $offset 0]}]
+        set ny [expr {[lindex $matrix 2]*$x + [lindex $matrix 3]*$y + [lindex $offset 1]}]
+        return [list $nx $ny]
+    }
+}
+
+proc draw_morphism {canvas width height headless} {
+    # Define a collection of Functors (the IFS)
+    set functors {
+        {Functor new {0.5 0.0 0.0 0.5} {0.0 0.0}}
+        {Functor new {0.5 0.0 0.0 0.5} {0.5 0.0}}
+        {Functor new {0.5 0.0 0.0 0.5} {0.25 0.433}}
+    }
+
     set current {0.0 0.0}
     set res_points {}
     for {set i 0} {$i < 5000} {incr i} {
-        set t [lindex $transforms [expr {int(rand()*3)}]]
-        set current [transform $current [lindex $t 0] [lindex $t 1]]
+        # Select a morphism randomly (Chaos Game)
+        set f_cmd [lindex $functors [expr {int(rand()*3)}]]
+        set f [eval $f_cmd]
+        set current [$f map $current]
         if {$i > 100} { lappend res_points $current }
     }
 
@@ -30,26 +40,24 @@ proc draw_fractal {canvas width height headless} {
         set svg "<svg width='$width' height='$height' xmlns='http://www.w3.org/2000/svg' style='background:white'>"
     }
 
-    set scale 600
-    set ox 100
-    set oy 100
+    set scale 600; set ox 100; set oy 100
 
     foreach p $res_points {
-        set x [expr {[lindex $p 0] * $scale + $ox}]
-        set y [expr {[lindex $p 1] * $scale + $oy}]
+        lassign $p re im
 
-        # Morphism: Non-linear mapping z -> z^2 in complex plane
-        # (re + i*im)^2 = re^2 - im^2 + 2*i*re*im
-        set re [lindex $p 0]; set im [lindex $p 1]
+        # Identity Morphism (Blue)
+        set x [expr {$re * $scale + $ox}]
+        set y [expr {$im * $scale + $oy}]
+
+        # Non-linear Morphism: z -> z^2 (Red)
         set m_re [expr {$re*$re - $im*$im}]
         set m_im [expr {2*$re*$im}]
-
         set mx [expr {$m_re * $scale + $ox + 300}]
         set my [expr {$m_im * $scale + $oy}]
 
         if {$headless} {
-            append svg "<circle cx='$x' cy='$y' r='1' fill='blue' />"
-            append svg "<circle cx='$mx' cy='$my' r='1' fill='red' />"
+            append svg "<circle cx='$x' cy='$y' r='1' fill='blue' opacity='0.5' />"
+            append svg "<circle cx='$mx' cy='$my' r='1' fill='red' opacity='0.5' />"
         } else {
             $canvas create oval [expr {$x-1}] [expr {$y-1}] [expr {$x+1}] [expr {$y+1}] -fill blue -outline ""
             $canvas create oval [expr {$mx-1}] [expr {$my-1}] [expr {$mx+1}] [expr {$my+1}] -fill red -outline ""
@@ -65,22 +73,21 @@ proc draw_fractal {canvas width height headless} {
 
 proc main {argv} {
     set headless [expr {[lsearch $argv "--headless"] != -1}]
-    set width 1000
-    set height 600
+    set width 1000; set height 600
 
     if {$headless} {
-        set svg [draw_fractal "" $width $height 1]
+        set svg [draw_morphism "" $width $height 1]
         set f [open "morphisms.svg" w]
         puts $f $svg
         close $f
-        puts "Generated morphisms.svg"
+        puts "Generated categorical morphisms.svg"
         exit
     } else {
         package require Tk
-        wm title . "Morphisms of Number Schemes"
+        wm title . "Categorical Morphisms of Number Schemes"
         canvas .c -width $width -height $height
         pack .c
-        draw_fractal .c $width $height 0
+        draw_morphism .c $width $height 0
     }
 }
 
