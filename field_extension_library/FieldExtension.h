@@ -23,6 +23,7 @@
  */
 template<size_t N = 4>
 class FieldElement {
+    static_assert(N <= 16, "FieldElement currently supports up to 16 basis elements.");
 private:
     float coefficients[N];
     
@@ -262,6 +263,74 @@ public:
         
         // For complex elements, use Taylor series approximation
         return logTaylor(x);
+    }
+
+    friend FieldElement sqrt(const FieldElement& x) {
+        float val = x.toFloat();
+        if (val < 0) return FieldElement(NAN);
+        if (val == 0) return FieldElement(0.0f);
+
+        // Newton's method: y = 0.5 * (y + x/y)
+        FieldElement y(std::sqrt(val));
+        for (int i = 0; i < 4; i++) {
+            y = (y + x / y) * 0.5f;
+        }
+        return y;
+    }
+
+    friend FieldElement atan(const FieldElement& x) {
+        float val = x.toFloat();
+        if (std::isnan(val)) return FieldElement(NAN);
+
+        // Use threshold 0.6 to avoid slow convergence and recursion issues at 1.0
+        if (std::abs(val) < 0.6f) {
+            FieldElement result = x;
+            FieldElement x2 = x * x;
+            FieldElement term = x;
+            for (int i = 1; i <= 8; i++) {
+                term = term * x2;
+                float sign = (i % 2 == 0) ? 1.0f : -1.0f;
+                result = result + term * (sign / (2.0f * i + 1.0f));
+            }
+            return result;
+        } else {
+            // Range reduction using atan(x) = atan(c) + atan((x-c)/(1+xc))
+            // To keep it simple, we can use atan(x) = pi/2 - atan(1/x) for |x| > 1
+            // but for x near 1, we still need something.
+            if (val > 1.0f) {
+                return FieldElement(_PI * 0.5f) - atan(FieldElement(1.0f) / x);
+            } else if (val < -1.0f) {
+                return FieldElement(-_PI * 0.5f) - atan(FieldElement(1.0f) / x);
+            } else {
+                // Near 1 or -1: use atan(x) = 2 * atan(x / (1 + sqrt(1 + x^2)))
+                // This will bring the argument close to 0.414 for x=1
+                return atan(x / (FieldElement(1.0f) + sqrt(FieldElement(1.0f) + x * x))) * 2.0f;
+            }
+        }
+    }
+
+    friend FieldElement asin(const FieldElement& x) {
+        float val = x.toFloat();
+        if (std::abs(val) > 1.0f) return FieldElement(NAN);
+        if (std::abs(val) == 1.0f) return FieldElement(val * _PI * 0.5f);
+        // asin(x) = atan(x / sqrt(1 - x^2))
+        return atan(x / sqrt(FieldElement(1.0f) - x * x));
+    }
+
+    friend FieldElement acos(const FieldElement& x) {
+        // acos(x) = pi/2 - asin(x)
+        return FieldElement(_PI * 0.5f) - asin(x);
+    }
+
+    friend FieldElement atan2(const FieldElement& y, const FieldElement& x) {
+        float vx = x.toFloat();
+        float vy = y.toFloat();
+        if (vx > 0) return atan(y / x);
+        if (vx < 0 && vy >= 0) return atan(y / x) + FieldElement(_PI);
+        if (vx < 0 && vy < 0) return atan(y / x) - FieldElement(_PI);
+        if (vx == 0 && vy > 0) return FieldElement(_PI * 0.5f);
+        if (vx == 0 && vy < 0) return FieldElement(-_PI * 0.5f);
+        return FieldElement(0.0f); // atan2(0,0) is undefined, return 0
     }
     
 private:

@@ -50,6 +50,10 @@ public:
         return result;
     }
 
+    FieldExtension operator-(const FieldExtension& other) const {
+        return (*this) + (other * -1.0f);
+    }
+
     // Scalar multiplication
     FieldExtension operator*(float scalar) const {
         FieldExtension result;
