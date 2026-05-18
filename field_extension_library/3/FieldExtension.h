@@ -70,6 +70,10 @@ public:
             for (const auto& t2 : other.terms) {
                 if (t1.basis == Basis::One) result.addTerm({t1.coeff * t2.coeff, t2.basis});
                 else if (t2.basis == Basis::One) result.addTerm({t1.coeff * t2.coeff, t1.basis});
+                else if (t1.basis == t2.basis) {
+                    // Approximate Pi*Pi as a scalar to keep it compact
+                    result.addTerm({t1.evaluate() * t2.evaluate(), Basis::One});
+                }
                 else {
                     // Out of basis product - evaluate to One
                     float val = t1.evaluate() * t2.evaluate();
@@ -78,6 +82,16 @@ public:
             }
         }
         return result;
+    }
+
+    FieldExtension recip() const {
+        float v = evaluate();
+        if (std::abs(v) < 1e-9) return FieldExtension(NAN);
+        return FieldExtension(1.0f / v);
+    }
+
+    FieldExtension operator/(const FieldExtension& other) const {
+        return (*this) * other.recip();
     }
 
     void addTerm(const Term& t) {

@@ -3,6 +3,7 @@
 #include <cassert>
 #include <iostream>
 #include <iomanip>
+#include <chrono>
 
 void testFieldElement8();
 void testFieldElement16();
@@ -10,6 +11,9 @@ void testExtendedPrecision();
 void testRangeReduction();
 void testIdentity();
 void testNewFunctions();
+void testPow();
+void testHyperbolic();
+void testMultiplicationBenchmark();
 
 int main() {
     std::cout << std::fixed << std::setprecision(10);
@@ -21,6 +25,9 @@ int main() {
     testRangeReduction();
     testIdentity();
     testNewFunctions();
+    testPow();
+    testHyperbolic();
+    testMultiplicationBenchmark();
 
     std::cout << "All expanded tests completed successfully!" << std::endl;
     return 0;
@@ -31,7 +38,6 @@ void testFieldElement8() {
     FieldElement8 pi = FieldElement8::pi();
     FieldElement8 e = FieldElement8::e();
 
-    // pi*e should be term 6
     FieldElement8 pie = pi * e;
     std::cout << "pi * e = " << pie.toFloat() << std::endl;
     std::cout << "Term 6 coefficient (pi*e): " << pie.getCoefficient(6) << std::endl;
@@ -44,7 +50,6 @@ void testFieldElement16() {
     FieldElement16 e = FieldElement16::e();
     FieldElement16 sqrt2 = FieldElement16::sqrt2();
 
-    // pi*e*sqrt2 should be term 15
     FieldElement16 triple = pi * e * sqrt2;
     std::cout << "pi * e * sqrt2 = " << triple.toFloat() << std::endl;
     std::cout << "Term 15 coefficient (pi*e*sqrt2): " << triple.getCoefficient(15) << std::endl;
@@ -57,7 +62,6 @@ void testExtendedPrecision() {
     FieldElement8 pi2 = pi * pi;
 
     std::cout << "pi^2 = " << pi2.toFloat() << std::endl;
-    // pi^2 is term 4
     std::cout << "Term 4 coefficient (pi^2): " << pi2.getCoefficient(4) << std::endl;
     assert(std::abs(pi2.getCoefficient(4) - 1.0f) < 1e-6);
 }
@@ -96,7 +100,7 @@ void testIdentity() {
 }
 
 void testNewFunctions() {
-    std::cout << "\n=== Testing New Functions (sqrt, atan, asin, acos) ===" << std::endl;
+    std::cout << "\n=== Testing New Functions (sqrt, atan, asin, acos, atan2) ===" << std::endl;
     FieldElement4 pi = FieldElement4::pi();
     FieldElement4 pi2 = pi * pi;
 
@@ -122,4 +126,49 @@ void testNewFunctions() {
     FieldElement4 a2 = atan2(y, x);
     std::cout << "atan2(1, 1) = " << a2.toFloat() << " (should be pi/4)" << std::endl;
     assert(std::abs(a2.toFloat() - M_PI * 0.25f) < 1e-5);
+}
+
+void testPow() {
+    std::cout << "\n=== Testing Pow ===" << std::endl;
+    FieldElement4 pi = FieldElement4::pi();
+    FieldElement4 p2 = pow(pi, 2.0f);
+    std::cout << "pow(pi, 2) = " << p2.toFloat() << " (should be pi^2)" << std::endl;
+    assert(std::abs(p2.toFloat() - M_PI * M_PI) < 1e-4);
+
+    FieldElement4 e = FieldElement4::e();
+    FieldElement4 pe = pow(e, pi);
+    std::cout << "pow(e, pi) = " << pe.toFloat() << " (should be e^pi)" << std::endl;
+    assert(std::abs(pe.toFloat() - std::pow(M_E, M_PI)) < 1e-4);
+}
+
+void testHyperbolic() {
+    std::cout << "\n=== Testing Hyperbolic Functions ===" << std::endl;
+    FieldElement4 x(0.5f);
+    FieldElement4 s = sinh(x);
+    FieldElement4 c = cosh(x);
+    // cosh^2 - sinh^2 = 1
+    FieldElement4 res = c * c - s * s;
+    std::cout << "cosh(0.5)^2 - sinh(0.5)^2 = " << res.toFloat() << " (should be 1)" << std::endl;
+    assert(std::abs(res.toFloat() - 1.0f) < 1e-6);
+
+    FieldElement4 as = asinh(s);
+    std::cout << "asinh(sinh(0.5)) = " << as.toFloat() << " (should be 0.5)" << std::endl;
+    assert(std::abs(as.toFloat() - 0.5f) < 1e-6);
+}
+
+void testMultiplicationBenchmark() {
+    std::cout << "\n=== Testing Multiplication Benchmark ===" << std::endl;
+    FieldElement16 a;
+    for(int i=0; i<16; i++) a.setCoefficient(i, (float)i/10.0f);
+    FieldElement16 b = a;
+
+    auto start = std::chrono::high_resolution_clock::now();
+    for(int i=0; i<10000; i++) {
+        a = a * b;
+        // Keep coefficients small to avoid overflow during benchmark
+        if (a.norm() > 10.0f) a = a * 0.1f;
+    }
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end - start;
+    std::cout << "10000 multiplications (FieldElement16) took: " << diff.count() << "s" << std::endl;
 }

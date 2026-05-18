@@ -19,6 +19,18 @@ int main() {
     std::cout << "fe4 (2*e) evaluation: " << fe4.evaluate() << std::endl;
     assert(std::abs(fe4.evaluate() - 2.0f * 2.71828182f) < 1e-5);
 
+    // Test Pi * Pi improvement
+    FieldExtension pi({{1.0f, Basis::Pi}});
+    FieldExtension pi2 = pi * pi;
+    std::cout << "pi^2 evaluation: " << pi2.evaluate() << " (should be ~9.869)" << std::endl;
+    assert(std::abs(pi2.evaluate() - 9.8696044f) < 1e-4);
+
+    // Test division
+    FieldExtension two(2.0f);
+    FieldExtension half = FieldExtension(1.0f) / two;
+    std::cout << "1/2 evaluation: " << half.evaluate() << std::endl;
+    assert(std::abs(half.evaluate() - 0.5f) < 1e-6);
+
     std::cout << "Tests for version 3 passed!" << std::endl;
     return 0;
 }

@@ -30,6 +30,10 @@ private:
     // Basis elements information - which transcendental number combinations
     // are represented by each coefficient index. We support up to 16 basis elements.
     static const uint8_t BASIS_ELEMENTS[16][3];
+
+    // Multiplication lookup table: [i][j] = {targetTerm, multiplier}
+    struct ProductEntry { int8_t term; float multiplier; };
+    static const ProductEntry PRODUCT_TABLE[16][16];
     
     // Pre-calculated values of common transcendental number powers
     static constexpr float _PI = 3.14159265358979323846;
@@ -109,33 +113,33 @@ public:
     }
 
     /**
-     * Multiplication operator - this is the complex part because we need
-     * to handle multiplication of the transcendental basis elements
+     * Multiplication operator - optimized using a precomputed product table
      */
     FieldElement operator*(const FieldElement& other) const {
         FieldElement result;
         
-        // For each pair of terms in the two field elements
         for (size_t i = 0; i < N; i++) {
-            if (fabs(coefficients[i]) < 1e-9) continue;
+            float ci = coefficients[i];
+            if (fabs(ci) < 1e-9) continue;
             for (size_t j = 0; j < N; j++) {
-                if (fabs(other.coefficients[j]) < 1e-9) continue;
+                float cj = other.coefficients[j];
+                if (fabs(cj) < 1e-9) continue;
 
-                // Multiply the coefficients
-                float coeffProduct = coefficients[i] * other.coefficients[j];
+                float coeffProduct = ci * cj;
+                ProductEntry entry = PRODUCT_TABLE[i][j];
                 
-                // Compute which result term this product contributes to
-                float multiplier = 1.0f;
-                uint8_t targetPowers[3];
-                int resultTerm = computeProductTerm(i, j, multiplier, targetPowers);
-                
-                // If the result is part of our basis, add it to the appropriate coefficient
-                if (resultTerm >= 0 && static_cast<size_t>(resultTerm) < N) {
-                    result.coefficients[resultTerm] += coeffProduct * multiplier;
-                }
-                // If the resultTerm is outside our basis, we'll approximate
-                else {
-                    approximateOutOfBasisTerm(result, coeffProduct * multiplier, targetPowers);
+                if (entry.term >= 0 && static_cast<size_t>(entry.term) < N) {
+                    result.coefficients[entry.term] += coeffProduct * entry.multiplier;
+                } else {
+                    // Out-of-basis or entry with negative term requires fallback or special handling
+                    uint8_t targetPowers[3];
+                    float multiplier;
+                    int resTerm = computeProductTerm(i, j, multiplier, targetPowers);
+                    if (resTerm >= 0 && static_cast<size_t>(resTerm) < N) {
+                        result.coefficients[resTerm] += coeffProduct * multiplier;
+                    } else {
+                        approximateOutOfBasisTerm(result, coeffProduct * multiplier, targetPowers);
+                    }
                 }
             }
         }
@@ -320,6 +324,71 @@ public:
     friend FieldElement acos(const FieldElement& x) {
         // acos(x) = pi/2 - asin(x)
         return FieldElement(_PI * 0.5f) - asin(x);
+    }
+
+    friend FieldElement tan(const FieldElement& x) {
+        return sin(x) / cos(x);
+    }
+
+    friend FieldElement sinh(const FieldElement& x) {
+        FieldElement ex = exp(x);
+        return (ex - FieldElement(1.0f) / ex) * 0.5f;
+    }
+
+    friend FieldElement cosh(const FieldElement& x) {
+        FieldElement ex = exp(x);
+        return (ex + FieldElement(1.0f) / ex) * 0.5f;
+    }
+
+    friend FieldElement tanh(const FieldElement& x) {
+        FieldElement ex = exp(x);
+        FieldElement enx = FieldElement(1.0f) / ex;
+        return (ex - enx) / (ex + enx);
+    }
+
+    friend FieldElement asinh(const FieldElement& x) {
+        // asinh(x) = log(x + sqrt(x^2 + 1))
+        return log(x + sqrt(x * x + FieldElement(1.0f)));
+    }
+
+    friend FieldElement acosh(const FieldElement& x) {
+        // acosh(x) = log(x + sqrt(x^2 - 1))
+        if (x.toFloat() < 1.0f) return FieldElement(NAN);
+        return log(x + sqrt(x * x - FieldElement(1.0f)));
+    }
+
+    friend FieldElement atanh(const FieldElement& x) {
+        // atanh(x) = 0.5 * log((1+x)/(1-x))
+        float v = x.toFloat();
+        if (std::abs(v) >= 1.0f) return FieldElement(NAN);
+        return log((FieldElement(1.0f) + x) / (FieldElement(1.0f) - x)) * 0.5f;
+    }
+
+    friend FieldElement pow(const FieldElement& x, float y) {
+        float val = x.toFloat();
+        if (val < 0 && std::floor(y) != y) return FieldElement(NAN);
+        if (val == 0) return (y == 0) ? FieldElement(1.0f) : FieldElement(0.0f);
+
+        // Optimization for integer powers
+        if (std::floor(y) == y && std::abs(y) <= 10.0f) {
+            int iy = (int)y;
+            if (iy == 0) return FieldElement(1.0f);
+            FieldElement base = (iy > 0) ? x : FieldElement(1.0f) / x;
+            int ay = std::abs(iy);
+            FieldElement res(1.0f);
+            for (int i = 0; i < ay; i++) res = res * base;
+            return res;
+        }
+
+        // Use exp(y * log(x)) for general power
+        return exp(log(x) * y);
+    }
+
+    friend FieldElement pow(const FieldElement& x, const FieldElement& y) {
+        float valX = x.toFloat();
+        if (valX < 0) return FieldElement(NAN);
+        if (valX == 0) return (y.toFloat() == 0) ? FieldElement(1.0f) : FieldElement(0.0f);
+        return exp(log(x) * y);
     }
 
     friend FieldElement atan2(const FieldElement& y, const FieldElement& x) {
@@ -619,6 +688,32 @@ const uint8_t FieldElement<N>::BASIS_ELEMENTS[16][3] = {
     {2, 0, 0}, {0, 2, 0}, {1, 1, 0}, {1, 0, 1}, // 4-7: pi^2, e^2, pi*e, pi*sqrt2
     {0, 1, 1}, {3, 0, 0}, {0, 3, 0}, {2, 1, 0}, // 8-11: e*sqrt2, pi^3, e^3, pi^2*e
     {1, 2, 0}, {2, 0, 1}, {0, 2, 1}, {1, 1, 1}  // 12-15: pi*e^2, pi^2*sqrt2, e^2*sqrt2, pi*e*sqrt2
+};
+
+/**
+ * Precomputed product table for basis elements.
+ * For each pair [i][j], specifies the resulting basis term index and a scalar multiplier.
+ * A term index of -1 indicates the product is not in the basis.
+ */
+template<size_t N>
+const typename FieldElement<N>::ProductEntry FieldElement<N>::PRODUCT_TABLE[16][16] = {
+    // 0:1, 1:pi, 2:e, 3:sqrt2, 4:pi^2, 5:e^2, 6:pi*e, 7:pi*sqrt2, 8:e*sqrt2, 9:pi^3, 10:e^3, 11:pi^2*e, 12:pi*e^2, 13:pi^2*sqrt2, 14:e^2*sqrt2, 15:pi*e*sqrt2
+    /* 0 */ {{0,1}, {1,1}, {2,1}, {3,1}, {4,1}, {5,1}, {6,1}, {7,1}, {8,1}, {9,1}, {10,1}, {11,1}, {12,1}, {13,1}, {14,1}, {15,1}},
+    /* 1 */ {{1,1}, {4,1}, {6,1}, {7,1}, {9,1}, {12,1}, {11,1}, {13,1}, {15,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}},
+    /* 2 */ {{2,1}, {6,1}, {5,1}, {8,1}, {11,1}, {10,1}, {12,1}, {15,1}, {14,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}},
+    /* 3 */ {{3,1}, {7,1}, {8,1}, {0,2}, {13,1}, {14,1}, {15,1}, {1,2}, {2,2}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {4,2}, {5,2}, {6,2}},
+    /* 4 */ {{4,1}, {9,1}, {11,1}, {13,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}},
+    /* 5 */ {{5,1}, {12,1}, {10,1}, {14,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}},
+    /* 6 */ {{6,1}, {11,1}, {12,1}, {15,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}},
+    /* 7 */ {{7,1}, {13,1}, {15,1}, {1,2}, {-1,1}, {-1,1}, {-1,1}, {4,2}, {6,2}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {9,2}, {11,2}, {11,2}},
+    /* 8 */ {{8,1}, {15,1}, {14,1}, {2,2}, {-1,1}, {-1,1}, {-1,1}, {6,2}, {5,2}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {11,2}, {10,2}, {12,2}},
+    /* 9 */ {{9,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}},
+    /* 10*/ {{10,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}},
+    /* 11*/ {{11,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}},
+    /* 12*/ {{12,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}},
+    /* 13*/ {{13,1}, {-1,1}, {-1,1}, {4,2}, {-1,1}, {-1,1}, {-1,1}, {9,2}, {11,2}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}},
+    /* 14*/ {{14,1}, {-1,1}, {-1,1}, {5,2}, {-1,1}, {-1,1}, {-1,1}, {11,2}, {10,2}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}},
+    /* 15*/ {{15,1}, {-1,1}, {-1,1}, {6,2}, {-1,1}, {-1,1}, {-1,1}, {11,2}, {12,2}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}, {-1,1}}
 };
 
 /**
