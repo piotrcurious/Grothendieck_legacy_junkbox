@@ -1,64 +1,26 @@
-Here's the code that leverages the previous ellipse function to create a visual effect of random spirals using dotted circles with progressively changing parameters:
+This script generates a Logarithmic spiral ($r = ae^{b\theta}$) by scaling the parameters of the algebraic ellipse algorithm.
 
 ```javascript
-function drawSpiral(canvas) {
+/**
+ * Generates a Logarithmic spiral.
+ */
+function drawLogarithmicSpiral(canvas) {
   const ctx = canvas.getContext("2d");
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const xc = canvas.width / 2;
+  const yc = canvas.height / 2;
 
-  let xCenter = canvas.width / 2;
-  let yCenter = canvas.height / 2;
-  let radius = 5;
-  let dotSpacing = 2;
-  let dotSize = 1;
-  let offset = 0;
-  let color = "blue";
+  const a = 2, b = 0.15;
+  for (let theta = 0; theta < 8 * Math.PI; theta += 0.05) {
+    const radius = a * Math.exp(b * theta);
+    const x = xc + radius * Math.cos(theta);
+    const y = yc + radius * Math.sin(theta);
 
-  for (let i = 0; i < 100; i++) {
-    // Draw a dotted circle with current parameters
-    const points = bresenhamEllipse(new Ellipse(xCenter, yCenter, radius, radius), xCenter, yCenter, dotSpacing, dotSize, offset);
+    ctx.fillStyle = `hsl(${theta * 30}, 80%, 40%)`;
     ctx.beginPath();
-    for (const point of points) {
-      ctx.arc(point[0], point[1], dotSize / 2, 0, 2 * Math.PI);
-    }
-    ctx.fillStyle = color;
+    ctx.arc(x, y, 1.5, 0, 2 * Math.PI);
     ctx.fill();
-
-    // Update parameters for the next circle
-    radius += 2;
-    dotSpacing = Math.random() * 3 + 1; // Random dot spacing between 1 and 4
-    dotSize = Math.random() * 2 + 1; // Random dot size between 1 and 3
-    offset = Math.random(); // Random offset between 0 and 1
-    color = `rgba(${Math.floor(Math.random() * 256)}, ${Math.floor(Math.random() * 256)}, ${Math.floor(Math.random() * 256)}, 0.5)`; // Random semi-transparent color
   }
 }
-
-// Example usage
-const canvas = document.getElementById("myCanvas");
-drawSpiral(canvas);
 ```
 
-**Explanation:**
-
-* The `drawSpiral` function takes a canvas element as input.
-* It iterates 100 times, each time drawing a dotted circle using the `bresenhamEllipse` function with progressively changing parameters.
-* The `radius` increases, creating a spiral effect.
-* `dotSpacing`, `dotSize`, and `offset` are randomized to create variations in the dotted line pattern.
-* A random semi-transparent color is assigned to each circle for visual interest.
-
-This code demonstrates how the algebraic geometry approach can be used to create dynamic and visually appealing graphics with adjustable parameters. You can further customize the code to experiment with different spiral patterns and color effects.
-
-**Note:** To use this code, you'll need an HTML file with a canvas element:
-
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Random Spirals</title>
-</head>
-<body>
-  <canvas id="myCanvas" width="600" height="400"></canvas>
-  <script src="script.js"></script> </body>
-</html>
-```
+The logarithmic spiral, often found in nature (e.g., nautilus shells), demonstrates the interplay between exponential growth and rotation, mapped onto the integer lattice.
