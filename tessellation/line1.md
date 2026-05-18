@@ -10,32 +10,29 @@ function Point(x, y) {
 // Function to perform integer addition with overflow protection
 function addSafe(a, b) {
   const sum = a + b;
-  if ((sum ^ a) < 0 && (sum ^ b) < 0) { // Check for overflow
-    throw new RangeError("Integer overflow");
-  }
+  if (b > 0 && sum < a) throw new RangeError("Integer overflow");
+  if (b < 0 && sum > a) throw new RangeError("Integer overflow");
   return sum;
 }
 
-// Bresenham line algorithm using parametric line equation
+/**
+ * Parametric line algorithm (reinvented Bresenham)
+ *
+ * Algebraic perspective: A line is a mapping L: R -> R^2, t |-> P0 + t(P1 - P0).
+ * We discretize the parameter t to traverse the lattice.
+ */
 function parametricLine(p0, p1) {
-  const dx = addSafe(p1.x, -p0.x);
-  const dy = addSafe(p1.y, -p0.y);
+  const dx = p1.x - p0.x;
+  const dy = p1.y - p0.y;
 
-  let t = 0; // Parameter for the line equation
-
-  const points = [];
-  points.push(new Point(p0.x, p0.y));
-
-  // Loop based on the greater absolute change in coordinates (dx or dy)
   const steps = Math.max(Math.abs(dx), Math.abs(dy));
-  for (let i = 0; i < steps; i++) {
+  const points = [];
+
+  for (let i = 0; i <= steps; i++) {
+    const t = steps === 0 ? 0 : i / steps;
     const x = Math.round(p0.x + t * dx);
     const y = Math.round(p0.y + t * dy);
     points.push(new Point(x, y));
-
-    // Update parameter based on the sign of dx and dy
-    const increment = Math.sign(dx) * Math.sign(dy);
-    t += increment;
   }
 
   return points;
