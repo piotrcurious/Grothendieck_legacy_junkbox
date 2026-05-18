@@ -3,7 +3,7 @@
 #include "../FieldExtension.h"
 #include <iostream>
 
-using FE = FieldElement4;
+using FE = FieldElement16;
 
 TFT_eSPI tft = TFT_eSPI();
 static const int16_t W = 320;
@@ -20,7 +20,7 @@ FE baseAngle() {
 }
 
 int main() {
-    std::cout << "Running Rotazoom Test..." << std::endl;
+    std::cout << "Running Refined Rotazoom Test..." << std::endl;
     tft.init();
 
     float t = 0.0f;
@@ -32,25 +32,25 @@ int main() {
         FE s = sin(ang);
         FE c = cos(ang);
 
+        FE zoomFE = 1.0f + 0.5f * sin(FE(t * 0.5f));
+        float zoom = zoomFE.toFloat();
+
         float fs = s.toFloat();
         float fc = c.toFloat();
-        float zoom = 1.0f + 0.5f * std::sin(t * 0.5f);
 
         std::cout << "Frame " << frame << ": t=" << t << ", zoom=" << zoom << ", sin=" << fs << ", cos=" << fc << std::endl;
 
-        // We won't actually draw all pixels to keep it fast
         for (int16_t y = 0; y < H; y += 40) {
             for (int16_t x = 0; x < W; x += 40) {
                 float u = (x - CX) * zoom;
                 float v = (y - CY) * zoom;
                 float xr = u * fc - v * fs;
                 float yr = u * fs + v * fc;
-                uint16_t color = tft.color565(0, 0, 0);
-                tft.drawPixel(x, y, color);
+                tft.drawPixel(x, y, 0);
             }
         }
     }
 
-    std::cout << "Rotazoom Test Completed Successfully!" << std::endl;
+    std::cout << "Refined Rotazoom Test Completed Successfully!" << std::endl;
     return 0;
 }

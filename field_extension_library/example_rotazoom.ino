@@ -15,8 +15,8 @@ static const int16_t H = 240;
 static const float CX = W / 2.0f;
 static const float CY = H / 2.0f;
 
-// Field-extension type with [1, π, e, √2]
-using FE = FieldElement4;
+// Field-extension type with 16 basis elements for high-order interactions
+using FE = FieldElement16;
 
 // Pre-define a composite angle element: 1·π + 0.5·e + 0.2·√2
 FE baseAngle()
@@ -36,30 +36,29 @@ void setup() {
 
 void loop() {
   static float t = 0.0f;
-  t += 0.02f;                    // time step
+  t += 0.02f;
 
   // Build an angle FE = base + t·1
   FE ang = baseAngle();
-  ang.setCoefficient(0, t);      // add constant term = t
+  ang.setCoefficient(0, t);
 
-  // Compute sin & cos in the field extension (Taylor path)
+  // Compute sin & cos in the field extension (Symbolic-Numeric hybrid)
   FE s = sin(ang);
   FE c = cos(ang);
 
-  // Convert to floats for pixel mapping
+  // Use the library's high-precision zoom calculation
+  FE zoomFE = 1.0f + 0.5f * sin(FE(t * 0.5f));
+  float zoom = zoomFE.toFloat();
+
   float fs = s.toFloat();
   float fc = c.toFloat();
 
-  // Compute zoom factor as 1 + 0.5·sin(t/2)
-  float zoom = 1.0f + 0.5f * sin(t * 0.5f);
-
-  // Draw rotazoomer
   for (int16_t y = 0; y < H; y++) {
     for (int16_t x = 0; x < W; x++) {
-      // Translate to center
       float u = (x - CX) * zoom;
       float v = (y - CY) * zoom;
-      // Rotate: x' = u·c – v·s, y' = u·s + v·c
+
+      // Algebraic rotation
       float xr = u * fc - v * fs;
       float yr = u * fs + v * fc;
       // Simple color from cosine waves

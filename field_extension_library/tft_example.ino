@@ -46,11 +46,8 @@ FE computeSunElevation(const FE& latitudeRad, int year, int month, int day, int 
 
   // 4) compute sin(el)
   FE sinEl = sinFE(decl)*sinFE(latitudeRad) + cosFE(decl)*cosFE(latitudeRad)*cosFE(H);
-  // clamp
-  float s = sinEl.toFloat();
-  if(s>1) s=1; else if(s<-1) s=-1;
   // elevation
-  return FE( asinh(s) ); // or just return arcsin: FE(asin(s))
+  return asin(sinEl);
 }
 
 FE toRadiansFE(const FE& deg) {
@@ -95,8 +92,7 @@ void loop() {
 
   // compute sun elevation
   FE elFE = computeSunElevation(latFE, yr, mo, day, hr, mn, sc);
-  float elevation = asinh(elFE.toFloat()) * 180.0 / 3.14159265; 
-      // if using arcsin: elevation = asin(elFE.toFloat())*180/PI;
+  float elevation = (elFE * 180.0f / FE::pi()).toFloat();
 
   // draw earth‐curvature graph
   // x axis: distance 0…50 km, y axis: drop due to curvature

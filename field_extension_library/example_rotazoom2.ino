@@ -41,10 +41,10 @@ void loop() {
   static float scale = 1.0f;
 
   // Represent angle and scale using field elements
-  FieldElement<4> theta(angle);
-  FieldElement<4> cosTheta = cos(theta);
-  FieldElement<4> sinTheta = sin(theta);
-  FieldElement<4> zoom(scale);
+  FieldElement<16> theta(angle);
+  FieldElement<16> cosTheta = cos(theta);
+  FieldElement<16> sinTheta = sin(theta);
+  FieldElement<16> zoom(scale);
 
   // Loop through screen pixels
   for (int y = 0; y < screenHeight; y++) {
@@ -54,12 +54,17 @@ void loop() {
       float fy = y - screenHeight / 2;
 
       // Convert to FieldElements
-      FieldElement<4> X(fx);
-      FieldElement<4> Y(fy);
+    FieldElement<16> X(fx);
+    FieldElement<16> Y(fy);
 
-      // Apply rotazoom: X' = cosθ·X - sinθ·Y, Y' = sinθ·X + cosθ·Y
-      FieldElement<4> rx = (cosTheta * X - sinTheta * Y) / zoom;
-      FieldElement<4> ry = (sinTheta * X + cosTheta * Y) / zoom;
+    // Apply rotazoom using in-place operations where possible
+    FieldElement<16> rx = cosTheta * X;
+    rx -= sinTheta * Y;
+    rx /= zoom;
+
+    FieldElement<16> ry = sinTheta * X;
+    ry += cosTheta * Y;
+    ry /= zoom;
 
       // Map to texture coordinates
       int tx = int(rx.toFloat()) & 15;
@@ -71,8 +76,8 @@ void loop() {
   }
 
   // Update angle and scale
-  angle += 0.02;
-  scale = 1.0f + 0.5f * sin(angle);
+  angle += 0.02f;
+  scale = 1.0f + 0.5f * std::sin(angle);
 
   // Optional: reduce flickering by syncing frame updates
   delay(20);
