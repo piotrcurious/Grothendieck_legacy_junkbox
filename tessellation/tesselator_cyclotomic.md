@@ -1,65 +1,93 @@
 Certainly! Below is a simple Tcl/Tk program that demonstrates tessellation using algebraic geometry concepts, specifically cyclotomic polynomials. This example will not delve deeply into Alexander Grothendieck's works but will use the concept of cyclotomic polynomials to find roots for a simple tessellation pattern. The program creates a window and draws a tessellated pattern using 3rd order polynomials.
 
 ```tcl
-#!/usr/bin/env tclsh
-
 package require Tk
 
-# Function to calculate the roots of the 3rd order polynomial using cyclotomic polynomials
-proc calculate_roots {} {
-    # Coefficients of the 3rd order polynomial: ax^3 + bx^2 + cx + d = 0
-    set a 1
-    set b -3
-    set c 3
-    set d -1
+# Helper for complex numbers (unity roots etc)
+proc complex {real imag} {
+    return [list $real $imag]
+}
 
-    # Calculate the roots using cyclotomic polynomials (simplified)
-    # The roots of the polynomial x^3 - 1 = 0 are the cube roots of unity: 1, -0.5 + i(√3/2), -0.5 - i(√3/2)
-    set roots [list 1 [complex -0.5 0.86602540378] [complex -0.5 -0.86602540378]]
+# The n-th cyclotomic polynomial roots are exp(2*pi*i*k/n) for gcd(k, n) = 1
+proc cyclotomic_roots {n} {
+    set pi 3.14159265358979323846
+    set roots {}
+    for {set k 0} {$k < $n} {incr k} {
+        # Simplified: all n-th roots of unity for the demo
+        set angle [expr {2.0 * $pi * $k / $n}]
+        lappend roots [complex [expr {cos($angle)}] [expr {sin($angle)}]]
+    }
     return $roots
 }
 
-# Function to draw the tessellation
-proc draw_tessellation {canvas width height} {
-    set roots [calculate_roots]
-    set offsetX 200
-    set offsetY 200
-    set scale 100
+proc draw_tessellation {canvas width height n} {
+    set roots [cyclotomic_roots $n]
+    set offsetX [expr {$width / 2.0}]
+    set offsetY [expr {$height / 2.0}]
+    set scale 150
     
-    # Draw the base points
-    foreach root $roots {
-        set x [expr {[lindex $root 0] * $scale + $offsetX}]
-        set y [expr {[lindex $root 1] * $scale + $offsetY}]
-        $canvas create oval [expr {$x - 3}] [expr {$y - 3}] [expr {$x + 3}] [expr {$y + 3}] -fill black
-    }
-
-    # Create tessellated pattern based on roots
-    for {set i 0} {$i < 5} {incr i} {
-        for {set j 0} {$j < 5} {incr j} {
+    # Draw a grid of these roots (Minkowski lattice projection)
+    for {set i -2} {$i <= 2} {incr i} {
+        for {set j -2} {$j <= 2} {incr j} {
             foreach root $roots {
-                set x [expr {[lindex $root 0] * $scale + $offsetX + $i * $scale}]
-                set y [expr {[lindex $root 1] * $scale + $offsetY + $j * $scale}]
-                $canvas create oval [expr {$x - 3}] [expr {$y - 3}] [expr {$x + 3}] [expr {$y + 3}] -fill black
+                set rx [lindex $root 0]
+                set ry [lindex $root 1]
+
+                # Projection: P = i*R1 + j*R2 + ...
+                # For simplicity, we just use the roots as basis vectors
+                set x [expr {($i * $rx - $j * $ry) * $scale + $offsetX}]
+                set y [expr {($i * $ry + $j * $rx) * $scale + $offsetY}]
+
+                set color [format "#%02x%02x%02x" [expr {int(abs($rx)*255)}] [expr {int(abs($ry)*255)}] 100]
+                $canvas create oval [expr {$x - 4}] [expr {$y - 4}] [expr {$x + 4}] [expr {$y + 4}] -fill $color -outline black
             }
         }
     }
 }
 
-# Main program
-proc main {} {
-    wm title . "Tessellation with Cyclotomic Polynomials"
-    set canvas [canvas .c -width 600 -height 600 -background white]
-    pack $canvas -fill both -expand true
-    
-    draw_tessellation $canvas 600 600
+proc main {argv} {
+    set n 3
+    set headless 0
+    if {[lsearch $argv "--headless"] != -1} {
+        set headless 1
+    }
+
+    if {!$headless} {
+        wm title . "Cyclotomic Lattice"
+        set canvas [canvas .c -width 600 -height 600 -background white]
+        pack $canvas -fill both -expand true
+        draw_tessellation .c 600 600 $n
+    } else {
+        # Minimal SVG generation
+        set width 600
+        set height 600
+        set roots [cyclotomic_roots $n]
+        set offsetX [expr {$width / 2.0}]
+        set offsetY [expr {$height / 2.0}]
+        set scale 150
+
+        set f [open "tesselator_cyclotomic.svg" w]
+        puts $f "<svg width='$width' height='$height' xmlns='http://www.w3.org/2000/svg'>"
+        for {set i -2} {$i <= 2} {incr i} {
+            for {set j -2} {$j <= 2} {incr j} {
+                foreach root $roots {
+                    set rx [lindex $root 0]
+                    set ry [lindex $root 1]
+                    set x [expr {($i * $rx - $j * $ry) * $scale + $offsetX}]
+                    set y [expr {($i * $ry + $j * $rx) * $scale + $offsetY}]
+                    set color [format "#%02x%02x%02x" [expr {int(abs($rx)*255)}] [expr {int(abs($ry)*255)}] 100]
+                    puts $f "<circle cx='$x' cy='$y' r='4' fill='$color' stroke='black' />"
+                }
+            }
+        }
+        puts $f "</svg>"
+        close $f
+        puts "Generated tesselator_cyclotomic.svg"
+        exit
+    }
 }
 
-# Initialize complex number representation
-proc complex {real imag} {
-    return [list $real $imag]
-}
-
-main
+main $argv
 ```
 
 ### Explanation

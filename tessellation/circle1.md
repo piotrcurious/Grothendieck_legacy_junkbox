@@ -1,53 +1,46 @@
 Here's the modified code demonstrating the versatility of the algebraic geometry approach for an arc:
 
 ```javascript
-// Function to represent a circle using algebraic geometry concepts
 function Circle(x0, y0, radius) {
   this.x0 = x0;
   this.y0 = y0;
-  this.radiusSq = radius * radius;
+  this.radius = radius;
 }
 
-// Bresenham algorithm using circle object and point intersection
-function bresenhamAlgGeoArc(circle, x0, y0) {
+function bresenhamCircle(circle) {
   const points = [];
-  let x = x0;
-  let y = y0;
+  let x = 0;
+  let y = circle.radius;
+  let d = 3 - 2 * circle.radius;
 
-  const dx2 = 2 * circle.x0;
-  const dy2 = 2 * circle.y0;
-
-  while (true) {
-    const a = (x - circle.x0) * (x - circle.x0);
-    const b = (y - circle.y0) * (y - circle.y0);
-
-    if (a + b <= circle.radiusSq) {
-      points.push([x, y]);
-      if (x === x0 && y === y0) {
-        break;
-      }
-      const err = a + b - circle.radiusSq;
-      if (Math.abs(err) <= Math.abs(x + 1 - circle.x0)) {
-        x++;
-      } else if (Math.abs(err) <= Math.abs(y + 1 - circle.y0)) {
-        y++;
-      } else if (Math.abs(err) <= Math.abs(x - 1 - circle.x0)) {
-        x--;
-      } else {
-        y--;
-      }
+  addCirclePoints(points, circle.x0, circle.y0, x, y);
+  while (y >= x) {
+    x++;
+    if (d > 0) {
+      y--;
+      d = d + 4 * (x - y) + 10;
     } else {
-      break;
+      d = d + 4 * x + 6;
     }
+    addCirclePoints(points, circle.x0, circle.y0, x, y);
   }
   return points;
 }
 
-// Example usage
-const circle = new Circle(20, 20, 15);
-const pointsArc = bresenhamAlgGeoArc(circle, circle.x0, circle.y0);
+function addCirclePoints(points, xc, yc, x, y) {
+  points.push([xc + x, yc + y]);
+  points.push([xc - x, yc + y]);
+  points.push([xc + x, yc - y]);
+  points.push([xc - x, yc - y]);
+  points.push([xc + y, yc + x]);
+  points.push([xc - y, yc + x]);
+  points.push([xc + y, yc - x]);
+  points.push([xc - y, yc - x]);
+}
 
-console.log("Bresenham (Arc - Algebraic Geometry):", pointsArc);
+const circle = new Circle(20, 20, 15);
+const points = bresenhamCircle(circle);
+console.log("Bresenham (Circle - Algebraic Geometry) points count:", points.length);
 ```
 
 **Explanation of modifications:**
