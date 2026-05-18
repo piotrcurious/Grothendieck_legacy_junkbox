@@ -33,6 +33,7 @@ public:
     std::vector<Term> terms;
 
     FieldExtension() = default;
+    FieldExtension(float val) { terms.push_back({val, Basis::One}); }
     FieldExtension(std::initializer_list<Term> list) : terms(list) {}
 
     // Evaluate to float
@@ -54,6 +55,23 @@ public:
         FieldExtension result;
         for (const auto& t : terms) {
             result.terms.push_back({t.coeff * scalar, t.basis});
+        }
+        return result;
+    }
+
+    // Multiplication (very basic distributive law for basis products)
+    FieldExtension operator*(const FieldExtension& other) const {
+        FieldExtension result;
+        for (const auto& t1 : terms) {
+            for (const auto& t2 : other.terms) {
+                if (t1.basis == Basis::One) result.addTerm({t1.coeff * t2.coeff, t2.basis});
+                else if (t2.basis == Basis::One) result.addTerm({t1.coeff * t2.coeff, t1.basis});
+                else {
+                    // Out of basis product - evaluate to One
+                    float val = t1.evaluate() * t2.evaluate();
+                    result.addTerm({val, Basis::One});
+                }
+            }
         }
         return result;
     }

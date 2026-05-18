@@ -27,8 +27,8 @@ private:
     float coefficients[N];
     
     // Basis elements information - which transcendental number combinations
-    // are represented by each coefficient index
-    static const uint8_t BASIS_ELEMENTS[N][3];
+    // are represented by each coefficient index. We support up to 16 basis elements.
+    static const uint8_t BASIS_ELEMENTS[16][3];
     
     // Pre-calculated values of common transcendental number powers
     static constexpr float _PI = 3.14159265358979323846;
@@ -116,25 +116,25 @@ public:
         
         // For each pair of terms in the two field elements
         for (size_t i = 0; i < N; i++) {
+            if (fabs(coefficients[i]) < 1e-9) continue;
             for (size_t j = 0; j < N; j++) {
+                if (fabs(other.coefficients[j]) < 1e-9) continue;
+
                 // Multiply the coefficients
                 float coeffProduct = coefficients[i] * other.coefficients[j];
                 
-                // Skip if product is zero
-                if (fabs(coeffProduct) < 1e-6) continue;
-                
                 // Compute which result term this product contributes to
-                // This depends on the specific basis elements being used
-                int resultTerm = computeProductTerm(i, j);
+                float multiplier = 1.0f;
+                uint8_t targetPowers[3];
+                int resultTerm = computeProductTerm(i, j, multiplier, targetPowers);
                 
                 // If the result is part of our basis, add it to the appropriate coefficient
                 if (resultTerm >= 0 && static_cast<size_t>(resultTerm) < N) {
-                    result.coefficients[resultTerm] += coeffProduct;
+                    result.coefficients[resultTerm] += coeffProduct * multiplier;
                 }
                 // If the resultTerm is outside our basis, we'll approximate
                 else {
-                    // Distribute to the closest matching terms as an approximation
-                    approximateOutOfBasisTerm(result, coeffProduct, i, j);
+                    approximateOutOfBasisTerm(result, coeffProduct * multiplier, targetPowers);
                 }
             }
         }
@@ -154,12 +154,12 @@ public:
             return result;
         }
         
-        // Start with a good initial guess using floating point division
-        float initialGuess = coefficients[0] / other.coefficients[0];
+        // Start with a good initial guess using floating point division of evaluating values
+        float initialGuess = 1.0f / other.toFloat();
         FieldElement x(initialGuess);
         
         // Newton-Raphson iterations for division: x = x + x * (1 - other * x)
-        for (int iter = 0; iter < 3; iter++) {  // 3 iterations is usually sufficient
+        for (int iter = 0; iter < 4; iter++) {  // 4 iterations for better precision
             FieldElement temp = other * x;
             FieldElement one(1.0f);
             FieldElement error = one - temp;
@@ -268,60 +268,52 @@ private:
     /**
      * Determine which basis term results from multiplying terms i and j
      */
-    int computeProductTerm(size_t i, size_t j) const {
-        // This implementation depends on how you define your basis
-        // For a simple example with [1, π, e, √2]:
-        
-        // If both are the constant term (1*1)
-        if (i == 0 && j == 0) return 0;
-        
-        // If one is the constant term (1*something = something)
-        if (i == 0) return j;
-        if (j == 0) return i;
-        
-        // Handle specific products based on the basis definition
-        // For example, if π*e is a defined basis element:
-        if ((i == 1 && j == 2) || (i == 2 && j == 1)) {
-            // Return the index for π*e if it exists in your basis
-            // This would depend on BASIS_ELEMENTS definition
-            for (size_t k = 0; k < N; k++) {
-                if (BASIS_ELEMENTS[k][0] == 1 && BASIS_ELEMENTS[k][1] == 1) {
-                    return k;
-                }
-            }
+    int computeProductTerm(size_t i, size_t j, float& multiplier, uint8_t targetPowers[3]) const {
+        multiplier = 1.0f;
+        if (i >= 16 || j >= 16) return -1;
+
+        for (int k = 0; k < 3; k++) {
+            targetPowers[k] = BASIS_ELEMENTS[i][k] + BASIS_ELEMENTS[j][k];
         }
         
-        // If the product isn't in our basis, return -1
-        // This will trigger approximation
+        // Handle relations: sqrt(2)^2 = 2
+        while (targetPowers[2] >= 2) {
+            targetPowers[2] -= 2;
+            multiplier *= 2.0f;
+        }
+
+        for (size_t k = 0; k < N; k++) {
+            if (BASIS_ELEMENTS[k][0] == targetPowers[0] &&
+                BASIS_ELEMENTS[k][1] == targetPowers[1] &&
+                BASIS_ELEMENTS[k][2] == targetPowers[2]) {
+                return (int)k;
+            }
+        }
         return -1;
     }
     
     /**
-     * Approximate an out-of-basis term by distributing to the closest matching terms
+     * Approximate an out-of-basis term by evaluating it to float and adding to constant term
      */
     void approximateOutOfBasisTerm(FieldElement& result, float coefficient, 
-                                  size_t term1, size_t term2) const {
-        // This is a simple approximation that distributes to the constituent terms
-        // A more sophisticated approach would use a proper approximation theory
-        
-        // Add half to each of the original terms
-        result.coefficients[term1] += coefficient * 0.5f;
-        result.coefficients[term2] += coefficient * 0.5f;
+                                  const uint8_t powers[3]) const {
+        float val = coefficient;
+        if (powers[0] > 0) val *= pow(_PI, (float)powers[0]);
+        if (powers[1] > 0) val *= pow(_E, (float)powers[1]);
+        if (powers[2] > 0) val *= pow(_SQRT2, (float)powers[2]);
+        result.coefficients[0] += val;
     }
     
     /**
      * Evaluate a basis element at the actual transcendental values
      */
     float evaluateBasisElement(size_t index) const {
-        // For standard basis [1, π, e, √2, ...]
-        switch (index) {
-            case 0: return 1.0f;  // Constant term
-            case 1: return _PI;    // π
-            case 2: return _E;     // e
-            case 3: return _SQRT2; // √2
-            // Handle other basis elements based on your definitions
-            default: return 0.0f;
-        }
+        if (index >= 16) return 0.0f;
+        float val = 1.0f;
+        if (BASIS_ELEMENTS[index][0] > 0) val *= pow(_PI, (float)BASIS_ELEMENTS[index][0]);
+        if (BASIS_ELEMENTS[index][1] > 0) val *= pow(_E, (float)BASIS_ELEMENTS[index][1]);
+        if (BASIS_ELEMENTS[index][2] > 0) val *= pow(_SQRT2, (float)BASIS_ELEMENTS[index][2]);
+        return val;
     }
     
     /**
@@ -382,23 +374,40 @@ private:
      * Taylor series approximation for sin
      */
     static FieldElement sinTaylor(const FieldElement& x) {
+        // Range reduction to [-pi, pi]
+        float val = x.toFloat();
+        int periods = (int)(val / (2.0f * _PI));
+        FieldElement reducedX = x - FieldElement(_PI * 2.0f * periods);
+
+        // If still outside [-pi, pi], adjust
+        float rVal = reducedX.toFloat();
+        if (rVal > _PI) reducedX = reducedX - FieldElement(_PI * 2.0f);
+        else if (rVal < -_PI) reducedX = reducedX + FieldElement(_PI * 2.0f);
+
+        // Check for symbolic shortcuts
+        rVal = reducedX.toFloat();
+        if (fabs(rVal) < 1e-6) return FieldElement(0.0f);
+        if (fabs(rVal - _PI) < 1e-6 || fabs(rVal + _PI) < 1e-6) return FieldElement(0.0f);
+        if (fabs(rVal - _PI*0.5f) < 1e-6) return FieldElement(1.0f);
+        if (fabs(rVal + _PI*0.5f) < 1e-6) return FieldElement(-1.0f);
+
         FieldElement result;
-        FieldElement xSquared = x * x;
-        FieldElement term = x;  // First term: x
+        FieldElement xSquared = reducedX * reducedX;
+        FieldElement term = reducedX;  // First term: x
         
-        // Add first term
+        // Add terms: x - x^3/3! + x^5/5! - x^7/7! + x^9/9!
         result = result + term;
         
-        // x^3/3!
         term = term * xSquared * (-1.0f/6.0f);
         result = result + term;
         
-        // x^5/5!
         term = term * xSquared * (1.0f/20.0f);
         result = result + term;
         
-        // x^7/7!
         term = term * xSquared * (-1.0f/42.0f);
+        result = result + term;
+
+        term = term * xSquared * (1.0f/72.0f);
         result = result + term;
         
         return result;
@@ -408,20 +417,36 @@ private:
      * Taylor series approximation for cos
      */
     static FieldElement cosTaylor(const FieldElement& x) {
+        // Range reduction to [-pi, pi]
+        float val = x.toFloat();
+        int periods = (int)(val / (2.0f * _PI));
+        FieldElement reducedX = x - FieldElement(_PI * 2.0f * periods);
+
+        float rVal = reducedX.toFloat();
+        if (rVal > _PI) reducedX = reducedX - FieldElement(_PI * 2.0f);
+        else if (rVal < -_PI) reducedX = reducedX + FieldElement(_PI * 2.0f);
+
+        // Check for symbolic shortcuts
+        rVal = reducedX.toFloat();
+        if (fabs(rVal) < 1e-6) return FieldElement(1.0f);
+        if (fabs(rVal - _PI) < 1e-6 || fabs(rVal + _PI) < 1e-6) return FieldElement(-1.0f);
+        if (fabs(rVal - _PI*0.5f) < 1e-6 || fabs(rVal + _PI*0.5f) < 1e-6) return FieldElement(0.0f);
+
         FieldElement result(1.0f);  // First term: 1
-        FieldElement xSquared = x * x;
+        FieldElement xSquared = reducedX * reducedX;
         FieldElement term(1.0f);
         
-        // x^2/2!
+        // 1 - x^2/2! + x^4/4! - x^6/6! + x^8/8!
         term = term * xSquared * (-1.0f/2.0f);
         result = result + term;
         
-        // x^4/4!
         term = term * xSquared * (1.0f/12.0f);
         result = result + term;
         
-        // x^6/6!
         term = term * xSquared * (-1.0f/30.0f);
+        result = result + term;
+
+        term = term * xSquared * (1.0f/56.0f);
         result = result + term;
         
         return result;
@@ -431,47 +456,73 @@ private:
      * Taylor series approximation for exp
      */
     static FieldElement expTaylor(const FieldElement& x) {
+        // Range reduction: exp(x) = exp(x - k) * e^k
+        float val = x.toFloat();
+        int k = (int)round(val);
+        FieldElement reducedX = x - FieldElement((float)k);
+
         FieldElement result(1.0f);  // First term: 1
         FieldElement term(1.0f);
-        FieldElement xPower = x;  // x^1
+        FieldElement xPower = reducedX;
         
-        // Add terms: 1 + x + x^2/2! + x^3/3! + ...
-        for (int i = 1; i <= 5; i++) {  // Use 5 terms
+        // Add terms: 1 + x + x^2/2! + x^3/3! + x^4/4! + x^5/5! + x^6/6!
+        for (int i = 1; i <= 6; i++) {
             term = xPower * (1.0f / factorial(i));
             result = result + term;
-            xPower = xPower * x;
+            xPower = xPower * reducedX;
+        }
+
+        // Multiply by e^k
+        if (k != 0) {
+            // We need a way to multiply by e^k symbolically if possible
+            // For now, if N >= 3 we have e as term 2.
+            // But e^k might not be in basis.
+            // Let's use a simple loop of multiplications if k is small and positive
+            if (k > 0 && k <= 3 && N >= 3) {
+                FieldElement eElem = FieldElement::e();
+                for (int i = 0; i < k; i++) result = result * eElem;
+            } else {
+                result = result * exp((float)k);
+            }
         }
         
         return result;
     }
     
     /**
-     * Taylor series approximation for log(1+x)
+     * Taylor series approximation for log(x)
      */
     static FieldElement logTaylor(const FieldElement& x) {
-        // This assumes x is close to 1
+        // Range reduction: log(x) = log(x/e^k) + k
+        float val = x.toFloat();
+        if (val <= 0) return FieldElement(NAN);
+
+        int k = (int)round(log(val));
+        // x_reduced = x * e^-k
+        FieldElement xReduced = x * exp((float)-k);
+
+        // Use log(1+y) where y = x_reduced - 1
         FieldElement one(1.0f);
-        FieldElement xMinusOne = x - one;
+        FieldElement y = xReduced - one;
         
-        // For log(1+y) using y = x-1
-        // Taylor series: y - y^2/2 + y^3/3 - ...
-        FieldElement result = xMinusOne;
-        FieldElement term = xMinusOne;
-        FieldElement yPower = xMinusOne * xMinusOne;  // y^2
+        // Taylor series for log(1+y): y - y^2/2 + y^3/3 - y^4/4 + y^5/5
+        FieldElement result = y;
+        FieldElement yPower = y * y;
         
-        // Subtract y^2/2
-        term = yPower * (-0.5f);
-        result = result + term;
+        result = result - yPower * 0.5f;
         
-        // Add y^3/3
-        yPower = yPower * xMinusOne;  // y^3
-        term = yPower * (1.0f/3.0f);
-        result = result + term;
+        yPower = yPower * y;
+        result = result + yPower * (1.0f/3.0f);
         
-        // Subtract y^4/4
-        yPower = yPower * xMinusOne;  // y^4
-        term = yPower * (-1.0f/4.0f);
-        result = result + term;
+        yPower = yPower * y;
+        result = result - yPower * 0.25f;
+
+        yPower = yPower * y;
+        result = result + yPower * 0.2f;
+
+        if (k != 0) {
+            result = result + FieldElement((float)k);
+        }
         
         return result;
     }
@@ -494,19 +545,11 @@ private:
  * transcendental numbers: [power of π, power of e, power of √2]
  */
 template<size_t N>
-const uint8_t FieldElement<N>::BASIS_ELEMENTS[N][3] = {
-    {0, 0, 0},  // 1 (constant term)
-    {1, 0, 0},  // π
-    {0, 1, 0},  // e
-    {0, 0, 1},  // √2
-    // Additional basis elements can be defined based on N
-    // For example:
-    //{2, 0, 0},  // π²
-    //{0, 2, 0},  // e²
-    //{0, 0, 2},  // 2
-    //{1, 1, 0},  // π·e
-    //{1, 0, 1},  // π·√2
-    //{0, 1, 1}   // e·√2
+const uint8_t FieldElement<N>::BASIS_ELEMENTS[16][3] = {
+    {0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, // 0-3: 1, pi, e, sqrt2
+    {2, 0, 0}, {0, 2, 0}, {1, 1, 0}, {1, 0, 1}, // 4-7: pi^2, e^2, pi*e, pi*sqrt2
+    {0, 1, 1}, {3, 0, 0}, {0, 3, 0}, {2, 1, 0}, // 8-11: e*sqrt2, pi^3, e^3, pi^2*e
+    {1, 2, 0}, {2, 0, 1}, {0, 2, 1}, {1, 1, 1}  // 12-15: pi*e^2, pi^2*sqrt2, e^2*sqrt2, pi*e*sqrt2
 };
 
 /**
