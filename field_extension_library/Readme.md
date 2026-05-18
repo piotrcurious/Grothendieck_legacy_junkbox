@@ -31,7 +31,7 @@ This approach allows for:
 
 - Template-based implementation allowing different field extension sizes
 - Support for basic arithmetic operations (+, -, *, /)
-- Implementation of transcendental functions (sin, cos, exp, log)
+- Implementation of transcendental functions (sin, cos, exp, log, sqrt, atan, asin, acos, atan2)
 - Configurable basis elements
 - Low memory footprint suitable for ESP32 and other microcontrollers
 - Easy conversion between standard floats and field elements
