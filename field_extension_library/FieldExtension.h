@@ -31,11 +31,11 @@ private:
     static const uint8_t BASIS_ELEMENTS[N][3];
     
     // Pre-calculated values of common transcendental number powers
-    static constexpr float PI = 3.14159265358979323846;
-    static constexpr float E = 2.71828182845904523536;
-    static constexpr float SQRT2 = 1.41421356237309504880;
-    static constexpr float PI2 = PI * PI;
-    static constexpr float E2 = E * E;
+    static constexpr float _PI = 3.14159265358979323846;
+    static constexpr float _E = 2.71828182845904523536;
+    static constexpr float _SQRT2 = 1.41421356237309504880;
+    static constexpr float _PI2 = _PI * _PI;
+    static constexpr float _E2 = _E * _E;
     
 public:
     /**
@@ -128,7 +128,7 @@ public:
                 int resultTerm = computeProductTerm(i, j);
                 
                 // If the result is part of our basis, add it to the appropriate coefficient
-                if (resultTerm >= 0 && resultTerm < N) {
+                if (resultTerm >= 0 && static_cast<size_t>(resultTerm) < N) {
                     result.coefficients[resultTerm] += coeffProduct;
                 }
                 // If the resultTerm is outside our basis, we'll approximate
@@ -316,9 +316,9 @@ private:
         // For standard basis [1, π, e, √2, ...]
         switch (index) {
             case 0: return 1.0f;  // Constant term
-            case 1: return PI;    // π
-            case 2: return E;     // e
-            case 3: return SQRT2; // √2
+            case 1: return _PI;    // π
+            case 2: return _E;     // e
+            case 3: return _SQRT2; // √2
             // Handle other basis elements based on your definitions
             default: return 0.0f;
         }

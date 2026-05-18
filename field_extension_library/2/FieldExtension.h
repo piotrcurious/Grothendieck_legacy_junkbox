@@ -1,6 +1,7 @@
 // FieldExtension.h // Compact field extension library for ESP32 Arduino // Allows higher precision and numerical stability by truncated polynomial extensions over a transcendental constant
 
-#ifndef FIELD_EXTENSION_H #define FIELD_EXTENSION_H
+#ifndef FIELD_EXTENSION_H_V2
+#define FIELD_EXTENSION_H_V2
 
 #include <Arduino.h>
 
@@ -78,7 +79,4 @@ T eval() const {
 
 };
 
-// Example specialization: extension over PI, degree 2 (a + b*pi) using ExtPi2 = FieldExt<float, 3.14159265358979323846f, 2>;
-
-#endif // FIELD_EXTENSION_H
-
+#endif // FIELD_EXTENSION_H_V2
