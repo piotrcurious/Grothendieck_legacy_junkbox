@@ -94,6 +94,12 @@ public:
         return (*this) * other.recip();
     }
 
+    friend FieldExtension sin(const FieldExtension& x) { return FieldExtension(std::sin(x.evaluate())); }
+    friend FieldExtension cos(const FieldExtension& x) { return FieldExtension(std::cos(x.evaluate())); }
+    friend FieldExtension exp(const FieldExtension& x) { return FieldExtension(std::exp(x.evaluate())); }
+    friend FieldExtension log(const FieldExtension& x) { return FieldExtension(std::log(x.evaluate())); }
+    friend FieldExtension sqrt(const FieldExtension& x) { return FieldExtension(std::sqrt(x.evaluate())); }
+
     void addTerm(const Term& t) {
         for (auto& existing : terms) {
             if (existing.basis == t.basis) {
