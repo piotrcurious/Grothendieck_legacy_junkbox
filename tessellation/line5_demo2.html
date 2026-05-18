@@ -1,0 +1,817 @@
+```html
+<!DOCTYPE html><html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Grothendieck-Inspired Rasterization + Tessellation Demo</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: rgba(20, 27, 34, 0.95);
+    --grid: #1e2a35;
+    --grid2: #16212a;
+    --text: #d6e2f0;
+    --muted: #8ea0b6;
+    --accent: #6ee7ff;
+    --accent2: #a78bfa;
+    --accent3: #7ddc8a;
+    --warn: #ffcb6b;
+    --danger: #ff7b7b;
+    --panel-border: #2c3947;
+  }
+
+  html, body { 
+    margin: 0; 
+    width: 100%; 
+    height: 100%; 
+    overflow: hidden; 
+    background: radial-gradient(1200px 800px at 20% 10%, #101722 0%, var(--bg) 55%, #070a0e 100%); 
+    color: var(--text); 
+    font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; 
+  }
+
+  canvas { 
+    display: block; 
+    touch-action: none; /* Crucial for preventing gestures while dragging on mobile */
+  }
+
+  #ui { 
+    position: absolute; 
+    top: 16px; 
+    left: 16px; 
+    width: 380px; 
+    max-width: calc(100vw - 32px); 
+    background: var(--panel); 
+    border: 1px solid var(--panel-border); 
+    border-radius: 18px; 
+    padding: 16px; 
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5); 
+    backdrop-filter: blur(12px); 
+    -webkit-backdrop-filter: blur(12px);
+    z-index: 10; 
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    max-height: calc(100vh - 32px);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  /* Collapsed state styling */
+  #ui.collapsed {
+    max-height: 58px;
+    overflow: hidden;
+    padding-bottom: 0;
+    border-color: rgba(110, 231, 255, 0.3);
+  }
+
+  .header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  h1 { 
+    margin: 0; 
+    font-size: 16px; 
+    line-height: 1.2; 
+    font-weight: 700;
+    color: #ffffff;
+    padding-right: 12px;
+  }
+
+  .toggle-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--accent);
+    border-radius: 8px;
+    padding: 4px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s;
+    flex-shrink: 0;
+    box-shadow: none;
+  }
+
+  .toggle-btn:hover {
+    background: rgba(110, 231, 255, 0.15);
+  }
+
+  #ui.collapsed .toggle-btn {
+    background: var(--accent);
+    color: #051018;
+  }
+
+  .collapsible-content {
+    transition: opacity 0.2s;
+    opacity: 1;
+  }
+
+  #ui.collapsed .collapsible-content {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .sub { 
+    font-size: 12px; 
+    color: var(--muted); 
+    line-height: 1.45; 
+    margin-bottom: 12px; 
+  }
+
+  .section { 
+    margin-top: 12px; 
+  }
+
+  .row { 
+    display: grid; 
+    grid-template-columns: 1fr 64px; 
+    gap: 10px; 
+    align-items: center; 
+  }
+
+  label { 
+    display: block; 
+    font-size: 12px; 
+    color: var(--text); 
+    margin-bottom: 6px; 
+    user-select: none;
+  }
+
+  input[type="range"] { 
+    width: 100%; 
+    accent-color: var(--accent);
+    cursor: pointer;
+  } 
+  
+  input[type="checkbox"] { 
+    transform: translateY(1.5px); 
+    accent-color: var(--accent);
+    cursor: pointer;
+    margin-right: 6px;
+  }
+
+  .value { 
+    text-align: right; 
+    font-size: 12px; 
+    color: var(--muted); 
+    font-variant-numeric: tabular-nums; 
+  }
+
+  .buttons { 
+    display: flex; 
+    flex-wrap: wrap; 
+    gap: 8px; 
+    margin-top: 14px;
+  }
+
+  button { 
+    border: 0; 
+    border-radius: 10px; 
+    padding: 8px 12px; 
+    background: linear-gradient(135deg, var(--accent), var(--accent2)); 
+    color: #051018; 
+    font-weight: 700; 
+    cursor: pointer; 
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25); 
+    font-size: 12px;
+    transition: transform 0.1s, filter 0.2s;
+  }
+
+  button:hover {
+    filter: brightness(1.1);
+  }
+
+  button.secondary { 
+    background: linear-gradient(135deg, #223043, #31465f); 
+    color: var(--text); 
+  }
+
+  button.warn { 
+    background: linear-gradient(135deg, var(--warn), #ffa726); 
+    color: #1b1100; 
+  }
+
+  button.danger { 
+    background: linear-gradient(135deg, var(--danger), #ff4d6d); 
+    color: #1b0505; 
+  }
+
+  button:active { 
+    transform: translateY(1px); 
+  }
+
+  .checkgrid { 
+    display: grid; 
+    grid-template-columns: 1fr 1fr; 
+    gap: 8px 10px; 
+    font-size: 12px; 
+    color: var(--muted); 
+    background: rgba(0, 0, 0, 0.15);
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.04);
+  }
+
+  .checkgrid label {
+    margin-bottom: 0;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+  }
+
+  .highlight-checkbox {
+    border: 1px solid rgba(110, 231, 255, 0.3);
+    background: rgba(110, 231, 255, 0.05);
+    padding: 6px;
+    border-radius: 8px;
+    grid-column: span 2;
+    display: flex;
+    align-items: center;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  .legend { 
+    margin-top: 12px; 
+    padding-top: 10px; 
+    border-top: 1px solid #263241; 
+    font-size: 11px; 
+    color: var(--muted); 
+    line-height: 1.45; 
+  }
+
+  code { 
+    color: #b9e6ff; 
+    background: rgba(0,0,0,0.2);
+    padding: 1px 4px;
+    border-radius: 4px;
+  }
+
+  /* Utility class to prevent selecting text during drag */
+  .no-select {
+    user-select: none;
+  }
+</style>
+</head>
+<body>
+  <div id="ui">
+    <div class="header-row" id="uiHeader" title="Click to collapse/expand menu">
+      <h1>Implicit Rasterization + Tessellation</h1>
+      <button class="toggle-btn" id="toggleCollapse">Collapse</button>
+    </div>
+    
+    <div class="collapsible-content">
+      <div class="sub">
+        A line is treated as the zero-locus of an implicit equation, while polygons are tessellated into triangles and rendered as a mesh.
+      </div>
+
+      <div class="section">
+        <label>Grid Resolution</label>
+        <div class="row">
+          <input id="gridSize" type="range" min="8" max="48" value="24" />
+          <div id="gridValue" class="value">24</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <label>Anti-Aliasing Strength</label>
+        <div class="row">
+          <input id="aaStrength" type="range" min="0" max="1" step="0.01" value="0.65" />
+          <div id="aaValue" class="value">0.65</div>
+        </div>
+      </div>
+
+      <div class="section checkgrid">
+        <div class="highlight-checkbox">
+          <label><input id="splitMode" type="checkbox" /> Tap edge to split (Mobile helper)</label>
+        </div>
+        <label><input id="showField" type="checkbox" checked /> Scalar field</label>
+        <label><input id="showLattice" type="checkbox" checked /> Lattice</label>
+        <label><input id="showLine" type="checkbox" checked /> Line raster</label>
+        <label><input id="showPolyFill" type="checkbox" checked /> Poly fill</label>
+        <label><input id="showPolyWire" type="checkbox" checked /> Poly wireframe</label>
+        <label><input id="showTriMesh" type="checkbox" checked /> Triangle mesh</label>
+      </div>
+
+      <div class="section buttons">
+        <button id="randomizeLine">Randomize line</button>
+        <button id="randomizePoly" class="secondary">Random poly</button>
+        <button id="addVertex" class="secondary">+ Vertex</button>
+        <button id="removeVertex" class="warn">- Vertex</button>
+        <button id="resetPoly" class="danger">Reset poly</button>
+      </div>
+
+      <div class="legend">
+        <b>Endpoints:</b> Drag blue/violet points to move line.<br>
+        <b>Vertices:</b> Drag blue vertices to reshape mesh.<br>
+        <b>Insert point:</b> Enable <i>"Tap edge to split"</i> above, or hold <code>Shift</code> while dragging/clicking a wireframe edge.
+      </div>
+    </div>
+  </div>
+
+  <canvas id="canvas"></canvas>
+
+<script>
+class ImplicitLine {
+  constructor(x0, y0, x1, y1) { this.set(x0, y0, x1, y1); }
+  set(x0, y0, x1, y1) {
+    this.x0 = x0; this.y0 = y0; this.x1 = x1; this.y1 = y1;
+    this.a = y0 - y1;
+    this.b = x1 - x0;
+    this.c = x0 * y1 - x1 * y0;
+  }
+  eval(x, y) { return this.a * x + this.b * y + this.c; }
+  normalizedDistance(x, y) {
+    const denom = Math.hypot(this.a, this.b) || 1;
+    return this.eval(x, y) / denom;
+  }
+}
+
+function bresenham(x0, y0, x1, y1) {
+  const pts = [];
+  let x = x0, y = y0;
+  const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+  while (true) {
+    pts.push([x, y]);
+    if (x === x1 && y === y1) break;
+    const e2 = 2 * err;
+    if (e2 > -dy) { err -= dy; x += sx; }
+    if (e2 < dx) { err += dx; y += sy; }
+  }
+  return pts;
+}
+
+function polygonArea(poly) {
+  let a = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i], q = poly[(i + 1) % poly.length];
+    a += p.x * q.y - q.x * p.y;
+  }
+  return a / 2;
+}
+
+function isCCW(poly) { return polygonArea(poly) > 0; }
+
+function cross(ax, ay, bx, by, cx, cy) {
+  return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+}
+
+function pointInTriangle(p, a, b, c) {
+  const c1 = cross(a.x, a.y, b.x, b.y, p.x, p.y);
+  const c2 = cross(b.x, b.y, c.x, c.y, p.x, p.y);
+  const c3 = cross(c.x, c.y, a.x, a.y, p.x, p.y);
+  const hasNeg = (c1 < 0) || (c2 < 0) || (c3 < 0);
+  const hasPos = (c1 > 0) || (c2 > 0) || (c3 > 0);
+  return !(hasNeg && hasPos);
+}
+
+function isConvex(prev, curr, next, ccw=true) {
+  const z = cross(prev.x, prev.y, curr.x, curr.y, next.x, next.y);
+  return ccw ? z > 0 : z < 0;
+}
+
+function earClipTriangulate(poly) {
+  const n = poly.length;
+  if (n < 3) return [];
+  const ccw = isCCW(poly);
+  const verts = poly.map((p, i) => ({ ...p, i }));
+  if (!ccw) verts.reverse();
+  const triangles = [];
+  let guard = 0;
+  while (verts.length > 3 && guard < 5000) {
+    let earFound = false;
+    for (let i = 0; i < verts.length; i++) {
+      const prev = verts[(i - 1 + verts.length) % verts.length];
+      const curr = verts[i];
+      const next = verts[(i + 1) % verts.length];
+      if (!isConvex(prev, curr, next, true)) continue;
+      let hasPoint = false;
+      for (let j = 0; j < verts.length; j++) {
+        if (j === i || j === (i - 1 + verts.length) % verts.length || j === (i + 1) % verts.length) continue;
+        if (pointInTriangle(verts[j], prev, curr, next)) { hasPoint = true; break; }
+      }
+      if (hasPoint) continue;
+      triangles.push([prev, curr, next]);
+      verts.splice(i, 1);
+      earFound = true;
+      break;
+    }
+    if (!earFound) break;
+    guard++;
+  }
+  if (verts.length === 3) triangles.push([verts[0], verts[1], verts[2]]);
+  return triangles;
+}
+
+function dedupePoints(points) {
+  const seen = new Set();
+  const out = [];
+  for (const p of points) {
+    const key = `${p.x},${p.y}`;
+    if (!seen.has(key)) { seen.add(key); out.push(p); }
+  }
+  return out;
+}
+
+function pointToSegmentDistance(px, py, ax, ay, bx, by) {
+  const abx = bx - ax, aby = by - ay;
+  const apx = px - ax, apy = py - ay;
+  const denom = abx * abx + aby * aby || 1;
+  let t = (apx * abx + apy * aby) / denom;
+  t = Math.max(0, Math.min(1, t));
+  const cx = ax + t * abx, cy = ay + t * aby;
+  return Math.hypot(px - cx, py - cy);
+}
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let W = innerWidth, H = innerHeight;
+function resize() { W = innerWidth; H = innerHeight; canvas.width = W; canvas.height = H; }
+addEventListener('resize', resize);
+resize();
+
+const ui = {
+  panel: document.getElementById('ui'),
+  uiHeader: document.getElementById('uiHeader'),
+  toggleCollapse: document.getElementById('toggleCollapse'),
+  gridSize: document.getElementById('gridSize'),
+  aaStrength: document.getElementById('aaStrength'),
+  gridValue: document.getElementById('gridValue'),
+  aaValue: document.getElementById('aaValue'),
+  splitMode: document.getElementById('splitMode'),
+  showField: document.getElementById('showField'),
+  showLattice: document.getElementById('showLattice'),
+  showLine: document.getElementById('showLine'),
+  showPolyFill: document.getElementById('showPolyFill'),
+  showPolyWire: document.getElementById('showPolyWire'),
+  showTriMesh: document.getElementById('showTriMesh'),
+  randomizeLine: document.getElementById('randomizeLine'),
+  randomizePoly: document.getElementById('randomizePoly'),
+  addVertex: document.getElementById('addVertex'),
+  removeVertex: document.getElementById('removeVertex'),
+  resetPoly: document.getElementById('resetPoly'),
+};
+
+// Collapsible UI Logic
+let isUICollapsed = false;
+function toggleUIPanel(e) {
+  // Prevent collapsing if clicking specific buttons inside the header
+  if (e && e.target === ui.toggleCollapse) {
+    e.stopPropagation();
+  }
+  isUICollapsed = !isUICollapsed;
+  if (isUICollapsed) {
+    ui.panel.classList.add('collapsed');
+    ui.toggleCollapse.textContent = 'Expand';
+  } else {
+    ui.panel.classList.remove('collapsed');
+    ui.toggleCollapse.textContent = 'Collapse';
+  }
+}
+ui.uiHeader.addEventListener('click', toggleUIPanel);
+ui.toggleCollapse.addEventListener('click', toggleUIPanel);
+
+let gridResolution = Number(ui.gridSize.value);
+let aaStrength = Number(ui.aaStrength.value);
+let p0 = { x: 4, y: 5 };
+let p1 = { x: 31, y: 18 };
+let polygon = defaultPolygon();
+let dragMode = null;
+let dragIndex = -1;
+let hoverEdge = -1;
+
+function defaultPolygon() {
+  return [
+    { x: 6, y: 7 },
+    { x: 16, y: 4 },
+    { x: 28, y: 7 },
+    { x: 32, y: 16 },
+    { x: 22, y: 22 },
+    { x: 10, y: 20 },
+    { x: 4, y: 13 },
+  ];
+}
+
+function gridCell() { return Math.min(W, H) / gridResolution; }
+function worldToScreen(x, y) { const c = gridCell(); return { x: x * c, y: y * c, c }; }
+function screenToWorld(x, y) { const c = gridCell(); return { x: x / c, y: y / c }; }
+function snap(v) { return Math.round(v); }
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function polyBounds(poly) {
+  const xs = poly.map(p => p.x), ys = poly.map(p => p.y);
+  return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
+}
+
+function randomizePolygon() {
+  const n = 7 + Math.floor(Math.random() * 3);
+  const cx = gridResolution * 0.52;
+  const cy = gridResolution * 0.55;
+  const base = Math.min(gridResolution * 0.18, 10);
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const t = (i / n) * Math.PI * 2 + (Math.random() * 0.4 - 0.2);
+    const r = base * (0.65 + Math.random() * 0.6);
+    pts.push({ x: cx + Math.cos(t) * r, y: cy + Math.sin(t) * r });
+  }
+  polygon = pts.map(p => ({ x: clamp(snap(p.x), 1, gridResolution - 2), y: clamp(snap(p.y), 1, gridResolution - 2) }));
+  polygon = dedupePoints(polygon);
+  if (polygon.length < 3) polygon = defaultPolygon();
+}
+
+function drawGrid() {
+  if (!ui.showLattice.checked) return;
+  const c = gridCell();
+  ctx.save();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid');
+  for (let i = 0; i <= gridResolution; i++) {
+    const x = i * c, y = i * c;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid2');
+  ctx.lineWidth = 1.4;
+  ctx.strokeRect(0, 0, gridResolution * c, gridResolution * c);
+  ctx.restore();
+}
+
+function drawScalarField(line) {
+  if (!ui.showField.checked) return;
+  const c = gridCell();
+  for (let gy = 0; gy < gridResolution; gy++) {
+    for (let gx = 0; gx < gridResolution; gx++) {
+      const d = line.normalizedDistance(gx + 0.5, gy + 0.5);
+      const intensity = Math.exp(-Math.abs(d) * (1.0 + 3.0 * aaStrength));
+      const alpha = 0.04 + intensity * 0.22;
+      const hueMix = d >= 0 ? '110,160,255' : '180,120,255';
+      ctx.fillStyle = `rgba(${hueMix},${alpha})`;
+      ctx.fillRect(gx * c, gy * c, c, c);
+    }
+  }
+}
+
+function drawLineRaster(line) {
+  if (!ui.showLine.checked) return;
+  const c = gridCell();
+  const pts = bresenham(p0.x, p0.y, p1.x, p1.y);
+  for (const [x, y] of pts) {
+    const dist = Math.abs(line.normalizedDistance(x + 0.5, y + 0.5));
+    const alpha = Math.max(0.22, 1.0 - dist * aaStrength);
+    ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+    ctx.fillRect(x * c + 1, y * c + 1, c - 2, c - 2);
+  }
+}
+
+function drawPolygonFill(tris) {
+  if (!ui.showPolyFill.checked) return;
+  const c = gridCell();
+  for (const tri of tris) {
+    const [a, b, d] = tri;
+    ctx.beginPath();
+    ctx.moveTo(a.x * c + c / 2, a.y * c + c / 2);
+    ctx.lineTo(b.x * c + c / 2, b.y * c + c / 2);
+    ctx.lineTo(d.x * c + c / 2, d.y * c + c / 2);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(110, 231, 255, 0.10)';
+    ctx.fill();
+  }
+}
+
+function drawPolygonWire(poly, tris) {
+  const c = gridCell();
+  if (ui.showTriMesh.checked) {
+    ctx.save();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(167, 139, 250, 0.7)';
+    for (const tri of tris) {
+      ctx.beginPath();
+      ctx.moveTo(tri[0].x * c + c / 2, tri[0].y * c + c / 2);
+      ctx.lineTo(tri[1].x * c + c / 2, tri[1].y * c + c / 2);
+      ctx.lineTo(tri[2].x * c + c / 2, tri[2].y * c + c / 2);
+      ctx.closePath();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  if (ui.showPolyWire.checked) {
+    ctx.save();
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = 'rgba(125, 220, 138, 0.95)';
+    ctx.beginPath();
+    poly.forEach((p, i) => {
+      const sx = p.x * c + c / 2, sy = p.y * c + c / 2;
+      if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+    });
+    ctx.closePath();
+    ctx.stroke();
+
+    // Highlight the edge under hover/near insertion
+    if (hoverEdge !== -1) {
+      const pA = poly[hoverEdge];
+      const pB = poly[(hoverEdge + 1) % poly.length];
+      ctx.beginPath();
+      ctx.moveTo(pA.x * c + c / 2, pA.y * c + c / 2);
+      ctx.lineTo(pB.x * c + c / 2, pB.y * c + c / 2);
+      ctx.strokeStyle = '#ffcb6b';
+      ctx.lineWidth = 4;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+function drawVertices(poly) {
+  const c = gridCell();
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i];
+    ctx.fillStyle = i === dragIndex ? 'rgba(255,203,107,1)' : 'rgba(110,231,255,1)';
+    ctx.beginPath();
+    ctx.arc(p.x * c + c / 2, p.y * c + c / 2, c * 0.22, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.fillStyle = 'rgba(255,255,255,0.8)';
+  ctx.font = '12px Inter, system-ui, sans-serif';
+  ctx.fillText(`Vertices: ${poly.length}`, 16, H - 18);
+}
+
+function drawLineEndpoints() {
+  const c = gridCell();
+  const paint = (p, color) => {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(p.x * c + c / 2, p.y * c + c / 2, c * 0.23, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  paint(p0, '#6ee7ff');
+  paint(p1, '#a78bfa');
+}
+
+function nearestVertexIndex(mx, my) {
+  const c = gridCell();
+  let best = -1;
+  let bestD = Infinity;
+  for (let i = 0; i < polygon.length; i++) {
+    const sx = polygon[i].x * c + c / 2;
+    const sy = polygon[i].y * c + c / 2;
+    const d = Math.hypot(mx - sx, my - sy);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return bestD <= c * 0.45 ? best : -1;
+}
+
+function nearestEdgeIndex(mx, my) {
+  const c = gridCell();
+  let best = -1;
+  let bestD = Infinity;
+  for (let i = 0; i < polygon.length; i++) {
+    const a = polygon[i], b = polygon[(i + 1) % polygon.length];
+    const d = pointToSegmentDistance(mx, my, a.x * c + c / 2, a.y * c + c / 2, b.x * c + c / 2, b.y * c + c / 2);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return bestD <= c * 0.45 ? best : -1;
+}
+
+function insertVertexOnEdge(edgeIndex, mx, my) {
+  const world = screenToWorld(mx, my);
+  const p = { x: clamp(snap(world.x), 1, gridResolution - 2), y: clamp(snap(world.y), 1, gridResolution - 2) };
+  polygon.splice(edgeIndex + 1, 0, p);
+}
+
+function render() {
+  ctx.clearRect(0, 0, W, H);
+
+  const line = new ImplicitLine(p0.x, p0.y, p1.x, p1.y);
+  const tris = earClipTriangulate(polygon);
+
+  drawGrid();
+  drawScalarField(line);
+  drawPolygonFill(tris);
+  drawLineRaster(line);
+  drawPolygonWire(polygon, tris);
+  drawVertices(polygon);
+  drawLineEndpoints();
+
+  requestAnimationFrame(render);
+}
+
+function canvasPoint(evt) {
+  const rect = canvas.getBoundingClientRect();
+  return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+}
+
+// Unified Pointer Down for Touch & Mouse Support
+canvas.addEventListener('pointerdown', (e) => {
+  document.body.classList.add('no-select');
+  canvas.setPointerCapture(e.pointerId);
+
+  const { x, y } = canvasPoint(e);
+  const c = gridCell();
+
+  // Endpoint checks
+  const d0 = Math.hypot(x - (p0.x * c + c / 2), y - (p0.y * c + c / 2));
+  const d1 = Math.hypot(x - (p1.x * c + c / 2), y - (p1.y * c + c / 2));
+  if (d0 < c * 0.45) { dragMode = 'line0'; return; }
+  if (d1 < c * 0.45) { dragMode = 'line1'; return; }
+
+  // Vertex checks
+  const vi = nearestVertexIndex(x, y);
+  if (vi !== -1) { dragMode = 'poly'; dragIndex = vi; return; }
+
+  // Split Edge check (Either Shift Key OR Split Mode enabled)
+  if (e.shiftKey || ui.splitMode.checked) {
+    const ei = nearestEdgeIndex(x, y);
+    if (ei !== -1) {
+      insertVertexOnEdge(ei, x, y);
+      dragMode = 'poly';
+      dragIndex = ei + 1;
+      return;
+    }
+  }
+});
+
+canvas.addEventListener('pointermove', (e) => {
+  const { x, y } = canvasPoint(e);
+  
+  // Track edge hover when not actively dragging
+  if (!dragMode) {
+    hoverEdge = (e.shiftKey || ui.splitMode.checked) ? nearestEdgeIndex(x, y) : -1;
+    return;
+  }
+
+  const world = screenToWorld(x, y);
+  const nx = clamp(snap(world.x), 1, gridResolution - 2);
+  const ny = clamp(snap(world.y), 1, gridResolution - 2);
+
+  if (dragMode === 'line0') { p0.x = nx; p0.y = ny; }
+  if (dragMode === 'line1') { p1.x = nx; p1.y = ny; }
+  if (dragMode === 'poly' && dragIndex >= 0) {
+    polygon[dragIndex].x = nx;
+    polygon[dragIndex].y = ny;
+  }
+});
+
+const endPointerDrag = (e) => {
+  document.body.classList.remove('no-select');
+  try {
+    canvas.releasePointerCapture(e.pointerId);
+  } catch(err) {}
+  dragMode = null; 
+  dragIndex = -1; 
+};
+
+canvas.addEventListener('pointerup', endPointerDrag);
+canvas.addEventListener('pointercancel', endPointerDrag);
+
+ui.gridSize.addEventListener('input', () => {
+  gridResolution = Number(ui.gridSize.value);
+  ui.gridValue.textContent = String(gridResolution);
+  p0.x = clamp(p0.x, 1, gridResolution - 2); p0.y = clamp(p0.y, 1, gridResolution - 2);
+  p1.x = clamp(p1.x, 1, gridResolution - 2); p1.y = clamp(p1.y, 1, gridResolution - 2);
+  polygon = polygon.map(p => ({ x: clamp(p.x, 1, gridResolution - 2), y: clamp(p.y, 1, gridResolution - 2) }));
+});
+
+ui.aaStrength.addEventListener('input', () => {
+  aaStrength = Number(ui.aaStrength.value);
+  ui.aaValue.textContent = aaStrength.toFixed(2);
+});
+
+ui.randomizeLine.addEventListener('click', () => {
+  p0 = { x: 2 + Math.floor(Math.random() * (gridResolution - 4)), y: 2 + Math.floor(Math.random() * (gridResolution - 4)) };
+  p1 = { x: 2 + Math.floor(Math.random() * (gridResolution - 4)), y: 2 + Math.floor(Math.random() * (gridResolution - 4)) };
+});
+
+ui.randomizePoly.addEventListener('click', randomizePolygon);
+
+ui.addVertex.addEventListener('click', () => {
+  const b = polyBounds(polygon);
+  const p = { x: clamp(snap((b.minX + b.maxX) / 2 + (Math.random() * 2 - 1) * 2), 1, gridResolution - 2), y: clamp(snap((b.minY + b.maxY) / 2 + (Math.random() * 2 - 1) * 2), 1, gridResolution - 2) };
+  polygon.splice(Math.floor(polygon.length / 2), 0, p);
+});
+
+ui.removeVertex.addEventListener('click', () => {
+  if (polygon.length > 3) polygon.splice(Math.floor(polygon.length / 2), 1);
+});
+
+ui.resetPoly.addEventListener('click', () => { polygon = defaultPolygon(); });
+
+canvas.addEventListener('pointerleave', () => { hoverEdge = -1; });
+
+// Initial state sync
+ui.gridValue.textContent = ui.gridSize.value;
+ui.aaValue.textContent = Number(ui.aaStrength.value).toFixed(2);
+
+render();
+</script>
+</body>
+</html>
+
+```
