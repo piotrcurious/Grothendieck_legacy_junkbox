@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Grothendieck-Inspired Algebraic Rasterization</title>
+
+<style>
+    :root {
+        --bg: #0b0f14;
+        --panel: #141b22;
+        --grid: #1e2a35;
+        --text: #d6e2f0;
+        --accent: #6ee7ff;
+        --accent2: #a78bfa;
+        --line: #ffffff;
+    }
+
+    body {
+        margin: 0;
+        font-family: Inter, system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        overflow: hidden;
+    }
+
+    #ui {
+        position: absolute;
+        top: 16px;
+        left: 16px;
+        width: 360px;
+        background: rgba(20, 27, 34, 0.92);
+        border: 1px solid #2c3947;
+        border-radius: 16px;
+        padding: 18px;
+        backdrop-filter: blur(10px);
+        z-index: 10;
+    }
+
+    h1 {
+        margin: 0 0 10px;
+        font-size: 18px;
+    }
+
+    .section {
+        margin-top: 16px;
+    }
+
+    label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 13px;
+    }
+
+    input[type="range"] {
+        width: 100%;
+    }
+
+    button {
+        background: linear-gradient(135deg, var(--accent), var(--accent2));
+        border: none;
+        color: black;
+        padding: 10px 14px;
+        border-radius: 10px;
+        cursor: pointer;
+        font-weight: bold;
+        margin-top: 8px;
+    }
+
+    button:hover {
+        transform: translateY(-1px);
+    }
+
+    .small {
+        opacity: 0.8;
+        font-size: 12px;
+        line-height: 1.4;
+    }
+
+    canvas {
+        display: block;
+    }
+
+    .row {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+    }
+
+    .value {
+        width: 60px;
+        text-align: right;
+        font-size: 12px;
+        opacity: 0.9;
+    }
+</style>
+</head>
+
+<body>
+
+<div id="ui">
+    <h1>Grothendieck-Inspired Rasterization</h1>
+
+    <div class="small">
+        Geometry represented through implicit algebraic equations:
+        <br />
+        <code>f(x,y)=ax+by+c</code>
+    </div>
+
+    <div class="section">
+        <label>Grid Resolution</label>
+        <div class="row">
+            <input id="gridSize" type="range" min="8" max="40" value="20" />
+            <div id="gridValue" class="value">20</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <label>Anti-Aliasing Strength</label>
+        <div class="row">
+            <input id="aaStrength" type="range" min="0" max="1" step="0.01" value="0.6" />
+            <div id="aaValue" class="value">0.60</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <label>
+            <input id="showField" type="checkbox" checked />
+            Show implicit scalar field
+        </label>
+
+        <label>
+            <input id="showLattice" type="checkbox" checked />
+            Show lattice
+        </label>
+
+        <label>
+            <input id="showCurve" type="checkbox" checked />
+            Show algebraic curve
+        </label>
+    </div>
+
+    <div class="section">
+        <button id="randomizeBtn">Randomize Curve</button>
+    </div>
+
+    <div class="section small">
+        Click and drag endpoints.
+        <br />
+        The rasterizer follows the algebraic zero locus.
+    </div>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+class ImplicitLine {
+    constructor(x0, y0, x1, y1) {
+        this.set(x0, y0, x1, y1);
+    }
+
+    set(x0, y0, x1, y1) {
+        this.x0 = x0;
+        this.y0 = y0;
+        this.x1 = x1;
+        this.y1 = y1;
+
+        this.a = y0 - y1;
+        this.b = x1 - x0;
+        this.c = x0 * y1 - x1 * y0;
+    }
+
+    eval(x, y) {
+        return this.a * x + this.b * y + this.c;
+    }
+
+    normalizedDistance(x, y) {
+        return this.eval(x, y) /
+            Math.sqrt(this.a * this.a + this.b * this.b);
+    }
+}
+
+class AlgebraicRasterizer {
+    constructor(line) {
+        this.line = line;
+    }
+
+    rasterize() {
+        const pts = [];
+
+        let x = this.line.x0;
+        let y = this.line.y0;
+
+        const x1 = this.line.x1;
+        const y1 = this.line.y1;
+
+        const sx = x < x1 ? 1 : -1;
+        const sy = y < y1 ? 1 : -1;
+
+        const maxSteps =
+            Math.abs(x1 - x) +
+            Math.abs(y1 - y) + 10;
+
+        let guard = 0;
+
+        while (true) {
+            pts.push([x, y]);
+
+            if (x === x1 && y === y1) break;
+
+            const fx = Math.abs(this.line.eval(x + sx, y));
+            const fy = Math.abs(this.line.eval(x, y + sy));
+            const fxy = Math.abs(this.line.eval(x + sx, y + sy));
+
+            if (fxy <= fx && fxy <= fy) {
+                x += sx;
+                y += sy;
+            }
+            else if (fx < fy) {
+                x += sx;
+            }
+            else {
+                y += sy;
+            }
+
+            guard++;
+            if (guard > maxSteps) break;
+        }
+
+        return pts;
+    }
+}
+
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+let W = window.innerWidth;
+let H = window.innerHeight;
+
+canvas.width = W;
+canvas.height = H;
+
+let gridResolution = 20;
+let aaStrength = 0.6;
+
+const gridSizeInput = document.getElementById("gridSize");
+const aaInput = document.getElementById("aaStrength");
+
+const gridValue = document.getElementById("gridValue");
+const aaValue = document.getElementById("aaValue");
+
+const showField = document.getElementById("showField");
+const showLattice = document.getElementById("showLattice");
+const showCurve = document.getElementById("showCurve");
+
+const randomizeBtn = document.getElementById("randomizeBtn");
+
+let p0 = { x: 5, y: 5 };
+let p1 = { x: 28, y: 17 };
+
+let dragging = null;
+
+function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W;
+    canvas.height = H;
+}
+
+window.addEventListener("resize", resize);
+
+function worldToScreen(x, y) {
+    const cell = Math.min(W, H) / gridResolution;
+
+    return {
+        x: x * cell,
+        y: y * cell,
+        cell
+    };
+}
+
+function screenToWorld(x, y) {
+    const cell = Math.min(W, H) / gridResolution;
+
+    return {
+        x: Math.round(x / cell),
+        y: Math.round(y / cell)
+    };
+}
+
+function drawGrid() {
+    if (!showLattice.checked) return;
+
+    const cell = Math.min(W, H) / gridResolution;
+
+    ctx.strokeStyle = "#1e2a35";
+    ctx.lineWidth = 1;
+
+    for (let x = 0; x < W; x += cell) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, H);
+        ctx.stroke();
+    }
+
+    for (let y = 0; y < H; y += cell) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(W, y);
+        ctx.stroke();
+    }
+}
+
+function drawScalarField(line) {
+    if (!showField.checked) return;
+
+    const cell = Math.min(W, H) / gridResolution;
+
+    for (let gy = 0; gy < gridResolution; gy++) {
+        for (let gx = 0; gx < gridResolution; gx++) {
+
+            const d = line.normalizedDistance(gx, gy);
+
+            const intensity =
+                Math.exp(-Math.abs(d) * aaStrength);
+
+            const r = Math.floor(100 + 120 * intensity);
+            const g = Math.floor(80 + 160 * intensity);
+            const b = Math.floor(150 + 80 * intensity);
+
+            ctx.fillStyle = `rgba(${r},${g},${b},0.18)`;
+
+            ctx.fillRect(
+                gx * cell,
+                gy * cell,
+                cell,
+                cell
+            );
+        }
+    }
+}
+
+function drawRasterizedCurve(line) {
+    if (!showCurve.checked) return;
+
+    const rast = new AlgebraicRasterizer(line);
+    const pts = rast.rasterize();
+
+    const cell = Math.min(W, H) / gridResolution;
+
+    for (const [x, y] of pts) {
+
+        const dist = Math.abs(line.normalizedDistance(x, y));
+
+        const alpha = Math.max(
+            0.15,
+            1.0 - dist * aaStrength
+        );
+
+        ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+
+        ctx.fillRect(
+            x * cell + 1,
+            y * cell + 1,
+            cell - 2,
+            cell - 2
+        );
+    }
+}
+
+function drawControlPoints() {
+    const cell = Math.min(W, H) / gridResolution;
+
+    ctx.fillStyle = "#6ee7ff";
+
+    ctx.beginPath();
+    ctx.arc(
+        p0.x * cell + cell / 2,
+        p0.y * cell + cell / 2,
+        cell * 0.25,
+        0,
+        Math.PI * 2
+    );
+    ctx.fill();
+
+    ctx.fillStyle = "#a78bfa";
+
+    ctx.beginPath();
+    ctx.arc(
+        p1.x * cell + cell / 2,
+        p1.y * cell + cell / 2,
+        cell * 0.25,
+        0,
+        Math.PI * 2
+    );
+    ctx.fill();
+}
+
+function render() {
+    ctx.clearRect(0, 0, W, H);
+
+    drawGrid();
+
+    const line = new ImplicitLine(
+        p0.x,
+        p0.y,
+        p1.x,
+        p1.y
+    );
+
+    drawScalarField(line);
+    drawRasterizedCurve(line);
+    drawControlPoints();
+
+    requestAnimationFrame(render);
+}
+
+canvas.addEventListener("mousedown", e => {
+    const rect = canvas.getBoundingClientRect();
+
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    const w = screenToWorld(mx, my);
+
+    const d0 = Math.hypot(w.x - p0.x, w.y - p0.y);
+    const d1 = Math.hypot(w.x - p1.x, w.y - p1.y);
+
+    if (d0 < 2) dragging = "p0";
+    else if (d1 < 2) dragging = "p1";
+});
+
+canvas.addEventListener("mousemove", e => {
+    if (!dragging) return;
+
+    const rect = canvas.getBoundingClientRect();
+
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    const w = screenToWorld(mx, my);
+
+    if (dragging === "p0") {
+        p0.x = w.x;
+        p0.y = w.y;
+    }
+
+    if (dragging === "p1") {
+        p1.x = w.x;
+        p1.y = w.y;
+    }
+});
+
+window.addEventListener("mouseup", () => {
+    dragging = null;
+});
+
+gridSizeInput.addEventListener("input", () => {
+    gridResolution = Number(gridSizeInput.value);
+    gridValue.textContent = gridResolution;
+});
+
+aaInput.addEventListener("input", () => {
+    aaStrength = Number(aaInput.value);
+    aaValue.textContent = aaStrength.toFixed(2);
+});
+
+randomizeBtn.addEventListener("click", () => {
+    p0.x = Math.floor(Math.random() * (gridResolution - 2));
+    p0.y = Math.floor(Math.random() * (gridResolution - 2));
+
+    p1.x = Math.floor(Math.random() * (gridResolution - 2));
+    p1.y = Math.floor(Math.random() * (gridResolution - 2));
+});
+
+render();
+</script>
+
+</body>
+</html>
