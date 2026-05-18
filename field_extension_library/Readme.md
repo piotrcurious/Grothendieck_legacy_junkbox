@@ -29,12 +29,16 @@ This approach allows for:
 
 ## Features
 
-- Template-based implementation allowing different field extension sizes
-- Support for basic arithmetic operations (+, -, *, /)
-- Implementation of transcendental functions (sin, cos, exp, log, sqrt, atan, asin, acos, atan2)
-- Configurable basis elements
-- Low memory footprint suitable for ESP32 and other microcontrollers
-- Easy conversion between standard floats and field elements
+- **Systematic 32-element basis**: Built-in support for combinations of $\pi, e, \sqrt{2}$ up to high degrees.
+- **High Performance**: Precomputed static multiplication lookup tables for $O(1)$ basis resolution.
+- **Full Math Library**:
+  - Basic arithmetic (+, -, *, /) with in-place operators (+=, etc.) and scalar-left support.
+  - Transcendental functions: `sin`, `cos`, `tan`, `exp`, `log`, `sqrt`, `pow`.
+  - Inverse trig: `asin`, `acos`, `atan`, `atan2`.
+  - Hyperbolic: `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`.
+  - Utilities: `abs`, `floor`, `ceil`, `round`.
+- **Symbolic Exactness**: Optimized to return exact symbolic values for key transcendental constants (e.g., $sin(\pi) = 0$).
+- **Lightweight**: Header-only core, designed for ESP32 and resource-constrained environments.
 
 ## Usage
 
