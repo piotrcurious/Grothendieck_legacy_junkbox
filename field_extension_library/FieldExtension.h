@@ -791,5 +791,6 @@ const typename FieldElement<N>::ProductEntry FieldElement<N>::PRODUCT_TABLE[32][
 using FieldElement4 = FieldElement<4>;   // Basic field with [1, π, e, √2]
 using FieldElement8 = FieldElement<8>;   // Extended field with more combinations
 using FieldElement16 = FieldElement<16>; // Advanced field with many combinations
+using FieldElement32 = FieldElement<32>; // Complete field with all 32 combinations
 
 #endif // FIELD_EXTENSION_H

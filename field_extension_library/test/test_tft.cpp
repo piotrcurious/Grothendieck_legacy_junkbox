@@ -14,11 +14,8 @@ HardwareSerial SerialGPS(1);
 const float R_earth = 6371000.0;
 
 FE toRadiansFE(const FE& deg) {
-  return deg * FE::pi() / FE(180.0f);
+  return deg * FE::pi() / 180.0f;
 }
-
-FE sinFE(const FE& x) { return sin(x); }
-FE cosFE(const FE& x) { return cos(x); }
 
 FE computeSunElevation(const FE& latitudeRad, int year, int month, int day, int hour, int min, int sec) {
   static const int mdays[] = { 0,31,28,31,30,31,30,31,31,30,31,30,31 };
@@ -26,21 +23,19 @@ FE computeSunElevation(const FE& latitudeRad, int year, int month, int day, int 
   for(int m=1; m<month; m++) N += mdays[m];
 
   FE Nfe{float(N)};
-  FE twoPi = FE::pi() * FE(2.0f);
-  FE decl = FE(23.44f) * sinFE( twoPi * (Nfe + FE(284.0f)) / FE(365.0f) );
+  FE twoPi = FE::pi() * 2.0f;
+  FE decl = 23.44f * sin( twoPi * (Nfe + 284.0f) / 365.0f );
   decl = toRadiansFE(decl);
 
   float hdec = hour + min/60.0f + sec/3600.0f;
-  FE H = toRadiansFE( FE(15.0f) * ( FE(hdec) - FE(12.0f) ) );
+  FE H = toRadiansFE( 15.0f * ( hdec - 12.0f ) );
 
-  FE sinEl = sinFE(decl)*sinFE(latitudeRad) + cosFE(decl)*cosFE(latitudeRad)*cosFE(H);
-  float s = sinEl.toFloat();
-  if(s>1) s=1; else if(s<-1) s=-1;
-  return FE( asin(s) );
+  FE sinEl = sin(decl)*sin(latitudeRad) + cos(decl)*cos(latitudeRad)*cos(H);
+  return asin(sinEl);
 }
 
 int main() {
-    std::cout << "Running TFT/GPS Example Test..." << std::endl;
+    std::cout << "Running Refined TFT/GPS Example Test..." << std::endl;
     tft.init();
 
     float lat = 37.7749;
@@ -50,7 +45,7 @@ int main() {
 
     FE latFE = toRadiansFE(FE(lat));
     FE elFE = computeSunElevation(latFE, yr, mo, day, hr, mn, sc);
-    float elevation = std::asin(elFE.toFloat()) * 180.0 / 3.14159265;
+    float elevation = (elFE * 180.0f / FE::pi()).toFloat();
 
     std::cout << "Lat: " << lat << ", Lon: " << lon << std::endl;
     std::cout << "Sun Elevation: " << elevation << " degrees" << std::endl;
@@ -63,6 +58,6 @@ int main() {
         tft.drawPixel(x0 + i, yi, 0);
     }
 
-    std::cout << "TFT/GPS Example Test Completed Successfully!" << std::endl;
+    std::cout << "Refined TFT/GPS Example Test Completed Successfully!" << std::endl;
     return 0;
 }

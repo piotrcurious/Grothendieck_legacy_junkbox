@@ -2,11 +2,13 @@
 #include "../FieldExtension.h"
 #include <cassert>
 #include <iostream>
+#include <iomanip>
 
 void demoBasicOperations();
 void demoPrecisionComparison();
 void demoNumericalStability();
 void demoTranscendentalFunctions();
+void demoAdvancedMath();
 
 int main() {
     std::cout << "Starting ESP32 Field Extension Library Tests..." << std::endl;
@@ -15,6 +17,7 @@ int main() {
     demoPrecisionComparison();
     demoNumericalStability();
     demoTranscendentalFunctions();
+    demoAdvancedMath();
 
     std::cout << "All tests completed successfully!" << std::endl;
     return 0;
@@ -23,17 +26,18 @@ int main() {
 void demoBasicOperations() {
     std::cout << "\n=== Basic Operations ===" << std::endl;
 
-    FieldElement4 a(3.5);
+    FieldElement4 a(3.5f);
     FieldElement4 b = FieldElement4::pi();
     FieldElement4 c = FieldElement4::e();
 
-    FieldElement4 sum = a + b;
-    std::cout << "3.5 + π = " << sum.toFloat() << std::endl;
-    assert(std::abs(sum.toFloat() - (3.5f + 3.14159265f)) < 1e-5);
+    FieldElement4 res = a;
+    res += b;
+    std::cout << "3.5 + π = " << res.toFloat() << std::endl;
+    assert(std::abs(res.toFloat() - (3.5f + M_PI)) < 1e-5);
 
-    FieldElement4 product = b * c;
-    std::cout << "π × e = " << product.toFloat() << std::endl;
-    // Note: Multiplication might be approximate in the library
+    FieldElement4 twoPi = 2.0f * b;
+    std::cout << "2 × π = " << twoPi.toFloat() << std::endl;
+    assert(std::abs(twoPi.toFloat() - 2.0f * M_PI) < 1e-5);
 
     FieldElement4 result = a * b + c / a;
     std::cout << "3.5 × π + e ÷ 3.5 = " << result.toFloat() << std::endl;
@@ -58,9 +62,6 @@ void demoPrecisionComparison() {
     FieldElement4 field_result = squared - pi_squared - e_squared - two_pi_e;
 
     std::cout << "Field extension result (should be 0): " << field_result.toFloat() << std::endl;
-
-    // In a symbolic field, this SHOULD be exactly 0 if it handles pi*e correctly.
-    // However, the library's computeProductTerm returns -1 for pi*e and approximates.
 }
 
 void demoNumericalStability() {
@@ -78,23 +79,46 @@ void demoNumericalStability() {
     FieldElement4 field_result = sum - large_fe;
 
     std::cout << "Field extension: (1000000 + π) - 1000000 = " << field_result.toFloat() << std::endl;
-    assert(std::abs(field_result.toFloat() - 3.14159265f) < 1e-5);
+    assert(std::abs(field_result.toFloat() - M_PI) < 1e-5);
 }
 
 void demoTranscendentalFunctions() {
     std::cout << "\n=== Transcendental Functions ===" << std::endl;
 
     FieldElement4 x = FieldElement4::pi() * 0.5f;
-
     FieldElement4 sin_x = sin(x);
     FieldElement4 cos_x = cos(x);
 
     std::cout << "sin(π/2) = " << sin_x.toFloat() << std::endl;
     std::cout << "cos(π/2) = " << cos_x.toFloat() << std::endl;
 
-    FieldElement4 sin_squared = sin_x * sin_x;
-    FieldElement4 cos_squared = cos_x * cos_x;
-    FieldElement4 identity = sin_squared + cos_squared;
-
+    FieldElement4 identity = sin_x * sin_x + cos_x * cos_x;
     std::cout << "sin²(π/2) + cos²(π/2) = " << identity.toFloat() << std::endl;
+    assert(std::abs(identity.toFloat() - 1.0f) < 1e-6);
+
+    FieldElement4 pi = FieldElement4::pi();
+    std::cout << "Symbolic exactness: sin(pi) = " << sin(pi).getCoefficient(0) << std::endl;
+    assert(sin(pi).getCoefficient(0) == 0.0f);
+}
+
+void demoAdvancedMath() {
+  std::cout << "\n=== Advanced Math Features ===" << std::endl;
+  FieldElement4 pi = FieldElement4::pi();
+  FieldElement4 p2 = pow(pi, 2.0f);
+  std::cout << "π² = " << p2.toFloat() << std::endl;
+  FieldElement4 sq = sqrt(p2);
+  std::cout << "sqrt(π²) = " << sq.toFloat() << std::endl;
+  assert(std::abs(sq.toFloat() - M_PI) < 1e-5);
+
+  FieldElement4 hx(0.5f);
+  FieldElement4 s = sinh(hx);
+  FieldElement4 c = cosh(hx);
+  FieldElement4 res = c * c - s * s;
+  std::cout << "cosh²(0.5) - sinh²(0.5) = " << res.toFloat() << std::endl;
+  assert(std::abs(res.toFloat() - 1.0f) < 1e-6);
+
+  FieldElement4 one(1.0f);
+  FieldElement4 a = atan(one);
+  std::cout << "atan(1) = " << a.toFloat() << " (pi/4=" << M_PI*0.25 << ")" << std::endl;
+  assert(std::abs(a.toFloat() - M_PI * 0.25f) < 1e-6);
 }
