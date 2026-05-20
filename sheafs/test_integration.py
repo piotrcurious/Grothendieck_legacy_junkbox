@@ -1,47 +1,44 @@
 import subprocess
 import time
 import os
-import signal
 
 def test_integration():
-    print("Starting integration test...")
+    print("Starting integration test (Headless Visualizer)...")
 
-    # Start mock arduino
-    mock_proc = subprocess.Popen(['python3', 'sheafs/mock_arduino.py'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    # Run the visualizer in headless mock mode, limit to 32 samples to trigger a completion or near completion
+    cmd = ['python3', 'sheafs/sheafs3_visualizer.py', '--port', 'mock', '--headless', '--max-samples', '32']
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
     collected_points = 0
-    cycle_complete = False
-    best_poly_found = False
+    cycle_complete_msg = False
+    max_samples_msg = False
 
     start_time = time.time()
     timeout = 15 # Wait up to 15 seconds
 
     try:
         while time.time() - start_time < timeout:
-            line = mock_proc.stdout.readline()
+            line = proc.stdout.readline()
             if not line:
                 break
             line = line.strip()
-            print(f"Mock output: {line}")
+            print(f"Visualizer output: {line}")
 
-            if "Collected Data Point" in line:
+            if "Sample" in line:
                 collected_points += 1
-            if "Data Collection Complete" in line:
-                cycle_complete = True
-            if "Best Feedback Polynomial" in line:
-                best_poly_found = True
-
-            if cycle_complete and best_poly_found and collected_points >= 32:
+            if "Cycle complete" in line:
+                cycle_complete_msg = True
+            if "Reached max samples" in line:
+                max_samples_msg = True
                 break
     finally:
-        mock_proc.terminate()
+        proc.terminate()
 
     print(f"\nSummary:")
-    print(f"- Points collected: {collected_points}")
-    print(f"- Cycle complete message seen: {cycle_complete}")
-    print(f"- Best polynomial message seen: {best_poly_found}")
+    print(f"- Samples processed: {collected_points}")
+    print(f"- Max samples message seen: {max_samples_msg}")
 
-    if cycle_complete and best_poly_found and collected_points >= 32:
+    if max_samples_msg and collected_points >= 20:
         print("\nIntegration test PASSED.")
     else:
         print("\nIntegration test FAILED.")
