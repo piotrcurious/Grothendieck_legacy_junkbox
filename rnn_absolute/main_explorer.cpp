@@ -19,16 +19,22 @@ Image loadPGM(const std::string& filename) {
     std::string magic;
     file >> magic;
     if (magic != "P5") throw std::runtime_error("Only P5 PGM supported");
+
     auto skipComments = [](std::ifstream& f) {
         char ch;
         while (f >> std::ws && f.peek() == '#') f.ignore(10000, '\n');
     };
+
     skipComments(file);
-    int w, h; file >> w >> h;
+    int w, h;
+    file >> w >> h;
     skipComments(file);
-    int maxVal; file >> maxVal;
+    int maxVal;
+    file >> maxVal;
     file.ignore(1);
-    Image img; img.width = w; img.height = h;
+
+    Image img;
+    img.width = w; img.height = h;
     size_t total_pixels = (size_t)w * h;
     img.data.resize(total_pixels);
     file.read(reinterpret_cast<char*>(img.data.data()), total_pixels);
@@ -49,13 +55,22 @@ double calculateEntropy(const std::vector<int>& data) {
     double entropy = 0;
     double size = data.size();
     for (auto const& [val, count] : counts) {
-        double p = count / size;
+        double p = (double)count / size;
         entropy -= p * std::log2(p);
     }
     return entropy;
 }
 
-void processImage(const std::string& input_path) {
+struct CompressionMetrics {
+    std::string name;
+    long original_size;
+    double original_entropy;
+    double rnn_residual_entropy;
+    double delta_entropy;
+    bool success;
+};
+
+CompressionMetrics processImage(const std::string& input_path) {
     std::cout << "--- Processing: " << input_path << " ---" << std::endl;
     Image img = loadPGM(input_path);
     const int block_size = 8;
@@ -71,7 +86,7 @@ void processImage(const std::string& input_path) {
     MultiDimRNN rnn(dim, hidden, dim);
 
     std::cout << "[*] Training RNN..." << std::endl;
-    size_t train_size = std::min((size_t)500, sequences.size());
+    size_t train_size = std::min((size_t)1000, sequences.size());
     std::vector<std::vector<double>> train_data(sequences.begin(), sequences.begin() + train_size);
     rnn.train(train_data, 50, 0.01);
 
@@ -126,22 +141,42 @@ void processImage(const std::string& input_path) {
     double rnn_ent = calculateEntropy(rnn_residuals);
     double delta_ent = calculateEntropy(delta_residuals);
 
-    std::cout << "[*] Result:" << std::endl;
-    std::cout << "    Original Entropy: " << std::fixed << std::setprecision(4) << original_ent << " bpp" << std::endl;
-    std::cout << "    Delta Entropy:    " << delta_ent << " bpp" << std::endl;
-    std::cout << "    RNN Res. Entropy: " << rnn_ent << " bpp" << std::endl;
-    std::cout << "    Reconstruction:   " << (errors == 0 ? "SUCCESS (Perfect)" : "FAILURE") << std::endl;
-
     std::string base = input_path.substr(input_path.find_last_of("/\\") + 1);
-    base = base.substr(0, base.find_last_of("."));
-    savePGM("rnn_absolute/reconstructed_" + base + ".pgm", reconstructed);
-    savePGM("rnn_absolute/residuals_" + base + ".pgm", {img.width, img.height, residual_view});
+    savePGM("rnn_absolute/reconstructed_" + base, reconstructed);
+    savePGM("rnn_absolute/residuals_" + base, {img.width, img.height, residual_view});
+
+    return {base, (long)img.data.size(), original_ent, rnn_ent, delta_ent, (errors == 0)};
 }
 
 int main() {
     try {
-        processImage("absolute_galois_group/compressor/01/test.pgm");
-        processImage("absolute_galois_group/compressor/01/GhostInShell_02_005.pgm");
+        std::vector<std::string> images = {
+            "absolute_galois_group/compressor/01/test.pgm",
+            "absolute_galois_group/compressor/01/GhostInShell_02_005.pgm"
+        };
+
+        std::vector<CompressionMetrics> results;
+        for (const auto& img : images) {
+            results.push_back(processImage(img));
+        }
+
+        std::ofstream report("rnn_absolute/compression_report.md");
+        report << "# RNN Absolute Galois Group Compression Report\n\n";
+        report << "| Image | Original Size | Orig. Entropy | Delta Entropy | RNN Res. Entropy | Ratio (Theoretical) | Reconstruction |\n";
+        report << "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n";
+
+        for (const auto& r : results) {
+            double ratio = r.original_entropy / r.rnn_residual_entropy;
+            report << "| " << r.name << " | " << r.original_size << " B | "
+                   << std::fixed << std::setprecision(4) << r.original_entropy << " bpp | "
+                   << r.delta_entropy << " bpp | "
+                   << r.rnn_residual_entropy << " bpp | "
+                   << ratio << ":1 | "
+                   << (r.success ? "SUCCESS" : "FAILURE") << " |\n";
+        }
+
+        std::cout << "[*] Report generated: rnn_absolute/compression_report.md" << std::endl;
+
     } catch (std::exception& e) {
         std::cerr << "Fatal Error: " << e.what() << std::endl;
         return 1;
