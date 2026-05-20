@@ -1,4 +1,5 @@
 #include <avr/pgmspace.h>
+#include <limits.h>
 
 #define DATA_POINTS 32  // Expanded data collection to enhance sheaf construction
 int sensorPin = A0;
@@ -43,6 +44,37 @@ void collectData() {
     }
 }
 
+int computeHammingDistance(int poly, int derivedPoly) {
+    // Compute error using Hamming distance to compare polynomials
+    int errorCount = 0;
+    int xorResult = poly ^ derivedPoly;
+    while (xorResult) {
+        errorCount += xorResult & 1;
+        xorResult >>= 1;
+    }
+    return errorCount;
+}
+
+int windowSizePenalty(int windowSize) {
+    // Adjust penalty based on the window size used for constructing the sheaf
+    return windowSize > 4 ? 2 * (windowSize - 4) : 0;
+}
+
+int evaluatePolynomial(int poly, int derivedPoly, int windowSize) {
+    // Compute error based on least squares approximation or fitting criteria
+    int error = computeHammingDistance(poly, derivedPoly) + windowSizePenalty(windowSize);
+    return error;
+}
+
+int approximateDerivative(int prevValue, int currValue, int diffTime) {
+    // Approximate the derivative using finite differences
+    int derivative = (currValue - prevValue) / max(diffTime, 1);  // Protect against division by zero
+    // Selecting a simple polynomial based on the observed rate of change
+    if (derivative == 0) return 0b1;
+    if (derivative == 1) return 0b11;
+    return 0b101;
+}
+
 void constructSheaf() {
     Serial.println("Constructing Sheaf with Improved Polynomial Matching:");
     int bestPolynomial = 0;
@@ -56,7 +88,6 @@ void constructSheaf() {
 
             // Approximate derivative using a broader set of points in the current window
             for (int i = start + 1; i < start + window; i++) {
-                int diffValue = (presheaf[i].value - presheaf[i - 1].value) % 2;
                 int diffTime = presheaf[i].timestamp - presheaf[i - 1].timestamp;
 
                 derivedPoly ^= approximateDerivative(presheaf[i - 1].value, presheaf[i].value, diffTime);
@@ -85,35 +116,58 @@ void constructSheaf() {
     Serial.println(bestStart);
 }
 
-int approximateDerivative(int prevValue, int currValue, int diffTime) {
-    // Approximate the derivative using finite differences
-    int derivative = (currValue - prevValue) / max(diffTime, 1);  // Protect against division by zero
-    // Selecting a simple polynomial based on the observed rate of change
-    if (derivative == 0) return 0b1;
-    if (derivative == 1) return 0b11;
-    return 0b101;
-}
-
-int evaluatePolynomial(int poly, int derivedPoly, int windowSize) {
-    // Compute error based on least squares approximation or fitting criteria
-    int error = computeTotalError(poly, derivedPoly) + windowSizePenalty(windowSize);
-    return error;
-}
-
-int computeTotalError(int poly, int derivedPoly) {
-    // Compute error using Hamming distance and other criteria to compare polynomials
-    int errorCount = 0;
-    int xorResult = poly ^ derivedPoly;
-    while (xorResult) {
-        errorCount += xorResult & 1;
-        xorResult >>= 1;
+int computeTotalError(int poly, int* data_seq, int size) {
+    int totalError = 0;
+    int state = data_seq[0];
+    for (int i = 1; i < size; i++) {
+        int next = 0;
+        for (int j = 0; j < 8; j++) { // Assuming 8-bit state for LFSR simulation
+            if ((poly >> j) & 1) {
+                next ^= (state >> j) & 1;
+            }
+        }
+        totalError += (next != data_seq[i]);
+        state = (state >> 1) | (next << 7);
     }
-    return errorCount;
+    return totalError;
 }
 
-int windowSizePenalty(int windowSize) {
-    // Adjust penalty based on the window size used for constructing the sheaf
-    return windowSize > 4 ? 2 * (windowSize - 4) : 0;
+int acceptableErrorThreshold() {
+    return 2;
+}
+
+int searchPolynomialsBruteForce(int* data_seq, int size) {
+    int bestMatch = -1;
+    int minError = INT_MAX;
+
+    // Brute force search in 8-bit space instead of broken binary search
+    for (int i = 0; i < 256; i++) {
+        int error = computeTotalError(i, data_seq, size);
+        if (error < minError) {
+            minError = error;
+            bestMatch = i;
+        }
+        if (minError <= acceptableErrorThreshold()) break;
+    }
+    return bestMatch;
+}
+
+int monteCarloSearch(int* data_seq, int size) {
+    int bestCandidate = 0;
+    int minError = INT_MAX;
+
+    for (int i = 0; i < size - 1; i++) {
+        int diffTime = timestamps[i + 1] - timestamps[i];
+        int derivedPoly = approximateDerivative(data_seq[i], data_seq[i + 1], diffTime);
+        int error = computeTotalError(derivedPoly, data_seq, size);
+
+        if (error < minError) {
+            minError = error;
+            bestCandidate = derivedPoly;
+        }
+    }
+
+    return (minError <= acceptableErrorThreshold()) ? bestCandidate : searchPolynomialsBruteForce(data_seq, size);
 }
 
 void setup() {
