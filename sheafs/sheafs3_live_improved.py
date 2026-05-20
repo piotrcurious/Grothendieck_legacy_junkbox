@@ -4,28 +4,13 @@ import matplotlib.pyplot as plt
 from numpy.polynomial import Polynomial
 import argparse
 import sys
+from sheaf_utils import MockSerial, parse_data_line
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Live visualization of sheaf data from Arduino.')
     parser.add_argument('--port', type=str, default='COM3', help='Serial port (e.g., COM3 or /dev/ttyACM0). Use "mock" for testing.')
     parser.add_argument('--baud', type=int, default=9600, help='Baud rate.')
     return parser.parse_args()
-
-class MockSerial:
-    def __init__(self):
-        self.in_waiting = 1
-        self.time = 0
-        print("MockSerial initialized")
-    def readline(self):
-        import random
-        import time
-        time.sleep(0.1)
-        self.time += random.randint(50, 500)
-        value = random.randint(0, 1)
-        line = f"Collected Data Point: Time: {self.time} ms, Value: {value}\n"
-        return line.encode('utf-8')
-    def flushInput(self): pass
-    def close(self): pass
 
 # Function to generate polynomial candidates using least squares fitting
 def generate_polynomial_candidates(timestamps, values, max_degree=5):
@@ -68,21 +53,6 @@ def plot_data_and_fit(timestamps, values, best_poly):
     plt.ylabel('Values')
     plt.title('Sample Data and Best Fit Polynomial')
     plt.legend()
-
-# Parse line of data from Arduino
-def parse_data_line(line):
-    # Attempt to extract timestamp and value from the formatted string
-    if "Collected Data Point" in line:
-        try:
-            parts = line.split(',')
-            time_part = parts[0].split('Time: ')[1].strip().replace(' ms', '')
-            value_part = parts[1].split('Value: ')[1].strip()
-            timestamp = int(time_part)
-            value = int(value_part)
-            return timestamp, value
-        except (IndexError, ValueError):
-            print(f"Failed to parse data line: {line}")
-    return None, None
 
 def main():
     args = parse_args()

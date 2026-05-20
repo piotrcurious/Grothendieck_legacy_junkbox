@@ -1,18 +1,22 @@
 ### Key Improvements Explained:
 
 1. **Sheaf Aggregation and Derivative-Based Polynomial Matching**:
-   - The code now aggregates sheafs using finite differences to approximate derivatives between sampled data points. This allows us to generate candidate polynomials based on observed changes rather than randomly guessing polynomials.
+   - The system aggregates local data ("stalks") into consistent sheafs. It uses finite differences in GF(2) to approximate derivatives, which guide the selection of candidate feedback polynomials.
    
-2. **Least Squares Fitting**:
-   - After aggregating sheafs, the least squares fitting process evaluates how well each candidate polynomial fits the aggregated sheaf data. This helps refine the search and prioritize polynomials that minimize the overall error.
+2. **Least Squares and Feature-Guided Fitting**:
+   - The Python tools (`sheafs3_visualizer.py`) use least squares fitting combined with hash-based feature correlation to identify the best polynomial candidates from sampled data.
 
-3. **Error Evaluation with Hamming Distance and Time Penalty**:
-   - The evaluation function uses Hamming distance to measure mismatches and includes a timing penalty to account for the constraints of the bandwidth-limited system. This combined approach ensures that selected polynomials are realistic and closely follow the data behavior.
+3. **Robust Search Algorithms**:
+   - The Arduino firmware (`sheafs3_tune.ino`) implements a tiered search strategy:
+     - **Monte Carlo Search**: Uses derivative-based candidates to quickly find a matching polynomial.
+     - **Brute Force Search**: Exhaustively searches the 8-bit polynomial space if the Monte Carlo search fails to find a match within the error threshold.
 
-4. **Monte Carlo Search Refinement**:
-   - Instead of purely random generation, the Monte Carlo search now incorporates derivative-based candidates derived from the sheafs. This method improves the efficiency of the search and narrows down the set of polynomials that are likely to match the NLFSR feedback.
+4. **Hardware-Less Verification Suite**:
+   - Includes `mock_arduino.py` which uses an LFSR generator to simulate realistic data streams.
+   - Includes `test_integration.py` for automated pipeline verification.
+   - The visualizers include a `--port mock` mode for instant testing without an Arduino.
 
-5. **Binary Search with Error Tolerance**:
-   - Binary search is used as a fallback method when the Monte Carlo search does not find an acceptable polynomial. It continues to search within the aggregated sheaf data, leveraging the structured nature of the polynomial space in the same finite field.
+5. **Portable and Dependency-Free Analysis**:
+   - Replaced heavy dependencies (`scipy`, `sklearn`) with custom implementations of smoothing (moving average) and feature hashing, ensuring the tools run on resource-constrained environments like Raspberry Pi.
 
-This improved code integrates the concepts of constructive algebraic geometry and sheaf theory, allowing iterative refinement of polynomial candidates that respect system constraints such as bandwidth limits. The approach effectively balances theoretical principles with practical error-tolerant algorithms to achieve robust polynomial matching in a realistic embedded system context.
+This suite integrates principles of constructive algebraic geometry and sheaf theory with practical, error-tolerant algorithms to achieve robust polynomial matching for NLFSR/LFSR systems.
