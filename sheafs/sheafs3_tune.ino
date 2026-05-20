@@ -152,12 +152,12 @@ int searchPolynomialsBruteForce(int* data_seq, int size) {
     return bestMatch;
 }
 
-int monteCarloSearch(int* data_seq, int size) {
+int monteCarloSearch(int* data_seq, int* timestamps_seq, int size) {
     int bestCandidate = 0;
     int minError = INT_MAX;
 
     for (int i = 0; i < size - 1; i++) {
-        int diffTime = timestamps[i + 1] - timestamps[i];
+        int diffTime = timestamps_seq[i + 1] - timestamps_seq[i];
         int derivedPoly = approximateDerivative(data_seq[i], data_seq[i + 1], diffTime);
         int error = computeTotalError(derivedPoly, data_seq, size);
 
@@ -182,7 +182,7 @@ void loop() {
         Serial.println("Data Collection Complete.");
         constructSheaf();
 
-        int feedbackPoly = monteCarloSearch(data, DATA_POINTS);
+        int feedbackPoly = monteCarloSearch(data, timestamps, DATA_POINTS);
         Serial.print("Best Feedback Polynomial (Monte Carlo Search): ");
         Serial.println(feedbackPoly, BIN);
 
