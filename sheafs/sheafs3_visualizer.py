@@ -6,33 +6,28 @@ import argparse
 import sys
 from sheaf_utils import MockSerial, parse_data_line
 
-# Simplified Feature Extraction instead of sklearn FeatureHasher
+# Simplified Feature Extraction
 def extract_features_simple(timestamps, values, n_features=10):
-    # A simple hash-based feature extraction
     features = np.zeros(n_features)
     for i in range(len(timestamps)):
-        # Feature 1: Time diff
         dt = timestamps[i] - timestamps[i-1] if i > 0 else 0
         idx_dt = hash(f"dt_{dt}") % n_features
         features[idx_dt] += 1
-
-        # Feature 2: Value
         val = values[i]
         idx_val = hash(f"val_{val}") % n_features
         features[idx_val] += 1
-
     norm = np.linalg.norm(features)
     if norm > 0:
         features /= norm
     return features
 
-# Simplified Smoothing instead of scipy gaussian_filter1d
+# Simplified Smoothing
 def simple_moving_average(values, window=3):
     if len(values) < window:
         return values
     return np.convolve(values, np.ones(window)/window, mode='same')
 
-# Function to generate polynomial candidates guided by hashed features
+# Function to generate polynomial candidates
 def generate_polynomial_candidates(timestamps, values, max_degree=5):
     candidates = []
     smoothed_values = simple_moving_average(values)
@@ -43,24 +38,21 @@ def generate_polynomial_candidates(timestamps, values, max_degree=5):
         candidates.append(poly)
     return candidates
 
-# Function to evaluate polynomials using feature-guided correlation
+# Function to evaluate polynomials
 def evaluate_polynomial(poly, timestamps, values, target_features):
     predicted_values = poly(timestamps)
     error = np.sum((predicted_values - values) ** 2)
-
     poly_features = extract_features_simple(timestamps, predicted_values)
     feature_correlation = np.dot(target_features, poly_features)
-
     return error, feature_correlation
 
-# Find the best polynomial match from candidates using feature correlation
+# Find the best polynomial match
 def find_best_polynomial(candidates, timestamps, values, target_features):
     best_poly = None
     best_error = float('inf')
     best_correlation = -1.0
     for poly in candidates:
         error, correlation = evaluate_polynomial(poly, timestamps, values, target_features)
-        # Prioritize lower error, then higher correlation
         if error < best_error:
             best_error = error
             best_poly = poly
@@ -73,25 +65,22 @@ def find_best_polynomial(candidates, timestamps, values, target_features):
 def main():
     parser = argparse.ArgumentParser(description='Portable Sheaf Visualizer')
     parser.add_argument('--port', type=str, default='mock', help='Serial port or "mock"')
+    parser.add_argument('--headless', action='store_true', help='Run without visualization')
+    parser.add_argument('--max-samples', type=int, default=0, help='Max samples to process (0 = infinite)')
     args = parser.parse_args()
 
     if args.port == 'mock':
-        ser = MockSerial()
+        ser = MockSerial(use_lfsr=True)
     else:
         ser = serial.Serial(args.port, 9600)
         ser.flushInput()
 
-    timestamps = []
-    values = []
-    sheafs = []
-    errors = []
+    timestamps, values, sheafs, errors = [], [], [], []
+    SHEAF_TIME_THRESHOLD, SHEAF_SIZE_THRESHOLD = 500, 5
 
-    SHEAF_TIME_THRESHOLD = 500
-    SHEAF_SIZE_THRESHOLD = 5
-
-    plt.ion()
-    fig, axs = plt.subplots(2, 1, figsize=(10, 8))
-    line_buf = ""
+    if not args.headless:
+        plt.ion()
+        fig, axs = plt.subplots(2, 1, figsize=(10, 8))
 
     print(f"Starting {__file__} on port {args.port}")
     try:
@@ -105,8 +94,6 @@ def main():
                 if timestamp is not None and value is not None:
                     timestamps.append(timestamp)
                     values.append(value)
-
-                    # Update sheafs
                     if not sheafs or (timestamp - sheafs[-1][-1][0] > SHEAF_TIME_THRESHOLD):
                         sheafs.append([])
                     sheafs[-1].append((timestamp, value))
@@ -117,23 +104,27 @@ def main():
                         best_poly, best_err, _ = find_best_polynomial(candidates, timestamps, values, target_features)
                         errors.append(best_err)
 
-                        # Plot
-                        axs[0].clear()
-                        axs[0].scatter(timestamps, values, color='red', label='Data')
-                        t_plot = np.linspace(min(timestamps), max(timestamps), 100)
-                        axs[0].plot(t_plot, best_poly(t_plot), label=f'Fit (Err: {best_err:.2f})', color='blue')
-                        axs[0].legend()
-
-                        axs[1].clear()
-                        axs[1].plot(errors, label='Error Trend')
-                        axs[1].legend()
-
-                        plt.draw()
-                        plt.pause(0.01)
+                        if not args.headless:
+                            axs[0].clear()
+                            axs[0].scatter(timestamps, values, color='red', label='Data')
+                            t_plot = np.linspace(min(timestamps), max(timestamps), 100)
+                            axs[0].plot(t_plot, best_poly(t_plot), label=f'Fit (Err: {best_err:.2f})', color='blue')
+                            axs[0].legend()
+                            axs[1].clear()
+                            axs[1].plot(errors, label='Error Trend')
+                            axs[1].legend()
+                            plt.draw()
+                            plt.pause(0.01)
+                        else:
+                            print(f"Sample {len(timestamps)}: Error {best_err:.4f}")
 
                 if "Data Collection Complete" in line_buf:
                     print("Cycle complete.")
                     timestamps, values, sheafs, errors = [], [], [], []
+
+                if args.max_samples > 0 and len(timestamps) >= args.max_samples:
+                    print(f"Reached max samples {args.max_samples}. Exiting cycle.")
+                    break
 
     except KeyboardInterrupt:
         print("Exiting...")

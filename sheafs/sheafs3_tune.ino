@@ -18,7 +18,8 @@ PresheafData presheaf[DATA_POINTS];
 const int candidatePolynomials[] = {
     0b1, 0b11, 0b101, 0b110, 0b111,
     0b1001, 0b1011, 0b1101, 0b1111, 0b10011,
-    0b10101, 0b11011, 0b11101, 0b11111
+    0b10101, 0b11011, 0b11101, 0b11111,
+    0x1D, 0x8D, 0xAF, 0xB4 // Common 8-bit LFSR polynomials
 };
 const int numCandidates = sizeof(candidatePolynomials) / sizeof(candidatePolynomials[0]);
 
@@ -57,22 +58,34 @@ int computeHammingDistance(int poly, int derivedPoly) {
 
 int windowSizePenalty(int windowSize) {
     // Adjust penalty based on the window size used for constructing the sheaf
-    return windowSize > 4 ? 2 * (windowSize - 4) : 0;
+    // Favor windows between 4 and 8
+    if (windowSize < 4) return (4 - windowSize) * 2;
+    if (windowSize > 8) return (windowSize - 8) * 2;
+    return 0;
 }
 
 int evaluatePolynomial(int poly, int derivedPoly, int windowSize) {
-    // Compute error based on least squares approximation or fitting criteria
+    // Compute error based on Hamming distance and window size penalty
     int error = computeHammingDistance(poly, derivedPoly) + windowSizePenalty(windowSize);
     return error;
 }
 
-int approximateDerivative(int prevValue, int currValue, int diffTime) {
-    // Approximate the derivative using finite differences
-    int derivative = (currValue - prevValue) / max(diffTime, 1);  // Protect against division by zero
-    // Selecting a simple polynomial based on the observed rate of change
-    if (derivative == 0) return 0b1;
-    if (derivative == 1) return 0b11;
-    return 0b101;
+// Improved candidate generator based on local bit patterns
+int generateCandidateFromPattern(int* data_seg, int len) {
+    if (len < 2) return 0b1;
+
+    int pattern = 0;
+    for (int i = 0; i < len && i < 8; i++) {
+        if (data_seg[i]) pattern |= (1 << i);
+    }
+
+    // Mix in some transition information
+    int transitions = 0;
+    for (int i = 1; i < len && i < 8; i++) {
+        if (data_seg[i] != data_seg[i-1]) transitions |= (1 << (i-1));
+    }
+
+    return pattern ^ (transitions << 1) ^ 0b1; // Ensure at least the constant term is considered
 }
 
 void constructSheaf() {
@@ -82,21 +95,16 @@ void constructSheaf() {
     int bestStart = 0;
 
     // Iterate over different window sizes to expand data used in sheaf construction
-    for (int window = 2; window <= dataIndex; window++) {
+    for (int window = 4; window <= 12 && window <= dataIndex; window++) {
         for (int start = 0; start <= dataIndex - window; start++) {
-            int derivedPoly = 0;
 
-            // Approximate derivative using a broader set of points in the current window
-            for (int i = start + 1; i < start + window; i++) {
-                int diffTime = presheaf[i].timestamp - presheaf[i - 1].timestamp;
-
-                derivedPoly ^= approximateDerivative(presheaf[i - 1].value, presheaf[i].value, diffTime);
-            }
+            // Extract a local candidate from this window's bit pattern
+            int localCandidate = generateCandidateFromPattern(&data[start], window);
 
             // Evaluate candidate polynomials against the constructed sheaf data
             for (int i = 0; i < numCandidates; i++) {
                 int candidate = candidatePolynomials[i];
-                int error = evaluatePolynomial(candidate, derivedPoly, window);
+                int error = evaluatePolynomial(candidate, localCandidate, window);
 
                 // Update the best polynomial based on the least error found
                 if (error < bestError) {
@@ -118,10 +126,15 @@ void constructSheaf() {
 
 int computeTotalError(int poly, int* data_seq, int size) {
     int totalError = 0;
-    int state = data_seq[0];
-    for (int i = 1; i < size; i++) {
+    int state = 0;
+    // Initialize state with first 8 bits
+    for (int i = 0; i < 8 && i < size; i++) {
+        if (data_seq[i]) state |= (1 << i);
+    }
+
+    for (int i = 8; i < size; i++) {
         int next = 0;
-        for (int j = 0; j < 8; j++) { // Assuming 8-bit state for LFSR simulation
+        for (int j = 0; j < 8; j++) {
             if ((poly >> j) & 1) {
                 next ^= (state >> j) & 1;
             }
@@ -133,21 +146,20 @@ int computeTotalError(int poly, int* data_seq, int size) {
 }
 
 int acceptableErrorThreshold() {
-    return 2;
+    return 4; // Allow some noise
 }
 
 int searchPolynomialsBruteForce(int* data_seq, int size) {
     int bestMatch = -1;
     int minError = INT_MAX;
 
-    // Brute force search in 8-bit space instead of broken binary search
     for (int i = 0; i < 256; i++) {
         int error = computeTotalError(i, data_seq, size);
         if (error < minError) {
             minError = error;
             bestMatch = i;
         }
-        if (minError <= acceptableErrorThreshold()) break;
+        if (minError <= 1) break; // Good enough
     }
     return bestMatch;
 }
@@ -156,18 +168,21 @@ int monteCarloSearch(int* data_seq, int* timestamps_seq, int size) {
     int bestCandidate = 0;
     int minError = INT_MAX;
 
-    for (int i = 0; i < size - 1; i++) {
-        int diffTime = timestamps_seq[i + 1] - timestamps_seq[i];
-        int derivedPoly = approximateDerivative(data_seq[i], data_seq[i + 1], diffTime);
+    // Use some random starting points based on local patterns
+    for (int i = 0; i < 10; i++) {
+        int start = random(0, size - 8);
+        int len = random(4, 9);
+        int derivedPoly = generateCandidateFromPattern(&data_seq[start], len);
         int error = computeTotalError(derivedPoly, data_seq, size);
 
         if (error < minError) {
             minError = error;
             bestCandidate = derivedPoly;
         }
+        if (minError <= acceptableErrorThreshold()) return bestCandidate;
     }
 
-    return (minError <= acceptableErrorThreshold()) ? bestCandidate : searchPolynomialsBruteForce(data_seq, size);
+    return searchPolynomialsBruteForce(data_seq, size);
 }
 
 void setup() {

@@ -6,7 +6,7 @@ This directory contains tools for collecting data from an Arduino and matching i
 
 ### 1. Arduino Firmware
 - **`sheafs3_tune.ino`**: The main Arduino sketch. It collects analog data, converts it to binary, and performs on-device sheaf construction and polynomial matching.
-  - Features: Derivative-based approximation, Monte Carlo search, and brute-force search for best-fit feedback polynomials.
+  - Features: Tiered search strategy (Monte Carlo followed by Brute Force) and pattern-based candidate generation.
   - Usage: Upload to an Arduino (tested on Uno/Mega).
 
 ### 2. Python Visualizers & Analyzers
@@ -16,10 +16,10 @@ This directory contains tools for collecting data from an Arduino and matching i
   - Requirements: `pyserial`, `numpy`, `matplotlib`.
 - **`sheafs3_cli_analyzer.py`**: A lightweight, CLI-only version of the analyzer for environments without a display.
   - Requirements: `numpy`.
-- **`sheafs3_live_improved.py`**: Legacy live visualizer (retained for backward compatibility with older data formats).
 
-### 3. Testing & Simulation
-- **`mock_arduino.py`**: Simulates the serial output of an Arduino running `sheafs3_tune.ino` using an LFSR generator.
+### 3. Testing & Utilities
+- **`sheaf_utils.py`**: Shared utilities for serial parsing and mock hardware simulation.
+- **`mock_arduino.py`**: Standalone mock hardware simulator using an LFSR generator.
 - **`test_integration.py`**: A script to verify the full data collection and matching cycle.
 
 ## Usage Instructions
@@ -39,8 +39,8 @@ This directory contains tools for collecting data from an Arduino and matching i
    ```
 2. Or use the CLI analyzer:
    ```bash
-   python3 sheafs/sheafs3_cli_analyzer.py
+   python3 sheafs/sheafs3_cli_analyzer.py --port mock
    ```
 
 ## Mathematical Approach
-The system uses **Sheaf Theory** to group local data points into consistent global sections. We approximate derivatives via finite differences in GF(2) to propose candidate polynomials, then refine these candidates using least squares fitting and exhaustive/Monte Carlo searches.
+The system uses principles of **Sheaf Theory** to group local data points into consistent global sections. We generate candidate polynomials based on local bit patterns and transitions, then refine these candidates using least squares fitting and exhaustive/Monte Carlo searches.
