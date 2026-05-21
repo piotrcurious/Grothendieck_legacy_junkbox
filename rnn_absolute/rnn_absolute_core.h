@@ -32,53 +32,54 @@ public:
         bias_o.resize(out, 0.0);
 
         std::default_random_engine gen(42);
-        std::uniform_real_distribution<double> dist(-1.0 / sqrt(in), 1.0 / sqrt(in));
-        auto init = [&]() { return dist(gen); };
-        std::generate(weights_ih.begin(), weights_ih.end(), init);
-        std::generate(weights_hh.begin(), weights_hh.end(), init);
-        std::generate(weights_ho.begin(), weights_ho.end(), init);
+        std::uniform_real_distribution<double> dist(-0.5 / std::sqrt(hid), 0.5 / std::sqrt(hid));
+        for(auto& w : weights_ih) w = dist(gen);
+        for(auto& w : weights_hh) w = dist(gen);
+        for(auto& w : weights_ho) w = dist(gen);
+
+        h_next.resize(hid);
+        out_buf.resize(out);
+        out_err.resize(out);
+        h_err.resize(hid);
     }
 
-    std::vector<double> forward(const std::vector<double>& input, std::vector<double>& h_state) {
-        std::vector<double> next_h(hidden_size, 0.0);
+    const std::vector<double>& forward(const std::vector<double>& input, std::vector<double>& h_state) {
         for (int i = 0; i < hidden_size; ++i) {
             double sum = bias_h[i];
             for (int j = 0; j < input_size; ++j) sum += input[j] * weights_ih[j * hidden_size + i];
             for (int j = 0; j < hidden_size; ++j) sum += h_state[j] * weights_hh[j * hidden_size + i];
-            next_h[i] = std::tanh(sum);
+            h_next[i] = std::tanh(sum);
         }
-        h_state = next_h;
-        std::vector<double> output(output_size, 0.0);
+        h_state = h_next;
         for (int i = 0; i < output_size; ++i) {
             double sum = bias_o[i];
             for (int j = 0; j < hidden_size; ++j) sum += h_state[j] * weights_ho[j * output_size + i];
-            output[i] = sum;
+            out_buf[i] = sum;
         }
-        return output;
+        return out_buf;
     }
 
     void trainStep(const std::vector<double>& input, const std::vector<double>& target, std::vector<double>& h_state, double lr) {
         std::vector<double> prev_h = h_state;
-        std::vector<double> pred = forward(input, h_state);
+        const std::vector<double>& pred = forward(input, h_state);
 
-        std::vector<double> out_error(output_size);
-        for (int i = 0; i < output_size; ++i) out_error[i] = pred[i] - target[i];
+        for (int i = 0; i < output_size; ++i) out_err[i] = pred[i] - target[i];
 
         for (int i = 0; i < output_size; ++i) {
-            bias_o[i] -= lr * out_error[i];
-            for (int j = 0; j < hidden_size; ++j) weights_ho[j * output_size + i] -= lr * out_error[i] * h_state[j];
+            bias_o[i] -= lr * out_err[i];
+            for (int j = 0; j < hidden_size; ++j) weights_ho[j * output_size + i] -= lr * out_err[i] * h_state[j];
         }
 
-        std::vector<double> h_error(hidden_size, 0.0);
+        std::fill(h_err.begin(), h_err.end(), 0.0);
         for (int j = 0; j < hidden_size; ++j) {
-            for (int i = 0; i < output_size; ++i) h_error[j] += out_error[i] * weights_ho[j * output_size + i];
-            h_error[j] *= (1.0 - h_state[j] * h_state[j]);
+            for (int i = 0; i < output_size; ++i) h_err[j] += out_err[i] * weights_ho[j * output_size + i];
+            h_err[j] *= (1.0 - h_state[j] * h_state[j]);
         }
 
         for (int i = 0; i < hidden_size; ++i) {
-            bias_h[i] -= lr * h_error[i];
-            for (int j = 0; j < input_size; ++j) weights_ih[j * hidden_size + i] -= lr * h_error[i] * input[j];
-            for (int j = 0; j < hidden_size; ++j) weights_hh[j * hidden_size + i] -= lr * h_error[i] * prev_h[j];
+            bias_h[i] -= lr * h_err[i];
+            for (int j = 0; j < input_size; ++j) weights_ih[j * hidden_size + i] -= lr * h_err[i] * input[j];
+            for (int j = 0; j < hidden_size; ++j) weights_hh[j * hidden_size + i] -= lr * h_err[i] * prev_h[j];
         }
     }
 
@@ -86,6 +87,7 @@ private:
     int input_size, hidden_size, output_size;
     std::vector<double> weights_ih, weights_hh, weights_ho;
     std::vector<double> bias_h, bias_o;
+    std::vector<double> h_next, out_buf, out_err, h_err;
 };
 
 #endif

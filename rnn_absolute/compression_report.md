@@ -1,6 +1,6 @@
-# RNN Absolute Galois Group Compression Report (Final Optimized)
+# RNN Absolute Galois Group Compression Report (Deep 2D context)
 
-| Image | Original Entropy | Delta Entropy | RNN Entropy | Ratio (vs Orig) |
+| Image | Original Entropy | RNN Entropy | Ratio | Recon |
 | :--- | :--- | :--- | :--- | :--- |
-| test.pgm | 6.8038 | 5.4737 | 5.1580 | 1.3191:1 |
-| GhostInShell_02_005.pgm | 6.5531 | 5.9420 | 5.7584 | 1.1380:1 |
+| test.pgm | 6.8038 | 5.0533 | 1.3464:1 | SUCCESS |
+| GhostInShell_02_005.pgm | 6.5531 | 5.6520 | 1.1594:1 | SUCCESS |
