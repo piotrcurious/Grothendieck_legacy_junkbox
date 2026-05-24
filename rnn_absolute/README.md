@@ -1,18 +1,27 @@
-# Finite Field & RNN Compressor
+# RNN Absolute Galois Group Compressor
 
-This project implements experimental data compression techniques that combine finite field arithmetic with statistical modeling (RNNs). It is part of the Absolute Galois Group explorations.
+This project implements an online adaptive image compression system using Recurrent Neural Networks (RNN) and Finite Field arithmetic.
 
-## Key Concepts
-- **Finite Field Arithmetic**: Mapping data to elements of $\mathbb{F}_p$ to leverage algebraic structures for compression and manipulation.
-- **RNN State Machines**: Using Recurrent Neural Networks to predict data sequences and only storing the residuals (errors) in the compressed format.
-- **Multidimensional Support**: Handling vectors of finite field elements for complex data structures.
+## Key Components
 
-## Files
-- `compressor.ino`: Arduino implementation of basic compression concepts.
-- `compressor1.py`: Python-based explorations of these algorithms.
-- `transformation_params.h`: Shared parameters for transformations.
-- `compressor1.md` through `compressor7b.md`: Detailed walkthroughs, code examples, and theoretical justifications for the approach.
-- `01/`, `02/`, `02_fix/`, `02_fix_crop/`, `py01/`, `py02/`: Various iterations and experiments in C++ and Python exploring quadtree decomposition, morphism-based compression, and dictionary learning.
+- **rnn_absolute_core.h**: Core C++ implementation of the `OptimizedRNN` with Adam optimizer and `FiniteFieldElement` for modular arithmetic (mod 10007).
+- **main_explorer.cpp**: Main entry point for compression/decompression verification on PGM images.
+- **compressor1.py**: Python prototype for testing algorithmic variations.
+- **documentation.md**: Technical details on the RNN architecture and finite field mapping.
 
-## State
-Conceptual prototype. Demonstrates the integration of neural sequence prediction with algebraic field theory for non-traditional compression.
+## Algorithms
+
+The system uses a 12-pixel spatial context for each pixel to predict its value. The prediction error (residual) is mapped into a finite field and then back, ensuring bit-perfect reconstruction. The RNN weights are updated online after each pixel using the Adam optimizer to adapt to local image statistics.
+
+## How to Build
+
+Run the provided build script:
+```bash
+./build.sh
+```
+
+This will compile the `rnn_explorer` utility.
+
+## Performance
+
+See `compression_report.md` for current entropy metrics and compression ratios.

@@ -7,6 +7,7 @@
 #include <string>
 #include <map>
 #include <iomanip>
+#include <algorithm>
 
 struct Image {
     int width, height;
@@ -56,27 +57,20 @@ struct Metrics {
 };
 
 Metrics processImage(const std::string& path) {
-    std::cout << "[*] Processing: " << path << std::endl;
+    std::cout << "[*] Processing: " << path << " (OptimizedRNN + Adam + Context12)" << std::endl;
     Image img = loadPGM(path);
     int w = img.width;
     int h_img = img.height;
 
-    std::vector<double> p_norm;
-    for(uint8_t b : img.data) p_norm.push_back(((double)b - 128.0) / 128.0);
-
-    int hidden = 32;
-    int ctx = 12; // Expanded context
-    MultiDimRNN encoder(ctx, hidden, 1);
-    MultiDimRNN decoder(ctx, hidden, 1);
+    int hidden = 16;
+    int ctx_size = 12;
+    OptimizedRNN predictor(ctx_size, hidden);
 
     std::vector<int> rnn_residuals;
     std::vector<uint8_t> res_view; res_view.assign(img.data.size(), 128);
     Image reconstructed; reconstructed.width = w; reconstructed.height = h_img; reconstructed.data.assign(img.data.size(), 0);
 
-    std::vector<double> h_enc(hidden, 0.0);
-    std::vector<double> h_dec(hidden, 0.0);
-
-    double lr = 0.01;
+    double lr = 0.005;
     int errors = 0;
 
     for(int y = 0; y < h_img; ++y) {
@@ -84,50 +78,44 @@ Metrics processImage(const std::string& path) {
             int i = y * w + x;
             if (y < 3 || x < 3 || x >= w - 3) {
                 reconstructed.data[i] = img.data[i];
+                rnn_residuals.push_back(0);
                 continue;
             }
 
+            auto getV = [&](int tx, int ty) { return ((double)reconstructed.data[ty * w + tx] - 128.0) / 128.0; };
+
             std::vector<double> input = {
-                p_norm[i-1], p_norm[i-2], p_norm[i-3],
-                p_norm[i-w], p_norm[i-2*w], p_norm[i-3*w],
-                p_norm[i-w-1], p_norm[i-w+1], p_norm[i-2*w-1], p_norm[i-2*w+1],
-                p_norm[i-w-2], p_norm[i-w+2]
+                getV(x-1, y), getV(x-2, y), getV(x-3, y),
+                getV(x, y-1), getV(x, y-2), getV(x, y-3),
+                getV(x-1, y-1), getV(x+1, y-1),
+                getV(x-1, y-2), getV(x+1, y-2),
+                getV(x-2, y-1), getV(x+2, y-1)
             };
 
-            // Encode
-            std::vector<double> h_enc_tmp = h_enc;
-            const std::vector<double>& pred = encoder.forward(input, h_enc_tmp);
+            double pred = predictor.forward(input);
+
             int target = (int)img.data[i];
-            int p_val = (int)std::round(pred[0] * 128.0 + 128.0);
+            int p_val = (int)std::round(pred * 128.0 + 128.0);
             int res = target - p_val;
-            rnn_residuals.push_back(res);
 
             FiniteFieldElement fe(res);
             int ff_res = (fe.value > PRIME/2) ? (fe.value - PRIME) : fe.value;
+            rnn_residuals.push_back(ff_res);
 
-            // Decode
-            std::vector<double> dec_input = {
-                ((double)reconstructed.data[i-1]-128.0)/128.0, ((double)reconstructed.data[i-2]-128.0)/128.0, ((double)reconstructed.data[i-3]-128.0)/128.0,
-                ((double)reconstructed.data[i-w]-128.0)/128.0, ((double)reconstructed.data[i-2*w]-128.0)/128.0, ((double)reconstructed.data[i-3*w]-128.0)/128.0,
-                ((double)reconstructed.data[i-w-1]-128.0)/128.0, ((double)reconstructed.data[i-w+1]-128.0)/128.0, ((double)reconstructed.data[i-2*w-1]-128.0)/128.0,
-                ((double)reconstructed.data[i-2*w+1]-128.0)/128.0, ((double)reconstructed.data[i-w-2]-128.0)/128.0, ((double)reconstructed.data[i-w+2]-128.0)/128.0
-            };
-            std::vector<double> h_dec_tmp = h_dec;
-            const std::vector<double>& d_pred = decoder.forward(dec_input, h_dec_tmp);
-            int recon_val = (int)std::round(d_pred[0] * 128.0 + 128.0) + ff_res;
+            int recon_val = p_val + ff_res;
             if (recon_val < 0) recon_val = 0; if (recon_val > 255) recon_val = 255;
             reconstructed.data[i] = (uint8_t)recon_val;
 
             if (reconstructed.data[i] != target) errors++;
 
-            double nt = ((double)target - 128.0)/128.0;
-            encoder.trainStep(input, {nt}, h_enc, lr);
-            decoder.trainStep(dec_input, {nt}, h_dec, lr);
+            double nt = ((double)target - 128.0) / 128.0;
+            predictor.train(input, nt, lr);
 
-            int vv = res + 128;
+            int vv = ff_res + 128;
             if (vv < 0) vv = 0; if (vv > 255) vv = 255;
             res_view[i] = (uint8_t)vv;
         }
+        if (y % 400 == 0) std::cout << "  Row: " << y << "/" << h_img << std::endl;
     }
 
     double o_e = calculateEntropy(std::vector<int>(img.data.begin(), img.data.end()));
@@ -144,7 +132,7 @@ int main() {
     auto m1 = processImage("absolute_galois_group/compressor/01/test.pgm");
     auto m2 = processImage("absolute_galois_group/compressor/01/GhostInShell_02_005.pgm");
     std::ofstream report("rnn_absolute/compression_report.md");
-    report << "# RNN Absolute Galois Group Compression Report (Deep 2D context)\n\n";
+    report << "# RNN Absolute Galois Group Compression Report (OptimizedRNN + Adam + Context12)\n\n";
     report << "| Image | Original Entropy | RNN Entropy | Ratio | Recon |\n";
     report << "| :--- | :--- | :--- | :--- | :--- |\n";
     auto add = [&](Metrics m) {
