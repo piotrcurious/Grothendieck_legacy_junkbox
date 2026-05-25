@@ -20,6 +20,7 @@ public:
     FiniteFieldElement operator*(const FiniteFieldElement& other) const { return FiniteFieldElement((1LL * value * other.value) % PRIME); }
 };
 
+// Morton Order Z-curve mapping
 inline uint32_t expandBits(uint32_t v) {
     v = (v | (v << 8)) & 0x00FF00FFu;
     v = (v | (v << 4)) & 0x0F0F0F0Fu;
@@ -32,6 +33,32 @@ inline uint32_t morton2D(uint32_t x, uint32_t y) {
     return (expandBits(y) << 1) | expandBits(x);
 }
 
+// Hilbert Curve mapping
+inline void rot(int n, int *x, int *y, int rx, int ry) {
+    if (ry == 0) {
+        if (rx == 1) {
+            *x = n-1 - *x;
+            *y = n-1 - *y;
+        }
+        int t  = *x;
+        *x = *y;
+        *y = t;
+    }
+}
+
+inline int64_t hilbert2D(int n, int x, int y) {
+    int rx, ry;
+    int64_t d=0;
+    for (int s=n/2; s>0; s/=2) {
+        rx = (x & s) > 0;
+        ry = (y & s) > 0;
+        d += (int64_t)s * s * ((3 * rx) ^ ry);
+        rot(s, &x, &y, rx, ry);
+    }
+    return d;
+}
+
+// Gated Recurrent Unit (GRU) optimized for online fractal learning
 class GatedRNN {
 public:
     GatedRNN(int in, int hid) : input_size(in), hidden_size(hid) {
@@ -98,7 +125,6 @@ public:
             dh[i] = dy * w_o[i];
         }
 
-        // Full single-step BPTT
         for(int i=0; i<hidden_size; ++i) {
             double d_h = dh[i];
             double d_zt = d_h * (h_tilde[i] - last_h[i]) * z[i] * (1.0 - z[i]);
@@ -113,12 +139,10 @@ public:
             }
             for(int j=0; j<hidden_size; ++j) {
                 w_z[(input_size + j) * hidden_size + i] -= lr * d_zt * last_h[j];
-
                 double d_rt = d_ht * w_h[(input_size + j) * hidden_size + i] * last_h[j] * r[j] * (1.0 - r[j]);
-                b_r[j] -= lr * d_rt / hidden_size; // Distribute gate bias update
+                b_r[j] -= lr * d_rt / hidden_size;
                 for(int k=0; k<input_size; ++k) w_r[k * hidden_size + j] -= lr * d_rt * x[k] / hidden_size;
                 for(int k=0; k<hidden_size; ++k) w_r[(input_size + k) * hidden_size + j] -= lr * d_rt * last_h[k] / hidden_size;
-
                 w_h[(input_size + j) * hidden_size + i] -= lr * d_ht * (r[j] * last_h[j]);
             }
         }

@@ -23,8 +23,9 @@ struct Metrics {
 
 Image loadPGM(const std::string& filename) {
     std::ifstream file(filename, std::ios::binary);
-    if (!file.is_open()) throw std::runtime_error("Could not open input file");
+    if (!file.is_open()) throw std::runtime_error("Could not open input file: " + filename);
     std::string magic; file >> magic;
+    if (magic != "P5") throw std::runtime_error("Only P5 supported");
     auto skip = [](std::ifstream& f) { char ch; while (f >> std::ws && f.peek() == '#') f.ignore(10000, '\n'); };
     skip(file); int w, h; file >> w >> h;
     skip(file); int maxVal; file >> maxVal;
@@ -54,20 +55,20 @@ double calculateEntropy(const std::vector<int>& data) {
     return entropy;
 }
 
-struct Point { uint32_t x, y, z; };
-
 double getMED(double a, double b, double c) {
     if (c >= std::max(a, b)) return std::min(a, b);
     if (c <= std::min(a, b)) return std::max(a, b);
     return a + b - c;
 }
 
-Metrics processImageRaster(const std::string& path, double lr, int hid) {
-    std::cout << "[*] Processing Raster: " << path << std::endl;
+Metrics processImageFractal(const std::string& path, double lr, int hid) {
+    std::cout << "[*] Processing Fractal RNN (Verified): " << path << std::endl;
     Image img = loadPGM(path);
     int w = img.width, h_img = img.height;
-    int ctx_size = 12 + 1 + 2;
+
+    int ctx_size = 12 + 1 + 2 + 3*4;
     GatedRNN predictor(ctx_size, hid);
+
     std::vector<int> rnn_residuals;
     std::vector<uint8_t> reconstructed_data(w * h_img, 0);
 
@@ -75,104 +76,69 @@ Metrics processImageRaster(const std::string& path, double lr, int hid) {
     for(int y=0; y<h_img; ++y) {
         for(int x=0; x<w; ++x) {
             int i = y * w + x;
-            if (y < 3 || x < 3 || x >= w - 3) {
+            if (y < 8 || x < 8 || x >= w - 8) {
                 reconstructed_data[i] = img.data[i];
                 rnn_residuals.push_back(0);
                 continue;
             }
+
             auto getV = [&](int tx, int ty) { return ((double)reconstructed_data[ty * w + tx] - 128.0) / 128.0; };
+
             std::vector<double> input = {
                 getV(x-1, y), getV(x-2, y), getV(x-3, y),
                 getV(x, y-1), getV(x, y-2), getV(x, y-3),
                 getV(x-1, y-1), getV(x+1, y-1),
                 getV(x-1, y-2), getV(x+1, y-2),
-                getV(x-2, y-1), getV(x+2, y-1),
-                getMED(getV(x-1, y), getV(x, y-1), getV(x-1, y-1)),
-                (double)x/w, (double)y/h_img
+                getV(x-2, y-1), getV(x+2, y-1)
             };
+
+            input.push_back(getMED(getV(x-1, y), getV(x, y-1), getV(x-1, y-1)));
+            input.push_back((double)x/w);
+            input.push_back((double)y/h_img);
+
+            int scales[] = {2, 4, 8};
+            for(int s : scales) {
+                input.push_back(getV(x-s, y)); input.push_back(getV(x, y-s));
+                input.push_back(getV(x-s, y-s)); input.push_back(getV(x+s, y-s));
+            }
+
             double pred = predictor.forward(input);
             int target = (int)img.data[i];
             int p_val = (int)std::round(pred * 128.0 + 128.0);
+
             FiniteFieldElement fe(target - p_val);
             int ff_res = (fe.value > PRIME/2) ? (fe.value - PRIME) : fe.value;
             rnn_residuals.push_back(ff_res);
+
             int recon_val = p_val + ff_res;
             if (recon_val < 0) recon_val = 0; if (recon_val > 255) recon_val = 255;
             reconstructed_data[i] = (uint8_t)recon_val;
             if (reconstructed_data[i] != target) errs++;
+
             predictor.train(input, ((double)target - 128.0) / 128.0, lr);
         }
     }
+
     double o_e = calculateEntropy(std::vector<int>(img.data.begin(), img.data.end()));
     double r_e = calculateEntropy(rnn_residuals);
     std::string base = path.substr(path.find_last_of("/\\") + 1);
-    savePGM("rnn_absolute/reconstructed_" + base, {w, h_img, reconstructed_data});
-    return {base, o_e, r_e, errs == 0};
-}
-
-Metrics processImageMorton(const std::string& path, double lr, int hid) {
-    std::cout << "[*] Processing Morton: " << path << std::endl;
-    Image img = loadPGM(path);
-    int w = img.width, h_img = img.height;
-    std::vector<Point> points;
-    for(uint32_t y=0; y<h_img; ++y) for(uint32_t x=0; x<w; ++x) points.push_back({x, y, morton2D(x, y)});
-    std::sort(points.begin(), points.end(), [](const Point& a, const Point& b) { return a.z < b.z; });
-
-    int ctx_size = 12 + 1 + 2;
-    GatedRNN predictor(ctx_size, hid);
-    std::vector<int> rnn_residuals;
-    std::vector<uint8_t> reconstructed_data(w * h_img, 0);
-    std::vector<bool> visited(w * h_img, false);
-
-    int errs = 0;
-    for(const auto& p : points) {
-        auto getV = [&](int tx, int ty) {
-            if (tx < 0 || tx >= w || ty < 0 || ty >= h_img || !visited[ty * w + tx]) return 0.0;
-            return ((double)reconstructed_data[ty * w + tx] - 128.0) / 128.0;
-        };
-        std::vector<double> input = {
-            getV(p.x-1, p.y), getV(p.x-2, p.y), getV(p.x-3, p.y),
-            getV(p.x, p.y-1), getV(p.x, p.y-2), getV(p.x, p.y-3),
-            getV(p.x-1, p.y-1), getV(p.x+1, p.y-1),
-            getV(p.x-1, p.y-2), getV(p.x+1, p.y-2),
-            getV(p.x-2, p.y-1), getV(p.x+2, p.y-1),
-            getMED(getV(p.x-1, p.y), getV(p.x, p.y-1), getV(p.x-1, p.y-1)),
-            (double)p.x/w, (double)p.y/h_img
-        };
-        double pred = predictor.forward(input);
-        int target = (int)img.data[p.y * w + p.x];
-        int p_val = (int)std::round(pred * 128.0 + 128.0);
-        FiniteFieldElement fe(target - p_val);
-        int ff_res = (fe.value > PRIME/2) ? (fe.value - PRIME) : fe.value;
-        rnn_residuals.push_back(ff_res);
-        int recon_val = p_val + ff_res;
-        if (recon_val < 0) recon_val = 0; if (recon_val > 255) recon_val = 255;
-        reconstructed_data[p.y * w + p.x] = (uint8_t)recon_val;
-        if (reconstructed_data[p.y * w + p.x] != target) errs++;
-        visited[p.y * w + p.x] = true;
-        predictor.train(input, ((double)target - 128.0) / 128.0, lr);
-    }
-    double o_e = calculateEntropy(std::vector<int>(img.data.begin(), img.data.end()));
-    double r_e = calculateEntropy(rnn_residuals);
-    std::string base = path.substr(path.find_last_of("/\\") + 1);
-    savePGM("rnn_absolute/morton_reconstructed_" + base, {w, h_img, reconstructed_data});
     return {base, o_e, r_e, errs == 0};
 }
 
 int main() {
-    auto r1 = processImageRaster("absolute_galois_group/compressor/01/test.pgm", 0.01, 32);
-    auto m1 = processImageMorton("absolute_galois_group/compressor/01/test.pgm", 0.01, 32);
-    auto r2 = processImageRaster("absolute_galois_group/compressor/01/GhostInShell_02_005.pgm", 0.01, 32);
-    auto m2 = processImageMorton("absolute_galois_group/compressor/01/GhostInShell_02_005.pgm", 0.01, 32);
+    std::string img1 = "absolute_galois_group/compressor/01/test.pgm";
+    std::string img2 = "absolute_galois_group/compressor/01/GhostInShell_02_005.pgm";
 
-    std::ofstream report("rnn_absolute/compression_report.md");
-    report << "# RNN Compression Comparison Report (Optimized GatedRNN + MED + Positional)\n\n";
-    report << "| Image | Mode | Original Entropy | RNN Entropy | Ratio | Recon |\n";
-    report << "| :--- | :--- | :--- | :--- | :--- | :--- |\n";
-    auto add = [&](Metrics m, std::string mode) {
-        report << "| " << m.name << " | " << mode << " | " << std::fixed << std::setprecision(4) << m.orig_ent << " | " << m.rnn_ent << " | " << m.orig_ent/m.rnn_ent << " | " << (m.success ? "SUCCESS" : "FAIL") << " |\n";
+    auto f1 = processImageFractal(img1, 0.012, 32);
+    auto f2 = processImageFractal(img2, 0.012, 32);
+
+    std::ofstream report("rnn_absolute/fractal_report.md");
+    report << "# Fractal RNN Compression Report\n\n";
+    report << "| Image | Original Entropy | Fractal Entropy | Ratio | Recon |\n";
+    report << "| :--- | :--- | :--- | :--- | :--- |\n";
+    auto add = [&](Metrics m) {
+        report << "| " << m.name << " | " << std::fixed << std::setprecision(4) << m.orig_ent << " | " << m.rnn_ent << " | " << m.orig_ent/m.rnn_ent << " | " << (m.success ? "SUCCESS" : "FAIL") << " |\n";
     };
-    add(r1, "Raster"); add(m1, "Morton");
-    add(r2, "Raster"); add(m2, "Morton");
+    add(f1); add(f2);
     return 0;
 }
