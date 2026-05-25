@@ -18,12 +18,13 @@ struct Metrics {
     std::string name;
     double orig_ent;
     double rnn_ent;
+    double lzma_ratio;
     bool success;
 };
 
 Image loadPGM(const std::string& filename) {
     std::ifstream file(filename, std::ios::binary);
-    if (!file.is_open()) throw std::runtime_error("Could not open input file");
+    if (!file.is_open()) throw std::runtime_error("Could not open input file: " + filename);
     std::string magic; file >> magic;
     auto skip = [](std::ifstream& f) { char ch; while (f >> std::ws && f.peek() == '#') f.ignore(10000, '\n'); };
     skip(file); int w, h; file >> w >> h;
@@ -33,13 +34,6 @@ Image loadPGM(const std::string& filename) {
     img.data.resize((size_t)w * h);
     file.read(reinterpret_cast<char*>(img.data.data()), img.data.size());
     return img;
-}
-
-void savePGM(const std::string& filename, const Image& img) {
-    std::ofstream file(filename, std::ios::binary);
-    if (!file.is_open()) throw std::runtime_error("Could not open output file");
-    file << "P5\n" << img.width << " " << img.height << "\n255\n";
-    file.write(reinterpret_cast<const char*>(img.data.data()), img.data.size());
 }
 
 double calculateEntropy(const std::vector<int>& data) {
@@ -60,20 +54,25 @@ double getMED(double a, double b, double c) {
     return a + b - c;
 }
 
-Metrics processImage(const std::string& path, double lr, int hid) {
-    std::cout << "[*] Processing: " << path << " (LR=" << lr << ", HID=" << hid << ")" << std::endl;
+Metrics processImageHybrid(const std::string& path, double lr, int hid) {
+    std::cout << "[*] Processing Hybrid (Galois + RNN + LZMA): " << path << std::endl;
     Image img = loadPGM(path);
     int w = img.width, h_img = img.height;
+
     int ctx_size = 29; GatedRNN predictor(ctx_size, hid);
-    std::vector<int> rnn_residuals;
+
+    std::vector<uint8_t> orbits;
+    std::vector<uint8_t> conjugacy_indices;
     std::vector<uint8_t> reconstructed_data(w * h_img, 0);
     int errs = 0;
+
     for(int y=0; y<h_img; ++y) {
         for(int x=0; x<w; ++x) {
             int i = y * w + x;
             if (y < 8 || x < 8 || x >= w - 8) {
                 reconstructed_data[i] = img.data[i];
-                rnn_residuals.push_back(0);
+                orbits.push_back(img.data[i]);
+                conjugacy_indices.push_back(0);
                 continue;
             }
             auto getV = [&](int tx, int ty) { return ((double)reconstructed_data[ty * w + tx] - 128.0) / 128.0; };
@@ -87,35 +86,49 @@ Metrics processImage(const std::string& path, double lr, int hid) {
             for(int s : scales) {
                 input.push_back(getV(x-s, y)); input.push_back(getV(x, y-s)); input.push_back(getV(x-s, y-s)); input.push_back(getV(x+s, y-s));
             }
+
             double pred = predictor.forward(input);
             int target = (int)img.data[i];
             int p_val = (int)std::round(pred * 128.0 + 128.0);
-            FiniteFieldElement fe(target - p_val);
-            int ff_res = (fe.value > PRIME/2) ? (fe.value - PRIME) : fe.value;
-            rnn_residuals.push_back(ff_res);
-            int recon_val = p_val + ff_res;
-            if (recon_val < 0) recon_val = 0; if (recon_val > 255) recon_val = 255;
-            reconstructed_data[i] = (uint8_t)recon_val;
+
+            uint8_t res_byte = (uint8_t)(target - p_val);
+            GaloisOrbit g_res = get_canonical({res_byte});
+
+            orbits.push_back(g_res.canonical[0]);
+            conjugacy_indices.push_back((uint8_t)g_res.k);
+
+            uint8_t recovered_res = frobenius(g_res.canonical[0], (8 - g_res.k) % 8);
+            reconstructed_data[i] = (uint8_t)(p_val + (int8_t)recovered_res);
+
             if (reconstructed_data[i] != target) errs++;
             predictor.train(input, ((double)target - 128.0) / 128.0, lr);
         }
     }
-    double o_e = calculateEntropy(std::vector<int>(img.data.begin(), img.data.end()));
-    double r_e = calculateEntropy(rnn_residuals);
-    std::string base = path.substr(path.find_last_of("/\\") + 1);
-    savePGM("rnn_absolute/reconstructed_" + base, {w, h_img, reconstructed_data});
-    return {base, o_e, r_e, errs == 0};
+
+    std::vector<uint8_t> stream;
+    stream.insert(stream.end(), orbits.begin(), orbits.end());
+    stream.insert(stream.end(), conjugacy_indices.begin(), conjugacy_indices.end());
+    auto compressed = lzma_compress(stream);
+    double lz_ratio = (double)img.data.size() / compressed.size();
+
+    std::vector<int> orbit_ints; for(auto x : orbits) orbit_ints.push_back((int)x);
+
+    return {path, calculateEntropy(std::vector<int>(img.data.begin(), img.data.end())), calculateEntropy(orbit_ints), lz_ratio, errs == 0};
 }
 
 int main() {
-    auto m1 = processImage("absolute_galois_group/compressor/01/test.pgm", 0.012, 48);
-    auto m2 = processImage("absolute_galois_group/compressor/01/GhostInShell_02_005.pgm", 0.012, 48);
-    std::ofstream report("rnn_absolute/compression_report.md");
-    report << "# Final RNN Compression Report (Peak Architecture)\n\n";
-    report << "| Image | Original Entropy | RNN Entropy | Ratio | Recon |\n";
+    std::string img1 = "../absolute_galois_group/compressor/01/test.pgm";
+    std::string img2 = "../absolute_galois_group/compressor/01/GhostInShell_02_005.pgm";
+
+    auto m1 = processImageHybrid(img1, 0.012, 48);
+    auto m2 = processImageHybrid(img2, 0.012, 48);
+
+    std::ofstream report("compression_report.md");
+    report << "# Absolute Galois RNN + LZMA Compression Report\n\n";
+    report << "| Image | Orig Entropy | Orbit Entropy | LZMA Ratio | Recon |\n";
     report << "| :--- | :--- | :--- | :--- | :--- |\n";
     auto add = [&](Metrics m) {
-        report << "| " << m.name << " | " << std::fixed << std::setprecision(4) << m.orig_ent << " | " << m.rnn_ent << " | " << m.orig_ent/m.rnn_ent << " | " << (m.success ? "SUCCESS" : "FAIL") << " |\n";
+        report << "| " << m.name << " | " << std::fixed << std::setprecision(4) << m.orig_ent << " | " << m.rnn_ent << " | " << m.lzma_ratio << ":1 | " << (m.success ? "SUCCESS" : "FAIL") << " |\n";
     };
     add(m1); add(m2);
     return 0;

@@ -6,6 +6,7 @@
 #include <random>
 #include <algorithm>
 #include <cstdint>
+#include <lzma.h>
 
 const int PRIME = 10007;
 
@@ -20,7 +21,49 @@ public:
     FiniteFieldElement operator*(const FiniteFieldElement& other) const { return FiniteFieldElement((1LL * value * other.value) % PRIME); }
 };
 
-// Morton Order Z-curve mapping
+// --- Finite Field GF(2^8) Logic ---
+const uint16_t AES_POLY = 0x11B;
+
+inline uint8_t gf_mul(uint8_t a, uint8_t b) {
+    uint8_t res = 0;
+    for (int i = 0; i < 8; ++i) {
+        if (b & 1) res ^= a;
+        bool hi = (a & 0x80);
+        a <<= 1;
+        if (hi) a ^= (AES_POLY & 0xFF);
+        b >>= 1;
+    }
+    return res;
+}
+
+inline uint8_t gf_pow2(uint8_t a) { return gf_mul(a, a); }
+
+inline uint8_t frobenius(uint8_t a, int k) {
+    for (int i = 0; i < k; ++i) a = gf_pow2(a);
+    return a;
+}
+
+// --- Galois Canonicalization ---
+struct GaloisOrbit {
+    std::vector<uint8_t> canonical;
+    int k; // Frobenius power used to reach canonical
+};
+
+inline GaloisOrbit get_canonical(const std::vector<uint8_t>& vec) {
+    std::vector<uint8_t> best = vec;
+    int best_k = 0;
+    std::vector<uint8_t> cur = vec;
+    for (int k = 1; k < 8; ++k) {
+        for (auto& x : cur) x = gf_pow2(x);
+        if (cur < best) {
+            best = cur;
+            best_k = k;
+        }
+    }
+    return {best, best_k};
+}
+
+// --- Hilbert/Morton Utilities ---
 inline uint32_t expandBits(uint32_t v) {
     v = (v | (v << 8)) & 0x00FF00FFu;
     v = (v | (v << 4)) & 0x0F0F0F0Fu;
@@ -33,7 +76,6 @@ inline uint32_t morton2D(uint32_t x, uint32_t y) {
     return (expandBits(y) << 1) | expandBits(x);
 }
 
-// Hilbert Curve mapping
 inline void rot(int n, int *x, int *y, int rx, int ry) {
     if (ry == 0) {
         if (rx == 1) {
@@ -58,7 +100,7 @@ inline int64_t hilbert2D(int n, int x, int y) {
     return d;
 }
 
-// Full Gated Recurrent Unit (GRU) with robust online single-step gradients
+// --- GatedRNN with robust online single-step gradients ---
 class GatedRNN {
 public:
     GatedRNN(int in, int hid) : input_size(in), hidden_size(hid) {
@@ -119,7 +161,6 @@ public:
         for(int i=0; i<hidden_size; ++i) out += h[i] * w_o[i];
         double dy = out - target;
 
-        // Output layer update
         b_o -= lr * dy;
         std::vector<double> d_h_global(hidden_size);
         for(int i=0; i<hidden_size; ++i) {
@@ -127,10 +168,8 @@ public:
             w_o[i] -= lr * dy * h[i];
         }
 
-        // GRU Cell Backprop
         std::vector<double> d_pre_h(hidden_size);
         std::vector<double> d_pre_z(hidden_size);
-        std::vector<double> d_pre_r(hidden_size);
 
         for(int i=0; i<hidden_size; ++i) {
             d_pre_h[i] = d_h_global[i] * z[i] * (1.0 - h_tilde[i] * h_tilde[i]);
@@ -150,7 +189,6 @@ public:
             }
         }
 
-        // Reset gate gradient requires summing across all h_tilde outputs
         for(int j=0; j<hidden_size; ++j) {
             double dr = 0;
             for(int i=0; i<hidden_size; ++i) {
@@ -171,5 +209,25 @@ private:
     std::vector<double> h, last_h, last_x;
     std::vector<double> z, r, h_tilde;
 };
+
+// --- LZMA Compression Wrap ---
+inline std::vector<uint8_t> lzma_compress(const std::vector<uint8_t>& data) {
+    lzma_stream strm = LZMA_STREAM_INIT;
+    if (lzma_easy_encoder(&strm, 9, LZMA_CHECK_CRC64) != LZMA_OK) return {};
+
+    std::vector<uint8_t> out(data.size() + 1024);
+    strm.next_in = data.data();
+    strm.avail_in = data.size();
+    strm.next_out = out.data();
+    strm.avail_out = out.size();
+
+    if (lzma_code(&strm, LZMA_FINISH) != LZMA_STREAM_END) {
+        lzma_end(&strm);
+        return {};
+    }
+    out.resize(out.size() - strm.avail_out);
+    lzma_end(&strm);
+    return out;
+}
 
 #endif
