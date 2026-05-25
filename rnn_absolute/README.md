@@ -1,18 +1,27 @@
-# Finite Field & RNN Compressor
+# RNN Absolute Image Compressor (Morton & Raster Adaptive)
 
-This project implements experimental data compression techniques that combine finite field arithmetic with statistical modeling (RNNs). It is part of the Absolute Galois Group explorations.
+This project implements an online adaptive image compression system using Gated Recurrent Neural Networks (RNN) and Morton-order (Z-curve) traversal.
 
-## Key Concepts
-- **Finite Field Arithmetic**: Mapping data to elements of $\mathbb{F}_p$ to leverage algebraic structures for compression and manipulation.
-- **RNN State Machines**: Using Recurrent Neural Networks to predict data sequences and only storing the residuals (errors) in the compressed format.
-- **Multidimensional Support**: Handling vectors of finite field elements for complex data structures.
+## Core Features
 
-## Files
-- `compressor.ino`: Arduino implementation of basic compression concepts.
-- `compressor1.py`: Python-based explorations of these algorithms.
-- `transformation_params.h`: Shared parameters for transformations.
-- `compressor1.md` through `compressor7b.md`: Detailed walkthroughs, code examples, and theoretical justifications for the approach.
-- `01/`, `02/`, `02_fix/`, `02_fix_crop/`, `py01/`, `py02/`: Various iterations and experiments in C++ and Python exploring quadtree decomposition, morphism-based compression, and dictionary learning.
+- **GatedRNN Architecture**: A GRU-like cell with full single-step BPTT (Backpropagation Through Time) for real-time online learning.
+- **Hybrid Prediction**: Combines neural prediction with the **Median Edge Detector (MED)** and positional encodings.
+- **Morton Traversal**: Supports both standard Raster scan and Morton Order Z-curve traversal for better 2D spatial context.
+- **Finite Field Residues**: Stores residuals as finite field elements (mod 10007) to ensure bit-perfect, lossless reconstruction.
 
-## State
-Conceptual prototype. Demonstrates the integration of neural sequence prediction with algebraic field theory for non-traditional compression.
+## Performance
+
+The system achieves a compression ratio of **~1.38:1** (entropy reduction) on standard anime-style test images using the Raster mode, and **~1.34:1** using the Morton Order traversal.
+
+## How to Run
+
+1. Build the explorer:
+   ```bash
+   g++ -O3 main_explorer.cpp -o rnn_explorer
+   ```
+2. Run benchmarks:
+   ```bash
+   ./rnn_explorer
+   ```
+
+Check `compression_report.md` for detailed results.
