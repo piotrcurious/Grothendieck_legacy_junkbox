@@ -5,6 +5,7 @@
 #include <cmath>
 #include <random>
 #include <algorithm>
+#include <cstdint>
 
 const int PRIME = 10007;
 
@@ -19,81 +20,117 @@ public:
     FiniteFieldElement operator*(const FiniteFieldElement& other) const { return FiniteFieldElement((1LL * value * other.value) % PRIME); }
 };
 
-class OptimizedRNN {
-public:
-    OptimizedRNN(int in, int hid) : input_size(in), hidden_size(hid) {
-        weights_ih.resize(in * hid);
-        weights_hh.resize(hid * hid);
-        weights_ho.resize(hid);
-        bias_h.resize(hid, 0.0);
-        bias_o = 0.0;
+inline uint32_t expandBits(uint32_t v) {
+    v = (v | (v << 8)) & 0x00FF00FFu;
+    v = (v | (v << 4)) & 0x0F0F0F0Fu;
+    v = (v | (v << 2)) & 0x33333333u;
+    v = (v | (v << 1)) & 0x55555555u;
+    return v;
+}
 
-        m_ih.assign(in * hid, 0.0); v_ih.assign(in * hid, 0.0);
-        m_hh.assign(hid * hid, 0.0); v_hh.assign(hid * hid, 0.0);
-        m_ho.assign(hid, 0.0); v_ho.assign(hid, 0.0);
-        m_bh.assign(hid, 0.0); v_bh.assign(hid, 0.0);
+inline uint32_t morton2D(uint32_t x, uint32_t y) {
+    return (expandBits(y) << 1) | expandBits(x);
+}
+
+class GatedRNN {
+public:
+    GatedRNN(int in, int hid) : input_size(in), hidden_size(hid) {
+        int w_size = (in + hid) * hid;
+        w_z.assign(w_size, 0.0); w_r.assign(w_size, 0.0); w_h.assign(w_size, 0.0);
+        b_z.assign(hid, 0.0); b_r.assign(hid, 0.0); b_h.assign(hid, 0.0);
+        w_o.assign(hid, 0.0); b_o = 0.0;
 
         std::default_random_engine gen(42);
         std::uniform_real_distribution<double> dist(-0.1, 0.1);
-        for(auto& w : weights_ih) w = dist(gen);
-        for(auto& w : weights_hh) w = dist(gen);
-        for(auto& w : weights_ho) w = dist(gen);
+        for(auto& w : w_z) w = dist(gen);
+        for(auto& w : w_r) w = dist(gen);
+        for(auto& w : w_h) w = dist(gen);
+        for(auto& w : w_o) w = dist(gen);
 
-        h_state.assign(hid, 0.0);
-        h_prev.assign(hid, 0.0);
+        h.assign(hid, 0.0);
     }
 
-    double forward(const std::vector<double>& input) {
-        h_prev = h_state;
-        for (int i = 0; i < hidden_size; ++i) {
-            double sum = bias_h[i];
-            for (int j = 0; j < input_size; ++j) sum += input[j] * weights_ih[j * hidden_size + i];
-            for (int j = 0; j < hidden_size; ++j) sum += h_prev[j] * weights_hh[j * hidden_size + i];
-            h_state[i] = std::tanh(sum);
+    double forward(const std::vector<double>& x) {
+        last_x = x;
+        last_h = h;
+        z.assign(hidden_size, 0.0); r.assign(hidden_size, 0.0); h_tilde.assign(hidden_size, 0.0);
+        auto sigmoid = [](double v) { return 1.0 / (1.0 + std::exp(-v)); };
+
+        for(int i=0; i<hidden_size; ++i) {
+            double sum_z = b_z[i], sum_r = b_r[i];
+            for(int j=0; j<input_size; ++j) {
+                sum_z += x[j] * w_z[j * hidden_size + i];
+                sum_r += x[j] * w_r[j * hidden_size + i];
+            }
+            for(int j=0; j<hidden_size; ++j) {
+                sum_z += last_h[j] * w_z[(input_size + j) * hidden_size + i];
+                sum_r += last_h[j] * w_r[(input_size + j) * hidden_size + i];
+            }
+            z[i] = sigmoid(sum_z);
+            r[i] = sigmoid(sum_r);
         }
-        double out = bias_o;
-        for (int j = 0; j < hidden_size; ++j) out += h_state[j] * weights_ho[j];
+
+        for(int i=0; i<hidden_size; ++i) {
+            double sum_h = b_h[i];
+            for(int j=0; j<input_size; ++j) sum_h += x[j] * w_h[j * hidden_size + i];
+            for(int j=0; j<hidden_size; ++j) sum_h += (r[j] * last_h[j]) * w_h[(input_size + j) * hidden_size + i];
+            h_tilde[i] = std::tanh(sum_h);
+        }
+
+        for(int i=0; i<hidden_size; ++i) {
+            h[i] = (1.0 - z[i]) * last_h[i] + z[i] * h_tilde[i];
+        }
+
+        double out = b_o;
+        for(int i=0; i<hidden_size; ++i) out += h[i] * w_o[i];
         return out;
     }
 
-    void train(const std::vector<double>& input, double target, double lr) {
-        double out = bias_o;
-        for (int j = 0; j < hidden_size; ++j) out += h_state[j] * weights_ho[j];
+    void train(const std::vector<double>& x, double target, double lr) {
+        double out = b_o;
+        for(int i=0; i<hidden_size; ++i) out += h[i] * w_o[i];
+        double dy = out - target;
 
-        double d_out = out - target;
-        t++;
-        const double b1 = 0.9, b2 = 0.999, eps = 1e-8;
+        b_o -= lr * dy;
+        std::vector<double> dh(hidden_size);
+        for(int i=0; i<hidden_size; ++i) {
+            w_o[i] -= lr * dy * h[i];
+            dh[i] = dy * w_o[i];
+        }
 
-        double bias_corr1 = 1.0 - std::pow(b1, t);
-        double bias_corr2 = 1.0 - std::pow(b2, t);
-        double step_size = lr / bias_corr1;
+        // Full single-step BPTT
+        for(int i=0; i<hidden_size; ++i) {
+            double d_h = dh[i];
+            double d_zt = d_h * (h_tilde[i] - last_h[i]) * z[i] * (1.0 - z[i]);
+            double d_ht = d_h * z[i] * (1.0 - h_tilde[i] * h_tilde[i]);
 
-        auto update_fast = [&](double& w, double& m, double& v, double grad) {
-            m = b1 * m + (1.0 - b1) * grad;
-            v = b2 * v + (1.0 - b2) * grad * grad;
-            w -= step_size * m / (std::sqrt(v / bias_corr2) + eps);
-        };
+            b_z[i] -= lr * d_zt;
+            b_h[i] -= lr * d_ht;
 
-        update_fast(bias_o, m_bo, v_bo, d_out);
-        for(int j=0; j<hidden_size; ++j) {
-            update_fast(weights_ho[j], m_ho[j], v_ho[j], d_out * h_state[j]);
-            double d_h = d_out * weights_ho[j] * (1.0 - h_state[j] * h_state[j]);
-            update_fast(bias_h[j], m_bh[j], v_bh[j], d_h);
-            for(int k=0; k<input_size; ++k)
-                update_fast(weights_ih[k*hidden_size + j], m_ih[k*hidden_size + j], v_ih[k*hidden_size + j], d_h * input[k]);
-            for(int k=0; k<hidden_size; ++k)
-                update_fast(weights_hh[k*hidden_size + j], m_hh[k*hidden_size + j], v_hh[k*hidden_size + j], d_h * h_prev[k]);
+            for(int j=0; j<input_size; ++j) {
+                w_z[j * hidden_size + i] -= lr * d_zt * x[j];
+                w_h[j * hidden_size + i] -= lr * d_ht * x[j];
+            }
+            for(int j=0; j<hidden_size; ++j) {
+                w_z[(input_size + j) * hidden_size + i] -= lr * d_zt * last_h[j];
+
+                double d_rt = d_ht * w_h[(input_size + j) * hidden_size + i] * last_h[j] * r[j] * (1.0 - r[j]);
+                b_r[j] -= lr * d_rt / hidden_size; // Distribute gate bias update
+                for(int k=0; k<input_size; ++k) w_r[k * hidden_size + j] -= lr * d_rt * x[k] / hidden_size;
+                for(int k=0; k<hidden_size; ++k) w_r[(input_size + k) * hidden_size + j] -= lr * d_rt * last_h[k] / hidden_size;
+
+                w_h[(input_size + j) * hidden_size + i] -= lr * d_ht * (r[j] * last_h[j]);
+            }
         }
     }
 
 private:
     int input_size, hidden_size;
-    std::vector<double> weights_ih, weights_hh, weights_ho, bias_h;
-    double bias_o;
-    std::vector<double> h_state, h_prev;
-    std::vector<double> m_ih, v_ih, m_hh, v_hh, m_ho, v_ho, m_bh, v_bh;
-    double m_bo = 0, v_bo = 0;
-    long long t = 0;
+    std::vector<double> w_z, w_r, w_h, w_o;
+    std::vector<double> b_z, b_r, b_h;
+    double b_o;
+    std::vector<double> h, last_h, last_x;
+    std::vector<double> z, r, h_tilde;
 };
 
 #endif
