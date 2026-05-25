@@ -7,105 +7,104 @@
 #include <algorithm>
 #include <cstdint>
 #include <lzma.h>
+#include <map>
 
-const int PRIME = 10007;
-
-class FiniteFieldElement {
+// --- Comprehensive Galois Field GF(2^8) with Absolute Group Action ---
+class GaloisField8 {
 public:
-    int value;
-    FiniteFieldElement(int v = 0) : value(v % PRIME) {
-        if (value < 0) value += PRIME;
-    }
-    FiniteFieldElement operator+(const FiniteFieldElement& other) const { return FiniteFieldElement((value + other.value) % PRIME); }
-    FiniteFieldElement operator-(const FiniteFieldElement& other) const { return FiniteFieldElement((value - other.value + PRIME) % PRIME); }
-    FiniteFieldElement operator*(const FiniteFieldElement& other) const { return FiniteFieldElement((1LL * value * other.value) % PRIME); }
-};
+    static const uint16_t POLY = 0x11B;
+    uint8_t mul_table[256][256];
+    uint8_t exp_table[256];
+    uint8_t log_table[256];
+    uint8_t inv_table[256];
 
-// --- Finite Field GF(2^8) Logic ---
-const uint16_t AES_POLY = 0x11B;
+    GaloisField8() {
+        uint16_t x = 1;
+        for (int i = 0; i < 255; i++) {
+            exp_table[i] = (uint8_t)x;
+            log_table[x] = (uint8_t)i;
+            x <<= 1;
+            if (x & 0x100) x ^= POLY;
+        }
+        exp_table[255] = exp_table[0];
+        log_table[0] = 0;
 
-inline uint8_t gf_mul(uint8_t a, uint8_t b) {
-    uint8_t res = 0;
-    for (int i = 0; i < 8; ++i) {
-        if (b & 1) res ^= a;
-        bool hi = (a & 0x80);
-        a <<= 1;
-        if (hi) a ^= (AES_POLY & 0xFF);
-        b >>= 1;
-    }
-    return res;
-}
-
-inline uint8_t gf_pow2(uint8_t a) { return gf_mul(a, a); }
-
-inline uint8_t frobenius(uint8_t a, int k) {
-    for (int i = 0; i < k; ++i) a = gf_pow2(a);
-    return a;
-}
-
-// --- Galois Canonicalization ---
-struct GaloisOrbit {
-    std::vector<uint8_t> canonical;
-    int k; // Frobenius power used to reach canonical
-};
-
-inline GaloisOrbit get_canonical(const std::vector<uint8_t>& vec) {
-    std::vector<uint8_t> best = vec;
-    int best_k = 0;
-    std::vector<uint8_t> cur = vec;
-    for (int k = 1; k < 8; ++k) {
-        for (auto& x : cur) x = gf_pow2(x);
-        if (cur < best) {
-            best = cur;
-            best_k = k;
+        for (int i = 0; i < 256; i++) {
+            for (int j = 0; j < 256; j++) {
+                mul_table[i][j] = compute_mul(i, j);
+            }
+        }
+        inv_table[0] = 0;
+        for (int i = 1; i < 256; i++) {
+            for (int j = 1; j < 256; j++) {
+                if (mul_table[i][j] == 1) {
+                    inv_table[i] = (uint8_t)j;
+                    break;
+                }
+            }
         }
     }
-    return {best, best_k};
-}
 
-// --- Hilbert/Morton Utilities ---
-inline uint32_t expandBits(uint32_t v) {
-    v = (v | (v << 8)) & 0x00FF00FFu;
-    v = (v | (v << 4)) & 0x0F0F0F0Fu;
-    v = (v | (v << 2)) & 0x33333333u;
-    v = (v | (v << 1)) & 0x55555555u;
-    return v;
-}
-
-inline uint32_t morton2D(uint32_t x, uint32_t y) {
-    return (expandBits(y) << 1) | expandBits(x);
-}
-
-inline void rot(int n, int *x, int *y, int rx, int ry) {
-    if (ry == 0) {
-        if (rx == 1) {
-            *x = n-1 - *x;
-            *y = n-1 - *y;
+    uint8_t compute_mul(uint8_t a, uint8_t b) {
+        uint8_t res = 0;
+        for (int i = 0; i < 8; i++) {
+            if (b & 1) res ^= a;
+            bool hi = (a & 0x80);
+            a <<= 1;
+            if (hi) a ^= (POLY & 0xFF);
+            b >>= 1;
         }
-        int t  = *x;
-        *x = *y;
-        *y = t;
+        return res;
     }
-}
 
-inline int64_t hilbert2D(int n, int x, int y) {
-    int rx, ry;
-    int64_t d=0;
-    for (int s=n/2; s>0; s/=2) {
-        rx = (x & s) > 0;
-        ry = (y & s) > 0;
-        d += (int64_t)s * s * ((3 * rx) ^ ry);
-        rot(s, &x, &y, rx, ry);
+    inline uint8_t mul(uint8_t a, uint8_t b) const { return mul_table[a][b]; }
+    inline uint8_t add(uint8_t a, uint8_t b) const { return a ^ b; }
+    inline uint8_t div(uint8_t a, uint8_t b) const { return mul_table[a][inv_table[b]]; }
+    inline uint8_t frobenius(uint8_t a) const { return mul_table[a][a]; }
+
+    // Trace from GF(2^8) to GF(2)
+    // Tr(a) = a + a^2 + a^4 + a^8 + a^16 + a^32 + a^64 + a^128
+    uint8_t trace(uint8_t a) const {
+        uint8_t res = a;
+        uint8_t cur = a;
+        for(int i=0; i<7; ++i) {
+            cur = frobenius(cur);
+            res ^= cur;
+        }
+        return res & 1;
     }
-    return d;
-}
 
-// --- GatedRNN with robust online single-step gradients ---
-class GatedRNN {
+    // Canonical representative under Absolute Galois Group action (Frobenius orbits)
+    uint8_t get_canonical(uint8_t a, int& k_out) const {
+        uint8_t best = a;
+        k_out = 0;
+        uint8_t cur = a;
+        for (int k = 1; k < 8; k++) {
+            cur = frobenius(cur);
+            if (cur < best) {
+                best = cur;
+                k_out = k;
+            }
+        }
+        return best;
+    }
+};
+
+static GaloisField8 GF8;
+
+// --- Galois-Equivariant GatedRNN ---
+class GaloisGatedRNN {
 public:
-    GatedRNN(int in, int hid) : input_size(in), hidden_size(hid) {
+    int input_size, hidden_size;
+    std::vector<double> w_z, w_r, w_h, w_o;
+    std::vector<double> b_z, b_r, b_h;
+    double b_o;
+    std::vector<double> h, last_h;
+    std::vector<double> z, r, h_tilde;
+
+    GaloisGatedRNN(int in, int hid) : input_size(in), hidden_size(hid) {
         int w_size = (in + hid) * hid;
-        w_z.assign(w_size, 0.0); w_r.assign(w_size, 0.0); w_h.assign(w_size, 0.0);
+        w_z.resize(w_size); w_r.resize(w_size); w_h.resize(w_size);
         b_z.assign(hid, 0.0); b_r.assign(hid, 0.0); b_h.assign(hid, 0.0);
         w_o.assign(hid, 0.0); b_o = 0.0;
 
@@ -121,7 +120,6 @@ public:
     }
 
     double forward(const std::vector<double>& x) {
-        last_x = x;
         last_h = h;
         z.assign(hidden_size, 0.0); r.assign(hidden_size, 0.0); h_tilde.assign(hidden_size, 0.0);
         auto sigmoid = [](double v) { return 1.0 / (1.0 + std::exp(-v)); };
@@ -191,40 +189,23 @@ public:
 
         for(int j=0; j<hidden_size; ++j) {
             double dr = 0;
-            for(int i=0; i<hidden_size; ++i) {
-                dr += d_pre_h[i] * w_h[(input_size + j) * hidden_size + i] * last_h[j];
-            }
+            for(int i=0; i<hidden_size; ++i) dr += d_pre_h[i] * w_h[(input_size + j) * hidden_size + i] * last_h[j];
             double d_pre_r_j = dr * r[j] * (1.0 - r[j]);
             b_r[j] -= lr * d_pre_r_j;
             for(int k=0; k<input_size; ++k) w_r[k * hidden_size + j] -= lr * d_pre_r_j * x[k];
             for(int k=0; k<hidden_size; ++k) w_r[(input_size + k) * hidden_size + j] -= lr * d_pre_r_j * last_h[k];
         }
     }
-
-private:
-    int input_size, hidden_size;
-    std::vector<double> w_z, w_r, w_h, w_o;
-    std::vector<double> b_z, b_r, b_h;
-    double b_o;
-    std::vector<double> h, last_h, last_x;
-    std::vector<double> z, r, h_tilde;
 };
 
-// --- LZMA Compression Wrap ---
+// --- LZMA Utils ---
 inline std::vector<uint8_t> lzma_compress(const std::vector<uint8_t>& data) {
     lzma_stream strm = LZMA_STREAM_INIT;
     if (lzma_easy_encoder(&strm, 9, LZMA_CHECK_CRC64) != LZMA_OK) return {};
-
     std::vector<uint8_t> out(data.size() + 1024);
-    strm.next_in = data.data();
-    strm.avail_in = data.size();
-    strm.next_out = out.data();
-    strm.avail_out = out.size();
-
-    if (lzma_code(&strm, LZMA_FINISH) != LZMA_STREAM_END) {
-        lzma_end(&strm);
-        return {};
-    }
+    strm.next_in = data.data(); strm.avail_in = data.size();
+    strm.next_out = out.data(); strm.avail_out = out.size();
+    if (lzma_code(&strm, LZMA_FINISH) != LZMA_STREAM_END) { lzma_end(&strm); return {}; }
     out.resize(out.size() - strm.avail_out);
     lzma_end(&strm);
     return out;

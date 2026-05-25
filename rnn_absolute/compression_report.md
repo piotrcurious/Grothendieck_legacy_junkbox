@@ -1,6 +1,6 @@
-# Absolute Galois RNN + LZMA Compression Report
+# Absolute Galois Group RNN Compression (True Action + LZMA)
 
-| Image | Orig Entropy | Orbit Entropy | LZMA Ratio | Recon |
+| Image | Orig Entropy | Canonical Entropy | LZMA Ratio | Recon |
 | :--- | :--- | :--- | :--- | :--- |
-| ../absolute_galois_group/compressor/01/test.pgm | 6.8038 | 3.8946 | 1.3904:1 | SUCCESS |
-| ../absolute_galois_group/compressor/01/GhostInShell_02_005.pgm | 6.5531 | 4.2844 | 1.2800:1 | SUCCESS |
+| ../absolute_galois_group/compressor/01/test.pgm | 6.8038 | 3.9001 | 1.3886:1 | SUCCESS |
+| ../absolute_galois_group/compressor/01/GhostInShell_02_005.pgm | 6.5531 | 4.2863 | 1.2804:1 | SUCCESS |
