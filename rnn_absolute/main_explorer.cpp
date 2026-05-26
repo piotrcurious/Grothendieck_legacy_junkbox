@@ -37,6 +37,13 @@ Image loadPGM(const std::string& filename) {
     return img;
 }
 
+void savePGM(const std::string& filename, const Image& img) {
+    std::ofstream file(filename, std::ios::binary);
+    if (!file.is_open()) throw std::runtime_error("Could not open output file");
+    file << "P5\n" << img.width << " " << img.height << "\n255\n";
+    file.write(reinterpret_cast<const char*>(img.data.data()), img.data.size());
+}
+
 double calculateEntropy(const std::vector<uint8_t>& data) {
     if (data.empty()) return 0;
     std::map<uint8_t, long long> counts;
@@ -49,12 +56,11 @@ double calculateEntropy(const std::vector<uint8_t>& data) {
     return entropy;
 }
 
-Metrics processImageDeepGalois(const std::string& path, double lr, int hid) {
-    std::cout << "[*] Processing Deep Galois RNN: " << path << std::endl;
+Metrics processImageAbsoluteGalois(const std::string& path, double lr, int hid) {
+    std::cout << "[*] Processing Absolute Galois RNN: " << path << std::endl;
     Image img = loadPGM(path);
     int w = img.width, h_img = img.height;
 
-    // Feature vector: 4 neighbors * 4 algebraic features + 2 pos + 3 multi-scale = 16 + 2 + 3 = 21
     int ctx_size = 21;
     GaloisRNN predictor(ctx_size, hid, (int)GF8.orbits.size());
 
@@ -86,11 +92,6 @@ Metrics processImageDeepGalois(const std::string& path, double lr, int hid) {
             for(int s : scales) input.push_back((double)reconstructed_data[i-s]/255.0);
 
             auto probs = predictor.forward(input);
-            int pred_orbit = (int)(std::max_element(probs.begin(), probs.end()) - probs.begin());
-
-            // To ensure lossless, we don't use the prediction directly as pixel,
-            // but we could use it to order the orbit stream.
-            // For now, we store the actual orbit and root.
             int actual_orbit = GF8.element_to_orbit_id[img.data[i]];
             int actual_root = GF8.element_to_root_index[img.data[i]];
 
@@ -104,9 +105,16 @@ Metrics processImageDeepGalois(const std::string& path, double lr, int hid) {
         }
     }
 
-    std::vector<uint8_t> full_stream = orbit_stream;
-    full_stream.insert(full_stream.end(), root_stream.begin(), root_stream.end());
-    auto compressed = lzma_compress(full_stream);
+    // Packet refinement: interleave to improve local redundancy (Galois packets)
+    std::vector<uint8_t> packets;
+    for(size_t i=0; i<orbit_stream.size(); ++i) {
+        packets.push_back(orbit_stream[i]);
+        packets.push_back(root_stream[i]);
+    }
+    auto compressed = lzma_compress(packets);
+
+    std::string base = path.substr(path.find_last_of("/\\") + 1);
+    savePGM("reconstructed_" + base, {w, h_img, reconstructed_data});
 
     return {path, calculateEntropy(img.data), calculateEntropy(orbit_stream), (double)img.data.size() / std::max((size_t)1, compressed.size()), errs == 0};
 }
@@ -115,11 +123,11 @@ int main() {
     std::string img1 = "../absolute_galois_group/compressor/01/test.pgm";
     std::string img2 = "../absolute_galois_group/compressor/01/GhostInShell_02_005.pgm";
 
-    auto m1 = processImageDeepGalois(img1, 0.012, 64);
-    auto m2 = processImageDeepGalois(img2, 0.012, 64);
+    auto m1 = processImageAbsoluteGalois(img1, 0.012, 64);
+    auto m2 = processImageAbsoluteGalois(img2, 0.012, 64);
 
     std::ofstream report("compression_report.md");
-    report << "# Rigorous Absolute Galois Group RNN Compression Report\n\n";
+    report << "# Absolute Galois Group Neural Compression Report\n\n";
     report << "| Image | Orig Entropy | Orbit Entropy | LZMA Ratio | Recon |\n";
     report << "| :--- | :--- | :--- | :--- | :--- |\n";
     auto add = [&](Metrics m) {
