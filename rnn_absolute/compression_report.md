@@ -1,4 +1,4 @@
-# Holomorphic Galois Manifold Neural Compression Report
+# Rigorous Absolute Galois RNN Compression Report
 
 | Image | Orig Entropy | Orbit Entropy | LZMA Ratio | Recon |
 | :--- | :--- | :--- | :--- | :--- |

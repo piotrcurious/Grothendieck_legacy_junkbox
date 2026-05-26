@@ -56,14 +56,29 @@ double calculateEntropy(const std::vector<uint8_t>& data) {
     return entropy;
 }
 
-Metrics processImageHolomorphicManifold(const std::string& path, double lr, int hid) {
-    std::cout << "[*] Processing Holomorphic Manifold RNN: " << path << std::endl;
+double estimate_local_fd(const std::vector<uint8_t>& img, int x, int y, int w, int h) {
+    auto get = [&](int tx, int ty) { return (tx<0||ty<0||tx>=w||ty>=h)?0:img[ty*w+tx]; };
+    auto var = [&](int sz) {
+        double s=0, s2=0; int n=0;
+        for(int j=y-sz; j<=y+sz; ++j) for(int i=x-sz; i<=x+sz; ++i) {
+            double v = (double)get(i, j); s += v; s2 += v*v; n++;
+        }
+        return (s2/n - (s/n)*(s/n));
+    };
+    double v1 = var(1), v4 = var(4);
+    if(v1 < 1e-5) return 2.0;
+    double h_exp = (std::log(v4+1e-5) - std::log(v1+1e-5)) / (2.0 * std::log(4.0));
+    return std::clamp(3.0 - h_exp, 1.0, 3.0);
+}
+
+Metrics processImageAbsoluteGalois(const std::string& path, double lr, int hid) {
+    std::cout << "[*] Processing Latent Manifold Galois RNN: " << path << std::endl;
     Image img = loadPGM(path);
     int w = img.width, h_img = img.height;
 
-    // x_s: 4 * 5 = 20
-    // x_f: 4 * 5 + 2 + 4 (differentials) = 26
-    DualPathGaloisRNN predictor(20, 26, hid, (int)GF8.orbits.size());
+    // x_s: 4 neighbors * 5 manifold features = 20
+    // x_f: 4 neighbors * (5 manifold + 1 FD) + 2 pos + 8 min_poly_coeffs = 34
+    DualPathGaloisGRU predictor(20, 34, hid, (int)GF8.orbits.size());
 
     std::vector<uint8_t> orbit_stream;
     std::vector<uint8_t> root_stream;
@@ -73,7 +88,7 @@ Metrics processImageHolomorphicManifold(const std::string& path, double lr, int 
     for(int y=0; y<h_img; ++y) {
         for(int x=0; x<w; ++x) {
             int i = y * w + x;
-            if (y < 16 || x < 16 || x >= w - 16) {
+            if (y < 16 || x < 16 || x >= w - 16 || y >= h_img - 16) {
                 reconstructed_data[i] = img.data[i];
                 orbit_stream.push_back((uint8_t)GF8.element_to_orbit_id[img.data[i]]);
                 root_stream.push_back((uint8_t)GF8.element_to_root_index[img.data[i]]);
@@ -81,31 +96,32 @@ Metrics processImageHolomorphicManifold(const std::string& path, double lr, int 
             }
 
             auto getV = [&](int tx, int ty) { return reconstructed_data[ty * w + tx]; };
+            auto stalk = [&](uint8_t v) {
+                return std::vector<double>{ (double)GF8.tr8_1(v), (double)GF8.tr8_4(v)/255.0, (double)GF8.element_to_orbit_id[v]/(double)GF8.orbits.size(), (double)GF8.orbits[GF8.element_to_orbit_id[v]].elements.size()/8.0, (double)v/255.0 };
+            };
 
             std::vector<double> x_s, x_f;
             int nx[] = {x-1, x, x-1, x+1}, ny[] = {y, y-1, y-1, y-1};
             for(int j=0; j<4; ++j) {
-                auto stalk = get_algebraic_stalk(getV(nx[j], ny[j]));
-                x_s.insert(x_s.end(), stalk.begin(), stalk.end());
+                auto s = stalk(getV(nx[j], ny[j]));
+                x_s.insert(x_s.end(), s.begin(), s.end());
             }
 
-            int scales[] = {2, 4, 8, 16};
-            for(int s : scales) {
-                auto stalk = get_algebraic_stalk(getV(x-s, y-s));
-                x_f.insert(x_f.end(), stalk.begin(), stalk.end());
+            int fx[] = {x-2, x, x-4, x}, fy[] = {y, y-2, y, y-4};
+            for(int j=0; j<4; ++j) {
+                auto s = stalk(getV(fx[j], fy[j]));
+                x_f.insert(x_f.end(), s.begin(), s.end());
+                x_f.push_back(estimate_local_fd(reconstructed_data, fx[j], fy[j], w, h_img) / 3.0);
             }
             x_f.push_back((double)x/w); x_f.push_back((double)y/h_img);
 
-            // Algebraic Differentials: XOR differences of traces
-            for(int s : scales) {
-                uint8_t v1 = getV(x-s, y), v2 = getV(x, y-s);
-                x_f.push_back((double)(GF8.tr8_4(v1) ^ GF8.tr8_4(v2)) / 255.0);
-            }
+            // Minimal Polynomial Coefficients as High-Dimensional Features
+            const auto& mpc = GF8.orbits[GF8.element_to_orbit_id[getV(x-1, y)]].min_poly_coeffs;
+            for(int k=0; k<8; k++) x_f.push_back(k < (int)mpc.size() ? (double)mpc[k]/255.0 : 0.0);
 
-            auto probs = predictor.forward(x_s, x_f);
+            auto res = predictor.forward(x_s, x_f);
             int actual_orbit = GF8.element_to_orbit_id[img.data[i]];
             int actual_root = GF8.element_to_root_index[img.data[i]];
-
             orbit_stream.push_back((uint8_t)actual_orbit);
             root_stream.push_back((uint8_t)actual_root);
 
@@ -128,14 +144,14 @@ Metrics processImageHolomorphicManifold(const std::string& path, double lr, int 
 }
 
 int main() {
-    std::string img1 = "../absolute_galois_group/compressor/01/test.pgm";
-    std::string img2 = "../absolute_galois_group/compressor/01/GhostInShell_02_005.pgm";
+    std::string img1 = "absolute_galois_group/compressor/01/test.pgm";
+    std::string img2 = "absolute_galois_group/compressor/01/GhostInShell_02_005.pgm";
 
-    auto m1 = processImageHolomorphicManifold(img1, 0.012, 64);
-    auto m2 = processImageHolomorphicManifold(img2, 0.012, 64);
+    auto m1 = processImageAbsoluteGalois(img1, 0.015, 32);
+    auto m2 = processImageAbsoluteGalois(img2, 0.015, 32);
 
     std::ofstream report("compression_report.md");
-    report << "# Holomorphic Galois Manifold Neural Compression Report\n\n";
+    report << "# Peak Latent Manifold Galois RNN Compression Report\n\n";
     report << "| Image | Orig Entropy | Orbit Entropy | LZMA Ratio | Recon |\n";
     report << "| :--- | :--- | :--- | :--- | :--- |\n";
     auto add = [&](Metrics m) {
