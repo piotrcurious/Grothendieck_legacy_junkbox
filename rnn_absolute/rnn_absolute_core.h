@@ -82,42 +82,53 @@ public:
         uint8_t res = x; for(int i=1; i<8; ++i) { x = frobenius(x); res ^= x; }
         return res & 1;
     }
-
-    // New for multi-head manifold mapping
-    uint8_t full_trace(uint8_t x) const { return tr8_1(x); }
 };
 
 static GaloisField8 GF8;
 
-// --- Gated RNN with multi-head prediction ---
-class GaloisRNN {
+// --- High-Dimensional Algebraic Signature (Sheaf Stalk) ---
+inline std::vector<double> get_algebraic_stalk(uint8_t x) {
+    return {
+        (double)GF8.tr8_1(x),
+        (double)GF8.tr8_4(x) / 255.0,
+        (double)GF8.element_to_orbit_id[x] / (double)GF8.orbits.size(),
+        (double)GF8.orbits[GF8.element_to_orbit_id[x]].degree / 8.0,
+        (double)x / 255.0
+    };
+}
+
+// --- Dual-Path Gated RNN with Multi-Head Prediction ---
+class DualPathGaloisRNN {
 public:
-    int input_size, hidden_size, num_orbits;
-    std::vector<double> w_ih, w_hh, w_ho_orb, w_ho_root;
+    int in_spatial, in_fractal, hidden_size, num_orbits;
+    std::vector<double> w_ih_s, w_ih_f, w_hh, w_ho_orb, w_ho_root;
     std::vector<double> b_h, b_o_orb, b_o_root;
     std::vector<double> h, last_h;
 
-    GaloisRNN(int in, int hid, int orbits_count)
-        : input_size(in), hidden_size(hid), num_orbits(orbits_count) {
-        w_ih.resize(in * hid); w_hh.resize(hid * hid);
+    DualPathGaloisRNN(int in_s, int in_f, int hid, int orbits_count)
+        : in_spatial(in_s), in_fractal(in_f), hidden_size(hid), num_orbits(orbits_count) {
+        w_ih_s.resize(in_s * hid); w_ih_f.resize(in_f * hid);
+        w_hh.resize(hid * hid);
         w_ho_orb.resize(hid * num_orbits); w_ho_root.resize(hid * 8);
         b_h.assign(hid, 0.0);
         b_o_orb.assign(num_orbits, 0.0); b_o_root.assign(8, 0.0);
         std::default_random_engine gen(1337);
         std::uniform_real_distribution<double> dist(-1.0/std::sqrt(hid), 1.0/std::sqrt(hid));
-        for(auto& w : w_ih) w = dist(gen);
+        for(auto& w : w_ih_s) w = dist(gen);
+        for(auto& w : w_ih_f) w = dist(gen);
         for(auto& w : w_hh) w = dist(gen);
         for(auto& w : w_ho_orb) w = dist(gen);
         for(auto& w : w_ho_root) w = dist(gen);
         h.assign(hid, 0.0);
     }
 
-    std::pair<std::vector<double>, std::vector<double>> forward(const std::vector<double>& x) {
+    std::pair<std::vector<double>, std::vector<double>> forward(const std::vector<double>& x_s, const std::vector<double>& x_f) {
         last_h = h;
         std::vector<double> next_h(hidden_size, 0.0);
         for(int i=0; i<hidden_size; ++i) {
             double sum = b_h[i];
-            for(int j=0; j<input_size; ++j) sum += x[j] * w_ih[j * hidden_size + i];
+            for(int j=0; j<in_spatial; ++j) sum += x_s[j] * w_ih_s[j * hidden_size + i];
+            for(int j=0; j<in_fractal; ++j) sum += x_f[j] * w_ih_f[j * hidden_size + i];
             for(int j=0; j<hidden_size; ++j) sum += last_h[j] * w_hh[j * hidden_size + i];
             next_h[i] = std::tanh(sum);
         }
@@ -149,9 +160,8 @@ public:
         return {orb_logits, root_logits};
     }
 
-    void train(const std::vector<double>& x, int target_orb, int target_root, double lr) {
-        // Forward call already happened outside
-        // Logits again to get probabilities for the current h
+    void train(const std::vector<double>& x_s, const std::vector<double>& x_f, int target_orb, int target_root, double lr) {
+        // Logits re-calculation
         std::vector<double> orb_probs(num_orbits, 0.0);
         for(int i=0; i<num_orbits; ++i) {
             double sum = b_o_orb[i];
@@ -196,7 +206,8 @@ public:
         for(int i=0; i<hidden_size; ++i) {
             double d_pre = d_h[i] * (1.0 - h[i] * h[i]);
             b_h[i] -= lr * d_pre;
-            for(int j=0; j<input_size; ++j) w_ih[j * hidden_size + i] -= lr * d_pre * x[j];
+            for(int j=0; j<in_spatial; ++j) w_ih_s[j * hidden_size + i] -= lr * d_pre * x_s[j];
+            for(int j=0; j<in_fractal; ++j) w_ih_f[j * hidden_size + i] -= lr * d_pre * x_f[j];
             for(int j=0; j<hidden_size; ++j) w_hh[j * hidden_size + i] -= lr * d_pre * last_h[j];
         }
     }
