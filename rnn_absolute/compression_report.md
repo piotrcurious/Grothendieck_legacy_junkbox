@@ -1,4 +1,4 @@
-# Absolute Galois Group Neural Compression Report
+# Holomorphic Galois Manifold Neural Compression Report
 
 | Image | Orig Entropy | Orbit Entropy | LZMA Ratio | Recon |
 | :--- | :--- | :--- | :--- | :--- |

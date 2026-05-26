@@ -56,12 +56,13 @@ double calculateEntropy(const std::vector<uint8_t>& data) {
     return entropy;
 }
 
-Metrics processImageAbsoluteGalois(const std::string& path, double lr, int hid) {
-    std::cout << "[*] Processing Absolute Galois RNN: " << path << std::endl;
+Metrics processImageHolomorphicGalois(const std::string& path, double lr, int hid) {
+    std::cout << "[*] Processing Holomorphic Manifold Galois RNN: " << path << std::endl;
     Image img = loadPGM(path);
     int w = img.width, h_img = img.height;
 
-    int ctx_size = 21;
+    // Feature vector: 4 neighbors * 5 manifold features + 2 pos + 8 multi-scale = 30
+    int ctx_size = 30;
     GaloisRNN predictor(ctx_size, hid, (int)GF8.orbits.size());
 
     std::vector<uint8_t> orbit_stream;
@@ -82,14 +83,20 @@ Metrics processImageAbsoluteGalois(const std::string& path, double lr, int hid) 
             auto getV = [&](int tx, int ty) { return reconstructed_data[ty * w + tx]; };
             std::vector<double> input;
 
+            // Manifold Signatures
             int nx[] = {x-1, x, x-1, x+1}, ny[] = {y, y-1, y-1, y-1};
             for(int j=0; j<4; ++j) {
-                auto sig = GF8.algebraic_signature(getV(nx[j], ny[j]));
+                auto sig = GF8.manifold_signature(getV(nx[j], ny[j]));
                 input.insert(input.end(), sig.begin(), sig.end());
             }
             input.push_back((double)x/w); input.push_back((double)y/h_img);
-            int scales[] = {2, 4, 8};
-            for(int s : scales) input.push_back((double)reconstructed_data[i-s]/255.0);
+
+            // "Algebraic Differential" features (multi-scale differences in field traces)
+            int scales[] = {1, 2, 4, 8};
+            for(int s : scales) {
+                input.push_back((double)GF8.tr8_4(getV(x, y-s)) / 255.0);
+                input.push_back((double)GF8.tr8_1(getV(x-s, y)));
+            }
 
             auto probs = predictor.forward(input);
             int actual_orbit = GF8.element_to_orbit_id[img.data[i]];
@@ -105,7 +112,6 @@ Metrics processImageAbsoluteGalois(const std::string& path, double lr, int hid) 
         }
     }
 
-    // Packet refinement: interleave to improve local redundancy (Galois packets)
     std::vector<uint8_t> packets;
     for(size_t i=0; i<orbit_stream.size(); ++i) {
         packets.push_back(orbit_stream[i]);
@@ -123,11 +129,11 @@ int main() {
     std::string img1 = "../absolute_galois_group/compressor/01/test.pgm";
     std::string img2 = "../absolute_galois_group/compressor/01/GhostInShell_02_005.pgm";
 
-    auto m1 = processImageAbsoluteGalois(img1, 0.012, 64);
-    auto m2 = processImageAbsoluteGalois(img2, 0.012, 64);
+    auto m1 = processImageHolomorphicGalois(img1, 0.012, 64);
+    auto m2 = processImageHolomorphicGalois(img2, 0.012, 64);
 
     std::ofstream report("compression_report.md");
-    report << "# Absolute Galois Group Neural Compression Report\n\n";
+    report << "# Holomorphic Galois Manifold Neural Compression Report\n\n";
     report << "| Image | Orig Entropy | Orbit Entropy | LZMA Ratio | Recon |\n";
     report << "| :--- | :--- | :--- | :--- | :--- |\n";
     auto add = [&](Metrics m) {

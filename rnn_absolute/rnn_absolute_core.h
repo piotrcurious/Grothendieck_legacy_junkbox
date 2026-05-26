@@ -11,7 +11,7 @@
 #include <set>
 #include <iostream>
 
-// --- Rigorous Galois Field GF(2^8) ---
+// --- Rigorous Galois Field GF(2^8) with Manifold Utilities ---
 class GaloisField8 {
 public:
     static const uint16_t POLY = 0x11B;
@@ -73,25 +73,34 @@ public:
 
     inline uint8_t mul(uint8_t a, uint8_t b) const { return mul_table[a][b]; }
     inline uint8_t frobenius(uint8_t a) const { return mul_table[a][a]; }
-    uint8_t full_trace(uint8_t x) const {
-        uint8_t res = x;
-        for(int i=1; i<8; ++i) { x = frobenius(x); res ^= x; }
+
+    // Tower of Traces (Algebraic projections)
+    uint8_t tr8_4(uint8_t x) const { return x ^ iterate_frob(x, 4); }
+    uint8_t tr8_1(uint8_t x) const {
+        uint8_t res = x; for(int i=1; i<8; ++i) { x = frobenius(x); res ^= x; }
         return res & 1;
     }
 
-    std::vector<double> algebraic_signature(uint8_t x) const {
+    uint8_t iterate_frob(uint8_t x, int n) const {
+        for(int i=0; i<n; ++i) x = frobenius(x);
+        return x;
+    }
+
+    // High-dimensional Algebraic Signature (Manifold Mapping)
+    std::vector<double> manifold_signature(uint8_t x) const {
         return {
-            (double)full_trace(x),
+            (double)tr8_1(x),
+            (double)tr8_4(x) / 255.0,
             (double)orbits[element_to_orbit_id[x]].degree / 8.0,
-            (double)x / 255.0,
-            (double)element_to_orbit_id[x] / (double)orbits.size()
+            (double)element_to_orbit_id[x] / (double)orbits.size(),
+            (double)x / 255.0
         };
     }
 };
 
 static GaloisField8 GF8;
 
-// --- Gated RNN with Corrected Online Learning ---
+// --- Gated RNN with Multi-Dimensional Algebraic Awareness ---
 class GaloisRNN {
 public:
     int input_size, hidden_size, num_orbits;
@@ -121,7 +130,6 @@ public:
             next_h[i] = std::tanh(sum);
         }
         h = next_h;
-
         std::vector<double> logits(num_orbits, 0.0);
         for(int i=0; i<num_orbits; ++i) {
             double sum = b_o[i];
@@ -136,8 +144,6 @@ public:
     }
 
     void train(const std::vector<double>& x, int target_orbit, double lr) {
-        // Corrected: use cached hidden state from forward pass
-        // No redundant forward call to avoid double step
         std::vector<double> probs(num_orbits, 0.0);
         for(int i=0; i<num_orbits; ++i) {
             double sum = b_o[i];
@@ -148,14 +154,10 @@ public:
         double sum_exp = 0;
         for(auto& l : probs) { l = std::exp(l - max_l); sum_exp += l; }
         for(auto& l : probs) l /= sum_exp;
-
         std::vector<double> d_logits = probs;
         d_logits[target_orbit] -= 1.0;
-
         std::vector<double> d_h(hidden_size, 0.0);
-        // Corrected: capture weights before update for backprop
         std::vector<double> old_w_ho = w_ho;
-
         for(int i=0; i<num_orbits; ++i) {
             b_o[i] -= lr * d_logits[i];
             for(int j=0; j<hidden_size; ++j) {
@@ -163,7 +165,6 @@ public:
                 d_h[j] += d_logits[i] * old_w_ho[j * num_orbits + i];
             }
         }
-
         for(int i=0; i<hidden_size; ++i) {
             double d_pre = d_h[i] * (1.0 - h[i] * h[i]);
             b_h[i] -= lr * d_pre;
