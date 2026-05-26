@@ -11,7 +11,7 @@
 #include <set>
 #include <iostream>
 
-// --- Rigorous Galois Field GF(2^8) with Manifold Utilities ---
+// --- Comprehensive Galois Field GF(2^8) ---
 class GaloisField8 {
 public:
     static const uint16_t POLY = 0x11B;
@@ -74,53 +74,45 @@ public:
     inline uint8_t mul(uint8_t a, uint8_t b) const { return mul_table[a][b]; }
     inline uint8_t frobenius(uint8_t a) const { return mul_table[a][a]; }
 
-    // Tower of Traces (Algebraic projections)
-    uint8_t tr8_4(uint8_t x) const { return x ^ iterate_frob(x, 4); }
+    uint8_t tr8_4(uint8_t x) const {
+        uint8_t x16 = x; for(int i=0; i<4; ++i) x16 = frobenius(x16);
+        return x ^ x16;
+    }
     uint8_t tr8_1(uint8_t x) const {
         uint8_t res = x; for(int i=1; i<8; ++i) { x = frobenius(x); res ^= x; }
         return res & 1;
     }
 
-    uint8_t iterate_frob(uint8_t x, int n) const {
-        for(int i=0; i<n; ++i) x = frobenius(x);
-        return x;
-    }
-
-    // High-dimensional Algebraic Signature (Manifold Mapping)
-    std::vector<double> manifold_signature(uint8_t x) const {
-        return {
-            (double)tr8_1(x),
-            (double)tr8_4(x) / 255.0,
-            (double)orbits[element_to_orbit_id[x]].degree / 8.0,
-            (double)element_to_orbit_id[x] / (double)orbits.size(),
-            (double)x / 255.0
-        };
-    }
+    // New for multi-head manifold mapping
+    uint8_t full_trace(uint8_t x) const { return tr8_1(x); }
 };
 
 static GaloisField8 GF8;
 
-// --- Gated RNN with Multi-Dimensional Algebraic Awareness ---
+// --- Gated RNN with multi-head prediction ---
 class GaloisRNN {
 public:
     int input_size, hidden_size, num_orbits;
-    std::vector<double> w_ih, w_hh, w_ho;
-    std::vector<double> b_h, b_o;
+    std::vector<double> w_ih, w_hh, w_ho_orb, w_ho_root;
+    std::vector<double> b_h, b_o_orb, b_o_root;
     std::vector<double> h, last_h;
 
     GaloisRNN(int in, int hid, int orbits_count)
         : input_size(in), hidden_size(hid), num_orbits(orbits_count) {
-        w_ih.resize(in * hid); w_hh.resize(hid * hid); w_ho.resize(hid * num_orbits);
-        b_h.assign(hid, 0.0); b_o.assign(num_orbits, 0.0);
+        w_ih.resize(in * hid); w_hh.resize(hid * hid);
+        w_ho_orb.resize(hid * num_orbits); w_ho_root.resize(hid * 8);
+        b_h.assign(hid, 0.0);
+        b_o_orb.assign(num_orbits, 0.0); b_o_root.assign(8, 0.0);
         std::default_random_engine gen(1337);
         std::uniform_real_distribution<double> dist(-1.0/std::sqrt(hid), 1.0/std::sqrt(hid));
         for(auto& w : w_ih) w = dist(gen);
         for(auto& w : w_hh) w = dist(gen);
-        for(auto& w : w_ho) w = dist(gen);
+        for(auto& w : w_ho_orb) w = dist(gen);
+        for(auto& w : w_ho_root) w = dist(gen);
         h.assign(hid, 0.0);
     }
 
-    std::vector<double> forward(const std::vector<double>& x) {
+    std::pair<std::vector<double>, std::vector<double>> forward(const std::vector<double>& x) {
         last_h = h;
         std::vector<double> next_h(hidden_size, 0.0);
         for(int i=0; i<hidden_size; ++i) {
@@ -130,41 +122,77 @@ public:
             next_h[i] = std::tanh(sum);
         }
         h = next_h;
-        std::vector<double> logits(num_orbits, 0.0);
+
+        auto softmax = [](std::vector<double>& v) {
+            double max_v = *std::max_element(v.begin(), v.end());
+            double sum_exp = 0;
+            for(auto& x : v) { x = std::exp(x - max_v); sum_exp += x; }
+            for(auto& x : v) x /= sum_exp;
+        };
+
+        std::vector<double> orb_logits(num_orbits, 0.0);
         for(int i=0; i<num_orbits; ++i) {
-            double sum = b_o[i];
-            for(int j=0; j<hidden_size; ++j) sum += h[j] * w_ho[j * num_orbits + i];
-            logits[i] = sum;
+            double sum = b_o_orb[i];
+            for(int j=0; j<hidden_size; ++j) sum += h[j] * w_ho_orb[j * num_orbits + i];
+            orb_logits[i] = sum;
         }
-        double max_l = *std::max_element(logits.begin(), logits.end());
-        double sum_exp = 0;
-        for(auto& l : logits) { l = std::exp(l - max_l); sum_exp += l; }
-        for(auto& l : logits) l /= sum_exp;
-        return logits;
+        softmax(orb_logits);
+
+        std::vector<double> root_logits(8, 0.0);
+        for(int i=0; i<8; ++i) {
+            double sum = b_o_root[i];
+            for(int j=0; j<hidden_size; ++j) sum += h[j] * w_ho_root[j * 8 + i];
+            root_logits[i] = sum;
+        }
+        softmax(root_logits);
+
+        return {orb_logits, root_logits};
     }
 
-    void train(const std::vector<double>& x, int target_orbit, double lr) {
-        std::vector<double> probs(num_orbits, 0.0);
+    void train(const std::vector<double>& x, int target_orb, int target_root, double lr) {
+        // Forward call already happened outside
+        // Logits again to get probabilities for the current h
+        std::vector<double> orb_probs(num_orbits, 0.0);
         for(int i=0; i<num_orbits; ++i) {
-            double sum = b_o[i];
-            for(int j=0; j<hidden_size; ++j) sum += h[j] * w_ho[j * num_orbits + i];
-            probs[i] = sum;
+            double sum = b_o_orb[i];
+            for(int j=0; j<hidden_size; ++j) sum += h[j] * w_ho_orb[j * num_orbits + i];
+            orb_probs[i] = sum;
         }
-        double max_l = *std::max_element(probs.begin(), probs.end());
-        double sum_exp = 0;
-        for(auto& l : probs) { l = std::exp(l - max_l); sum_exp += l; }
-        for(auto& l : probs) l /= sum_exp;
-        std::vector<double> d_logits = probs;
-        d_logits[target_orbit] -= 1.0;
+        double max_o = *std::max_element(orb_probs.begin(), orb_probs.end());
+        double s_o = 0; for(auto& l : orb_probs) { l = std::exp(l-max_o); s_o += l; }
+        for(auto& l : orb_probs) l /= s_o;
+
+        std::vector<double> root_probs(8, 0.0);
+        for(int i=0; i<8; ++i) {
+            double sum = b_o_root[i];
+            for(int j=0; j<hidden_size; ++j) sum += h[j] * w_ho_root[j * 8 + i];
+            root_probs[i] = sum;
+        }
+        double max_r = *std::max_element(root_probs.begin(), root_probs.end());
+        double s_r = 0; for(auto& l : root_probs) { l = std::exp(l-max_r); s_r += l; }
+        for(auto& l : root_probs) l /= s_r;
+
+        std::vector<double> d_orb = orb_probs; d_orb[target_orb] -= 1.0;
+        std::vector<double> d_root = root_probs; d_root[target_root] -= 1.0;
+
         std::vector<double> d_h(hidden_size, 0.0);
-        std::vector<double> old_w_ho = w_ho;
+        std::vector<double> old_w_ho_orb = w_ho_orb, old_w_ho_root = w_ho_root;
+
         for(int i=0; i<num_orbits; ++i) {
-            b_o[i] -= lr * d_logits[i];
+            b_o_orb[i] -= lr * d_orb[i];
             for(int j=0; j<hidden_size; ++j) {
-                w_ho[j * num_orbits + i] -= lr * d_logits[i] * h[j];
-                d_h[j] += d_logits[i] * old_w_ho[j * num_orbits + i];
+                w_ho_orb[j * num_orbits + i] -= lr * d_orb[i] * h[j];
+                d_h[j] += d_orb[i] * old_w_ho_orb[j * num_orbits + i];
             }
         }
+        for(int i=0; i<8; ++i) {
+            b_o_root[i] -= lr * d_root[i];
+            for(int j=0; j<hidden_size; ++j) {
+                w_ho_root[j * 8 + i] -= lr * d_root[i] * h[j];
+                d_h[j] += d_root[i] * old_w_ho_root[j * 8 + i];
+            }
+        }
+
         for(int i=0; i<hidden_size; ++i) {
             double d_pre = d_h[i] * (1.0 - h[i] * h[i]);
             b_h[i] -= lr * d_pre;
