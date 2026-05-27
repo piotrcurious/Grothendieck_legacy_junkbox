@@ -11,7 +11,7 @@
 #include <set>
 #include <iostream>
 
-// --- Comprehensive Galois Field GF(2^8) ---
+// --- Rigorous Galois Field GF(2^8) ---
 class GaloisField8 {
 public:
     static const uint16_t POLY = 0x11B;
@@ -23,7 +23,7 @@ public:
     struct Orbit {
         int id;
         std::vector<uint8_t> elements;
-        int degree;
+        std::vector<uint8_t> min_poly_coeffs;
     };
 
     std::vector<Orbit> orbits;
@@ -51,8 +51,17 @@ public:
                 orb.elements.push_back(cur);
                 cur = mul_table[cur][cur];
             }
-            orb.degree = (int)orb.elements.size();
-            std::sort(orb.elements.begin(), orb.elements.end());
+            std::vector<uint8_t> poly = {1};
+            for(uint8_t e : orb.elements) {
+                std::vector<uint8_t> next_poly(poly.size() + 1, 0);
+                for(size_t k=0; k<poly.size(); k++) {
+                    next_poly[k+1] ^= poly[k];
+                    next_poly[k] ^= mul_table[e][poly[k]];
+                }
+                poly = next_poly;
+            }
+            orb.min_poly_coeffs = poly;
+            // Removed std::sort to preserve Frobenius-cyclic order
             for (size_t j = 0; j < orb.elements.size(); j++) {
                 element_to_orbit_id[orb.elements[j]] = orb.id;
                 element_to_root_index[orb.elements[j]] = (int)j;
@@ -73,152 +82,187 @@ public:
 
     inline uint8_t mul(uint8_t a, uint8_t b) const { return mul_table[a][b]; }
     inline uint8_t frobenius(uint8_t a) const { return mul_table[a][a]; }
-
     uint8_t tr8_4(uint8_t x) const {
-        uint8_t x16 = x; for(int i=0; i<4; ++i) x16 = frobenius(x16);
-        return x ^ x16;
+        uint8_t xq = x; for(int i=0; i<4; ++i) xq = frobenius(xq);
+        return x ^ xq;
+    }
+    uint8_t tr8_2(uint8_t x) const {
+        uint8_t res = x;
+        uint8_t xq = x; for(int i=0; i<2; ++i) xq = frobenius(xq); res ^= xq;
+        for(int i=0; i<2; ++i) xq = frobenius(xq); res ^= xq;
+        for(int i=0; i<2; ++i) xq = frobenius(xq); res ^= xq;
+        return res;
     }
     uint8_t tr8_1(uint8_t x) const {
         uint8_t res = x; for(int i=1; i<8; ++i) { x = frobenius(x); res ^= x; }
         return res & 1;
     }
+    uint8_t norm8_4(uint8_t x) const {
+        uint8_t xq = x; for(int i=0; i<4; ++i) xq = frobenius(xq);
+        return mul(x, xq);
+    }
+    uint8_t bilinear_trace(uint8_t a, uint8_t b) const { return tr8_1(mul(a, b)); }
 };
 
 static GaloisField8 GF8;
 
-// --- High-Dimensional Algebraic Signature (Sheaf Stalk) ---
-inline std::vector<double> get_algebraic_stalk(uint8_t x) {
-    return {
-        (double)GF8.tr8_1(x),
-        (double)GF8.tr8_4(x) / 255.0,
-        (double)GF8.element_to_orbit_id[x] / (double)GF8.orbits.size(),
-        (double)GF8.orbits[GF8.element_to_orbit_id[x]].degree / 8.0,
-        (double)x / 255.0
-    };
-}
-
-// --- Dual-Path Gated RNN with Multi-Head Prediction ---
-class DualPathGaloisRNN {
+// --- Multi-Head Gated RNN with Complexity Prediction ---
+class DualPathGaloisGRU {
 public:
-    int in_spatial, in_fractal, hidden_size, num_orbits;
-    std::vector<double> w_ih_s, w_ih_f, w_hh, w_ho_orb, w_ho_root;
-    std::vector<double> b_h, b_o_orb, b_o_root;
-    std::vector<double> h, last_h;
+    struct Prediction { std::vector<double> p_orb, p_root; double complexity; };
 
-    DualPathGaloisRNN(int in_s, int in_f, int hid, int orbits_count)
+    int in_spatial, in_fractal, hidden_size, num_orbits;
+    std::vector<double> w_iz, w_ir, w_in, w_hz, w_hr, w_hn;
+    std::vector<double> b_z, b_r, b_n;
+    std::vector<double> w_ho_orb, w_ho_root, w_ho_comp;
+    std::vector<double> b_o_orb, b_o_root, b_o_comp;
+    std::vector<double> h, last_h, last_x;
+    std::vector<double> cached_z, cached_r, cached_n;
+    Prediction last_pred;
+
+    DualPathGaloisGRU(int in_s, int in_f, int hid, int orbits_count)
         : in_spatial(in_s), in_fractal(in_f), hidden_size(hid), num_orbits(orbits_count) {
-        w_ih_s.resize(in_s * hid); w_ih_f.resize(in_f * hid);
-        w_hh.resize(hid * hid);
-        w_ho_orb.resize(hid * num_orbits); w_ho_root.resize(hid * 8);
-        b_h.assign(hid, 0.0);
-        b_o_orb.assign(num_orbits, 0.0); b_o_root.assign(8, 0.0);
+        int in_total = in_s + in_f;
+        w_iz.resize(in_total * hid); w_ir.resize(in_total * hid); w_in.resize(in_total * hid);
+        w_hz.resize(hid * hid); w_hr.resize(hid * hid); w_hn.resize(hid * hid);
+        b_z.assign(hid, 0.0); b_r.assign(hid, 0.0); b_n.assign(hid, 0.0);
+        w_ho_orb.resize(hid * num_orbits); w_ho_root.resize(hid * 8); w_ho_comp.resize(hid);
+        b_o_orb.assign(num_orbits, 0.0); b_o_root.assign(8, 0.0); b_o_comp.assign(1, 0.0);
+
         std::default_random_engine gen(1337);
-        std::uniform_real_distribution<double> dist(-1.0/std::sqrt(hid), 1.0/std::sqrt(hid));
-        for(auto& w : w_ih_s) w = dist(gen);
-        for(auto& w : w_ih_f) w = dist(gen);
-        for(auto& w : w_hh) w = dist(gen);
-        for(auto& w : w_ho_orb) w = dist(gen);
-        for(auto& w : w_ho_root) w = dist(gen);
+        std::uniform_real_distribution<double> dist(-0.1, 0.1);
+        auto init = [&](std::vector<double>& v) { for(auto& x : v) x = dist(gen); };
+        init(w_iz); init(w_ir); init(w_in); init(w_hz); init(w_hr); init(w_hn);
+        init(w_ho_orb); init(w_ho_root); init(w_ho_comp);
         h.assign(hid, 0.0);
+        cached_z.assign(hid, 0.0); cached_r.assign(hid, 0.0); cached_n.assign(hid, 0.0);
     }
 
-    std::pair<std::vector<double>, std::vector<double>> forward(const std::vector<double>& x_s, const std::vector<double>& x_f) {
+    Prediction forward(const std::vector<double>& x_s, const std::vector<double>& x_f) {
         last_h = h;
-        std::vector<double> next_h(hidden_size, 0.0);
+        last_x = x_s; last_x.insert(last_x.end(), x_f.begin(), x_f.end());
+        int in_total = (int)last_x.size();
+
+        auto sigmoid = [](double v) { return 1.0 / (1.0 + std::exp(-std::clamp(v, -15.0, 15.0))); };
+
         for(int i=0; i<hidden_size; ++i) {
-            double sum = b_h[i];
-            for(int j=0; j<in_spatial; ++j) sum += x_s[j] * w_ih_s[j * hidden_size + i];
-            for(int j=0; j<in_fractal; ++j) sum += x_f[j] * w_ih_f[j * hidden_size + i];
-            for(int j=0; j<hidden_size; ++j) sum += last_h[j] * w_hh[j * hidden_size + i];
-            next_h[i] = std::tanh(sum);
+            double sz = b_z[i], sr = b_r[i];
+            for(int j=0; j<in_total; ++j) {
+                sz += last_x[j]*w_iz[j*hidden_size+i];
+                sr += last_x[j]*w_ir[j*hidden_size+i];
+            }
+            for(int j=0; j<hidden_size; ++j) {
+                sz += last_h[j]*w_hz[j*hidden_size+i];
+                sr += last_h[j]*w_hr[j*hidden_size+i];
+            }
+            cached_z[i] = sigmoid(sz); cached_r[i] = sigmoid(sr);
         }
-        h = next_h;
+        for(int i=0; i<hidden_size; ++i) {
+            double sn = b_n[i];
+            for(int j=0; j<in_total; ++j) sn += last_x[j]*w_in[j*hidden_size+i];
+            for(int j=0; j<hidden_size; ++j) sn += (cached_r[j]*last_h[j])*w_hn[j*hidden_size+i];
+            cached_n[i] = std::tanh(sn);
+        }
+        for(int i=0; i<hidden_size; ++i) h[i] = (1.0 - cached_z[i])*last_h[i] + cached_z[i]*cached_n[i];
 
         auto softmax = [](std::vector<double>& v) {
-            double max_v = *std::max_element(v.begin(), v.end());
-            double sum_exp = 0;
-            for(auto& x : v) { x = std::exp(x - max_v); sum_exp += x; }
-            for(auto& x : v) x /= sum_exp;
+            double mv = *std::max_element(v.begin(), v.end());
+            double se = 0; for(auto& val : v) { val = std::exp(std::clamp(val-mv, -15.0, 15.0)); se += val; }
+            for(auto& val : v) val /= (se + 1e-9);
         };
 
-        std::vector<double> orb_logits(num_orbits, 0.0);
+        std::vector<double> lo_orb(num_orbits, 0.0), lo_root(8, 0.0);
         for(int i=0; i<num_orbits; ++i) {
-            double sum = b_o_orb[i];
-            for(int j=0; j<hidden_size; ++j) sum += h[j] * w_ho_orb[j * num_orbits + i];
-            orb_logits[i] = sum;
+            double s = b_o_orb[i]; for(int j=0; j<hidden_size; ++j) s += h[j]*w_ho_orb[j*num_orbits+i];
+            lo_orb[i] = s;
         }
-        softmax(orb_logits);
-
-        std::vector<double> root_logits(8, 0.0);
         for(int i=0; i<8; ++i) {
-            double sum = b_o_root[i];
-            for(int j=0; j<hidden_size; ++j) sum += h[j] * w_ho_root[j * 8 + i];
-            root_logits[i] = sum;
+            double s = b_o_root[i]; for(int j=0; j<hidden_size; ++j) s += h[j]*w_ho_root[j*8+i];
+            lo_root[i] = s;
         }
-        softmax(root_logits);
-
-        return {orb_logits, root_logits};
+        softmax(lo_orb); softmax(lo_root);
+        double comp = b_o_comp[0]; for(int j=0; j<hidden_size; ++j) comp += h[j]*w_ho_comp[j];
+        last_pred = {lo_orb, lo_root, std::tanh(comp)};
+        return last_pred;
     }
 
-    void train(const std::vector<double>& x_s, const std::vector<double>& x_f, int target_orb, int target_root, double lr) {
-        // Logits re-calculation
-        std::vector<double> orb_probs(num_orbits, 0.0);
-        for(int i=0; i<num_orbits; ++i) {
-            double sum = b_o_orb[i];
-            for(int j=0; j<hidden_size; ++j) sum += h[j] * w_ho_orb[j * num_orbits + i];
-            orb_probs[i] = sum;
-        }
-        double max_o = *std::max_element(orb_probs.begin(), orb_probs.end());
-        double s_o = 0; for(auto& l : orb_probs) { l = std::exp(l-max_o); s_o += l; }
-        for(auto& l : orb_probs) l /= s_o;
-
-        std::vector<double> root_probs(8, 0.0);
-        for(int i=0; i<8; ++i) {
-            double sum = b_o_root[i];
-            for(int j=0; j<hidden_size; ++j) sum += h[j] * w_ho_root[j * 8 + i];
-            root_probs[i] = sum;
-        }
-        double max_r = *std::max_element(root_probs.begin(), root_probs.end());
-        double s_r = 0; for(auto& l : root_probs) { l = std::exp(l-max_r); s_r += l; }
-        for(auto& l : root_probs) l /= s_r;
-
-        std::vector<double> d_orb = orb_probs; d_orb[target_orb] -= 1.0;
-        std::vector<double> d_root = root_probs; d_root[target_root] -= 1.0;
+    void train(int t_orb, int t_root, double t_comp, double lr) {
+        std::vector<double> d_orb = last_pred.p_orb; d_orb[t_orb] -= 1.0;
+        std::vector<double> d_root = last_pred.p_root; d_root[t_root] -= 1.0;
+        double d_comp_val = last_pred.complexity - t_comp;
 
         std::vector<double> d_h(hidden_size, 0.0);
-        std::vector<double> old_w_ho_orb = w_ho_orb, old_w_ho_root = w_ho_root;
-
         for(int i=0; i<num_orbits; ++i) {
             b_o_orb[i] -= lr * d_orb[i];
             for(int j=0; j<hidden_size; ++j) {
-                w_ho_orb[j * num_orbits + i] -= lr * d_orb[i] * h[j];
-                d_h[j] += d_orb[i] * old_w_ho_orb[j * num_orbits + i];
+                d_h[j] += d_orb[i] * w_ho_orb[j*num_orbits+i];
+                w_ho_orb[j*num_orbits+i] -= lr * d_orb[i] * h[j];
             }
         }
         for(int i=0; i<8; ++i) {
             b_o_root[i] -= lr * d_root[i];
             for(int j=0; j<hidden_size; ++j) {
-                w_ho_root[j * 8 + i] -= lr * d_root[i] * h[j];
-                d_h[j] += d_root[i] * old_w_ho_root[j * 8 + i];
+                d_h[j] += d_root[i] * w_ho_root[j*8+i];
+                w_ho_root[j*8+i] -= lr * d_root[i] * h[j];
+            }
+        }
+        b_o_comp[0] -= lr * d_comp_val;
+        double d_comp_tanh = d_comp_val * (1.0 - last_pred.complexity * last_pred.complexity);
+        for(int j=0; j<hidden_size; ++j) {
+            d_h[j] += d_comp_tanh * w_ho_comp[j];
+            w_ho_comp[j] -= lr * d_comp_tanh * h[j];
+        }
+
+        // BPTT for GRU gates
+        std::vector<double> d_z(hidden_size), d_r(hidden_size), d_n(hidden_size);
+        for(int i=0; i<hidden_size; ++i) {
+            d_z[i] = d_h[i] * (cached_n[i] - last_h[i]) * (cached_z[i] * (1.0 - cached_z[i]));
+            d_n[i] = d_h[i] * cached_z[i] * (1.0 - cached_n[i] * cached_n[i]);
+        }
+
+        int in_total = (int)last_x.size();
+        for(int i=0; i<hidden_size; ++i) {
+            b_z[i] -= lr * d_z[i];
+            b_n[i] -= lr * d_n[i];
+            for(int j=0; j<in_total; ++j) {
+                w_iz[j*hidden_size+i] -= lr * d_z[i] * last_x[j];
+                w_in[j*hidden_size+i] -= lr * d_n[i] * last_x[j];
+            }
+            for(int j=0; j<hidden_size; ++j) {
+                w_hz[j*hidden_size+i] -= lr * d_z[i] * last_h[j];
+                w_hn[j*hidden_size+i] -= lr * d_n[i] * (cached_r[j] * last_h[j]);
             }
         }
 
         for(int i=0; i<hidden_size; ++i) {
-            double d_pre = d_h[i] * (1.0 - h[i] * h[i]);
-            b_h[i] -= lr * d_pre;
-            for(int j=0; j<in_spatial; ++j) w_ih_s[j * hidden_size + i] -= lr * d_pre * x_s[j];
-            for(int j=0; j<in_fractal; ++j) w_ih_f[j * hidden_size + i] -= lr * d_pre * x_f[j];
-            for(int j=0; j<hidden_size; ++j) w_hh[j * hidden_size + i] -= lr * d_pre * last_h[j];
+            double d_rec_n = 0;
+            for(int j=0; j<hidden_size; ++j) d_rec_n += d_n[j] * w_hn[i*hidden_size+j];
+            d_r[i] = d_rec_n * last_h[i] * (cached_r[i] * (1.0 - cached_r[i]));
+        }
+
+        for(int i=0; i<hidden_size; ++i) {
+            b_r[i] -= lr * d_r[i];
+            for(int j=0; j<in_total; ++j) w_ir[j*hidden_size+i] -= lr * d_r[i] * last_x[j];
+            for(int j=0; j<hidden_size; ++j) w_hr[j*hidden_size+i] -= lr * d_r[i] * last_h[j];
         }
     }
 };
 
-// --- LZMA Utils ---
-inline std::vector<uint8_t> lzma_compress(const std::vector<uint8_t>& data) {
+// --- LZMA Multi-Channel Utils ---
+inline std::vector<uint8_t> lzma_compress_channels(const std::vector<std::vector<uint8_t>>& channels) {
+    std::vector<uint8_t> all_data;
+    for(const auto& c : channels) {
+        uint32_t sz = (uint32_t)c.size();
+        all_data.push_back(sz & 0xFF);
+        all_data.push_back((sz >> 8) & 0xFF);
+        all_data.push_back((sz >> 16) & 0xFF);
+        all_data.push_back((sz >> 24) & 0xFF);
+        all_data.insert(all_data.end(), c.begin(), c.end());
+    }
     lzma_stream strm = LZMA_STREAM_INIT;
     if (lzma_easy_encoder(&strm, 9, LZMA_CHECK_CRC64) != LZMA_OK) return {};
-    std::vector<uint8_t> out(data.size() + 1024);
-    strm.next_in = data.data(); strm.avail_in = data.size();
+    std::vector<uint8_t> out(all_data.size() + 4096);
+    strm.next_in = all_data.data(); strm.avail_in = all_data.size();
     strm.next_out = out.data(); strm.avail_out = out.size();
     if (lzma_code(&strm, LZMA_FINISH) != LZMA_STREAM_END) { lzma_end(&strm); return {}; }
     out.resize(out.size() - strm.avail_out);
