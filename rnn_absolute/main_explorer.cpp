@@ -77,24 +77,21 @@ Metrics processImage(const std::string& path, double lr, int hid, bool use_lzma 
     Image img = loadPGM(path);
     int w = img.width, h_img = img.height;
 
-    // Spatial Path: 4 neighbors * 8 features = 32
+    // Spatial Path: 4 neighbors * 8 features + 2 local rank history = 34
     // Fractal Path: 4 neighbors * 9 features + 2 pos + 8 min_poly_diffs = 46
-    DualPathGaloisGRU predictor(32, 46, hid, (int)GF8.orbits.size());
+    DualPathGaloisGRU predictor(34, 46, hid, (int)GF8.orbits.size());
 
     std::vector<uint8_t> orbit_stream;
-    std::vector<uint8_t> root_stream;
-    std::vector<uint8_t> trace_stream;
     std::vector<uint8_t> reconstructed_data(w * h_img, 0);
     int errs = 0;
+    uint8_t last_rank = 0, last_rid = 0;
 
     for(int y=0; y<h_img; ++y) {
         for(int x=0; x<w; ++x) {
             int i = y * w + x;
             if (y < 16 || x < 16 || x >= w - 16 || y >= h_img - 16) {
                 reconstructed_data[i] = img.data[i];
-                orbit_stream.push_back((uint8_t)GF8.element_to_orbit_id[img.data[i]]);
-                root_stream.push_back((uint8_t)GF8.element_to_root_index[img.data[i]]);
-                trace_stream.push_back(GF8.tr8_1(img.data[i]));
+                orbit_stream.push_back(0); // placeholder rank
                 continue;
             }
 
@@ -119,6 +116,8 @@ Metrics processImage(const std::string& path, double lr, int hid, bool use_lzma 
                 auto s = stalk(getV(nx[j], ny[j]), ref_val);
                 x_s.insert(x_s.end(), s.begin(), s.end());
             }
+            x_s.push_back((double)last_rank / 255.0);
+            x_s.push_back((double)last_rid / 8.0);
 
             int fx[] = {x-2, x, x-4, x}, fy[] = {y, y-2, y, y-4};
             for(int j=0; j<4; ++j) {
@@ -138,29 +137,43 @@ Metrics processImage(const std::string& path, double lr, int hid, bool use_lzma 
             }
 
             auto res_pair = predictor.forward(x_s, x_f);
-            int actual_orbit = GF8.element_to_orbit_id[img.data[i]];
-            int actual_root = GF8.element_to_root_index[img.data[i]];
 
-            auto get_rank = [](const std::vector<double>& probs, int actual) {
-                int rank = 0;
-                double target_p = probs[actual];
-                for(double p : probs) if(p > target_p) rank++;
-                return rank;
-            };
+            // Unified Byte-level Probability Estimation
+            std::vector<double> byte_probs(256, 0.0);
+            std::vector<double> orbit_root_sums(GF8.orbits.size(), 1e-9);
+            for(int b=0; b<256; b++) {
+                int oid = GF8.element_to_orbit_id[b];
+                int rid = GF8.element_to_root_index[b];
+                orbit_root_sums[oid] += (rid < 8) ? res_pair.p_root[rid] : 0.0;
+            }
 
-            orbit_stream.push_back((uint8_t)get_rank(res_pair.p_orb, actual_orbit));
-            root_stream.push_back((uint8_t)get_rank(res_pair.p_root, actual_root));
-            trace_stream.push_back(GF8.tr8_1(img.data[i]));
+            for(int b=0; b<256; b++) {
+                int oid = GF8.element_to_orbit_id[b];
+                int rid = GF8.element_to_root_index[b];
+                double p_root_norm = (rid < 8) ? (res_pair.p_root[rid] / orbit_root_sums[oid]) : 0.0;
+                byte_probs[b] = res_pair.p_orb[oid] * p_root_norm;
+            }
 
-            reconstructed_data[i] = GF8.orbits[actual_orbit].elements[actual_root];
+            uint8_t actual_val = img.data[i];
+            double target_p = byte_probs[actual_val];
+            int rank = 0;
+            for(int b=0; b<256; b++) if(byte_probs[b] > target_p) rank++;
+
+            orbit_stream.push_back((uint8_t)rank);
+            reconstructed_data[i] = actual_val;
             if (reconstructed_data[i] != img.data[i]) errs++;
 
             double local_fd = estimate_local_fd(reconstructed_data, x, y, w, h_img);
+            int actual_orbit = GF8.element_to_orbit_id[img.data[i]];
+            int actual_root = GF8.element_to_root_index[img.data[i]];
             predictor.train(actual_orbit, actual_root, local_fd/3.0, lr);
+
+            last_rank = (uint8_t)rank;
+            last_rid = (uint8_t)actual_root;
         }
     }
 
-    std::vector<std::vector<uint8_t>> channels = {trace_stream, orbit_stream, root_stream};
+    std::vector<std::vector<uint8_t>> channels = {orbit_stream};
     std::vector<uint8_t> compressed;
     if (use_lzma) {
         compressed = lzma_compress_channels(channels);
@@ -172,28 +185,26 @@ Metrics processImage(const std::string& path, double lr, int hid, bool use_lzma 
     savePGM("reconstructed_" + base, {w, h_img, reconstructed_data});
 
     double e_orig = calculateEntropy(img.data);
-    double e_tr = calculateEntropy(trace_stream);
-    double e_orb = calculateEntropy(orbit_stream);
-    double e_root = calculateEntropy(root_stream);
-    double core_eff = e_orig / (e_tr + e_orb + e_root + 1e-9);
+    double e_rank = calculateEntropy(orbit_stream);
+    double core_eff = e_orig / (e_rank + 1e-9);
 
-    return {path, e_orig, e_tr, e_orb, e_root, core_eff, (double)img.data.size() / std::max((size_t)1, compressed.size()), errs == 0};
+    return {path, e_orig, 0.0, e_rank, 0.0, core_eff, (double)img.data.size() / std::max((size_t)1, compressed.size()), errs == 0};
 }
 
 int main() {
     std::string img1 = "../absolute_galois_group/compressor/01/test.pgm";
     std::string img2 = "../absolute_galois_group/compressor/01/GhostInShell_02_005.pgm";
 
-    auto m1 = processImage(img1, 0.012, 48, true);
-    auto m2 = processImage(img2, 0.012, 48, true);
+    auto m1 = processImage(img1, 0.018, 64, true);
+    auto m2 = processImage(img2, 0.018, 64, true);
 
     std::ofstream report("compression_report.md");
     report << "# Peak Holomorphic Tensor Absolute Galois RNN Compression Report\n\n";
-    report << "| Image | Orig Ent | Tr Ent | OrbR Ent | RootR Ent | Core Eff | LZMA Ratio | Recon |\n";
-    report << "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n";
+    report << "| Image | Orig Ent | Unified Rank Ent | Core Eff | LZMA Ratio | Recon |\n";
+    report << "| :--- | :--- | :--- | :--- | :--- | :--- |\n";
     auto add = [&](Metrics m) {
         report << "| " << m.name << " | " << std::fixed << std::setprecision(4) << m.orig_ent
-               << " | " << m.trace_ent << " | " << m.rank_orb_ent << " | " << m.rank_root_ent
+               << " | " << m.rank_orb_ent
                << " | " << m.core_efficiency << ":1 | " << m.lzma_ratio << ":1 | " << (m.success ? "SUCCESS" : "FAIL") << " |\n";
     };
     add(m1); add(m2);

@@ -61,7 +61,7 @@ public:
                 poly = next_poly;
             }
             orb.min_poly_coeffs = poly;
-            std::sort(orb.elements.begin(), orb.elements.end());
+            // Removed std::sort to preserve Frobenius-cyclic order
             for (size_t j = 0; j < orb.elements.size(); j++) {
                 element_to_orbit_id[orb.elements[j]] = orb.id;
                 element_to_root_index[orb.elements[j]] = (int)j;
