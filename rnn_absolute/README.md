@@ -12,7 +12,7 @@ This project implements an advanced image compression system that merges Recurre
 
 ## Performance
 
-The system achieves a peak compression ratio of **~1.25:1** on standard anime-style test images, significantly outperforming baseline neural and classical predictors through rigorous algebraic modeling and predictive rank encoding.
+The system achieves a peak compression ratio of **~1.25:1** on standard anime-style test images. It utilizes a **Core Efficiency** metric to track how well the Galois-Rank encoding reduces raw symbol entropy before the final LZMA stage.
 
 ## How to Build
 

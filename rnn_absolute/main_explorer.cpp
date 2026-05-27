@@ -17,7 +17,8 @@ struct Image {
 struct Metrics {
     std::string name;
     double orig_ent;
-    double orbit_ent;
+    double trace_ent, rank_orb_ent, rank_root_ent;
+    double core_efficiency;
     double lzma_ratio;
     bool success;
 };
@@ -71,8 +72,8 @@ double estimate_local_fd(const std::vector<uint8_t>& img, int x, int y, int w, i
     return std::clamp(3.0 - h_exp, 1.0, 3.0);
 }
 
-Metrics processImage(const std::string& path, double lr, int hid) {
-    std::cout << "[*] Processing Holomorphic Tensor Absolute Galois RNN: " << path << std::endl;
+Metrics processImage(const std::string& path, double lr, int hid, bool use_lzma = true) {
+    std::cout << "[*] Processing Holomorphic Tensor Absolute Galois RNN: " << path << " (LZMA: " << (use_lzma ? "ON" : "OFF") << ")" << std::endl;
     Image img = loadPGM(path);
     int w = img.width, h_img = img.height;
 
@@ -160,27 +161,40 @@ Metrics processImage(const std::string& path, double lr, int hid) {
     }
 
     std::vector<std::vector<uint8_t>> channels = {trace_stream, orbit_stream, root_stream};
-    auto compressed = lzma_compress_channels(channels);
+    std::vector<uint8_t> compressed;
+    if (use_lzma) {
+        compressed = lzma_compress_channels(channels);
+    } else {
+        for(const auto& c : channels) compressed.insert(compressed.end(), c.begin(), c.end());
+    }
 
     std::string base = path.substr(path.find_last_of("/\\") + 1);
     savePGM("reconstructed_" + base, {w, h_img, reconstructed_data});
 
-    return {path, calculateEntropy(img.data), calculateEntropy(orbit_stream), (double)img.data.size() / std::max((size_t)1, compressed.size()), errs == 0};
+    double e_orig = calculateEntropy(img.data);
+    double e_tr = calculateEntropy(trace_stream);
+    double e_orb = calculateEntropy(orbit_stream);
+    double e_root = calculateEntropy(root_stream);
+    double core_eff = e_orig / (e_tr + e_orb + e_root + 1e-9);
+
+    return {path, e_orig, e_tr, e_orb, e_root, core_eff, (double)img.data.size() / std::max((size_t)1, compressed.size()), errs == 0};
 }
 
 int main() {
     std::string img1 = "../absolute_galois_group/compressor/01/test.pgm";
     std::string img2 = "../absolute_galois_group/compressor/01/GhostInShell_02_005.pgm";
 
-    auto m1 = processImage(img1, 0.012, 32);
-    auto m2 = processImage(img2, 0.012, 32);
+    auto m1 = processImage(img1, 0.012, 48, true);
+    auto m2 = processImage(img2, 0.012, 48, true);
 
     std::ofstream report("compression_report.md");
     report << "# Peak Holomorphic Tensor Absolute Galois RNN Compression Report\n\n";
-    report << "| Image | Orig Entropy | Orbit Entropy | LZMA Ratio | Recon |\n";
-    report << "| :--- | :--- | :--- | :--- | :--- |\n";
+    report << "| Image | Orig Ent | Tr Ent | OrbR Ent | RootR Ent | Core Eff | LZMA Ratio | Recon |\n";
+    report << "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n";
     auto add = [&](Metrics m) {
-        report << "| " << m.name << " | " << std::fixed << std::setprecision(4) << m.orig_ent << " | " << m.orbit_ent << " | " << m.lzma_ratio << ":1 | " << (m.success ? "SUCCESS" : "FAIL") << " |\n";
+        report << "| " << m.name << " | " << std::fixed << std::setprecision(4) << m.orig_ent
+               << " | " << m.trace_ent << " | " << m.rank_orb_ent << " | " << m.rank_root_ent
+               << " | " << m.core_efficiency << ":1 | " << m.lzma_ratio << ":1 | " << (m.success ? "SUCCESS" : "FAIL") << " |\n";
     };
     add(m1); add(m2);
     return 0;
