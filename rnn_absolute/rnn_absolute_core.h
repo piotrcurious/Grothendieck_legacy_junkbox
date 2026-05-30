@@ -131,9 +131,29 @@ public:
 
         std::default_random_engine gen(1337);
         std::uniform_real_distribution<double> dist(-0.1, 0.1);
+        std::normal_distribution<double> norm(0.0, 1.0);
         auto init = [&](std::vector<double>& v) { for(auto& x : v) x = dist(gen); };
-        init(w_iz); init(w_ir); init(w_in); init(w_hz); init(w_hr); init(w_hn);
+        init(w_iz); init(w_ir); init(w_in);
         init(w_ho_orb); init(w_ho_root); init(w_ho_comp);
+
+        auto ortho_init = [&](std::vector<double>& v, int rows, int cols) {
+            for(auto& x : v) x = norm(gen);
+            // Simple Gram-Schmidt for orthogonalization
+            for(int i=0; i<cols; ++i) {
+                for(int j=0; j<i; ++j) {
+                    double dot = 0;
+                    for(int k=0; k<rows; ++k) dot += v[k*cols+i] * v[k*cols+j];
+                    for(int k=0; k<rows; ++k) v[k*cols+i] -= dot * v[k*cols+j];
+                }
+                double norm_v = 0;
+                for(int k=0; k<rows; ++k) norm_v += v[k*cols+i] * v[k*cols+i];
+                norm_v = std::sqrt(norm_v + 1e-9);
+                for(int k=0; k<rows; ++k) v[k*cols+i] /= norm_v;
+            }
+        };
+        ortho_init(w_hz, hidden_size, hidden_size);
+        ortho_init(w_hr, hidden_size, hidden_size);
+        ortho_init(w_hn, hidden_size, hidden_size);
         h.assign(hid, 0.0);
         cached_z.assign(hid, 0.0); cached_r.assign(hid, 0.0); cached_n.assign(hid, 0.0);
     }
@@ -187,8 +207,17 @@ public:
     }
 
     void train(int t_orb, int t_root, double t_comp, double lr) {
-        std::vector<double> d_orb = last_pred.p_orb; d_orb[t_orb] -= 1.0;
-        std::vector<double> d_root = last_pred.p_root; d_root[t_root] -= 1.0;
+        double eps = 0.1;
+        std::vector<double> d_orb(num_orbits);
+        for(int i=0; i<num_orbits; ++i) {
+            double target = (i == t_orb) ? (1.0 - eps) : (eps / (num_orbits - 1));
+            d_orb[i] = last_pred.p_orb[i] - target;
+        }
+        std::vector<double> d_root(8);
+        for(int i=0; i<8; ++i) {
+            double target = (i == t_root) ? (1.0 - eps) : (eps / 7.0);
+            d_root[i] = last_pred.p_root[i] - target;
+        }
         double d_comp_val = last_pred.complexity - t_comp;
 
         std::vector<double> d_h(hidden_size, 0.0);
