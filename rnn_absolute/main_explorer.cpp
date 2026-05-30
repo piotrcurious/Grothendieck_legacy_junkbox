@@ -77,9 +77,9 @@ Metrics processImage(const std::string& path, double lr, int hid, bool use_lzma 
     Image img = loadPGM(path);
     int w = img.width, h_img = img.height;
 
-    // Spatial Path: 4 neighbors * 8 features + 2 local rank history = 34
-    // Fractal Path: 4 neighbors * 9 features + 2 pos + 8 min_poly_diffs = 46
-    DualPathGaloisGRU predictor(34, 46, hid, (int)GF8.orbits.size());
+    // Spatial Path: 8 neighbors * 9 features + 2 local rank history = 74
+    // Fractal Path: 5 neighbors * 10 features + 2 pos + 8 min_poly_diffs = 60
+    DualPathGaloisGRU predictor(74, 60, hid, (int)GF8.orbits.size());
 
     std::vector<uint8_t> orbit_stream;
     std::vector<uint8_t> reconstructed_data(w * h_img, 0);
@@ -97,6 +97,8 @@ Metrics processImage(const std::string& path, double lr, int hid, bool use_lzma 
 
             auto getV = [&](int tx, int ty) { return reconstructed_data[ty * w + tx]; };
             auto stalk = [&](uint8_t v, uint8_t ref) {
+                uint8_t inv_ref = GF8.inv_table[ref];
+                uint8_t mul_diff = GF8.mul(v, inv_ref);
                 return std::vector<double>{
                     (double)GF8.tr8_1(v),
                     (double)GF8.tr8_4(v)/255.0,
@@ -105,22 +107,23 @@ Metrics processImage(const std::string& path, double lr, int hid, bool use_lzma 
                     (double)GF8.element_to_orbit_id[v]/(double)GF8.orbits.size(),
                     (double)GF8.orbits[GF8.element_to_orbit_id[v]].elements.size()/8.0,
                     (double)v/255.0,
-                    (double)GF8.bilinear_trace(v, ref)
+                    (double)GF8.bilinear_trace(v, ref),
+                    (double)mul_diff / 255.0
                 };
             };
 
             std::vector<double> x_s, x_f;
-            int nx[] = {x-1, x, x-1, x+1}, ny[] = {y, y-1, y-1, y-1};
+            int nx[] = {x-1, x, x-1, x+1, x-2, x, x-2, x-1}, ny[] = {y, y-1, y-1, y-1, y, y-2, y-1, y-2};
             uint8_t ref_val = getV(x-1, y-1);
-            for(int j=0; j<4; ++j) {
+            for(int j=0; j<8; ++j) {
                 auto s = stalk(getV(nx[j], ny[j]), ref_val);
                 x_s.insert(x_s.end(), s.begin(), s.end());
             }
             x_s.push_back((double)last_rank / 255.0);
             x_s.push_back((double)last_rid / 8.0);
 
-            int fx[] = {x-2, x, x-4, x}, fy[] = {y, y-2, y, y-4};
-            for(int j=0; j<4; ++j) {
+            int fx[] = {x-2, x, x-4, x, x-8}, fy[] = {y, y-2, y, y-4, y};
+            for(int j=0; j<5; ++j) {
                 uint8_t fv = getV(fx[j], fy[j]);
                 auto s = stalk(fv, ref_val);
                 x_f.insert(x_f.end(), s.begin(), s.end());
@@ -195,8 +198,8 @@ int main() {
     std::string img1 = "../absolute_galois_group/compressor/01/test.pgm";
     std::string img2 = "../absolute_galois_group/compressor/01/GhostInShell_02_005.pgm";
 
-    auto m1 = processImage(img1, 0.018, 64, true);
-    auto m2 = processImage(img2, 0.018, 64, true);
+    auto m1 = processImage(img1, 0.015, 128, true);
+    auto m2 = processImage(img2, 0.015, 128, true);
 
     std::ofstream report("compression_report.md");
     report << "# Peak Holomorphic Tensor Absolute Galois RNN Compression Report\n\n";
