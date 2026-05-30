@@ -2,5 +2,6 @@
 
 | Image | Orig Ent | Unified Rank Ent | Core Eff | LZMA Ratio | Recon |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| ../absolute_galois_group/compressor/01/test.pgm | 6.3589 | 5.4574 | 1.1652:1 | 1.6243:1 | SUCCESS |
-| ../absolute_galois_group/compressor/01/GhostInShell_02_005.pgm | 5.9783 | 5.4413 | 1.0987:1 | 1.6421:1 | SUCCESS |
+| ../absolute_galois_group/compressor/01/test.pgm | 5.9435 | 4.5419 | 1.3086:1 | 1.9944:1 | SUCCESS |
+| ../absolute_galois_group/compressor/01/GhostInShell_02_005.pgm | 5.4366 | 4.4836 | 1.2126:1 | 2.0257:1 | SUCCESS |
+| ../absolute_galois_group/compressor/01/iter/ghcd_08/test.pgm | 2.3695 | 1.5989 | 1.4819:1 | 4.9409:1 | SUCCESS |

@@ -72,8 +72,9 @@ double estimate_local_fd(const std::vector<uint8_t>& img, int x, int y, int w, i
     return std::clamp(3.0 - h_exp, 1.0, 3.0);
 }
 
-Metrics processImage(const std::string& path, double lr, int hid, bool use_lzma = true) {
-    std::cout << "[*] Processing Holomorphic Tensor Absolute Galois RNN: " << path << " (LZMA: " << (use_lzma ? "ON" : "OFF") << ")" << std::endl;
+Metrics processImage(const std::string& path, double lr, int hid, int lossy_q = 0, bool use_lzma = true) {
+    std::cout << "[*] Processing Holomorphic Tensor Absolute Galois RNN: " << path
+              << " (Quality: " << lossy_q << ", LZMA: " << (use_lzma ? "ON" : "OFF") << ")" << std::endl;
     Image img = loadPGM(path);
     int w = img.width, h_img = img.height;
 
@@ -157,18 +158,32 @@ Metrics processImage(const std::string& path, double lr, int hid, bool use_lzma 
                 byte_probs[b] = res_pair.p_orb[oid] * p_root_norm;
             }
 
-            uint8_t actual_val = img.data[i];
-            double target_p = byte_probs[actual_val];
+            uint8_t target_val = img.data[i];
+            uint8_t selected_val = target_val;
+
+            if (lossy_q > 0) {
+                // Lossy: Search for most probable value within radius
+                int radius = std::max(1, (100 - lossy_q) / 10);
+                double max_p = -1.0;
+                for (int v = std::max(0, (int)target_val - radius); v <= std::min(255, (int)target_val + radius); ++v) {
+                    if (byte_probs[v] > max_p) {
+                        max_p = byte_probs[v];
+                        selected_val = (uint8_t)v;
+                    }
+                }
+            }
+
+            double p_selected = byte_probs[selected_val];
             int rank = 0;
-            for(int b=0; b<256; b++) if(byte_probs[b] > target_p) rank++;
+            for(int b=0; b<256; b++) if(byte_probs[b] > p_selected) rank++;
 
             orbit_stream.push_back((uint8_t)rank);
-            reconstructed_data[i] = actual_val;
+            reconstructed_data[i] = selected_val;
             if (reconstructed_data[i] != img.data[i]) errs++;
 
             double local_fd = estimate_local_fd(reconstructed_data, x, y, w, h_img);
-            int actual_orbit = GF8.element_to_orbit_id[img.data[i]];
-            int actual_root = GF8.element_to_root_index[img.data[i]];
+            int actual_orbit = GF8.element_to_orbit_id[selected_val];
+            int actual_root = GF8.element_to_root_index[selected_val];
             predictor.train(actual_orbit, actual_root, local_fd/3.0, lr);
 
             last_rank = (uint8_t)rank;
@@ -185,7 +200,8 @@ Metrics processImage(const std::string& path, double lr, int hid, bool use_lzma 
     }
 
     std::string base = path.substr(path.find_last_of("/\\") + 1);
-    savePGM("reconstructed_" + base, {w, h_img, reconstructed_data});
+    std::string q_str = (lossy_q > 0) ? "_q" + std::to_string(lossy_q) : "";
+    savePGM("reconstructed_" + base.substr(0, base.find_last_of(".")) + q_str + ".pgm", {w, h_img, reconstructed_data});
 
     double e_orig = calculateEntropy(img.data);
     double e_rank = calculateEntropy(orbit_stream);
@@ -194,14 +210,20 @@ Metrics processImage(const std::string& path, double lr, int hid, bool use_lzma 
     return {path, e_orig, 0.0, e_rank, 0.0, core_eff, (double)img.data.size() / std::max((size_t)1, compressed.size()), errs == 0};
 }
 
-int main() {
+int main(int argc, char** argv) {
     std::string img1 = "../absolute_galois_group/compressor/01/test.pgm";
     std::string img2 = "../absolute_galois_group/compressor/01/GhostInShell_02_005.pgm";
+    std::string img3 = "../absolute_galois_group/compressor/01/iter/ghcd_08/test.pgm";
 
-    auto m1 = processImage(img1, 0.015, 128, true);
-    auto m2 = processImage(img2, 0.015, 128, true);
+    int q = 0;
+    if (argc > 1) q = std::stoi(argv[1]);
 
-    std::ofstream report("compression_report.md");
+    auto m1 = processImage(img1, 0.015, 128, q, true);
+    auto m2 = processImage(img2, 0.015, 128, q, true);
+    auto m3 = processImage(img3, 0.015, 128, q, true);
+
+    std::string suffix = (q > 0) ? "_q" + std::to_string(q) : "";
+    std::ofstream report("compression_report" + suffix + ".md");
     report << "# Peak Holomorphic Tensor Absolute Galois RNN Compression Report\n\n";
     report << "| Image | Orig Ent | Unified Rank Ent | Core Eff | LZMA Ratio | Recon |\n";
     report << "| :--- | :--- | :--- | :--- | :--- | :--- |\n";
@@ -210,6 +232,6 @@ int main() {
                << " | " << m.rank_orb_ent
                << " | " << m.core_efficiency << ":1 | " << m.lzma_ratio << ":1 | " << (m.success ? "SUCCESS" : "FAIL") << " |\n";
     };
-    add(m1); add(m2);
+    add(m1); add(m2); add(m3);
     return 0;
 }
