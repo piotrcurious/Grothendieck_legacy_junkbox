@@ -72,20 +72,49 @@ double estimate_local_fd(const std::vector<uint8_t>& img, int x, int y, int w, i
     return std::clamp(3.0 - h_exp, 1.0, 3.0);
 }
 
-Metrics processImage(const std::string& path, double lr, int hid, int lossy_q = 0, bool use_lzma = true) {
+double estimate_algebraic_complexity(const std::vector<uint8_t>& img, int x, int y, int w, int h) {
+    auto get = [&](int tx, int ty) {
+        if(tx<0||ty<0||tx>=w||ty>=h) return (uint8_t)0;
+        return img[ty*w+tx];
+    };
+    auto get_deg = [&](int tx, int ty) {
+        uint8_t v = get(tx, ty);
+        return (double)GF8.orbits[GF8.element_to_orbit_id[v]].elements.size();
+    };
+
+    double d0 = get_deg(x, y);
+    double d1 = (get_deg(x-1, y) + get_deg(x, y-1) + get_deg(x+1, y) + get_deg(x, y+1)) / 4.0;
+    double d2 = (get_deg(x-2, y) + get_deg(x, y-2) + get_deg(x+2, y) + get_deg(x, y+2)) / 4.0;
+
+    // Complexity as rate of change of minimal polynomial degree
+    double complexity = (std::abs(d1 - d0) + std::abs(d2 - d1)) / 8.0;
+    return std::clamp(complexity, 0.0, 1.0);
+}
+
+Metrics processImage(const std::string& path, double lr, int hid, int lossy_q = 0, int crop_sz = 0, bool use_lzma = true) {
     std::cout << "[*] Processing Holomorphic Tensor Absolute Galois RNN: " << path
-              << " (Quality: " << lossy_q << ", LZMA: " << (use_lzma ? "ON" : "OFF") << ")" << std::endl;
-    Image img = loadPGM(path);
+              << " (Quality: " << lossy_q << ", Crop: " << (crop_sz ? std::to_string(crop_sz) : "FULL")
+              << ", LZMA: " << (use_lzma ? "ON" : "OFF") << ")" << std::endl;
+    Image full = loadPGM(path);
+    Image img;
+    if (crop_sz > 0 && full.width >= crop_sz && full.height >= crop_sz) {
+        img.width = crop_sz; img.height = crop_sz;
+        img.data.resize(crop_sz * crop_sz);
+        int ox = (full.width - crop_sz) / 2, oy = (full.height - crop_sz) / 2;
+        for(int y=0; y<crop_sz; ++y) for(int x=0; x<crop_sz; ++x) img.data[y*crop_sz+x] = full.data[(oy+y)*full.width+(ox+x)];
+    } else {
+        img = full;
+    }
     int w = img.width, h_img = img.height;
 
-    // Spatial Path: 8 neighbors * 9 features + 2 local rank history = 74
-    // Fractal Path: 5 neighbors * 10 features + 2 pos + 8 min_poly_diffs = 60
-    DualPathGaloisGRU predictor(74, 60, hid, (int)GF8.orbits.size());
+    // Spatial Path: 8 neighbors * 15 features + 3 feedback (rank, root, resid) = 123
+    // Fractal Path: 5 neighbors * 18 features + 2 pos + 8 min_poly_diffs = 100
+    DualPathGaloisGRU predictor(123, 100, hid, (int)GF8.orbits.size());
 
     std::vector<uint8_t> orbit_stream;
     std::vector<uint8_t> reconstructed_data(w * h_img, 0);
     int errs = 0;
-    uint8_t last_rank = 0, last_rid = 0;
+    uint8_t last_rank = 0, last_rid = 0, last_resid = 0;
 
     for(int y=0; y<h_img; ++y) {
         for(int x=0; x<w; ++x) {
@@ -100,16 +129,25 @@ Metrics processImage(const std::string& path, double lr, int hid, int lossy_q = 
             auto stalk = [&](uint8_t v, uint8_t ref) {
                 uint8_t inv_ref = GF8.inv_table[ref];
                 uint8_t mul_diff = GF8.mul(v, inv_ref);
+                uint8_t tr1 = GF8.tr8_1(v);
+                uint8_t tr2 = GF8.tr8_2(v);
+                uint8_t tr4 = GF8.tr8_4(v);
                 return std::vector<double>{
-                    (double)GF8.tr8_1(v),
-                    (double)GF8.tr8_4(v)/255.0,
-                    (double)GF8.tr8_2(v)/255.0,
+                    (double)tr1,
+                    (double)tr4/255.0,
+                    (double)tr2/255.0,
                     (double)GF8.norm8_4(v)/255.0,
                     (double)GF8.element_to_orbit_id[v]/(double)GF8.orbits.size(),
                     (double)GF8.orbits[GF8.element_to_orbit_id[v]].elements.size()/8.0,
                     (double)v/255.0,
                     (double)GF8.bilinear_trace(v, ref),
-                    (double)mul_diff / 255.0
+                    (double)mul_diff / 255.0,
+                    (double)GF8.tr8_power(v, 3),
+                    (double)GF8.tr8_power(v, 5),
+                    (double)(tr1 ^ (tr2 & 1)), // Holomorphy diff 1
+                    (double)(tr2 ^ tr4) / 255.0, // Holomorphy diff 2
+                    (double)(tr4 ^ v) / 255.0,  // Holomorphy diff 3
+                    (double)GF8.to_normal[v] / 255.0
                 };
             };
 
@@ -122,6 +160,7 @@ Metrics processImage(const std::string& path, double lr, int hid, int lossy_q = 
             }
             x_s.push_back((double)last_rank / 255.0);
             x_s.push_back((double)last_rid / 8.0);
+            x_s.push_back((double)last_resid / 255.0);
 
             int fx[] = {x-2, x, x-4, x, x-8}, fy[] = {y, y-2, y, y-4, y};
             for(int j=0; j<5; ++j) {
@@ -129,6 +168,8 @@ Metrics processImage(const std::string& path, double lr, int hid, int lossy_q = 
                 auto s = stalk(fv, ref_val);
                 x_f.insert(x_f.end(), s.begin(), s.end());
                 x_f.push_back(estimate_local_fd(reconstructed_data, fx[j], fy[j], w, h_img) / 3.0);
+                x_f.push_back(estimate_algebraic_complexity(reconstructed_data, fx[j], fy[j], w, h_img));
+                x_f.push_back((double)GF8.tr8_power(fv, 7));
             }
             x_f.push_back((double)x/w); x_f.push_back((double)y/h_img);
 
@@ -162,12 +203,16 @@ Metrics processImage(const std::string& path, double lr, int hid, int lossy_q = 
             uint8_t selected_val = target_val;
 
             if (lossy_q > 0) {
-                // Lossy: Search for most probable value within radius
-                int radius = std::max(1, (100 - lossy_q) / 10);
-                double max_p = -1.0;
+                // Rate-Distortion Optimization (RDO): cost = -log2(p) + lambda * dist
+                double lambda = std::pow(2.0, (100.0 - lossy_q) / 10.0) * 0.01;
+                int radius = std::max(1, (100 - lossy_q) / 8);
+                double min_cost = 1e18;
                 for (int v = std::max(0, (int)target_val - radius); v <= std::min(255, (int)target_val + radius); ++v) {
-                    if (byte_probs[v] > max_p) {
-                        max_p = byte_probs[v];
+                    double p = std::max(byte_probs[v], 1e-12);
+                    double dist = (v - target_val) * (v - target_val);
+                    double cost = -std::log2(p) + lambda * dist;
+                    if (cost < min_cost) {
+                        min_cost = cost;
                         selected_val = (uint8_t)v;
                     }
                 }
@@ -182,12 +227,14 @@ Metrics processImage(const std::string& path, double lr, int hid, int lossy_q = 
             if (reconstructed_data[i] != img.data[i]) errs++;
 
             double local_fd = estimate_local_fd(reconstructed_data, x, y, w, h_img);
+            double gain = 1.0 + (local_fd - 2.0); // Adaptive learning rate gain
             int actual_orbit = GF8.element_to_orbit_id[selected_val];
             int actual_root = GF8.element_to_root_index[selected_val];
-            predictor.train(actual_orbit, actual_root, local_fd/3.0, lr);
+            predictor.train(x_s, x_f, actual_orbit, actual_root, local_fd/3.0, lr * gain);
 
             last_rank = (uint8_t)rank;
             last_rid = (uint8_t)actual_root;
+            last_resid = (uint8_t)std::abs((int)selected_val - (int)target_val);
         }
     }
 
@@ -215,12 +262,13 @@ int main(int argc, char** argv) {
     std::string img2 = "../absolute_galois_group/compressor/01/GhostInShell_02_005.pgm";
     std::string img3 = "../absolute_galois_group/compressor/01/iter/ghcd_08/test.pgm";
 
-    int q = 0;
+    int q = 0, crop = 0;
     if (argc > 1) q = std::stoi(argv[1]);
+    if (argc > 2) crop = std::stoi(argv[2]);
 
-    auto m1 = processImage(img1, 0.015, 128, q, true);
-    auto m2 = processImage(img2, 0.015, 128, q, true);
-    auto m3 = processImage(img3, 0.015, 128, q, true);
+    auto m1 = processImage(img1, 0.015, 128, q, crop, true);
+    auto m2 = processImage(img2, 0.015, 128, q, crop, true);
+    auto m3 = processImage(img3, 0.015, 128, q, crop, true);
 
     std::string suffix = (q > 0) ? "_q" + std::to_string(q) : "";
     std::ofstream report("compression_report" + suffix + ".md");
