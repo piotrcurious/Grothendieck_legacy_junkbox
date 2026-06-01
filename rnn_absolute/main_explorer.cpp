@@ -57,40 +57,6 @@ double calculateEntropy(const std::vector<uint8_t>& data) {
     return entropy;
 }
 
-double estimate_local_fd(const std::vector<uint8_t>& img, int x, int y, int w, int h) {
-    auto get = [&](int tx, int ty) { return (tx<0||ty<0||tx>=w||ty>=h)?0:img[ty*w+tx]; };
-    auto var = [&](int sz) {
-        double s=0, s2=0; int n=0;
-        for(int j=y-sz; j<=y+sz; ++j) for(int i=x-sz; i<=x+sz; ++i) {
-            double v = (double)get(i, j); s += v; s2 += v*v; n++;
-        }
-        return (s2/n - (s/n)*(s/n));
-    };
-    double v1 = var(1), v4 = var(4);
-    if(v1 < 1e-5) return 2.0;
-    double h_exp = (std::log(v4+1e-5) - std::log(v1+1e-5)) / (2.0 * std::log(4.0));
-    return std::clamp(3.0 - h_exp, 1.0, 3.0);
-}
-
-double estimate_algebraic_complexity(const std::vector<uint8_t>& img, int x, int y, int w, int h) {
-    auto get = [&](int tx, int ty) {
-        if(tx<0||ty<0||tx>=w||ty>=h) return (uint8_t)0;
-        return img[ty*w+tx];
-    };
-    auto get_deg = [&](int tx, int ty) {
-        uint8_t v = get(tx, ty);
-        return (double)GF8.orbits[GF8.element_to_orbit_id[v]].elements.size();
-    };
-
-    double d0 = get_deg(x, y);
-    double d1 = (get_deg(x-1, y) + get_deg(x, y-1) + get_deg(x+1, y) + get_deg(x, y+1)) / 4.0;
-    double d2 = (get_deg(x-2, y) + get_deg(x, y-2) + get_deg(x+2, y) + get_deg(x, y+2)) / 4.0;
-
-    // Complexity as rate of change of minimal polynomial degree
-    double complexity = (std::abs(d1 - d0) + std::abs(d2 - d1)) / 8.0;
-    return std::clamp(complexity, 0.0, 1.0);
-}
-
 Metrics processImage(const std::string& path, double lr, int hid, int lossy_q = 0, int crop_sz = 0, bool use_lzma = true) {
     std::cout << "[*] Processing Holomorphic Tensor Absolute Galois RNN: " << path
               << " (Quality: " << lossy_q << ", Crop: " << (crop_sz ? std::to_string(crop_sz) : "FULL")
@@ -107,9 +73,9 @@ Metrics processImage(const std::string& path, double lr, int hid, int lossy_q = 
     }
     int w = img.width, h_img = img.height;
 
-    // Spatial Path: 8 neighbors * 18 features + 3 feedback (rank, root, resid) = 147
+    // Spatial Path: 8 neighbors * 18 features + 2 history = 146
     // Fractal Path: 5 neighbors * 18 features + 2 pos + 8 min_poly_diffs = 100
-    DualPathGaloisGRU predictor(147, 100, hid, (int)GF8.orbits.size());
+    DualPathGaloisGRU predictor(146, 100, hid, (int)GF8.orbits.size());
 
     std::vector<uint8_t> orbit_stream;
     std::vector<uint8_t> reconstructed_data(w * h_img, 0);
