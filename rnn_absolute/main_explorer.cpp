@@ -57,40 +57,6 @@ double calculateEntropy(const std::vector<uint8_t>& data) {
     return entropy;
 }
 
-double estimate_local_fd(const std::vector<uint8_t>& img, int x, int y, int w, int h) {
-    auto get = [&](int tx, int ty) { return (tx<0||ty<0||tx>=w||ty>=h)?0:img[ty*w+tx]; };
-    auto var = [&](int sz) {
-        double s=0, s2=0; int n=0;
-        for(int j=y-sz; j<=y+sz; ++j) for(int i=x-sz; i<=x+sz; ++i) {
-            double v = (double)get(i, j); s += v; s2 += v*v; n++;
-        }
-        return (s2/n - (s/n)*(s/n));
-    };
-    double v1 = var(1), v4 = var(4);
-    if(v1 < 1e-5) return 2.0;
-    double h_exp = (std::log(v4+1e-5) - std::log(v1+1e-5)) / (2.0 * std::log(4.0));
-    return std::clamp(3.0 - h_exp, 1.0, 3.0);
-}
-
-double estimate_algebraic_complexity(const std::vector<uint8_t>& img, int x, int y, int w, int h) {
-    auto get = [&](int tx, int ty) {
-        if(tx<0||ty<0||tx>=w||ty>=h) return (uint8_t)0;
-        return img[ty*w+tx];
-    };
-    auto get_deg = [&](int tx, int ty) {
-        uint8_t v = get(tx, ty);
-        return (double)GF8.orbits[GF8.element_to_orbit_id[v]].elements.size();
-    };
-
-    double d0 = get_deg(x, y);
-    double d1 = (get_deg(x-1, y) + get_deg(x, y-1) + get_deg(x+1, y) + get_deg(x, y+1)) / 4.0;
-    double d2 = (get_deg(x-2, y) + get_deg(x, y-2) + get_deg(x+2, y) + get_deg(x, y+2)) / 4.0;
-
-    // Complexity as rate of change of minimal polynomial degree
-    double complexity = (std::abs(d1 - d0) + std::abs(d2 - d1)) / 8.0;
-    return std::clamp(complexity, 0.0, 1.0);
-}
-
 Metrics processImage(const std::string& path, double lr, int hid, int lossy_q = 0, int crop_sz = 0, bool use_lzma = true) {
     std::cout << "[*] Processing Holomorphic Tensor Absolute Galois RNN: " << path
               << " (Quality: " << lossy_q << ", Crop: " << (crop_sz ? std::to_string(crop_sz) : "FULL")
@@ -107,80 +73,25 @@ Metrics processImage(const std::string& path, double lr, int hid, int lossy_q = 
     }
     int w = img.width, h_img = img.height;
 
-    // Spatial Path: 8 neighbors * 15 features + 3 feedback (rank, root, resid) = 123
-    // Fractal Path: 5 neighbors * 18 features + 2 pos + 8 min_poly_diffs = 100
-    DualPathGaloisGRU predictor(123, 100, hid, (int)GF8.orbits.size());
+    DualPathGaloisGRU predictor(146, 100, hid, (int)GF8.orbits.size());
 
     std::vector<uint8_t> orbit_stream;
     std::vector<uint8_t> reconstructed_data(w * h_img, 0);
     int errs = 0;
-    uint8_t last_rank = 0, last_rid = 0, last_resid = 0;
+    uint8_t last_rank = 0, last_rid = 0;
+    SignalContext ctx = {w, h_img, reconstructed_data};
 
     for(int y=0; y<h_img; ++y) {
         for(int x=0; x<w; ++x) {
             int i = y * w + x;
             if (y < 16 || x < 16 || x >= w - 16 || y >= h_img - 16) {
                 reconstructed_data[i] = img.data[i];
-                orbit_stream.push_back(0); // placeholder rank
+                orbit_stream.push_back(img.data[i]);
                 continue;
             }
 
-            auto getV = [&](int tx, int ty) { return reconstructed_data[ty * w + tx]; };
-            auto stalk = [&](uint8_t v, uint8_t ref) {
-                uint8_t inv_ref = GF8.inv_table[ref];
-                uint8_t mul_diff = GF8.mul(v, inv_ref);
-                uint8_t tr1 = GF8.tr8_1(v);
-                uint8_t tr2 = GF8.tr8_2(v);
-                uint8_t tr4 = GF8.tr8_4(v);
-                return std::vector<double>{
-                    (double)tr1,
-                    (double)tr4/255.0,
-                    (double)tr2/255.0,
-                    (double)GF8.norm8_4(v)/255.0,
-                    (double)GF8.element_to_orbit_id[v]/(double)GF8.orbits.size(),
-                    (double)GF8.orbits[GF8.element_to_orbit_id[v]].elements.size()/8.0,
-                    (double)v/255.0,
-                    (double)GF8.bilinear_trace(v, ref),
-                    (double)mul_diff / 255.0,
-                    (double)GF8.tr8_power(v, 3),
-                    (double)GF8.tr8_power(v, 5),
-                    (double)(tr1 ^ (tr2 & 1)), // Holomorphy diff 1
-                    (double)(tr2 ^ tr4) / 255.0, // Holomorphy diff 2
-                    (double)(tr4 ^ v) / 255.0,  // Holomorphy diff 3
-                    (double)GF8.to_normal[v] / 255.0
-                };
-            };
-
             std::vector<double> x_s, x_f;
-            int nx[] = {x-1, x, x-1, x+1, x-2, x, x-2, x-1}, ny[] = {y, y-1, y-1, y-1, y, y-2, y-1, y-2};
-            uint8_t ref_val = getV(x-1, y-1);
-            for(int j=0; j<8; ++j) {
-                auto s = stalk(getV(nx[j], ny[j]), ref_val);
-                x_s.insert(x_s.end(), s.begin(), s.end());
-            }
-            x_s.push_back((double)last_rank / 255.0);
-            x_s.push_back((double)last_rid / 8.0);
-            x_s.push_back((double)last_resid / 255.0);
-
-            int fx[] = {x-2, x, x-4, x, x-8}, fy[] = {y, y-2, y, y-4, y};
-            for(int j=0; j<5; ++j) {
-                uint8_t fv = getV(fx[j], fy[j]);
-                auto s = stalk(fv, ref_val);
-                x_f.insert(x_f.end(), s.begin(), s.end());
-                x_f.push_back(estimate_local_fd(reconstructed_data, fx[j], fy[j], w, h_img) / 3.0);
-                x_f.push_back(estimate_algebraic_complexity(reconstructed_data, fx[j], fy[j], w, h_img));
-                x_f.push_back((double)GF8.tr8_power(fv, 7));
-            }
-            x_f.push_back((double)x/w); x_f.push_back((double)y/h_img);
-
-            const auto& mpc_prev = GF8.orbits[GF8.element_to_orbit_id[getV(x-1, y)]].min_poly_coeffs;
-            const auto& mpc_curr = GF8.orbits[GF8.element_to_orbit_id[getV(x, y-1)]].min_poly_coeffs;
-            for(int k=0; k<8; k++) {
-                uint8_t v1 = (k < (int)mpc_prev.size()) ? mpc_prev[k] : 0;
-                uint8_t v2 = (k < (int)mpc_curr.size()) ? mpc_curr[k] : 0;
-                x_f.push_back((double)(v1 ^ v2) / 255.0);
-            }
-
+            ctx.get_features(x, y, last_rank, last_rid, x_s, x_f);
             auto res_pair = predictor.forward(x_s, x_f);
 
             // Unified Byte-level Probability Estimation
@@ -203,9 +114,10 @@ Metrics processImage(const std::string& path, double lr, int hid, int lossy_q = 
             uint8_t selected_val = target_val;
 
             if (lossy_q > 0) {
-                // Rate-Distortion Optimization (RDO): cost = -log2(p) + lambda * dist
-                double lambda = std::pow(2.0, (100.0 - lossy_q) / 10.0) * 0.01;
-                int radius = std::max(1, (100 - lossy_q) / 8);
+                // Competitive RDO mapping: High Q -> High Lambda -> Low Distortion
+                double q_norm = (double)lossy_q / 100.0;
+                double lambda = std::pow(10.0, 5.0 * q_norm - 1.0);
+                int radius = std::max(1, (int)(24.0 * (1.0 - q_norm)));
                 double min_cost = 1e18;
                 for (int v = std::max(0, (int)target_val - radius); v <= std::min(255, (int)target_val + radius); ++v) {
                     double p = std::max(byte_probs[v], 1e-12);
@@ -220,7 +132,10 @@ Metrics processImage(const std::string& path, double lr, int hid, int lossy_q = 
 
             double p_selected = byte_probs[selected_val];
             int rank = 0;
-            for(int b=0; b<256; b++) if(byte_probs[b] > p_selected) rank++;
+            for(int b=0; b<256; b++) {
+                if(byte_probs[b] > p_selected) rank++;
+                else if(byte_probs[b] == p_selected && b < selected_val) rank++;
+            }
 
             orbit_stream.push_back((uint8_t)rank);
             reconstructed_data[i] = selected_val;
@@ -234,7 +149,6 @@ Metrics processImage(const std::string& path, double lr, int hid, int lossy_q = 
 
             last_rank = (uint8_t)rank;
             last_rid = (uint8_t)actual_root;
-            last_resid = (uint8_t)std::abs((int)selected_val - (int)target_val);
         }
     }
 
@@ -246,9 +160,12 @@ Metrics processImage(const std::string& path, double lr, int hid, int lossy_q = 
         for(const auto& c : channels) compressed.insert(compressed.end(), c.begin(), c.end());
     }
 
-    std::string base = path.substr(path.find_last_of("/\\") + 1);
+    size_t last_slash = path.find_last_of("/\\");
+    size_t second_last_slash = path.find_last_of("/\\", last_slash - 1);
+    std::string prefix = (second_last_slash != std::string::npos) ? path.substr(second_last_slash + 1, last_slash - second_last_slash - 1) + "_" : "";
+    std::string base = path.substr(last_slash + 1);
     std::string q_str = (lossy_q > 0) ? "_q" + std::to_string(lossy_q) : "";
-    savePGM("reconstructed_" + base.substr(0, base.find_last_of(".")) + q_str + ".pgm", {w, h_img, reconstructed_data});
+    savePGM("reconstructed_" + prefix + base.substr(0, base.find_last_of(".")) + q_str + ".pgm", {w, h_img, reconstructed_data});
 
     double e_orig = calculateEntropy(img.data);
     double e_rank = calculateEntropy(orbit_stream);
@@ -258,28 +175,27 @@ Metrics processImage(const std::string& path, double lr, int hid, int lossy_q = 
 }
 
 int main(int argc, char** argv) {
-    std::string img1 = "../absolute_galois_group/compressor/01/test.pgm";
-    std::string img2 = "../absolute_galois_group/compressor/01/GhostInShell_02_005.pgm";
-    std::string img3 = "../absolute_galois_group/compressor/01/iter/ghcd_08/test.pgm";
-
-    int q = 0, crop = 0;
+    int q = 0, crop = 0, num_imgs = 3;
     if (argc > 1) q = std::stoi(argv[1]);
     if (argc > 2) crop = std::stoi(argv[2]);
+    if (argc > 3) num_imgs = std::stoi(argv[3]);
 
-    auto m1 = processImage(img1, 0.015, 128, q, crop, true);
-    auto m2 = processImage(img2, 0.015, 128, q, crop, true);
-    auto m3 = processImage(img3, 0.015, 128, q, crop, true);
+    std::ifstream list("../images_list.txt");
+    std::vector<std::string> imgs;
+    std::string line;
+    while(std::getline(list, line) && (int)imgs.size() < num_imgs) imgs.push_back("../" + line);
 
     std::string suffix = (q > 0) ? "_q" + std::to_string(q) : "";
     std::ofstream report("compression_report" + suffix + ".md");
-    report << "# Peak Holomorphic Tensor Absolute Galois RNN Compression Report\n\n";
+    report << "# Peak Holomorphic Tensor Absolute Galois RNN Compression Report (Q=" << q << ")\n\n";
     report << "| Image | Orig Ent | Unified Rank Ent | Core Eff | LZMA Ratio | Recon |\n";
     report << "| :--- | :--- | :--- | :--- | :--- | :--- |\n";
-    auto add = [&](Metrics m) {
+
+    for(const auto& path : imgs) {
+        auto m = processImage(path, 0.015, 128, q, crop, true);
         report << "| " << m.name << " | " << std::fixed << std::setprecision(4) << m.orig_ent
                << " | " << m.rank_orb_ent
                << " | " << m.core_efficiency << ":1 | " << m.lzma_ratio << ":1 | " << (m.success ? "SUCCESS" : "FAIL") << " |\n";
-    };
-    add(m1); add(m2); add(m3);
+    }
     return 0;
 }

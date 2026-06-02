@@ -134,6 +134,78 @@ public:
 
 static GaloisField8 GF8;
 
+inline double estimate_local_fd(const std::vector<uint8_t>& img, int x, int y, int w, int h) {
+    auto get = [&](int tx, int ty) { return (tx<0||ty<0||tx>=w||ty>=h)?0:img[ty*w+tx]; };
+    auto var = [&](int sz) {
+        double s=0, s2=0; int n=0;
+        for(int j=y-sz; j<=y+sz; ++j) for(int i=x-sz; i<=x+sz; ++i) {
+            double v = (double)get(i, j); s += v; s2 += v*v; n++;
+        }
+        return (s2/n - (s/n)*(s/n));
+    };
+    double v1 = var(1), v4 = var(4);
+    if(v1 < 1e-5) return 2.0;
+    double h_exp = (std::log(v4+1e-5) - std::log(v1+1e-5)) / (2.0 * std::log(4.0));
+    return std::clamp(3.0 - h_exp, 1.0, 3.0);
+}
+
+inline double estimate_algebraic_complexity(const std::vector<uint8_t>& img, int x, int y, int w, int h) {
+    auto get = [&](int tx, int ty) { if(tx<0||ty<0||tx>=w||ty>=h) return (uint8_t)0; return img[ty*w+tx]; };
+    auto get_deg = [&](int tx, int ty) {
+        uint8_t v = get(tx, ty);
+        return (double)GF8.orbits[GF8.element_to_orbit_id[v]].elements.size();
+    };
+    double d0 = get_deg(x, y);
+    double d1 = (get_deg(x-1, y) + get_deg(x, y-1) + get_deg(x+1, y) + get_deg(x, y+1)) / 4.0;
+    double d2 = (get_deg(x-2, y) + get_deg(x, y-2) + get_deg(x+2, y) + get_deg(x, y+2)) / 4.0;
+    return std::clamp((std::abs(d1 - d0) + std::abs(d2 - d1)) / 8.0, 0.0, 1.0);
+}
+
+struct SignalContext {
+    int w, h;
+    const std::vector<uint8_t>& data;
+
+    uint8_t getV(int tx, int ty) const { return (tx<0||ty<0||tx>=w||ty>=h)?0:data[ty * w + tx]; }
+
+    std::vector<double> stalk(uint8_t v, uint8_t ref, int tx, int ty) const {
+        uint8_t a = getV(tx-1, ty), b = getV(tx, ty-1), c = getV(tx-1, ty-1);
+        double med = (c >= std::max(a, b)) ? std::min(a, b) : ((c <= std::min(a, b)) ? std::max(a, b) : (a + b - c));
+        double gh = (double)(a - c), gv = (double)(b - c);
+        uint8_t tr1 = GF8.tr8_1(v), tr2 = GF8.tr8_2(v), tr4 = GF8.tr8_4(v);
+        return std::vector<double>{
+            (double)tr1, (double)tr4/255.0, (double)tr2/255.0, (double)GF8.norm8_4(v)/255.0,
+            (double)GF8.element_to_orbit_id[v]/(double)GF8.orbits.size(),
+            (double)GF8.orbits[GF8.element_to_orbit_id[v]].elements.size()/8.0,
+            (double)v/255.0, (double)GF8.bilinear_trace(v, ref), (double)GF8.mul(v, GF8.inv_table[ref])/255.0,
+            (double)GF8.tr8_power(v, 3), (double)GF8.tr8_power(v, 5), (double)(tr1 ^ (tr2 & 1)), (double)(tr2 ^ tr4)/255.0,
+            (double)(tr4 ^ v)/255.0, (double)GF8.to_normal[v]/255.0, med/255.0, gh/255.0, gv/255.0
+        };
+    }
+
+    void get_features(int x, int y, uint8_t last_rank, uint8_t last_rid, std::vector<double>& x_s, std::vector<double>& x_f) const {
+        int nx[] = {x-1, x, x-1, x+1, x-2, x, x-2, x-1}, ny[] = {y, y-1, y-1, y-1, y, y-2, y-1, y-2};
+        uint8_t ref = getV(x-1, y-1);
+        for(int j=0; j<8; ++j) { auto s = stalk(getV(nx[j], ny[j]), ref, nx[j], ny[j]); x_s.insert(x_s.end(), s.begin(), s.end()); }
+        x_s.push_back((double)last_rank/255.0); x_s.push_back((double)last_rid/8.0);
+        int fx[] = {x-2, x, x-4, x, x-16}, fy[] = {y, y-2, y, y-4, y};
+        for(int j=0; j<5; ++j) {
+            uint8_t fv = getV(fx[j], fy[j]); auto s = stalk(fv, ref, fx[j], fy[j]);
+            x_f.insert(x_f.end(), s.begin(), s.begin() + 15);
+            x_f.push_back(estimate_local_fd(data, fx[j], fy[j], w, h)/3.0);
+            x_f.push_back(estimate_algebraic_complexity(data, fx[j], fy[j], w, h));
+            x_f.push_back((double)GF8.tr8_power(fv, 7));
+        }
+        x_f.push_back((double)x/w); x_f.push_back((double)y/h);
+        const auto& mp_prev = GF8.orbits[GF8.element_to_orbit_id[getV(x-1, y)]].min_poly_coeffs;
+        const auto& mp_curr = GF8.orbits[GF8.element_to_orbit_id[getV(x, y-1)]].min_poly_coeffs;
+        for(int k=0; k<8; k++) {
+            uint8_t v1 = (k < (int)mp_prev.size()) ? mp_prev[k] : 0;
+            uint8_t v2 = (k < (int)mp_curr.size()) ? mp_curr[k] : 0;
+            x_f.push_back((double)(v1 ^ v2) / 255.0);
+        }
+    }
+};
+
 // --- Multi-Head Gated RNN with Complexity Prediction ---
 class DualPathGaloisGRU {
 public:
@@ -376,6 +448,33 @@ inline std::vector<uint8_t> lzma_compress_channels(const std::vector<std::vector
     out.resize(out.size() - strm.avail_out);
     lzma_end(&strm);
     return out;
+}
+
+inline std::vector<std::vector<uint8_t>> lzma_decompress_channels(const std::vector<uint8_t>& compressed) {
+    lzma_stream strm = LZMA_STREAM_INIT;
+    if (lzma_stream_decoder(&strm, UINT64_MAX, 0) != LZMA_OK) return {};
+    std::vector<uint8_t> all_data;
+    std::vector<uint8_t> buf(65536);
+    strm.next_in = compressed.data(); strm.avail_in = compressed.size();
+    lzma_ret ret;
+    do {
+        strm.next_out = buf.data(); strm.avail_out = buf.size();
+        ret = lzma_code(&strm, LZMA_RUN);
+        all_data.insert(all_data.end(), buf.begin(), buf.begin() + (buf.size() - strm.avail_out));
+    } while (ret == LZMA_OK);
+    lzma_end(&strm);
+    if (ret != LZMA_STREAM_END) return {};
+
+    std::vector<std::vector<uint8_t>> channels;
+    size_t pos = 0;
+    while(pos + 4 <= all_data.size()) {
+        uint32_t sz = all_data[pos] | (all_data[pos+1] << 8) | (all_data[pos+2] << 16) | (all_data[pos+3] << 24);
+        pos += 4;
+        if (pos + sz > all_data.size()) break;
+        channels.push_back(std::vector<uint8_t>(all_data.begin() + pos, all_data.begin() + pos + sz));
+        pos += sz;
+    }
+    return channels;
 }
 
 #endif
