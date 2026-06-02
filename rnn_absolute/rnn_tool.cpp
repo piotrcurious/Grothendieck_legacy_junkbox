@@ -110,7 +110,7 @@ void decompress(const std::string& in, const std::string& out) {
     int w = channels[0][0] | (channels[0][1] << 8), h_img = channels[0][2] | (channels[0][3] << 8);
     const auto& rank_stream = channels[1];
 
-    DualPathGaloisGRU predictor(178, 100, 128, (int)GF8.orbits.size());
+    DualPathGaloisGRU predictor(146, 100, 128, (int)GF8.orbits.size());
     Image img; img.width = w; img.height = h_img; img.data.assign(w * h_img, 0);
     uint8_t last_rank = 0, last_rid = 0;
     int stream_pos = 0;

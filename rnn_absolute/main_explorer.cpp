@@ -73,86 +73,25 @@ Metrics processImage(const std::string& path, double lr, int hid, int lossy_q = 
     }
     int w = img.width, h_img = img.height;
 
-    // Spatial Path: 8 neighbors * 18 features + 2 history = 146
-    // Fractal Path: 5 neighbors * 18 features + 2 pos + 8 min_poly_diffs = 100
     DualPathGaloisGRU predictor(146, 100, hid, (int)GF8.orbits.size());
 
     std::vector<uint8_t> orbit_stream;
     std::vector<uint8_t> reconstructed_data(w * h_img, 0);
     int errs = 0;
-    uint8_t last_rank = 0, last_rid = 0, last_resid = 0;
+    uint8_t last_rank = 0, last_rid = 0;
+    SignalContext ctx = {w, h_img, reconstructed_data};
 
     for(int y=0; y<h_img; ++y) {
         for(int x=0; x<w; ++x) {
             int i = y * w + x;
             if (y < 16 || x < 16 || x >= w - 16 || y >= h_img - 16) {
                 reconstructed_data[i] = img.data[i];
-                orbit_stream.push_back(0); // placeholder rank
+                orbit_stream.push_back(img.data[i]);
                 continue;
             }
 
-            auto getV = [&](int tx, int ty) { return (tx<0||ty<0||tx>=w||ty>=h_img)?0:reconstructed_data[ty * w + tx]; };
-            auto stalk = [&](uint8_t v, uint8_t ref, int tx, int ty) {
-                uint8_t a = getV(tx-1, ty), b = getV(tx, ty-1), c = getV(tx-1, ty-1);
-                double med = (c >= std::max(a, b)) ? std::min(a, b) : ((c <= std::min(a, b)) ? std::max(a, b) : (a + b - c));
-                double gh = (double)(a - c), gv = (double)(b - c);
-
-                uint8_t inv_ref = GF8.inv_table[ref];
-                uint8_t mul_diff = GF8.mul(v, inv_ref);
-                uint8_t tr1 = GF8.tr8_1(v);
-                uint8_t tr2 = GF8.tr8_2(v);
-                uint8_t tr4 = GF8.tr8_4(v);
-                return std::vector<double>{
-                    (double)tr1,
-                    (double)tr4/255.0,
-                    (double)tr2/255.0,
-                    (double)GF8.norm8_4(v)/255.0,
-                    (double)GF8.element_to_orbit_id[v]/(double)GF8.orbits.size(),
-                    (double)GF8.orbits[GF8.element_to_orbit_id[v]].elements.size()/8.0,
-                    (double)v/255.0,
-                    (double)GF8.bilinear_trace(v, ref),
-                    (double)mul_diff / 255.0,
-                    (double)GF8.tr8_power(v, 3),
-                    (double)GF8.tr8_power(v, 5),
-                    (double)(tr1 ^ (tr2 & 1)), // Holomorphy diff 1
-                    (double)(tr2 ^ tr4) / 255.0, // Holomorphy diff 2
-                    (double)(tr4 ^ v) / 255.0,  // Holomorphy diff 3
-                    (double)GF8.to_normal[v] / 255.0,
-                    med / 255.0, gh / 255.0, gv / 255.0 // Context Mixing
-                };
-            };
-
             std::vector<double> x_s, x_f;
-            int nx[] = {x-1, x, x-1, x+1, x-2, x, x-2, x-1}, ny[] = {y, y-1, y-1, y-1, y, y-2, y-1, y-2};
-            uint8_t ref_val = getV(x-1, y-1);
-            for(int j=0; j<8; ++j) {
-                auto s = stalk(getV(nx[j], ny[j]), ref_val, nx[j], ny[j]);
-                x_s.insert(x_s.end(), s.begin(), s.end());
-            }
-            x_s.push_back((double)last_rank / 255.0);
-            x_s.push_back((double)last_rid / 8.0);
-            x_s.push_back((double)last_resid / 255.0);
-
-            int fx[] = {x-2, x, x-4, x, x-8}, fy[] = {y, y-2, y, y-4, y};
-            for(int j=0; j<5; ++j) {
-                uint8_t fv = getV(fx[j], fy[j]);
-                auto s = stalk(fv, ref_val, fx[j], fy[j]);
-                // Stalk features (15) + 3 extra features = 18 total per neighbor
-                x_f.insert(x_f.end(), s.begin(), s.begin() + 15);
-                x_f.push_back(estimate_local_fd(reconstructed_data, fx[j], fy[j], w, h_img) / 3.0);
-                x_f.push_back(estimate_algebraic_complexity(reconstructed_data, fx[j], fy[j], w, h_img));
-                x_f.push_back((double)GF8.tr8_power(fv, 7));
-            }
-            x_f.push_back((double)x/w); x_f.push_back((double)y/h_img);
-
-            const auto& mpc_prev = GF8.orbits[GF8.element_to_orbit_id[getV(x-1, y)]].min_poly_coeffs;
-            const auto& mpc_curr = GF8.orbits[GF8.element_to_orbit_id[getV(x, y-1)]].min_poly_coeffs;
-            for(int k=0; k<8; k++) {
-                uint8_t v1 = (k < (int)mpc_prev.size()) ? mpc_prev[k] : 0;
-                uint8_t v2 = (k < (int)mpc_curr.size()) ? mpc_curr[k] : 0;
-                x_f.push_back((double)(v1 ^ v2) / 255.0);
-            }
-
+            ctx.get_features(x, y, last_rank, last_rid, x_s, x_f);
             auto res_pair = predictor.forward(x_s, x_f);
 
             // Unified Byte-level Probability Estimation
@@ -210,7 +149,6 @@ Metrics processImage(const std::string& path, double lr, int hid, int lossy_q = 
 
             last_rank = (uint8_t)rank;
             last_rid = (uint8_t)actual_root;
-            last_resid = (uint8_t)std::abs((int)selected_val - (int)target_val);
         }
     }
 

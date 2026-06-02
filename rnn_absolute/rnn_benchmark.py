@@ -30,8 +30,25 @@ def run_benchmark(tool_path, input_list, qualities):
                 res_dec = subprocess.run([tool_path, "decompress", out_rnn, recon_pgm], capture_output=True)
                 status = "OK" if res_dec.returncode == 0 else "DEC_FAIL"
 
+                # Check bit-perfection if quality is 0
+                if q == 0 and status == "OK":
+                    try:
+                        recon_img = Image.open(recon_pgm).convert("L")
+                        orig_img = Image.open(img_path).convert("L")
+                        # Center crop to match test logic if needed
+                        w, h = recon_img.size
+                        if orig_img.size != (w, h):
+                           ox, oy = (orig_img.width - w)//2, (orig_img.height - h)//2
+                           orig_img = orig_img.crop((ox, oy, ox+w, oy+h))
+
+                        import numpy as np
+                        if (np.array(orig_img) != np.array(recon_img)).any():
+                            status = "NOT_BIT_PERFECT"
+                    except Exception as e:
+                        print(f"Verification error: {e}")
+
                 # Convert to PNG for user inspection as requested
-                if status == "OK":
+                if status == "OK" or status == "NOT_BIT_PERFECT":
                     try:
                         im = Image.open(recon_pgm)
                         im.save(recon_pgm.replace(".pgm", ".png"))
