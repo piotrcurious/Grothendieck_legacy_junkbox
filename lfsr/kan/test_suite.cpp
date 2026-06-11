@@ -2,7 +2,9 @@
 #include <cassert>
 #include <vector>
 #include <string>
+#ifndef NO_MAIN
 #define NO_MAIN
+#endif
 #include "kan_field_geometry.cpp"
 
 void test_poly_math() {

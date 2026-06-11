@@ -1,8 +1,12 @@
 // demo_ntl_kan_next.cpp
+#ifdef USE_MOCK_NTL
+#include "ntl_mock.h"
+#else
 #include <NTL/GF2X.h>
 #include <NTL/GF2E.h>
 #include <NTL/GF2XFactoring.h>
 #include <NTL/GF2EX.h>
+#endif
 
 #include <algorithm>
 #include <cstdint>
@@ -13,6 +17,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <functional>
 
 using namespace NTL;
 using u64 = std::uint64_t;
@@ -131,7 +136,6 @@ static Chart basis_chart = [](const Orbit& orbit) -> std::optional<Fragment> {
 
 static Chart jump_chart = [](const Orbit& orbit) -> std::optional<Fragment> {
     // A toy GF2EX chart: precompute X^e mod f in GF2E[X].
-    // This is the place where GF2EXModulus and PowerXMod live.
     GF2EX fpoly;
     SetCoeff(fpoly, 8);  // X^8
     SetCoeff(fpoly, 1);  // + X
@@ -190,14 +194,16 @@ int main() {
         std::size_t requested_length = 37;
         Orbit orbit = build_orbit(requested_length);
 
+        std::cout << "--- NTL Kan Orbit Demo ---\n";
         std::cout << "n = " << orbit.n << "\n";
         std::cout << "modulus = " << orbit.modulus << "\n";
         std::cout << "primitive element = " << orbit.primitive << "\n\n";
 
         std::cout << "orbit states:\n";
-        for (std::size_t i = 0; i < orbit.states.size(); ++i) {
+        for (std::size_t i = 0; i < std::min<std::size_t>(10, orbit.states.size()); ++i) {
             std::cout << "  " << i << ": " << orbit.states[i] << "\n";
         }
+        if (orbit.states.size() > 10) std::cout << "  ...\n";
 
         Atlas atlas;
         atlas.charts.push_back(basis_chart);
