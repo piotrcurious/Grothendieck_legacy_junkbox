@@ -1,8 +1,12 @@
 // demo_ntl_kan.cpp
+#ifdef USE_MOCK_NTL
+#include "ntl_mock.h"
+#else
 #include <NTL/GF2X.h>
 #include <NTL/GF2E.h>
 #include <NTL/GF2XFactoring.h>
 #include <NTL/GF2EX.h>
+#endif
 
 #include <algorithm>
 #include <cstdint>
@@ -14,6 +18,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <functional>
 
 using namespace NTL;
 using u64 = std::uint64_t;
@@ -198,14 +203,16 @@ int main() {
         std::size_t requested_length = 37;
         auto seq = construct_orbit(requested_length);
 
+        std::cout << "--- NTL Field Orbit Demo ---\n";
         std::cout << "Chosen width n: " << seq.n << "\n";
         std::cout << "Modulus: " << seq.modulus << "\n";
         std::cout << "Primitive element: " << seq.primitive << "\n\n";
 
         std::cout << "Orbit states:\n";
-        for (std::size_t i = 0; i < seq.states.size(); ++i) {
+        for (std::size_t i = 0; i < std::min<std::size_t>(10, seq.states.size()); ++i) {
             std::cout << std::setw(3) << i << ": " << seq.states[i] << "\n";
         }
+        if (seq.states.size() > 10) std::cout << "  ...\n";
 
         FieldModel F{seq.n, seq.modulus, seq.primitive};
 

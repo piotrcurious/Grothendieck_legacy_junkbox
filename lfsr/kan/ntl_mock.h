@@ -8,10 +8,12 @@
 #include <algorithm>
 #include <bit>
 #include <cstdint>
+#include <cstdlib>
 
 namespace NTL {
 
 typedef uint64_t u64;
+typedef uint64_t ZZ;
 
 struct GF2X {
     u64 data = 0;
@@ -52,6 +54,8 @@ struct GF2E {
     static GF2X current_modulus;
     u64 data = 0;
 
+    static const GF2X& modulus() { return current_modulus; }
+
     GF2E() : data(0) {}
     GF2E(u64 d) : data(d) {}
 
@@ -82,6 +86,8 @@ struct GF2E {
 inline bool IsZero(const GF2E& a) { return a.data == 0; }
 inline bool IsOne(const GF2E& a) { return a.data == 1; }
 
+inline bool IsOne(const GF2X& a) { return a.data == 1; }
+
 inline void random(GF2E& a) {
     u64 mod = GF2E::current_modulus.data;
     if (mod <= 1) { a.data = 0; return; }
@@ -99,7 +105,21 @@ inline void power(GF2E& res, const GF2E& a, uint64_t e) {
     }
 }
 
+inline GF2E inv(const GF2E& a) {
+    if (a.data == 0) return GF2E(0);
+    u64 mod = GF2E::current_modulus.data;
+    unsigned n = 63 - std::countl_zero(mod);
+    u64 order_minus_2 = (1ULL << n) - 3;
+    GF2E res;
+    power(res, a, order_minus_2);
+    return res;
+}
+
 inline GF2X rep(const GF2E& a) { return GF2X(a.data); }
+
+inline GF2X coeff(const GF2X& a, long i) {
+    return GF2X((a.data >> i) & 1);
+}
 
 inline std::ostream& operator<<(std::ostream& os, const GF2E& a) {
     return os << GF2X(a.data);
@@ -116,6 +136,10 @@ inline void BuildSparseIrred(GF2X& p, long n) {
     if (n == 4) p.data = 0b10011;
     if (n == 5) p.data = 0b100101;
     if (n == 6) p.data = 0b1000011;
+}
+
+inline void BuildIrred(GF2X& p, long n) {
+    BuildSparseIrred(p, n);
 }
 
 inline uint64_t to_ZZ(uint64_t n) { return n; }
