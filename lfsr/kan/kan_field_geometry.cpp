@@ -150,6 +150,41 @@ static std::vector<u64> primitive_locus(unsigned n) {
 }
 
 // -----------------------------------------------------------------------------
+// Matrix Representation
+// -----------------------------------------------------------------------------
+
+struct GaloisMatrix {
+    unsigned n;
+    std::vector<u64> rows; // Each u64 is a row of n bits
+
+    GaloisMatrix(unsigned n_) : n(n_), rows(n_, 0) {}
+
+    u64 apply(u64 vec) const {
+        u64 res = 0;
+        for (unsigned i = 0; i < n; ++i) {
+            if (std::popcount(rows[i] & vec) & 1) {
+                res |= (1ULL << i);
+            }
+        }
+        return res;
+    }
+
+    static GaloisMatrix companion(u64 poly) {
+        unsigned n = degree(poly);
+        // Matrix representing multiplication by x in the polynomial basis:
+        // x * (c_{n-1}x^{n-1} + ... + c_0) mod p
+        GaloisMatrix P(n);
+        for(unsigned j=0; j<n; ++j) {
+            u64 col_val = poly_mul_mod(1ULL << j, 2, poly);
+            for(unsigned i=0; i<n; ++i) {
+                if((col_val >> i) & 1) P.rows[i] |= (1ULL << j);
+            }
+        }
+        return P;
+    }
+};
+
+// -----------------------------------------------------------------------------
 // Algebraic Machine
 // -----------------------------------------------------------------------------
 
@@ -176,17 +211,18 @@ public:
 struct Fragment {
     std::string chart_name;
     std::string coordinate_desc;
-    AlgebraicLFSR machine;
+    std::function<u64(u64)> transition;
     std::function<bool(u64, u64)> projection;
+    u64 state;
+    u64 modulus;
 
     std::string sample(std::size_t bits) {
         std::string s;
-        u64 saved_state = machine.state;
+        u64 cur = state;
         for (std::size_t i = 0; i < bits; ++i) {
-            s.push_back(projection(machine.state, machine.modulus) ? '1' : '0');
-            machine.step();
+            s.push_back(projection(cur, modulus) ? '1' : '0');
+            cur = transition(cur);
         }
-        machine.state = saved_state; // preserve for other uses
         return s;
     }
 };
@@ -205,22 +241,47 @@ static std::vector<Fragment> lan_extend(const std::vector<ChartFunctor>& atlas, 
 // Concrete Charts
 static ChartFunctor companion_chart = [](u64 p) -> std::optional<Fragment> {
     unsigned n = degree(p);
-    return Fragment{"Companion", "Polynomial basis bit 0", AlgebraicLFSR(n, p),
-                    [](u64 s, u64) { return (s & 1) != 0; }};
+    return Fragment{"Companion", "Polynomial basis bit 0",
+                    [p](u64 s){ return poly_mul_mod(s, 2, p); },
+                    [](u64 s, u64) { return (s & 1) != 0; },
+                    1, p};
+};
+
+static ChartFunctor matrix_chart = [](u64 p) -> std::optional<Fragment> {
+    unsigned n = degree(p);
+    GaloisMatrix M = GaloisMatrix::companion(p);
+    return Fragment{"Matrix", "Linear map transition",
+                    [M](u64 s){ return M.apply(s); },
+                    [](u64 s, u64) { return (s & 1) != 0; },
+                    1, p};
 };
 
 static ChartFunctor trace_chart = [](u64 p) -> std::optional<Fragment> {
     unsigned n = degree(p);
-    return Fragment{"Trace", "Field trace to GF(2)", AlgebraicLFSR(n, p),
-                    [](u64 s, u64 m) { return calculate_trace(s, m) != 0; }};
+    return Fragment{"Trace", "Field trace to GF(2)",
+                    [p](u64 s){ return poly_mul_mod(s, 2, p); },
+                    [](u64 s, u64 m) { return calculate_trace(s, m) != 0; },
+                    1, p};
+};
+
+static ChartFunctor decimation_chart = [](u64 p) -> std::optional<Fragment> {
+    unsigned n = degree(p);
+    u64 k = 3; // Decimate by 3
+    u64 xk = poly_pow_mod(2, k, p);
+    return Fragment{"Decimate-3", "Every 3rd orbit point",
+                    [p, xk](u64 s){ return poly_mul_mod(s, xk, p); },
+                    [](u64 s, u64) { return (s & 1) != 0; },
+                    1, p};
 };
 
 static ChartFunctor reciprocal_chart = [](u64 p) -> std::optional<Fragment> {
     unsigned n = degree(p);
     u64 rp = 0;
     for (unsigned i = 0; i <= n; ++i) if ((p >> i) & 1) rp |= (1ULL << (n-i));
-    return Fragment{"Reciprocal", "Dual basis / reversed orbit", AlgebraicLFSR(n, rp),
-                    [](u64 s, u64) { return (s & 1) != 0; }};
+    return Fragment{"Reciprocal", "Dual basis / reversed orbit",
+                    [rp](u64 s){ return poly_mul_mod(s, 2, rp); },
+                    [](u64 s, u64) { return (s & 1) != 0; },
+                    1, rp};
 };
 
 // Inference (Ran extension)
@@ -234,11 +295,11 @@ using Recognizer = std::function<std::vector<u64>(const Observation&)>;
 static Recognizer direct_recognizer = [](const Observation& obs) {
     std::vector<u64> candidates;
     for (u64 p : primitive_locus(obs.n)) {
-        AlgebraicLFSR m(obs.n, p, 1);
+        u64 s = 1;
         bool match = true;
         for (char c : obs.bits) {
-            if ((m.state & 1) != (c == '1')) { match = false; break; }
-            m.step();
+            if ((s & 1) != (c == '1')) { match = false; break; }
+            s = poly_mul_mod(s, 2, p);
         }
         if (match) candidates.push_back(p);
     }
@@ -254,11 +315,11 @@ static Recognizer dual_recognizer = [](const Observation& obs) {
         for (unsigned i = 0; i <= n; ++i) if ((p >> i) & 1) rp |= (1ULL << (n-i));
         bool found = false;
         for (u64 s = 1; s < (1ULL << obs.n); ++s) {
-            AlgebraicLFSR m(obs.n, rp, s);
+            u64 cur = s;
             bool match = true;
             for (char c : rev) {
-                if ((m.state & 1) != (c == '1')) { match = false; break; }
-                m.step();
+                if ((cur & 1) != (c == '1')) { match = false; break; }
+                cur = poly_mul_mod(cur, 2, rp);
             }
             if (match) { found = true; break; }
         }
@@ -282,12 +343,18 @@ int main() {
         std::cout << "--- Kan LFSR Geometry Suite ---\n";
         std::cout << "Global Object (Polynomial): " << poly_to_string(poly) << "\n\n";
 
-        std::vector<ChartFunctor> atlas = {companion_chart, trace_chart, reciprocal_chart};
+        std::vector<ChartFunctor> atlas = {
+            companion_chart,
+            matrix_chart,
+            trace_chart,
+            decimation_chart,
+            reciprocal_chart
+        };
         auto fragments = lan_extend(atlas, poly);
 
         std::cout << "Left Kan Extension (Local implementation fragments):\n";
         for (auto& f : fragments) {
-            std::cout << "  [" << std::left << std::setw(10) << f.chart_name << "] "
+            std::cout << "  [" << std::left << std::setw(12) << f.chart_name << "] "
                       << std::setw(25) << f.coordinate_desc << " | Sample: " << f.sample(32) << "\n";
         }
 
@@ -299,6 +366,8 @@ int main() {
         auto c2 = dual_recognizer(obs);
 
         std::vector<u64> common;
+        std::sort(c1.begin(), c1.end());
+        std::sort(c2.begin(), c2.end());
         std::set_intersection(c1.begin(), c1.end(), c2.begin(), c2.end(), std::back_inserter(common));
 
         for (u64 p : common) {
