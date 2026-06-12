@@ -1,7 +1,11 @@
 // g++ -std=c++20 -O2 demo_ntl_lfsr_kan.cpp -lntl -lgmp -o demo_ntl_lfsr_kan
+#ifdef USE_MOCK_NTL
+#include "ntl_mock.h"
+#else
 #include <NTL/GF2X.h>
 #include <NTL/GF2E.h>
 #include <NTL/GF2XFactoring.h>
+#endif
 
 #include <algorithm>
 #include <cstdint>
@@ -11,6 +15,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <functional>
+#include <iomanip>
 
 using namespace NTL;
 using u64 = std::uint64_t;
@@ -18,16 +24,6 @@ using u64 = std::uint64_t;
 // -----------------------------------------------------------------------------
 // Small integer utilities
 // -----------------------------------------------------------------------------
-
-static u64 ipow(u64 a, unsigned e) {
-    u64 r = 1;
-    while (e) {
-        if (e & 1U) r *= a;
-        a *= a;
-        e >>= 1U;
-    }
-    return r;
-}
 
 static std::vector<u64> unique_prime_factors(u64 n) {
     std::vector<u64> f;
@@ -42,30 +38,19 @@ static std::vector<u64> unique_prime_factors(u64 n) {
 }
 
 static std::string gf2x_to_string(const GF2X& f) {
-    std::string s;
-    long d = deg(f);
-    if (d < 0) return "0";
-
-    bool first = true;
-    for (long i = d; i >= 0; --i) {
-        if (!IsCoeff(f, i)) continue;
-        if (!first) s += " + ";
-        if (i == 0) s += "1";
-        else if (i == 1) s += "x";
-        else s += "x^" + std::to_string(i);
-        first = false;
-    }
-    return s;
+    std::ostringstream oss;
+    oss << f;
+    return oss.str();
 }
 
 static std::string gf2e_to_bits(const GF2E& a) {
     GF2X r = rep(a);
-    long d = deg(GF2E::modulus().P);
+    long d = deg(GF2E::modulus());
     if (d < 0) return "0";
 
     std::string s;
     for (long i = d - 1; i >= 0; --i) {
-        s.push_back(IsCoeff(r, i) ? '1' : '0');
+        s.push_back(IsOne(coeff(r, i)) ? '1' : '0');
     }
     return s;
 }
@@ -92,8 +77,6 @@ static GF2X build_modulus(long n, ModulusPolicy policy) {
 }
 
 static bool is_primitive_element(const GF2E& a, u64 field_order_minus_1) {
-    // Check that a has multiplicative order 2^n - 1.
-    // We use the standard divisor test: a^((q-1)/p) != 1 for every prime p|q-1.
     for (u64 p : unique_prime_factors(field_order_minus_1)) {
         ZZ e = to_ZZ(field_order_minus_1 / p);
         GF2E t;
@@ -172,7 +155,7 @@ struct Fragment {
         s.reserve(bits);
         GF2E x = generator;
         for (std::size_t i = 0; i < bits; ++i) {
-            s.push_back(IsOne(rep(x) & 1) ? '1' : '0'); // low bit of polynomial basis rep
+            s.push_back(IsOne(coeff(rep(x), 0)) ? '1' : '0'); // low bit of polynomial basis rep
             x *= generator;
         }
         return s;
@@ -207,7 +190,6 @@ static Chart polynomial_basis_chart = [](const GF2X& modulus, const GF2E& primit
 
 static Chart jump_ahead_chart = [](const GF2X& modulus, const GF2E& primitive) -> std::optional<Fragment> {
     (void)modulus;
-    // Same field element, but interpreted as a jump-ahead chart.
     GF2E g = primitive;
     ZZ jump = to_ZZ(8);
     power(g, g, jump);
@@ -258,8 +240,8 @@ static Recognizer prefix_recognizer = [](const Observation& obs) -> std::optiona
             auto seq = build_orbit_sequence(L);
             GF2E state(1);
             std::string got;
-            for (char c : obs.prefix_bits) {
-                got.push_back(IsOne(rep(state) & 1) ? '1' : '0');
+            for (std::size_t i = 0; i < obs.prefix_bits.size(); ++i) {
+                got.push_back(IsOne(coeff(rep(state), 0)) ? '1' : '0');
                 state *= seq.primitive;
             }
             if (got == obs.prefix_bits) candidates.push_back(L);
@@ -279,8 +261,8 @@ static Recognizer reversed_prefix_recognizer = [](const Observation& obs) -> std
             auto seq = build_orbit_sequence(L);
             GF2E state(1);
             std::string got;
-            for (char c : rev) {
-                got.push_back(IsOne(rep(state) & 1) ? '1' : '0');
+            for (std::size_t i = 0; i < rev.size(); ++i) {
+                got.push_back(IsOne(coeff(rep(state), 0)) ? '1' : '0');
                 state *= seq.primitive;
             }
             if (got == rev) candidates.push_back(L);
@@ -313,6 +295,7 @@ int main() {
 
         auto seq = build_orbit_sequence(requested_length, ModulusPolicy::Sparse);
 
+        std::cout << "--- NTL Toy Orbit Demo ---\n";
         std::cout << "Chosen width n: " << seq.n << "\n";
         std::cout << "Modulus: " << gf2x_to_string(seq.modulus) << "\n";
         std::cout << "Primitive element found: yes\n\n";
@@ -336,7 +319,7 @@ int main() {
         {
             GF2E state(1);
             for (int i = 0; i < 12; ++i) {
-                prefix.push_back(IsOne(rep(state) & 1) ? '1' : '0');
+                prefix.push_back(IsOne(coeff(rep(state), 0)) ? '1' : '0');
                 state *= seq.primitive;
             }
         }

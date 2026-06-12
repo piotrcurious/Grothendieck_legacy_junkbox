@@ -135,6 +135,7 @@ static Chart basis_chart = [](const Orbit& orbit) -> std::optional<Fragment> {
 };
 
 static Chart jump_chart = [](const Orbit& orbit) -> std::optional<Fragment> {
+    GF2EPush scope(orbit.modulus);
     // A toy GF2EX chart: precompute X^e mod f in GF2E[X].
     GF2EX fpoly;
     SetCoeff(fpoly, 8);  // X^8
