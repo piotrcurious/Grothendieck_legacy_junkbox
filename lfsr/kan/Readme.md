@@ -75,3 +75,18 @@ A practical architecture looks like this:
 So the suite is not “a table of primitive polynomials plus code.” It is “a geometric family of recurrences plus a Kan-extension mechanism that turns local algebra into global software.”
 
 If you want, I can sketch this as a concrete diagram with categories, functors, and one worked example for \(n=5\) or .
+
+## Implementation Notes
+
+The current suite in `kan_field_geometry.cpp` implements this framework:
+
+1.  **Global Object**: A primitive polynomial $p(x) \in \mathbf{F}_2[x]$.
+2.  **Left Kan Extension ($\operatorname{Lan}_i F$)**: The `lan_extend` function takes the global polynomial and "glues" multiple local implementation fragments (Charts):
+    -   `Companion`: Standard polynomial basis recurrence.
+    -   `Matrix`: Linear map transition using a companion matrix.
+    -   `Trace`: Orbit projected through the field trace $\operatorname{Tr}: \mathbf{F}_{2^n} \to \mathbf{F}_2$.
+    -   `Decimate-3`: A view of the orbit sampled at every 3rd step.
+    -   `Reciprocal`: The dual orbit in reversed coordinates.
+3.  **Right Kan Extension ($\operatorname{Ran}_j G$)**: The `direct_recognizer` and `dual_recognizer` implement the inference of the global object from local bit-stream observations.
+
+The suite also includes `ntl_mock.h` to allow NTL-based code (`lfsr_5.cpp`, etc.) to run in restricted environments.
