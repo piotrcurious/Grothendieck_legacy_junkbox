@@ -1,9 +1,8 @@
-// lfsr_improved.cpp - Enhanced NTL LFSR Suite with Range Traversal
+// lfsr_improved.cpp - Enhanced LFSR Suite with Quotient Geometry Traversal
 #include <NTL/GF2X.h>
 #include <NTL/GF2E.h>
 #include <NTL/GF2XFactoring.h>
 #include <NTL/GF2EX.h>
-#include <NTL/mat_GF2.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -18,6 +17,7 @@
 #include <vector>
 #include <random>
 #include <set>
+#include <numeric>
 
 using namespace NTL;
 using u64 = std::uint64_t;
@@ -28,13 +28,15 @@ using u64 = std::uint64_t;
 
 static std::vector<u64> unique_prime_factors(u64 n) {
     std::vector<u64> f;
-    for (u64 p = 2; p * p <= n; ++p) {
-        if (n % p == 0) {
+    u64 d = n;
+    if (d == 0) return f;
+    for (u64 p = 2; p * p <= d; ++p) {
+        if (d % p == 0) {
             f.push_back(p);
-            while (n % p == 0) n /= p;
+            while (d % p == 0) d /= p;
         }
     }
-    if (n > 1) f.push_back(n);
+    if (d > 1) f.push_back(d);
     return f;
 }
 
@@ -47,11 +49,9 @@ static std::string as_string(const GF2E& a) {
 static GF2X string_to_gf2x(const std::string& s) {
     GF2X res;
     if (s.empty()) return res;
-    
     std::string clean = s;
     clean.erase(std::remove(clean.begin(), clean.end(), '['), clean.end());
     clean.erase(std::remove(clean.begin(), clean.end(), ']'), clean.end());
-    
     std::istringstream iss(clean);
     long coeff_val;
     long idx = 0;
@@ -62,158 +62,204 @@ static GF2X string_to_gf2x(const std::string& s) {
     return res;
 }
 
-static GF2E bits_to_gf2e(u64 bits) {
-    GF2X f;
-    for (int i = 0; i < 64; ++i) {
-        if ((bits >> i) & 1) SetCoeff(f, i);
+static bool poly_less(const GF2X& a, const GF2X& b) {
+    long d1 = deg(a), d2 = deg(b);
+    if (d1 != d2) return d1 < d2;
+    for (long i = d1; i >= 0; --i) {
+        bool c1 = IsOne(coeff(a, i));
+        bool c2 = IsOne(coeff(b, i));
+        if (c1 != c2) return c2;
     }
-    return conv<GF2E>(f);
-}
-
-static u64 gf2x_to_bits(const GF2X& f) {
-    u64 res = 0;
-    for (long i = 0; i <= deg(f) && i < 64; ++i) {
-        if (IsOne(coeff(f, i))) res |= (u64(1) << i);
-    }
-    return res;
+    return false;
 }
 
 // -----------------------------------------------------------------------------
-// Field Model and Primitivity
+// Geometric Traverser (The Algebraic Redesign)
 // -----------------------------------------------------------------------------
-
-struct Orbit {
-    long n = 0;
-    GF2X modulus;
-    GF2X primitive;
-    std::vector<GF2X> states;
-};
-
-static bool is_primitive_element(const GF2E& a, u64 order_minus_1) {
-    if (IsZero(a)) return false;
-    if (order_minus_1 == 0) return true;
-    for (u64 p : unique_prime_factors(order_minus_1)) {
-        GF2E t;
-        power(t, a, to_ZZ(order_minus_1 / p));
-        if (IsOne(t)) return false;
-    }
-    return true;
-}
-
-static GF2E find_primitive_element(u64 order_minus_1, long tries = 5000) {
-    GF2E a;
-    for (long i = 0; i < tries; ++i) {
-        random(a);
-        if (is_primitive_element(a, order_minus_1)) return a;
-    }
-    throw std::runtime_error("failed to find primitive element");
-}
 
 /**
- * build_orbit generates a full maximal length sequence (maximal orbit)
- * of an LFSR of degree n.
+ * GeometricTraverser visits all numbers in [0, N-1] exactly once.
+ * For odd N, it uses Quotient Geometry:
+ * 1. Find n s.t. N | 2^n - 1.
+ * 2. In GF(2^n), let alpha be primitive.
+ * 3. zeta = alpha^((2^n-1)/N) has order N.
+ * 4. Traversal is multiplication in the subgroup <zeta>.
+ * 5. Output is a bijection from <zeta> to [0, N-1].
+ *
+ * For even N = 2^k * M, it combines a 2^k counter with a GeometricTraverser for M.
  */
-static Orbit build_orbit(long n) {
-    if (n <= 0 || n >= 62) throw std::runtime_error("invalid degree n for orbit");
+class GeometricTraverser {
+    u64 N_total;
+    u64 k_pow2;
+    u64 M_odd;
 
-    GF2X P;
-    BuildSparseIrred(P, n);
-    const u64 length = (u64{1} << n) - 1ULL;
-    GF2EPush scope(P);
-    GF2E alpha = find_primitive_element(length);
-
-    Orbit out;
-    out.n         = n;
-    out.modulus   = P;
-    out.primitive = rep(alpha);
-    out.states.reserve(length);
-
-    GF2E s(1);
-    for (u64 i = 0; i < length; ++i) {
-        out.states.push_back(rep(s));
-        s *= alpha;
-    }
-    return out;
-}
-
-// -----------------------------------------------------------------------------
-// Range Traversal (Practical Application)
-// -----------------------------------------------------------------------------
-
-class RangeTraverser {
-    long n;
+    // Algebraic state for M_odd
+    long field_n;
     GF2X modulus;
-    GF2X primitive;
-    u64 max_val;
-    u64 current_state_bits;
-    bool visited_zero;
+    GF2E zeta_step;
+    GF2E current_zeta;
+    GF2E initial_zeta;
+
+    struct RankPair {
+        GF2X poly;
+        u64 rank;
+        bool operator<(const RankPair& other) const {
+            return poly_less(poly, other.poly);
+        }
+    };
+    std::vector<RankPair> rank_map;
+
+    // State for 2^k
+    u64 count_2k;
+    u64 initial_count_2k;
     u64 seed;
 
+    void init_odd_part(u64 M) {
+        if (M <= 1) {
+            field_n = 0;
+            return;
+        }
+
+        // 1. Find smallest n s.t. M | 2^n - 1
+        field_n = -1;
+        for (long n = 1; n <= 1024; ++n) {
+            ZZ res = PowerMod(to_ZZ(2), to_ZZ(n), to_ZZ(M));
+            if (res == 1) {
+                field_n = n;
+                break;
+            }
+        }
+        if (field_n == -1) {
+            throw std::runtime_error("No suitable field degree found for N=" + std::to_string(N_total));
+        }
+
+        // 2. Build GF(2^field_n)
+        BuildSparseIrred(modulus, field_n);
+        GF2EPush scope(modulus);
+
+        // 3. Find primitive element alpha
+        SetSeed(to_ZZ(seed));
+        ZZ order = (power_ZZ(2, field_n) - 1);
+        auto factors = unique_prime_factors_ZZ(order);
+
+        GF2E alpha;
+        for (long i = 0; i < 5000; ++i) {
+            random(alpha);
+            if (IsZero(alpha)) continue;
+            bool is_prim = true;
+            for (const auto& p : factors) {
+                GF2E t;
+                power(t, alpha, order / p);
+                if (IsOne(t)) { is_prim = false; break; }
+            }
+            if (is_prim) break;
+        }
+
+        // 4. zeta = alpha^(order/M)
+        GF2E zeta;
+        power(zeta, alpha, order / to_ZZ(M));
+
+        // 5. Generate all M roots of unity and build rank map
+        std::vector<GF2X> roots;
+        roots.reserve(M);
+        GF2E cur_z(1);
+        for (u64 i = 0; i < M; ++i) {
+            roots.push_back(rep(cur_z));
+            cur_z *= zeta;
+        }
+
+        std::vector<GF2X> sorted_roots = roots;
+        std::sort(sorted_roots.begin(), sorted_roots.end(), poly_less);
+
+        rank_map.clear();
+        for (u64 i = 0; i < M; ++i) {
+            auto it = std::lower_bound(sorted_roots.begin(), sorted_roots.end(), roots[i], poly_less);
+            rank_map.push_back({roots[i], (u64)std::distance(sorted_roots.begin(), it)});
+        }
+        std::sort(rank_map.begin(), rank_map.end());
+
+        // 6. Setup step and initial state
+        std::mt19937_64 gen(seed);
+        u64 j = 1;
+        if (M > 1) {
+            do { j = (gen() % (M - 1)) + 1; } while (std::gcd(j, M) != 1);
+        }
+        power(zeta_step, zeta, to_ZZ(j));
+
+        u64 start_pow = gen() % M;
+        power(initial_zeta, zeta, to_ZZ(start_pow));
+        current_zeta = initial_zeta;
+    }
+
+    u64 get_rank(const GF2E& s) {
+        GF2X p = rep(s);
+        auto it = std::lower_bound(rank_map.begin(), rank_map.end(), RankPair{p, 0});
+        return it->rank;
+    }
+
+    std::vector<ZZ> unique_prime_factors_ZZ(ZZ n) {
+        std::vector<ZZ> factors;
+        ZZ d = n;
+        ZZ p = to_ZZ(2);
+        while (p * p <= d) {
+            if (d % p == 0) {
+                factors.push_back(p);
+                while (d % p == 0) d /= p;
+            }
+            p++;
+        }
+        if (d > 1) factors.push_back(d);
+        return factors;
+    }
+
 public:
-    RangeTraverser(u64 max_v, std::optional<u64> s = std::nullopt)
-        : max_val(max_v), visited_zero(false)
-    {
+    GeometricTraverser(u64 N, std::optional<u64> s = std::nullopt) : N_total(N) {
+        if (N == 0) throw std::runtime_error("N must be > 0");
+
         if (s) seed = *s;
         else {
             std::random_device rd;
             seed = ((u64)rd() << 32) | rd();
         }
 
-        SetSeed(to_ZZ(seed));
+        k_pow2 = 0;
+        M_odd = N;
+        while (M_odd > 0 && M_odd % 2 == 0) {
+            M_odd /= 2;
+            k_pow2++;
+        }
 
-        if (max_val == 0) {
-            n = 1;
-            return;
-        }
-        
-        n = 1;
-        while (n < 62 && ((u64(1) << n) - 1) < max_val) n++;
-        
-        BuildSparseIrred(modulus, n);
-        GF2EPush scope(modulus);
-        primitive = rep(find_primitive_element((u64(1) << n) - 1));
-        
+        init_odd_part(M_odd);
+
         std::mt19937_64 gen(seed);
-        std::uniform_int_distribution<u64> dis(1, (u64(1) << n) - 1);
-        current_state_bits = dis(gen);
-        
-        while (current_state_bits > max_val) {
-            step();
-        }
+        initial_count_2k = (k_pow2 > 0) ? (gen() % (1ULL << k_pow2)) : 0;
+        count_2k = initial_count_2k;
     }
 
     void reset() {
-        SetSeed(to_ZZ(seed));
-        visited_zero = false;
-        if (max_val == 0) return;
-        std::mt19937_64 gen(seed);
-        std::uniform_int_distribution<u64> dis(1, (u64(1) << n) - 1);
-        current_state_bits = dis(gen);
-        while (current_state_bits > max_val) {
-            step();
-        }
-    }
-
-    void step() {
-        if (max_val == 0) return;
-        GF2EPush scope(modulus);
-        GF2E s = bits_to_gf2e(current_state_bits);
-        GF2E alpha = conv<GF2E>(primitive);
-        s *= alpha;
-        current_state_bits = gf2x_to_bits(rep(s));
+        current_zeta = initial_zeta;
+        count_2k = initial_count_2k;
     }
 
     u64 next() {
-        if (max_val == 0) return 0;
-        if (!visited_zero) {
-            visited_zero = true;
-            return 0;
+        u64 res;
+        if (M_odd <= 1) {
+            res = count_2k;
+            count_2k = (count_2k + 1) % (1ULL << k_pow2);
+        } else {
+            GF2EPush scope(modulus);
+            u64 r = get_rank(current_zeta);
+            res = (r << k_pow2) | count_2k;
+
+            count_2k++;
+            if (k_pow2 < 64 && count_2k == (1ULL << k_pow2)) {
+                count_2k = 0;
+                current_zeta *= zeta_step;
+            } else if (k_pow2 >= 64) {
+                // This shouldn't happen with u64 N
+            }
         }
-        u64 val = current_state_bits;
-        do {
-            step();
-        } while (current_state_bits > max_val);
-        return val;
+        return res;
     }
 };
 
@@ -234,22 +280,36 @@ using Recognizer = std::function<bool(const Observation&, long candidate_width)>
 static Recognizer prefix_recognizer = [](const Observation& obs, long w) -> bool {
     try {
         if (obs.prefix.size() < 2) return false;
-        GF2X P;
-        BuildSparseIrred(P, w);
+        GF2X P; BuildSparseIrred(P, w);
         GF2EPush scope(P);
-        const u64 order_minus_1 = (u64{1} << w) - 1;
+        ZZ order = (power_ZZ(2, w) - 1);
         GF2X alpha_poly = string_to_gf2x(obs.prefix[1]);
         GF2E alpha = conv<GF2E>(alpha_poly);
-        if (!is_primitive_element(alpha, order_minus_1)) return false;
+        if (IsZero(alpha)) return false;
+
+        // Primitivity check
+        ZZ d = order;
+        ZZ p = to_ZZ(2);
+        while (p * p <= d) {
+            if (d % p == 0) {
+                GF2E t; power(t, alpha, order / p);
+                if (IsOne(t)) return false;
+                while (d % p == 0) d /= p;
+            }
+            p++;
+        }
+        if (d > 1) {
+            GF2E t; power(t, alpha, order / d);
+            if (IsOne(t)) return false;
+        }
+
         GF2E state(1);
         for (const auto& expected : obs.prefix) {
             if (as_string(state) != expected) return false;
             state *= alpha;
         }
         return true;
-    } catch (...) {
-        return false;
-    }
+    } catch (...) { return false; }
 };
 
 static InferenceResult ran_extend(const std::vector<Recognizer>& recognizers, const Observation& obs) {
@@ -265,82 +325,86 @@ static InferenceResult ran_extend(const std::vector<Recognizer>& recognizers, co
 }
 
 // -----------------------------------------------------------------------------
-// Tests
+// Main Demo
 // -----------------------------------------------------------------------------
 
-void test_inference() {
-    std::cout << "--- 1. Inference Test ---\n";
-    long n = 8;
-    GF2X P; BuildSparseIrred(P, n);
-    GF2EPush scope(P);
-    SetSeed(to_ZZ(42));
-    GF2E alpha = find_primitive_element((u64(1) << n) - 1);
-    Observation obs;
-    GF2E s(1);
-    for(int i=0; i<5; ++i) {
-        obs.prefix.push_back(as_string(s));
-        s *= alpha;
-    }
-    auto inf = ran_extend({prefix_recognizer}, obs);
-    std::cout << "Inferred width(s):";
-    for(long w : inf.candidates) std::cout << " " << w;
-    std::cout << "\n\n";
-}
+void test_geometric_traversal(u64 N, std::optional<u64> seed = std::nullopt) {
+    std::cout << "--- Geometric Traversal (N=" << N << ") ---\n";
+    try {
+        GeometricTraverser traverser(N, seed);
+        std::vector<u64> sequence;
+        for (u64 i = 0; i < N; ++i) sequence.push_back(traverser.next());
 
-void test_range_traversal(u64 max_val, std::optional<u64> seed = std::nullopt) {
-    std::cout << "--- 2. Range Traversal Demo (max_val=" << max_val << ") ---\n";
-    RangeTraverser traverser(max_val, seed);
-    std::vector<u64> sequence;
-    for (u64 i = 0; i <= max_val; ++i) {
-        sequence.push_back(traverser.next());
-    }
-    std::cout << "Sequence size: " << sequence.size() << "\n";
-    std::set<u64> seen;
-    bool all_in_range = true;
-    for(u64 x : sequence) {
-        if(x > max_val) all_in_range = false;
-        seen.insert(x);
-    }
-    std::cout << "Verification: All numbers in [0, " << max_val << "] visited exactly once? "
-              << (seen.size() == max_val + 1 && all_in_range ? "YES" : "NO") << "\n\n";
-}
+        std::cout << "First 15: ";
+        for(size_t i=0; i<std::min<size_t>(sequence.size(), 15); ++i) std::cout << sequence[i] << " ";
+        std::cout << "\n";
 
-void test_build_orbit(long n) {
-    std::cout << "--- 3. Full Orbit Generation (n=" << n << ") ---\n";
-    Orbit orb = build_orbit(n);
-    u64 expected_len = (u64(1) << n) - 1;
-    std::cout << "Generated orbit length: " << orb.states.size() << " (Expected: " << expected_len << ")\n";
-    std::set<u64> seen;
-    for(const auto& s : orb.states) {
-        seen.insert(gf2x_to_bits(s));
+        std::set<u64> seen;
+        bool all_in_range = true;
+        for(u64 x : sequence) {
+            if(x >= N) all_in_range = false;
+            seen.insert(x);
+        }
+        std::cout << "Verification: Size=" << sequence.size() << ", Unique=" << seen.size()
+                  << ", All in range? " << (all_in_range ? "YES" : "NO") << "\n";
+        std::cout << "Traversal Complete? " << (seen.size() == N ? "YES" : "NO") << "\n\n";
+    } catch (std::exception& e) {
+        std::cout << "Error: " << e.what() << "\n\n";
     }
-    std::cout << "Verification: All states unique and non-zero? "
-              << (seen.size() == expected_len && seen.find(0) == seen.end() ? "YES" : "NO") << "\n\n";
 }
 
 int main() {
     try {
-        std::cout << "=== LFSR Suite Extended Testing ===\n\n";
-        test_inference();
-        test_range_traversal(20, 12345ULL);
-        test_range_traversal(1000, 999ULL);
-        test_range_traversal(65535, 42ULL); // Large range test
-        test_build_orbit(4);
-        test_build_orbit(8);
-        test_build_orbit(12);
+        std::cout << "=== Improved LFSR Suite: Quotient Geometry Edition ===\n\n";
 
-        std::cout << "--- 4. Reproducibility Test ---\n";
-        u64 seed = 777;
-        RangeTraverser t1(100, seed);
-        RangeTraverser t2(100, seed);
-        bool match = true;
-        for(int i=0; i<=100; ++i) {
-            if(t1.next() != t2.next()) { match = false; break; }
+        // 1. Functional Inference Demo
+        std::cout << "--- 1. Inference Demo (GF(2^8)) ---\n";
+        {
+            GF2X P_test; BuildSparseIrred(P_test, 8);
+            GF2EPush scope(P_test);
+            SetSeed(to_ZZ(12345));
+            GF2E alpha;
+            ZZ ord = to_ZZ(255);
+            do {
+                random(alpha);
+                bool ok = true;
+                if (IsZero(alpha)) ok = false;
+                else {
+                    for(long p : {3, 5, 17}) {
+                        GF2E t; power(t, alpha, ord/p);
+                        if(IsOne(t)) { ok = false; break; }
+                    }
+                }
+                if (ok) break;
+            } while(true);
+
+            Observation obs; GF2E s(1);
+            for(int i=0; i<5; ++i) { obs.prefix.push_back(as_string(s)); s *= alpha; }
+
+            auto res = ran_extend({prefix_recognizer}, obs);
+            std::cout << "Observed prefix: ";
+            for(auto& p : obs.prefix) std::cout << p << " ";
+            std::cout << "\nInferred field width(s): ";
+            for(long w : res.candidates) std::cout << w << " ";
+            std::cout << "\n\n";
         }
-        std::cout << "Reproducibility check: " << (match ? "PASS" : "FAIL") << "\n";
+
+        // 2. Geometric Traversal (No rejection sampling)
+        test_geometric_traversal(100);    // Even N
+        test_geometric_traversal(65535);  // Large Mersenne-like N (n=16)
+        test_geometric_traversal(67);     // Odd N where n=66 (> 64)
+        test_geometric_traversal(1024);   // Power of 2
+
+        // Reproducibility
+        std::cout << "--- 3. Reproducibility Test ---\n";
+        u64 seed = 42;
+        GeometricTraverser t1(50, seed), t2(50, seed);
+        bool match = true;
+        for(int i=0; i<50; ++i) if(t1.next() != t2.next()) match = false;
+        std::cout << "Seeded traversers match? " << (match ? "YES" : "NO") << "\n";
 
     } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << "\n";
+        std::cerr << "Global Error: " << e.what() << "\n";
         return 1;
     }
     return 0;
