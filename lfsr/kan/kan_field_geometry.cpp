@@ -27,7 +27,7 @@ static unsigned degree(u64 p) {
 }
 
 static u64 mask_width(unsigned n) {
-    if (n >= 63) return ~0ULL;
+    if (n >= 64) return ~0ULL;
     return (u64{1} << n) - 1;
 }
 
@@ -335,10 +335,8 @@ static Recognizer dual_recognizer = [](const Observation& obs) {
 #ifndef NO_MAIN
 int main() {
     try {
-        unsigned n = 6;
-        auto locus = primitive_locus(n);
-        if (locus.empty()) return 1;
-        u64 poly = locus.front();
+        unsigned n = 4;
+        u64 poly = 0b10011; // x^4 + x + 1
 
         std::cout << "--- Kan LFSR Geometry Suite ---\n";
         std::cout << "Global Object (Polynomial): " << poly_to_string(poly) << "\n\n";
@@ -355,7 +353,7 @@ int main() {
         std::cout << "Left Kan Extension (Local implementation fragments):\n";
         for (auto& f : fragments) {
             std::cout << "  [" << std::left << std::setw(12) << f.chart_name << "] "
-                      << std::setw(25) << f.coordinate_desc << " | Sample: " << f.sample(32) << "\n";
+                      << std::setw(25) << f.coordinate_desc << " | Sample: " << f.sample(15) << "\n";
         }
 
         std::string prefix = fragments[0].sample(12);
