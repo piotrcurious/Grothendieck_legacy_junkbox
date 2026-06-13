@@ -45,7 +45,7 @@ static std::string gf2x_to_string(const GF2X& f) {
 
 static std::string gf2e_to_bits(const GF2E& a) {
     GF2X r = rep(a);
-    long d = deg(GF2E::modulus());
+    long d = deg(GF2E::GetModulus().P);
     if (d < 0) return "0";
 
     std::string s;

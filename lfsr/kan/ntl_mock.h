@@ -50,11 +50,22 @@ inline std::ostream& operator<<(std::ostream& os, const GF2X& a) {
     return os;
 }
 
+struct GF2XModulus {
+    GF2X P;
+    GF2XModulus() {}
+    GF2XModulus(const GF2X& p) : P(p) {}
+};
+
 struct GF2E {
     static GF2X current_modulus;
     u64 data = 0;
 
     static const GF2X& modulus() { return current_modulus; }
+    static const GF2XModulus& GetModulus() {
+        static GF2XModulus m;
+        m.P = current_modulus;
+        return m;
+    }
 
     GF2E() : data(0) {}
     GF2E(u64 d) : data(d) {}
@@ -192,6 +203,7 @@ inline std::ostream& operator<<(std::ostream& os, const GF2EX& f) {
 struct GF2EXModulus {
     GF2EX f;
     GF2EXModulus(const GF2EX& _f) : f(_f) {}
+    const GF2EX& getgetP() const { return f; }
 };
 
 inline GF2EX PowerXMod(uint64_t e, const GF2EXModulus& F) {

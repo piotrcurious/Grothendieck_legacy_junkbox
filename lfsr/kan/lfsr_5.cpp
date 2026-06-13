@@ -20,6 +20,7 @@
 #include <vector>
 #include <functional>
 #include <iomanip>
+#include <optional>
 
 using namespace NTL;
 using u64 = std::uint64_t;
@@ -282,9 +283,21 @@ static InferenceResult ran_extend(const std::vector<Recognizer>& recognizers,
 
 int main() {
     try {
-        SetSeed(to_ZZ(42));
-        std::size_t requested_length = 37;
-        Orbit orbit = build_orbit(requested_length);
+        unsigned n = 4;
+        GF2X P;
+        SetCoeff(P, 4); SetCoeff(P, 1); SetCoeff(P, 0); // x^4 + x + 1
+        GF2EPush scope(P);
+
+        Orbit orbit;
+        orbit.n = n;
+        orbit.modulus = P;
+        orbit.primitive = GF2E(2); // x
+        orbit.states.reserve(15);
+        GF2E s(1);
+        for(int i=0; i<15; ++i) {
+            orbit.states.push_back(s);
+            s *= orbit.primitive;
+        }
 
         std::cout << "=== Improved NTL Kan Extension Suite ===\n";
         std::cout << "Global Object: GF(2^" << orbit.n << ") / " << orbit.modulus << "\n";
