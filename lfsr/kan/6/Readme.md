@@ -1,22 +1,26 @@
-# Enhanced NTL LFSR Suite
+# Enhanced NTL LFSR Suite: Quotient Geometry Edition
 
-This repository contains a robust C++ implementation of Linear Feedback Shift Registers (LFSRs) leveraging the **NTL (Number Theory Library)** and **GMP (GNU Multi-Precision Library)**. It provides tools for algebraic inference, pseudo-random range traversal, and maximal length sequence generation.
+This repository contains a high-level C++ implementation of Linear Feedback Shift Registers (LFSRs) and Finite Field constructions, leveraging the **NTL (Number Theory Library)** and **GMP (GNU Multi-Precision Library)**.
+
+## Core Architecture: Quotient Geometry
+
+The centerpiece of this suite is the `GeometricTraverser`, which implements a mathematically guaranteed traversal of any interval $[0, N-1]$ exactly once. Unlike standard LFSR-based "rejection sampling" methods, this implementation uses **Quotient Geometry** to produce a true permutation.
+
+### Mathematical Foundation
+For any range size $N$, we decompose it as $N = 2^k \cdot M$, where $M$ is odd.
+1. **Odd Part ($M$):** We find the smallest extension degree $n$ such that $M$ divides $2^n - 1$.
+2. **Subgroup Action:** In the field $GF(2^n)$, we select a primitive element $\alpha$ and define $\zeta = \alpha^{(2^n-1)/M}$, which generates a cyclic subgroup of order $M$ (the $M$-th roots of unity).
+3. **Bijection:** Traversal is performed by multiplication in the subgroup $\langle\zeta\rangle$. We map these algebraic elements to $[0, M-1]$ using their rank in the field's natural bit-ordering.
+4. **Product Construction:** The final traversal is the product of the power-of-two counter and the geometric odd-part traverser.
+
+This approach is "geometric" because the interval is obtained as a quotient of a cyclic field action rather than by filtering an orbit.
 
 ## Features
 
-### 1. Algebraic Inference Layer
-- **O(n) Alpha Recovery:** Efficiently recovers the primitive element (alpha) from observed sequences using a direct string-to-polynomial parser. This is significantly faster than the naive $O(2^w)$ enumeration approach.
-- **Field Width Inference:** Automatically identifies the underlying field extension degree `w` from a short observed prefix.
-
-### 2. Pseudo-random Range Traversal
-- **Complete Coverage:** The `RangeTraverser` class ensures that every integer in a specified range `[0, max_val]` is visited exactly once before the sequence repeats.
-- **Pseudo-randomness:** Uses an underlying LFSR over a field extension $GF(2^n)$ (where $2^n-1 \ge max\_val$) to generate a non-repeating, pseudo-random sequence.
-- **Efficient Mapping:** Employs a discarding mechanism to stay within the target range while maintaining the cycle properties of the LFSR.
-- **Reproducibility:** Supports optional seeding for deterministic, reproducible sequences.
-
-### 3. Maximal Orbit Generation
-- **Full Sequence Generation:** The `build_orbit` function generates a complete maximal length sequence ($2^n-1$ states) for any degree $n < 62$.
-- **Primitive Polynomials:** Utilizes NTL's `BuildSparseIrred` to automatically select optimal primitive polynomials for any given degree.
+- **Algebraic Inference:** Recovers field parameters and primitive elements from observed bit-stream prefixes in $O(n)$ time.
+- **Geometric Traversal:** Guaranteed one-time visit of all elements in $[0, N-1]$ without rejection sampling for the odd component.
+- **Reproducibility:** Fully deterministic sequences when provided with a seed.
+- **Mersenne-Scale Testing:** Verified for ranges up to 65,535 and beyond.
 
 ## Getting Started
 
@@ -25,35 +29,19 @@ This repository contains a robust C++ implementation of Linear Feedback Shift Re
 - **GMP:** [https://gmplib.org/](https://gmplib.org/)
 
 ### Compilation
-To compile the suite, link against NTL, GMP, and Pthreads. Ensure you use C++17 or later.
+Use C++17 or later and link against `ntl`, `gmp`, and `pthread`.
 
 ```bash
 g++ -O3 -std=c++17 lfsr_improved.cpp -o lfsr_improved -lntl -lgmp -pthread
 ```
 
-If the libraries are installed in a custom location (e.g., `/usr/local` or a home directory), specify the paths:
-
-```bash
-g++ -O3 -std=c++17 lfsr_improved.cpp -o lfsr_improved \
-    -I/path/to/include -L/path/to/lib \
-    -lntl -lgmp -pthread
-```
-
 ### Execution
-Run the compiled binary. If using custom library paths, update `LD_LIBRARY_PATH`:
-
 ```bash
-LD_LIBRARY_PATH=/path/to/lib ./lfsr_improved
+./lfsr_improved
 ```
 
 ## Testing
-The `main()` function in `lfsr_improved.cpp` includes a comprehensive test suite that verifies:
-- **Inference Accuracy:** Correct recovery of field parameters from sequence prefixes.
-- **Range Traversal Integrity:** Uniqueness and completeness for ranges up to 65,535 and beyond.
-- **Orbit Completeness:** Verification of maximal length sequence properties.
-- **Determinism:** Ensuring seeded traversers produce identical sequences.
-
-## Practical Applications
-- **Pseudo-random Sampling:** Visit every element in a large dataset exactly once in random order without storing a visited set.
-- **Cryptographic Primitives:** Generate keystreams or nonces with guaranteed period properties.
-- **Simulation:** Efficiently shuffle or traverse state spaces in Monte Carlo simulations.
+The `main()` function contains a suite of demonstrations:
+1. **Field Inference:** Deducing $GF(2^8)$ parameters from a short sequence.
+2. **Geometric Traversal:** Completeness and uniqueness checks for various $N$ (100, 65535, 127, 1024).
+3. **Reproducibility:** Verification that seeded instances produce bit-identical paths.
