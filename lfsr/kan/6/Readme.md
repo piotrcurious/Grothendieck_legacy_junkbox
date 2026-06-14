@@ -1,27 +1,23 @@
-# Enhanced NTL LFSR Suite: Canonical Kan Extensions
+# Enhanced NTL LFSR Suite: Algebraic Geography
 
-This repository contains a high-level C++ implementation of Linear Feedback Shift Registers (LFSRs) and Finite Field constructions, leveraging the **NTL (Number Theory Library)** and **GMP (GNU Multi-Precision Library)**.
+This repository provides an advanced C++ framework for Linear Feedback Shift Registers (LFSRs) and Finite Field constructions, utilizing the **NTL (Number Theory Library)** and **GMP (GNU Multi-Precision Library)**. It treats LFSRs not merely as bit-stream generators, but as geometric objects defined over an algebraic locus.
 
-## Core Philosophy: Resolving Underdetermined Kan Extensions
+## Core Features: The Algebraic Geography Model
 
-Standard Kan extensions for bit-streams can be "underdetermined" due to random primitive choices or insufficient local data. This suite resolves these ambiguities through:
+### 1. Geometric Traverser (Quotient Geometry)
+A mathematically guaranteed traversal of any interval $[0, N-1]$ exactly once, producing a true permutation without rejection sampling.
+- **Quotient Geometry:** Decomposes $N = 2^k \cdot M$ and uses subgroup actions in suitable field extensions $GF(2^n)$.
+- **Scalable Ranking:** Implements an $O(M)$ rank bijection for small ranges and a **Lazy Rank** (hash-based) mode for large $N$ to prevent excessive memory usage.
+- **State Management:** Supports `seek(pos)` to jump to any point in the sequence in $O(\log n)$ time.
 
-### 1. Canonical Constructions
-- **Minimal Primitives:** Replaces random selection with the lexicographically smallest bit-pattern that satisfies primitivity. This makes the global object uniquely determined by the field parameters.
-- **Standardized Roots:** Fixes the subgroup action to the primary $N$-th root, ensuring bit-identical traversals across all platforms.
+### 2. Geometric Atlas & Morphisms (Kan Extensions)
+Views the global algebraic state through multiple local "Charts," effectively implementing the Kan extension philosophy.
+- **Morphisms:** Explicit transition maps between charts. The suite includes an optimized **Trace Reconstruction** morphism that recovers the full $n$-bit field state from $n$ Trace bits using precomputed dual basis matrices.
+- **Projections:** Support for Companion, Trace, and Decimation charts.
 
-### 2. Chart Morphisms (Geometric Atlas)
-Local "Charts" provide different views of the same algebraic state. We implement explicit **Morphisms** to transition between these views:
-- **Trace Reconstruction:** A linear-system solver that recovers the full $n$-bit field state from just $n$ bits of a Trace-stream. This proves that local Trace observations are not underdetermined when sufficient context is available.
-
-### 3. Multi-Chart Consensus (Inference)
-Resolves field-inference ambiguities by seeking a single global object that simultaneously satisfies multiple local projections (e.g., both Companion and Trace bit-streams).
-
-## Features
-
-- **Geometric Traverser:** Mathematically guaranteed $[0, N-1]$ traversal using Quotient Geometry. Supports `seek(pos)` and arbitrary range sizes.
-- **Advanced Inference:** O(n) recovery of field width and primitive elements using Multi-Chart Consensus.
-- **Algebraic Morphisms:** Tools to glue local implementation fragments into a coherent global state.
+### 3. Locus Exploration & Certificates
+- **Primitive Locus:** Tools to find all primitive polynomials for a given degree, revealing the parameter space of maximal-period recurrences.
+- **Kan Certificates:** Determines the minimal bit-length required from multiple charts to uniquely identify the global algebraic object.
 
 ## Getting Started
 
@@ -30,14 +26,21 @@ Resolves field-inference ambiguities by seeking a single global object that simu
 - **GMP:** [https://gmplib.org/](https://gmplib.org/)
 
 ### Compilation
-Use C++17 or later.
+Requires C++17 or later. Link against `ntl`, `gmp`, and `pthread`.
 
 ```bash
 g++ -O3 -std=c++17 lfsr_improved.cpp -o lfsr_improved -lntl -lgmp -pthread
 ```
 
-### Testing
-The `main()` function verifies:
-1. **Trace -> State Morphism:** Successful bit-perfect reconstruction.
-2. **Canonical Determinism:** Seeded instances produce bit-identical sequences.
-3. **Consensus Inference:** Resolving field width from multi-chart observations.
+### Execution
+Ensure `LD_LIBRARY_PATH` includes the location of your libraries.
+
+```bash
+LD_LIBRARY_PATH=/path/to/lib ./lfsr_improved
+```
+
+## Testing
+The `main()` function serves as a verification suite for:
+1. **Trace Reconstruction:** Bit-perfect recovery of internal state.
+2. **Locus Exploration:** Generation of primitive polynomials.
+3. **Scalability:** Demonstration of Lazy Rank mode for large ranges.
