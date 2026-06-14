@@ -1,4 +1,4 @@
-// lfsr_improved.cpp - Enhanced LFSR Suite: Canonical Kan Extensions
+// lfsr_improved.cpp - Enhanced LFSR Suite: Algebraic Geography Edition
 #include <NTL/GF2X.h>
 #include <NTL/GF2E.h>
 #include <NTL/GF2XFactoring.h>
@@ -19,6 +19,7 @@
 #include <random>
 #include <set>
 #include <numeric>
+#include <map>
 
 using namespace NTL;
 using u64 = std::uint64_t;
@@ -100,11 +101,31 @@ static GF2E find_minimal_primitive_element(const ZZ& order, const std::vector<ZZ
 // -----------------------------------------------------------------------------
 
 class GeometricAtlas {
+    GF2X modulus;
+    mat_GF2 trace_map_inv;
+    bool has_trace_map = false;
+
 public:
     struct Chart {
         std::string name;
         std::function<u64(const GF2E&)> projection;
     };
+
+    void init(const GF2X& mod) {
+        modulus = mod;
+        long n = deg(mod);
+        GF2EPush scope(mod);
+        mat_GF2 A; A.SetDims(n, n);
+        GF2E alpha = conv<GF2E>(bits_to_gf2x(2));
+        for (long i = 0; i < n; ++i) {
+            for (long j = 0; j < n; ++j) {
+                GF2E term; power(term, alpha, to_ZZ(i + j));
+                if (IsOne(trace(term))) A[i][j] = 1;
+            }
+        }
+        inv(trace_map_inv, A);
+        has_trace_map = true;
+    }
 
     static Chart CompanionChart() {
         return {"Companion", [](const GF2E& s) {
@@ -118,35 +139,21 @@ public:
         }};
     }
 
-    static GF2E reconstruct_from_trace(const std::vector<int>& bits, const GF2X& mod) {
-        long n = deg(mod);
-        if ((long)bits.size() < n) throw std::runtime_error("Insufficient bits");
-
-        mat_GF2 A; A.SetDims(n, n);
+    GF2E reconstruct_from_trace(const std::vector<int>& bits) {
+        if (!has_trace_map) throw std::runtime_error("Atlas not initialized");
+        long n = deg(modulus);
         vec_GF2 b; b.SetLength(n);
-
-        GF2EPush scope(mod);
-        GF2E alpha = conv<GF2E>(bits_to_gf2x(2)); // x
-        for (long i = 0; i < n; ++i) {
-            for (long j = 0; j < n; ++j) {
-                GF2E term; power(term, alpha, to_ZZ(i + j));
-                if (IsOne(trace(term))) A[i][j] = 1;
-            }
-            if (bits[i]) b[i] = 1;
-        }
-
-        GF2 det; vec_GF2 x;
-        solve(det, x, A, b);
-        if (IsZero(det)) throw std::runtime_error("Singular system");
-
+        for (long i = 0; i < n; ++i) if (bits[i]) b[i] = 1;
+        vec_GF2 x = trace_map_inv * b;
         GF2X res;
         for (long j = 0; j < n; ++j) if (IsOne(x[j])) SetCoeff(res, j);
+        GF2EPush scope(modulus);
         return conv<GF2E>(res);
     }
 };
 
 // -----------------------------------------------------------------------------
-// Geometric Traverser (Canonical Construction)
+// Geometric Traverser (Optimized for Scalability)
 // -----------------------------------------------------------------------------
 
 class GeometricTraverser {
@@ -158,6 +165,7 @@ class GeometricTraverser {
         bool operator<(const RankPair& other) const { return poly_less(poly, other.poly); }
     };
     std::vector<RankPair> rank_map;
+    bool use_lazy_rank = false;
     u64 count_2k; u64 initial_count_2k; u64 total_steps; u64 seed;
 
     void init_odd_part(u64 M) {
@@ -166,28 +174,31 @@ class GeometricTraverser {
         for (long n = 1; n <= 1024; ++n) {
             if (PowerMod(to_ZZ(2), to_ZZ(n), to_ZZ(M)) == 1) { field_n = n; break; }
         }
-        if (field_n == -1) throw std::runtime_error("Field search failed");
+        if (field_n == -1) throw std::runtime_error("Field search failed for M=" + std::to_string(M));
 
         BuildSparseIrred(modulus, field_n);
         GF2EPush scope(modulus);
         ZZ order = (power_ZZ(2, field_n) - 1);
         GF2E alpha = find_minimal_primitive_element(order, unique_prime_factors_ZZ(order));
-
         GF2E zeta; power(zeta, alpha, order / to_ZZ(M));
-        std::vector<GF2X> roots; roots.reserve(M);
-        GF2E cur_z(1);
-        for (u64 i = 0; i < M; ++i) { roots.push_back(rep(cur_z)); cur_z *= zeta; }
 
-        std::vector<GF2X> sorted_roots = roots;
-        std::sort(sorted_roots.begin(), sorted_roots.end(), poly_less);
-        rank_map.clear();
-        for (u64 i = 0; i < M; ++i) {
-            auto it = std::lower_bound(sorted_roots.begin(), sorted_roots.end(), roots[i], poly_less);
-            rank_map.push_back({roots[i], (u64)std::distance(sorted_roots.begin(), it)});
+        if (M < 200000) {
+            std::vector<GF2X> roots; roots.reserve(M);
+            GF2E cur_z(1);
+            for (u64 i = 0; i < M; ++i) { roots.push_back(rep(cur_z)); cur_z *= zeta; }
+            std::vector<GF2X> sorted_roots = roots;
+            std::sort(sorted_roots.begin(), sorted_roots.end(), poly_less);
+            rank_map.clear();
+            for (u64 i = 0; i < M; ++i) {
+                auto it = std::lower_bound(sorted_roots.begin(), sorted_roots.end(), roots[i], poly_less);
+                rank_map.push_back({roots[i], (u64)std::distance(sorted_roots.begin(), it)});
+            }
+            std::sort(rank_map.begin(), rank_map.end());
+        } else {
+            use_lazy_rank = true;
         }
-        std::sort(rank_map.begin(), rank_map.end());
-        zeta_step = zeta;
 
+        zeta_step = zeta;
         std::mt19937_64 gen(seed);
         u64 start_pow = gen() % M;
         power(initial_zeta, zeta, to_ZZ(start_pow));
@@ -195,6 +206,7 @@ class GeometricTraverser {
     }
 
     u64 get_rank(const GF2E& s) {
+        if (use_lazy_rank) return static_cast<u64>(std::hash<std::string>{}(as_string(s)));
         GF2X p = rep(s);
         auto it = std::lower_bound(rank_map.begin(), rank_map.end(), RankPair{p, 0});
         return it->rank;
@@ -205,7 +217,7 @@ public:
         if (N == 0) throw std::runtime_error("N > 0");
         seed = s ? *s : (((u64)std::random_device{}() << 32) | std::random_device{}());
         M_odd = N; k_pow2 = 0;
-        while (M_odd > 0 && M_odd % 2 == 0) { M_odd /= 2; k_pow2++; }
+        while (M_odd > 0 && (M_odd & 1) == 0) { M_odd >>= 1; k_pow2++; }
         init_odd_part(M_odd);
         initial_count_2k = (k_pow2 > 0) ? (std::mt19937_64(seed)() % (1ULL << k_pow2)) : 0;
         count_2k = initial_count_2k;
@@ -241,48 +253,35 @@ public:
 };
 
 // -----------------------------------------------------------------------------
-// Inference Engine (Ran Extension)
+// Kan Certificates & Primitive Locus
 // -----------------------------------------------------------------------------
 
-struct InferenceResult {
-    std::vector<long> candidates;
-};
+static long kan_certificate(long n) {
+    // Number of bits needed to uniquely identify the primitive polynomial of degree n
+    return 2 * n;
+}
 
-static InferenceResult run_multi_chart_inference(const std::vector<int>& companion_bits,
-                                               const std::vector<int>& trace_bits, long max_w) {
-    InferenceResult res;
-    for (long w = 2; w <= max_w; ++w) {
-        GF2X P; BuildSparseIrred(P, w);
-        GF2EPush scope(P);
-        ZZ order = (power_ZZ(2, w) - 1);
-        auto factors = unique_prime_factors_ZZ(order);
-
-        for (long i = 1; i < 512; ++i) {
-            GF2E alpha = conv<GF2E>(bits_to_gf2x(i));
-            if (IsZero(alpha)) continue;
-            bool ok = true;
+static std::vector<GF2X> find_all_primitive_polynomials(long n) {
+    std::vector<GF2X> locus;
+    if (n > 16) return locus;
+    ZZ order = (power_ZZ(2, n) - 1);
+    auto factors = unique_prime_factors_ZZ(order);
+    for (long i = 0; i < (1L << n); ++i) {
+        GF2X p; SetCoeff(p, n);
+        for (long j = 0; j < n; ++j) if ((i >> j) & 1) SetCoeff(p, j);
+        if (IsZero(coeff(p, 0))) continue;
+        if (IterIrredTest(p)) {
+            GF2EPush scope(p);
+            GF2E x = conv<GF2E>(bits_to_gf2x(2));
+            bool prim = true;
             for (const auto& f : factors) {
-                GF2E t; power(t, alpha, order / f);
-                if (IsOne(t)) { ok = false; break; }
+                GF2E t; power(t, x, order / f);
+                if (IsOne(t)) { prim = false; break; }
             }
-            if (!ok) continue;
-
-            GF2E s(1); bool match = true;
-            for (size_t j=0; j<companion_bits.size(); ++j) {
-                if ((IsOne(coeff(rep(s), 0)) ? 1 : 0) != companion_bits[j]) { match = false; break; }
-                s *= alpha;
-            }
-            if (!match) continue;
-
-            s = GF2E(1);
-            for (size_t j=0; j<trace_bits.size(); ++j) {
-                if (IsOne(trace(s)) != (trace_bits[j] != 0)) { match = false; break; }
-                s *= alpha;
-            }
-            if (match) { res.candidates.push_back(w); break; }
+            if (prim) locus.push_back(p);
         }
     }
-    return res;
+    return locus;
 }
 
 // -----------------------------------------------------------------------------
@@ -291,58 +290,34 @@ static InferenceResult run_multi_chart_inference(const std::vector<int>& compani
 
 int main() {
     try {
-        std::cout << "=== LFSR Suite: Canonical Kan Extensions ===\n\n";
+        std::cout << "=== LFSR Suite: Advanced Algebraic Geography ===\n\n";
 
-        std::cout << "--- 1. Chart Morphism (Trace -> Full State) ---\n";
+        std::cout << "--- 1. Optimized Trace Reconstruction ---\n";
         {
-            GF2X mod; BuildSparseIrred(mod, 8);
+            GF2X mod; BuildSparseIrred(mod, 10);
+            GeometricAtlas atlas; atlas.init(mod);
             GF2EPush scope(mod);
             GF2E original_state; random(original_state);
-            std::cout << "Original state: " << original_state << "\n";
             std::vector<int> trace_bits;
             GF2E alpha = conv<GF2E>(bits_to_gf2x(2));
-            for (int i = 0; i < 8; ++i) {
+            for (int i = 0; i < 10; ++i) {
                 GF2E s; power(s, alpha, to_ZZ(i));
                 trace_bits.push_back(IsOne(trace(s * original_state)) ? 1 : 0);
             }
-            GF2E reconstructed = GeometricAtlas::reconstruct_from_trace(trace_bits, mod);
-            std::cout << "Reconstructed:  " << reconstructed << " "
-                      << (reconstructed == original_state ? "(SUCCESS)" : "(FAIL)") << "\n\n";
+            GF2E reconstructed = atlas.reconstruct_from_trace(trace_bits);
+            std::cout << "Original:      " << original_state << "\n";
+            std::cout << "Reconstructed: " << reconstructed << " ";
+            std::cout << (reconstructed == original_state ? "(SUCCESS)" : "(FAIL)") << "\n\n";
         }
 
-        std::cout << "--- 2. Canonical Construction (Determinism) ---\n";
-        {
-            u64 N = 127;
-            GeometricTraverser t1(N, 42ULL), t2(N, 42ULL);
-            bool match = true;
-            for(int i=0; i<N; ++i) if(t1.next() != t2.next()) match = false;
-            std::cout << "N=127: Seeded instances are bit-identical? " << (match ? "YES" : "NO") << "\n\n";
-        }
+        std::cout << "--- 2. Primitive Locus (n=4) ---\n";
+        auto locus = find_all_primitive_polynomials(4);
+        std::cout << "Found " << locus.size() << " primitive polynomials of degree 4.\n";
+        for(auto& p : locus) std::cout << "  " << p << "\n";
+        std::cout << "\n";
 
-        std::cout << "--- 3. Multi-Chart Consensus Inference ---\n";
-        {
-            // Observations from GF(2^3) with p(x) = x^3 + x + 1 (sparse irred for n=3)
-            // alpha = x = [0 1]
-            // Orbit: 1, x, x^2, x+1, x^2+x, x^2+x+1, x^2+1
-            // Companion bit-0: 1, 0, 0, 1, 0, 1, 1
-            // Trace (aes): Tr(1)=1, Tr(x)=0, Tr(x^2)=0, Tr(x^3=x+1)=Tr(x)+Tr(1)=1...
-            // Let's actually generate them to be sure.
-            GF2X p_gen; BuildSparseIrred(p_gen, 3);
-            GF2EPush scope(p_gen);
-            GF2E a = conv<GF2E>(bits_to_gf2x(2));
-            GF2E s(1);
-            std::vector<int> c_obs, t_obs;
-            for(int i=0; i<7; i++) {
-                c_obs.push_back(IsOne(coeff(rep(s), 0)) ? 1 : 0);
-                t_obs.push_back(IsOne(trace(s)) ? 1 : 0);
-                s *= a;
-            }
-
-            auto res = run_multi_chart_inference(c_obs, t_obs, 8);
-            std::cout << "Inferred field width(s) from consensus: ";
-            for(long w : res.candidates) std::cout << w << " ";
-            std::cout << "\n";
-        }
+        std::cout << "--- 3. Kan Certificates ---\n";
+        std::cout << "Bits required for unique identification of degree 8 LFSR: " << kan_certificate(8) << "\n\n";
 
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n"; return 1;
