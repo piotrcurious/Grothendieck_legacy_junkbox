@@ -295,8 +295,10 @@ static ChartFunctor companion_chart = [](const FieldContext* fc) -> std::unique_
     };
     f->projection = [fc](u64 s) {
         fc->activate();
-        ZZ_pE ss = fc->from_uint(s);
-        return (conv<long>(rep(coeff(rep(ss), 0))) & 1) != 0;
+        // Polynomial representation a0 + a1*x + ...
+        // state s = a0 + a1*p + ...
+        // bit 0 is a0 mod 2.
+        return (u64)(s % fc->p) % 2 != 0;
     };
     return f;
 };
@@ -380,7 +382,7 @@ static ChartFunctor matrix_chart = [](const FieldContext* fc) -> std::unique_ptr
         for (long i = 0; i < fc->n; ++i) { out += conv<long>(rep(res[i])) * base; base *= fc->p; }
         return out;
     };
-    f->projection = [fc](u64 s) { return (s & 1) != 0; };
+    f->projection = [fc](u64 s) { return (u64)(s % fc->p) % 2 != 0; };
     return f;
 };
 
@@ -501,10 +503,16 @@ struct Observation {
     std::vector<u64> prefix;
 };
 
-static std::vector<long> ran_extend(const Observation& obs, long n_min = 1, long n_max = 8) {
+static std::vector<long> ran_extend(const Observation& obs, long n_min = 1, long n_max = 10) {
     std::vector<long> candidates;
     for (long n = std::max(1L, n_min); n <= n_max; ++n) {
         try {
+            // In a fully developed Right Kan Extension, we don't assume the irreducible.
+            // But NTL's BuildIrred is deterministic. To search the "variety",
+            // we'd need to iterate all irreducible polynomials.
+            // For now, we improve inference by searching the PRIMITIVE LOCUS
+            // of the chosen field representation.
+
             FieldContext fc(obs.p, n, 0);
             fc.activate();
 
@@ -516,10 +524,12 @@ static std::vector<long> ran_extend(const Observation& obs, long n_min = 1, long
                     ZZ_pE s0inv, alpha;
                     inv(s0inv, s0);
                     mul(alpha, s1, s0inv);
+                    // Algebraic property: alpha = s1/s0 MUST be primitive
                     if (is_primitive_element(alpha, fc.group_order)) {
                         ZZ_pE s = s0;
                         bool ok = true;
                         for (u64 val : obs.prefix) {
+                            fc.activate();
                             if (fc.to_uint(s) != val) { ok = false; break; }
                             s *= alpha;
                         }
@@ -529,6 +539,50 @@ static std::vector<long> ran_extend(const Observation& obs, long n_min = 1, long
             }
 
             // 2. Fragment-based Inference (Projection-level or multi-chart)
+
+            bool found_for_n = false;
+
+            // Special optimization for Trace inference using Linear Algebra (especially for p=2)
+            if (obs.chart_name == "Trace" && obs.p == 2) {
+                if (obs.prefix.size() >= (size_t)n) {
+                    mat_ZZ_p A; A.SetDims(n, n);
+                    vec_ZZ_p b; b.SetLength(n);
+                    ZZ_pE alpha = fc.primitive();
+                    for (int i = 0; i < n; ++i) {
+                        ZZ_pE alpha_i; power(alpha_i, alpha, i);
+                        for (int j = 0; j < n; ++j) {
+                            ZZ_pX xj_poly; SetCoeff(xj_poly, j, 1);
+                            ZZ_pE xj_ev = conv<ZZ_pE>(xj_poly);
+                            A[i][j] = conv<ZZ_p>(rep(trace(xj_ev * alpha_i)));
+                        }
+                        b[i] = conv<ZZ_p>(to_ZZ((long)obs.prefix[i]));
+                    }
+
+                    ZZ_p det_val;
+                    vec_ZZ_p sol;
+                    solve(det_val, sol, A, b);
+                    if (!IsZero(det_val)) {
+                        u64 s_uint = 0, base = 1;
+                        for (int j = 0; j < n; ++j) {
+                            s_uint += conv<long>(rep(sol[j])) * base;
+                            base *= 2;
+                        }
+                        // Verify solution against remaining bits
+                        ZZ_pE s_ev = fc.from_uint(s_uint);
+                        bool ok = true;
+                        for (size_t i = 0; i < obs.prefix.size(); ++i) {
+                            ZZ_pE cur_s = s_ev;
+                            ZZ_pE alpha_i; power(alpha_i, alpha, i);
+                            if ((u64)(conv<long>(rep(trace(cur_s * alpha_i))) % 2) != obs.prefix[i]) {
+                                ok = false; break;
+                            }
+                        }
+                        if (ok) { candidates.push_back(n); found_for_n = true; break; }
+                    }
+                }
+                if (found_for_n) break;
+            }
+
             std::vector<ChartFunctor> atlas = {
                 companion_chart, matrix_chart, trace_chart, decimation_chart, reciprocal_chart
             };
@@ -536,21 +590,46 @@ static std::vector<long> ran_extend(const Observation& obs, long n_min = 1, long
 
             for (auto& f : fragments) {
                 if (f && f->chart_name == obs.chart_name) {
-                    u64 search_limit = std::min<u64>(fc.order, 1024);
-                    for (u64 s_idx = 1; s_idx < search_limit; ++s_idx) {
-                        f->state = s_idx;
-                        bool match = true;
-                        u64 cur = f->state;
-                        for (u64 val : obs.prefix) {
-                            fc.activate();
-                            if ((u64)f->projection(cur) != val) { match = false; break; }
-                            cur = f->transition(cur);
+                    // Search the PRIMITIVE LOCUS
+                    // For the Trace/Decimation charts, the generator matters.
+                    // We try multiple primitive elements if the standard one doesn't work.
+                    std::vector<u64> primitives;
+        if (fc.order < 10000) {
+                        for (u64 a = 1; a < fc.order; ++a) {
+                            if (is_primitive_element(fc.from_uint(a), fc.group_order))
+                                primitives.push_back(a);
+                if (primitives.size() > 64) break; // Increased limit for Decimation search
                         }
-                        if (match) { candidates.push_back(n); goto next_n; }
+                    } else {
+                        primitives.push_back(fc.prim_as_uint());
+                    }
+
+                    for (u64 prim : primitives) {
+                        // Update fragment's transition to use this primitive
+                        f->transition = [&fc, prim](u64 s) {
+                            fc.activate();
+                            ZZ_pE ss = fc.from_uint(s);
+                            ss *= fc.from_uint(prim);
+                            return fc.to_uint(ss);
+                        };
+
+                        u64 search_limit = std::min<u64>(fc.order, 1024);
+                        for (u64 s_idx = 1; s_idx < search_limit; ++s_idx) {
+                            f->state = s_idx;
+                            bool match = true;
+                            u64 cur = f->state;
+                            for (u64 val : obs.prefix) {
+                                fc.activate();
+                                if ((u64)f->projection(cur) != val) { match = false; break; }
+                                cur = f->transition(cur);
+                            }
+                            if (match) { candidates.push_back(n); found_for_n = true; break; }
+                        }
+                        if (found_for_n) break;
                     }
                 }
+                if (found_for_n) break;
             }
-            next_n:;
         } catch (...) {}
     }
     return candidates;
@@ -584,6 +663,7 @@ static void test_kan_inference(long p, long n, std::string chart) {
     if (chart == "Trace") atlas.push_back(trace_chart);
     else if (chart == "Reciprocal") atlas.push_back(reciprocal_chart);
     else if (chart == "Matrix") atlas.push_back(matrix_chart);
+    else if (chart == "Decimate-3") atlas.push_back(decimation_chart);
     else atlas.push_back(companion_chart);
 
     auto fragments = lan_extend(atlas, &fc);
@@ -601,6 +681,27 @@ static void test_kan_inference(long p, long n, std::string chart) {
     for (long c : candidates) std::cout << " " << c;
     bool ok = std::find(candidates.begin(), candidates.end(), n) != candidates.end();
     std::cout << "  [OK: " << (ok ? "YES" : "NO") << "]\n\n";
+}
+
+static void test_categorical_gluing(long p, long n) {
+    std::cout << "[ Categorical Gluing Test  p=" << p << "  n=" << n << " ]\n";
+    FieldContext fc(p, n, 0);
+    std::vector<ChartFunctor> atlas = {
+        companion_chart, matrix_chart, trace_chart, decimation_chart, reciprocal_chart
+    };
+    auto fragments = lan_extend(atlas, &fc);
+
+    // In a category, different presentations of the same object must commute.
+    // Here we check that the Companion and Matrix charts generate identical state-sequences
+    // when projected identically.
+
+    if (fragments.size() >= 2) {
+        std::string s1 = fragments[0]->sample(50);
+        std::string s2 = fragments[1]->sample(50);
+        bool match = (s1 == s2);
+        std::cout << "  Companion vs Matrix bit-perfect consistency: " << (match ? "PASS" : "FAIL") << "\n";
+    }
+    std::cout << "\n";
 }
 
 static void test_range_traversal(long p, u64 max_val, std::optional<u64> seed = std::nullopt) {
@@ -642,7 +743,11 @@ int main() {
         test_kan_inference(3, 3, "Reciprocal");
         test_kan_inference(5, 2, "Trace");
 
-        std::cout << "--- Stage 3: Core Utilities ---" << std::endl;
+        std::cout << "--- Stage 3: Categorical Consistency ---" << std::endl;
+        test_categorical_gluing(2, 8);
+        test_categorical_gluing(3, 4);
+
+        std::cout << "--- Stage 4: Core Utilities ---" << std::endl;
         test_range_traversal(2, 20, 12345ULL);
         test_build_orbit(2, 8);
         test_build_orbit(3, 4);
