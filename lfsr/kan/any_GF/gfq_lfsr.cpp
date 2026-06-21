@@ -49,6 +49,7 @@ using u64 = std::uint64_t;
 // ────────────────────────────────────────────────────────────────────────────
 // §1  Utilities
 // ────────────────────────────────────────────────────────────────────────────
+// Helper functions for primitivity testing and portable NTL conversion.
 
 static std::vector<u64> unique_prime_factors(u64 n) {
     std::vector<u64> f;
@@ -84,6 +85,9 @@ static ZZ u64_to_ZZ(u64 v) {
 // ────────────────────────────────────────────────────────────────────────────
 // §2  Base-p Encoding
 // ────────────────────────────────────────────────────────────────────────────
+// Maps GF(p^n) elements to integers in [0, p^n - 1] via a base-p expansion
+// of polynomial coefficients. This ensures a consistent set-theoretic
+// representation across different algebraic charts.
 
 static u64 zzpe_to_uint(const ZZ_pE& a, long p) {
     if (IsZero(a)) return 0ULL;
@@ -115,6 +119,7 @@ static ZZ_pE uint_to_zzpe(u64 val, long p) {
 // ────────────────────────────────────────────────────────────────────────────
 // §3  Galois Field Locus
 // ────────────────────────────────────────────────────────────────────────────
+// Algorithms to identify and construct generators of the multiplicative group.
 
 static bool is_primitive_element(const ZZ_pE& a, u64 group_order) {
     if (IsZero(a)) return false;
@@ -246,6 +251,10 @@ public:
 // ────────────────────────────────────────────────────────────────────────────
 // §4  Kan Extensions (Lan) — Realization Atlas
 // ────────────────────────────────────────────────────────────────────────────
+// Implementation of the Left Kan Extension. A 'Fragment' represents a
+// local algebraic presentation (Chart) of the global LFSR object.
+// We use an Atlas of ChartFunctors to 'glue' these presentations into a
+// unified realization.
 
 struct Fragment {
     std::string chart_name;
@@ -414,6 +423,10 @@ static ChartFunctor decimation_chart = [](const FieldContext* fc) -> std::unique
 // ────────────────────────────────────────────────────────────────────────────
 // §5  Orbit & RangeTraverser
 // ────────────────────────────────────────────────────────────────────────────
+// High-level utilities for full-sequence generation and range traversal.
+// RangeTraverser provides a pseudo-random permutation of [0, max_val] by
+// selecting the minimal field that contains the range and skipping
+// out-of-range elements.
 
 struct Orbit {
     long p, n;
@@ -496,6 +509,13 @@ public:
 // ────────────────────────────────────────────────────────────────────────────
 // §6  Right Kan Extension (Ran) — Inference Machine
 // ────────────────────────────────────────────────────────────────────────────
+// Implementation of the Right Kan Extension. Reconstructs the global field
+// parameters (p, n) and initial state from local observations.
+//
+// Inference strategies:
+// 1. Algebraic: alpha = s1/s0 (for state-level observations).
+// 2. Linear-Algebraic: Solving Tr(s * alpha^i) = b_i (for Trace bit-streams).
+// 3. Search: Brute-force over the primitive locus (for general projections).
 
 struct Observation {
     long p;
