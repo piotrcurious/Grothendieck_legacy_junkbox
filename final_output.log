@@ -1,0 +1,143 @@
+=== GF(p^n) LFSR Suite: Kan Extensions & Algebraic Geometry ===
+
+--- Stage 1: Left Kan Extension (Lan) ---
+[ Lan Realization  p=2  n=8 ]
+  GF(2^8)  |F*| = 255
+  irred f(x) = + 1x^0 + 1x^3 + 1x^5 + 1x^6 + 1x^8
+  primitive α (base-2 int) = 177
+  Atlas Realizations:
+    [Companion   ] Polynomial basis bit 0    | Sample: 100000001011110
+    [Matrix      ] Linear map transition     | Sample: 100000001011110
+    [Trace       ] Field trace to GF(p) mod 2 | Sample: 000100100101110
+    [Decimate-3  ] Every 3rd orbit point     | Sample: 100011001010000
+    [Reciprocal  ] Dual basis / reversed orbit | Sample: 100000001001010
+
+[ Lan Realization  p=3  n=4 ]
+  GF(3^4)  |F*| = 80
+  irred f(x) = + 1x^0 + 1x^2 + 1x^3 + 1x^4
+  primitive α (base-3 int) = 65
+  Atlas Realizations:
+    [Companion   ] Polynomial basis bit 0    | Sample: 100001000100111
+    [Matrix      ] Linear map transition     | Sample: 100001000100111
+    [Trace       ] Field trace to GF(p) mod 2 | Sample: 100011010000100
+    [Decimate-3  ] Every 3rd orbit point     | Sample: 100111101100000
+    [Reciprocal  ] Dual basis / reversed orbit | Sample: 100000110111100
+
+[ Lan Realization  p=5  n=2 ]
+  GF(5^2)  |F*| = 24
+  irred f(x) = + 4x^0 + 2x^1 + 1x^2
+  primitive α (base-5 int) = 8
+  Atlas Realizations:
+    [Companion   ] Polynomial basis bit 0    | Sample: 101101000000101
+    [Matrix      ] Linear map transition     | Sample: 101101000000101
+    [Trace       ] Field trace to GF(p) mod 2 | Sample: 011101100010011
+    [Decimate-3  ] Every 3rd orbit point     | Sample: 110011001100110
+    [Reciprocal  ] Dual basis / reversed orbit | Sample: 101000000101101
+
+[ Lan Realization  p=97  n=2 ]
+  GF(97^2)  |F*| = 9408
+  irred f(x) = + 6x^0 + 19x^1 + 1x^2
+  primitive α (base-97 int) = 8209
+  Atlas Realizations:
+    [Companion   ] Polynomial basis bit 0    | Sample: 101100010101001
+    [Matrix      ] Linear map transition     | Sample: 101100010101001
+    [Trace       ] Field trace to GF(p) mod 2 | Sample: 000110011011010
+    [Decimate-3  ] Every 3rd orbit point     | Sample: 110100000001010
+    [Reciprocal  ] Dual basis / reversed orbit | Sample: 100001101001010
+
+--- Stage 2: Right Kan Extension (Ran) ---
+[ Ran Inference  p=2  target_n=4  chart=Companion  seed=0 ]
+  Observation: 1 14 9 2 3 13 4 6 5 8 12 10 15 7 11 1 14 9 2 3
+  Inferred n: 4  [OK: YES]
+
+[ Ran Inference  p=2  target_n=4  chart=Trace  seed=12345 ]
+  Observation: 0 1 1 1 1 0 1 0
+  Inferred n: 4 6 7 8 9 10  [OK: YES]
+
+[ Ran Inference  p=2  target_n=6  chart=Trace  seed=0 ]
+  Observation: 0 0 0 1 0 0 1 0 0 0 0 1
+  Inferred n: 6 9 10  [OK: YES]
+
+[ Ran Inference  p=3  target_n=3  chart=Reciprocal  seed=0 ]
+  Observation: 1 0 0 0 1 0 0 0 0 0 0 0 1 0 1 1 1 0 0 0
+  Inferred n: 3 6 7 8  [OK: YES]
+
+[ Ran Inference  p=5  target_n=2  chart=Trace  seed=0 ]
+  Observation: 2 4 2 0
+  Inferred n: 2  [OK: YES]
+
+--- Stage 3: Categorical Commutativity ---
+[ Categorical Commutativity Test  p=2  n=8 ]
+  Companion ⇋ Matrix consistency: PASS
+  Reciprocal chart realization: PASS
+  Multi-chart Determinism: PASS
+
+[ Categorical Commutativity Test  p=3  n=4 ]
+  Companion ⇋ Matrix consistency: PASS
+  Reciprocal chart realization: PASS
+  Multi-chart Determinism: PASS
+
+--- Stage 4: Algebraic Certificates ---
+[ Algebraic Certificate Test  p=2  n=4 ]
+  Certificate of length 16 identifies degree 4: PASS
+
+--- Stage 5: Core Utilities & Traditional Suite ---
+[ RangeTraversal  p=2  max_val=20 ]
+  All [0,20] visited exactly once: YES
+  First 20: 0 12 7 5 8 6 4 3 11 2 13 17 1 18 20 9 15 14 10 16
+
+[ RangeTraversal  p=2  max_val=65535 ]
+  All [0,65535] visited exactly once: YES
+  First 20: 0 49490 17393 24284 55496 52101 60553 28738 26138 62516 2914 52628 13074 3248 25975 64947 56084 58245 16659 36705
+
+[ Orbit  p=2  n=4 ]
+  generated=15  expected=15  unique+nonzero: YES
+
+[ Orbit  p=2  n=8 ]
+  generated=255  expected=255  unique+nonzero: YES
+
+[ Reproducibility  p=2  max_val=100 ]
+  same seed → same sequence: PASS
+
+[ RangeTraversal  p=3  max_val=20 ]
+  All [0,20] visited exactly once: YES
+  First 20: 0 10 14 16 5 15 2 6 18 19 4 12 20 13 7 1 3 9 11 17
+
+[ RangeTraversal  p=3  max_val=1000 ]
+  All [0,1000] visited exactly once: YES
+  First 20: 0 777 305 642 739 39 111 399 996 941 589 615 704 692 990 229 930 641 527 451
+
+[ Orbit  p=3  n=4 ]
+  generated=80  expected=80  unique+nonzero: YES
+
+[ Orbit  p=3  n=6 ]
+  generated=728  expected=728  unique+nonzero: YES
+
+[ Reproducibility  p=3  max_val=100 ]
+  same seed → same sequence: PASS
+
+[ Orbit  p=5  n=4 ]
+  generated=624  expected=624  unique+nonzero: YES
+
+[ Reproducibility  p=5  max_val=100 ]
+  same seed → same sequence: PASS
+
+[ RangeTraversal  p=17  max_val=500 ]
+  All [0,500] visited exactly once: YES
+  First 20: 0 425 215 279 78 120 264 341 303 201 31 493 212 43 100 355 330 423 257 372
+
+[ Reproducibility  p=17  max_val=200 ]
+  same seed → same sequence: PASS
+
+[ RangeTraversal  p=97  max_val=10000 ]
+  All [0,10000] visited exactly once: YES
+  First 20: 0 4769 5853 5670 699 7563 2750 4341 9140 5410 2696 2143 8375 6298 9093 1844 4650 5387 6180 4415
+
+[ Orbit  p=97  n=1 ]
+  generated=96  expected=96  unique+nonzero: YES
+
+[ Orbit  p=97  n=2 ]
+  generated=9408  expected=9408  unique+nonzero: YES
+
+[ Reproducibility  p=97  max_val=500 ]
+  same seed → same sequence: PASS

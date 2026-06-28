@@ -73,6 +73,8 @@ g++ -O2 -std=c++17 gfq_lfsr.cpp -lntl -lgmp -pthread -o gfq_lfsr
 
 ### Running
 Executing `./gfq_lfsr` runs the integrated test suite, demonstrating:
-1. **Lan Realizations** across multiple primes ($p=2, 3, 5, 97$).
-2. **Ran Inferences** from various chart observations.
-3. **Consistency Checks** ensuring the mathematical integrity of the gluing process.
+1. **Lan Realizations**: Multi-chart generation across $p=2, 3, 5, 97$.
+2. **Ran Inferences**: Structural reconstruction from Trace, Reciprocal, and Companion observations.
+3. **Categorical Commutativity**: Verification of bit-perfect consistency between algebraic presentations.
+4. **Algebraic Certificates**: Determining the minimal uniqueness criteria for field parameter recovery.
+5. **Traditional Suite**: Comprehensive range traversal, orbit validation, and reproducibility tests.
