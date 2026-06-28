@@ -1,4 +1,4 @@
-// lfsr_improved.cpp - Enhanced LFSR Suite: Algebraic Geography Edition
+// lfsr_improved.cpp - Enhanced LFSR Suite: Algebraic Geography
 #include <NTL/GF2X.h>
 #include <NTL/GF2E.h>
 #include <NTL/GF2XFactoring.h>
@@ -20,6 +20,7 @@
 #include <set>
 #include <numeric>
 #include <map>
+#include <chrono>
 
 using namespace NTL;
 using u64 = std::uint64_t;
@@ -46,22 +47,6 @@ static std::string as_string(const GF2E& a) {
     std::ostringstream oss;
     oss << a;
     return oss.str();
-}
-
-static GF2X string_to_gf2x(const std::string& s) {
-    GF2X res;
-    if (s.empty()) return res;
-    std::string clean = s;
-    clean.erase(std::remove(clean.begin(), clean.end(), '['), clean.end());
-    clean.erase(std::remove(clean.begin(), clean.end(), ']'), clean.end());
-    std::istringstream iss(clean);
-    long coeff_val;
-    long idx = 0;
-    while (iss >> coeff_val) {
-        if (coeff_val) SetCoeff(res, idx);
-        idx++;
-    }
-    return res;
 }
 
 static GF2X bits_to_gf2x(u64 bits) {
@@ -116,7 +101,7 @@ public:
         long n = deg(mod);
         GF2EPush scope(mod);
         mat_GF2 A; A.SetDims(n, n);
-        GF2E alpha = conv<GF2E>(bits_to_gf2x(2));
+        GF2E alpha = conv<GF2E>(bits_to_gf2x(2)); // x
         for (long i = 0; i < n; ++i) {
             for (long j = 0; j < n; ++j) {
                 GF2E term; power(term, alpha, to_ZZ(i + j));
@@ -125,18 +110,6 @@ public:
         }
         inv(trace_map_inv, A);
         has_trace_map = true;
-    }
-
-    static Chart CompanionChart() {
-        return {"Companion", [](const GF2E& s) {
-            return IsOne(coeff(rep(s), 0)) ? 1ULL : 0ULL;
-        }};
-    }
-
-    static Chart TraceChart() {
-        return {"Trace", [](const GF2E& s) {
-            return IsOne(trace(s)) ? 1ULL : 0ULL;
-        }};
     }
 
     GF2E reconstruct_from_trace(const std::vector<int>& bits) {
@@ -150,16 +123,36 @@ public:
         GF2EPush scope(modulus);
         return conv<GF2E>(res);
     }
+
+    // Legacy linear solver for benchmarking
+    static GF2E reconstruct_legacy(const std::vector<int>& bits, const GF2X& mod) {
+        long n = deg(mod);
+        mat_GF2 A; A.SetDims(n, n);
+        vec_GF2 b; b.SetLength(n);
+        GF2EPush scope(mod);
+        GF2E alpha = conv<GF2E>(bits_to_gf2x(2));
+        for (long i = 0; i < n; ++i) {
+            for (long j = 0; j < n; ++j) {
+                GF2E term; power(term, alpha, to_ZZ(i + j));
+                if (IsOne(trace(term))) A[i][j] = 1;
+            }
+            if (bits[i]) b[i] = 1;
+        }
+        GF2 det; vec_GF2 x;
+        solve(det, x, A, b);
+        GF2X res;
+        for (long j = 0; j < n; ++j) if (IsOne(x[j])) SetCoeff(res, j);
+        return conv<GF2E>(res);
+    }
 };
 
 // -----------------------------------------------------------------------------
-// Geometric Traverser (Optimized for Scalability)
+// Geometric Traverser (Exhaustively Tested)
 // -----------------------------------------------------------------------------
 
 class GeometricTraverser {
     u64 N_total; u64 k_pow2; u64 M_odd;
     long field_n; GF2X modulus; GF2E zeta_step; GF2E current_zeta; GF2E initial_zeta;
-
     struct RankPair {
         GF2X poly; u64 rank;
         bool operator<(const RankPair& other) const { return poly_less(poly, other.poly); }
@@ -174,7 +167,7 @@ class GeometricTraverser {
         for (long n = 1; n <= 1024; ++n) {
             if (PowerMod(to_ZZ(2), to_ZZ(n), to_ZZ(M)) == 1) { field_n = n; break; }
         }
-        if (field_n == -1) throw std::runtime_error("Field search failed for M=" + std::to_string(M));
+        if (field_n == -1) throw std::runtime_error("Field search failed");
 
         BuildSparseIrred(modulus, field_n);
         GF2EPush scope(modulus);
@@ -194,9 +187,7 @@ class GeometricTraverser {
                 rank_map.push_back({roots[i], (u64)std::distance(sorted_roots.begin(), it)});
             }
             std::sort(rank_map.begin(), rank_map.end());
-        } else {
-            use_lazy_rank = true;
-        }
+        } else { use_lazy_rank = true; }
 
         zeta_step = zeta;
         std::mt19937_64 gen(seed);
@@ -253,71 +244,84 @@ public:
 };
 
 // -----------------------------------------------------------------------------
-// Kan Certificates & Primitive Locus
+// Testing Suite
 // -----------------------------------------------------------------------------
 
-static long kan_certificate(long n) {
-    // Number of bits needed to uniquely identify the primitive polynomial of degree n
-    return 2 * n;
+void test_full_permutation_integrity(u64 N) {
+    std::cout << "Testing N=" << N << "... ";
+    GeometricTraverser gt(N, 777ULL);
+    std::set<u64> seen;
+    for(u64 i=0; i<N; i++) {
+        u64 v = gt.next();
+        if(v >= N || seen.count(v)) {
+            std::cout << "FAILED (v=" << v << ")\n";
+            return;
+        }
+        seen.insert(v);
+    }
+    std::cout << "PASSED (Full Permutation verified)\n";
 }
 
-static std::vector<GF2X> find_all_primitive_polynomials(long n) {
-    std::vector<GF2X> locus;
-    if (n > 16) return locus;
-    ZZ order = (power_ZZ(2, n) - 1);
-    auto factors = unique_prime_factors_ZZ(order);
-    for (long i = 0; i < (1L << n); ++i) {
-        GF2X p; SetCoeff(p, n);
-        for (long j = 0; j < n; ++j) if ((i >> j) & 1) SetCoeff(p, j);
-        if (IsZero(coeff(p, 0))) continue;
-        if (IterIrredTest(p)) {
-            GF2EPush scope(p);
-            GF2E x = conv<GF2E>(bits_to_gf2x(2));
-            bool prim = true;
-            for (const auto& f : factors) {
-                GF2E t; power(t, x, order / f);
-                if (IsOne(t)) { prim = false; break; }
-            }
-            if (prim) locus.push_back(p);
+void test_morphism_completeness() {
+    std::cout << "Testing Trace Morphism (degree-8 field)... ";
+    GF2X mod; BuildSparseIrred(mod, 8);
+    GeometricAtlas atlas; atlas.init(mod);
+    GF2EPush scope(mod);
+    for(long i=1; i<256; i++) {
+        GF2E state = conv<GF2E>(bits_to_gf2x(i));
+        std::vector<int> bits;
+        GF2E alpha = conv<GF2E>(bits_to_gf2x(2));
+        for(int j=0; j<8; j++) {
+            GF2E s; power(s, alpha, to_ZZ(j));
+            bits.push_back(IsOne(trace(s * state)) ? 1 : 0);
+        }
+        if(atlas.reconstruct_from_trace(bits) != state) {
+            std::cout << "FAILED at state " << i << "\n";
+            return;
         }
     }
-    return locus;
+    std::cout << "PASSED (All states reconstructed)\n";
 }
 
-// -----------------------------------------------------------------------------
-// Main
-// -----------------------------------------------------------------------------
+void benchmark_reconstruction() {
+    std::cout << "Benchmarking Trace Reconstruction (n=12, 1000 iterations)...\n";
+    GF2X mod; BuildSparseIrred(mod, 12);
+    GeometricAtlas atlas; atlas.init(mod);
+    GF2EPush scope(mod);
+    GF2E state; random(state);
+    std::vector<int> bits;
+    GF2E alpha = conv<GF2E>(bits_to_gf2x(2));
+    for(int j=0; j<12; j++) {
+        GF2E s; power(s, alpha, to_ZZ(j));
+        bits.push_back(IsOne(trace(s * state)) ? 1 : 0);
+    }
+
+    auto t1 = std::chrono::high_resolution_clock::now();
+    for(int i=0; i<1000; i++) atlas.reconstruct_from_trace(bits);
+    auto t2 = std::chrono::high_resolution_clock::now();
+
+    auto t3 = std::chrono::high_resolution_clock::now();
+    for(int i=0; i<1000; i++) GeometricAtlas::reconstruct_legacy(bits, mod);
+    auto t4 = std::chrono::high_resolution_clock::now();
+
+    auto dur_opt = std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count();
+    auto dur_leg = std::chrono::duration_cast<std::chrono::microseconds>(t4-t3).count();
+    std::cout << "  Optimized (Matrix): " << dur_opt << " us\n";
+    std::cout << "  Legacy (Solver):    " << dur_leg << " us\n";
+}
 
 int main() {
     try {
-        std::cout << "=== LFSR Suite: Advanced Algebraic Geography ===\n\n";
-
-        std::cout << "--- 1. Optimized Trace Reconstruction ---\n";
-        {
-            GF2X mod; BuildSparseIrred(mod, 10);
-            GeometricAtlas atlas; atlas.init(mod);
-            GF2EPush scope(mod);
-            GF2E original_state; random(original_state);
-            std::vector<int> trace_bits;
-            GF2E alpha = conv<GF2E>(bits_to_gf2x(2));
-            for (int i = 0; i < 10; ++i) {
-                GF2E s; power(s, alpha, to_ZZ(i));
-                trace_bits.push_back(IsOne(trace(s * original_state)) ? 1 : 0);
-            }
-            GF2E reconstructed = atlas.reconstruct_from_trace(trace_bits);
-            std::cout << "Original:      " << original_state << "\n";
-            std::cout << "Reconstructed: " << reconstructed << " ";
-            std::cout << (reconstructed == original_state ? "(SUCCESS)" : "(FAIL)") << "\n\n";
-        }
-
-        std::cout << "--- 2. Primitive Locus (n=4) ---\n";
-        auto locus = find_all_primitive_polynomials(4);
-        std::cout << "Found " << locus.size() << " primitive polynomials of degree 4.\n";
-        for(auto& p : locus) std::cout << "  " << p << "\n";
+        std::cout << "=== LFSR Suite: Exhaustive Verification ===\n\n";
+        test_full_permutation_integrity(4096);
+        test_full_permutation_integrity(4097);
+        test_full_permutation_integrity(8191);
         std::cout << "\n";
 
-        std::cout << "--- 3. Kan Certificates ---\n";
-        std::cout << "Bits required for unique identification of degree 8 LFSR: " << kan_certificate(8) << "\n\n";
+        test_morphism_completeness();
+        std::cout << "\n";
+
+        benchmark_reconstruction();
 
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n"; return 1;
