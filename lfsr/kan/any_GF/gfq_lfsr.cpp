@@ -553,8 +553,10 @@ static std::vector<long> ran_extend(const Observation& obs, long n_min = 1, long
                         ZZ_pE s0 = fc.from_uint(obs.prefix[0]);
                         ZZ_pE s1 = fc.from_uint(obs.prefix[1]);
                         ZZ_pE s0inv, alpha;
-                        inv(s0inv, s0);
-                        mul(alpha, s1, s0inv);
+                        try {
+                            inv(s0inv, s0);
+                            mul(alpha, s1, s0inv);
+                        } catch (...) { continue; }
                         if (is_primitive_element(alpha, fc.group_order)) {
                             ZZ_pE s = s0;
                             bool ok = true;
@@ -801,11 +803,23 @@ static void test_range_traversal(long p, u64 max_val, std::optional<u64> seed = 
 static void test_build_orbit(long p, long n) {
     std::cout << "[ Orbit  p=" << p << "  n=" << n << " ]\n";
     u64 expected; try { expected = p_power(p, n) - 1; } catch (...) { return; }
-    if (expected > 2000000) return;
+    if (expected > 2000000) {
+        std::cout << "  orbit size " << expected << " - too large; skipping\n\n";
+        return;
+    }
     Orbit orb = build_orbit(p, n);
     std::set<u64> seen(orb.states.begin(), orb.states.end());
     bool ok = (seen.size() == expected && seen.find(0) == seen.end());
-    std::cout << "  unique+nonzero: " << (ok ? "YES" : "NO") << "\n\n";
+    std::cout << "  generated=" << orb.states.size() << "  expected=" << expected
+              << "  unique+nonzero: " << (ok ? "YES" : "NO") << "\n\n";
+}
+
+static void test_reproducibility(long p, u64 max_val, u64 seed) {
+    std::cout << "[ Reproducibility  p=" << p << "  max_val=" << max_val << " ]\n";
+    RangeTraverser t1(p, max_val, seed), t2(p, max_val, seed);
+    bool ok = true;
+    for (u64 i = 0; i <= max_val && ok; ++i) if (t1.next() != t2.next()) ok = false;
+    std::cout << "  same seed \u2192 same sequence: " << (ok ? "PASS" : "FAIL") << "\n\n";
 }
 
 int main() {
@@ -815,6 +829,7 @@ int main() {
         test_kan_realization(2, 8);
         test_kan_realization(3, 4);
         test_kan_realization(5, 2);
+        test_kan_realization(97, 2);
 
         std::cout << "--- Stage 2: Right Kan Extension (Ran) ---" << std::endl;
         test_kan_inference(2, 4, "Companion");
@@ -830,10 +845,30 @@ int main() {
         std::cout << "--- Stage 4: Algebraic Certificates ---" << std::endl;
         test_algebraic_certificates(2, 4);
 
-        std::cout << "--- Stage 5: Core Utilities ---" << std::endl;
+        std::cout << "--- Stage 5: Core Utilities & Traditional Suite ---" << std::endl;
+        // Restore comprehensive testing
         test_range_traversal(2, 20, 12345ULL);
+        test_range_traversal(2, 65535, 42ULL);
+        test_build_orbit(2, 4);
         test_build_orbit(2, 8);
+        test_reproducibility(2, 100, 777);
+
+        test_range_traversal(3, 20, 12345ULL);
+        test_range_traversal(3, 1000, 999ULL);
         test_build_orbit(3, 4);
+        test_build_orbit(3, 6);
+        test_reproducibility(3, 100, 777);
+
+        test_build_orbit(5, 4);
+        test_reproducibility(5, 100, 777);
+
+        test_range_traversal(17, 500, 42ULL);
+        test_reproducibility(17, 200, 777);
+
+        test_range_traversal(97, 10000, 42ULL);
+        test_build_orbit(97, 1);
+        test_build_orbit(97, 2);
+        test_reproducibility(97, 500, 777);
 
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n"; return 1;
