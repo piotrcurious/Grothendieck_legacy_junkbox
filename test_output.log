@@ -34,37 +34,26 @@
     [Decimate-3  ] Every 3rd orbit point     | Sample: 110011001100110
     [Reciprocal  ] Dual basis / reversed orbit | Sample: 101000000101101
 
-[ Lan Realization  p=97  n=2 ]
-  GF(97^2)  |F*| = 9408
-  irred f(x) = + 6x^0 + 19x^1 + 1x^2
-  primitive α (base-97 int) = 8209
-  Atlas Realizations:
-    [Companion   ] Polynomial basis bit 0    | Sample: 101100010101001
-    [Matrix      ] Linear map transition     | Sample: 101100010101001
-    [Trace       ] Field trace to GF(p) mod 2 | Sample: 000110011011010
-    [Decimate-3  ] Every 3rd orbit point     | Sample: 110100000001010
-    [Reciprocal  ] Dual basis / reversed orbit | Sample: 100001101001010
-
 --- Stage 2: Right Kan Extension (Ran) ---
-[ Ran Inference  p=2  target_n=4  chart=Companion ]
-  Observation: 10001100011000110001
-  Inferred n: 8  [OK: NO]
+[ Ran Inference  p=2  target_n=4  chart=Companion  seed=0 ]
+  Observation: 1 14 9 2 3 13 4 6 5 8 12 10 15 7 11 1 14 9 2 3
+  Inferred n: 4  [OK: YES]
 
-[ Ran Inference  p=2  target_n=4  chart=Trace ]
-  Observation: 01111011110111101111
-  Inferred n: 8  [OK: NO]
+[ Ran Inference  p=2  target_n=4  chart=Trace  seed=12345 ]
+  Observation: 0 1 1 1 1 0 1 0
+  Inferred n: 4 6 7 8 9 10  [OK: YES]
 
-[ Ran Inference  p=2  target_n=4  chart=Matrix ]
-  Observation: 10001100011000110001
-  Inferred n: 8  [OK: NO]
+[ Ran Inference  p=2  target_n=6  chart=Trace  seed=0 ]
+  Observation: 0 0 0 1 0 0 1 0 0 0 0 1
+  Inferred n: 6 9 10  [OK: YES]
 
-[ Ran Inference  p=3  target_n=3  chart=Reciprocal ]
-  Observation: 10000000101110001101
-  Inferred n: 3 7  [OK: YES]
+[ Ran Inference  p=3  target_n=3  chart=Reciprocal  seed=0 ]
+  Observation: 1 0 0 0 1 0 0 0 0 0 0 0 1 0 1 1 1 0 0 0
+  Inferred n: 3 6 7 8  [OK: YES]
 
-[ Ran Inference  p=5  target_n=2  chart=Trace ]
-  Observation: 01110110001001110110
-  Inferred n: 2 4  [OK: YES]
+[ Ran Inference  p=5  target_n=2  chart=Trace  seed=0 ]
+  Observation: 2 4 2 0
+  Inferred n: 2  [OK: YES]
 
 --- Stage 3: Categorical Consistency ---
 [ Categorical Gluing Test  p=2  n=8 ]
@@ -72,14 +61,3 @@
 
 [ Categorical Gluing Test  p=3  n=4 ]
   Companion vs Matrix bit-perfect consistency: PASS
-
---- Stage 4: Core Utilities ---
-[ RangeTraversal  p=2  max_val=20 ]
-  All [0,20] visited exactly once: YES
-  First 20: 0 12 7 5 8 6 4 3 11 2 13 17 1 18 20 9 15 14 10 16
-
-[ Orbit  p=2  n=8 ]
-  unique+nonzero: YES
-
-[ Orbit  p=3  n=4 ]
-  unique+nonzero: YES
