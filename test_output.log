@@ -55,9 +55,31 @@
   Observation: 2 4 2 0
   Inferred n: 2  [OK: YES]
 
---- Stage 3: Categorical Consistency ---
-[ Categorical Gluing Test  p=2  n=8 ]
-  Companion vs Matrix bit-perfect consistency: PASS
+--- Stage 3: Categorical Commutativity ---
+[ Categorical Commutativity Test  p=2  n=8 ]
+  Companion ⇋ Matrix consistency: PASS
+  Reciprocal chart realization: PASS
+  Multi-chart Determinism: PASS
 
-[ Categorical Gluing Test  p=3  n=4 ]
-  Companion vs Matrix bit-perfect consistency: PASS
+[ Categorical Commutativity Test  p=3  n=4 ]
+  Companion ⇋ Matrix consistency: PASS
+  Reciprocal chart realization: PASS
+  Multi-chart Determinism: PASS
+
+--- Stage 4: Algebraic Certificates ---
+[ Algebraic Certificate Test  p=2  n=4 ]
+  Certificate of length 16 identifies degree 4: PASS
+
+[ Algebraic Certificate Test  p=3  n=2 ]
+  Certificate of length 8 identifies degree 2: FAIL
+
+--- Stage 5: Core Utilities ---
+[ RangeTraversal  p=2  max_val=20 ]
+  All [0,20] visited exactly once: YES
+  First 20: 0 12 7 5 8 6 4 3 11 2 13 17 1 18 20 9 15 14 10 16
+
+[ Orbit  p=2  n=8 ]
+  unique+nonzero: YES
+
+[ Orbit  p=3  n=4 ]
+  unique+nonzero: YES
