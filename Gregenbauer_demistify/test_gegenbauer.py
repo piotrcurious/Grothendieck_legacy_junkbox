@@ -5,9 +5,11 @@ Tests:
 1. Formal Prolog Proof Knowledgebase Execution (via swipl)
 2. Python Semiclassical Asymptotics & Error Convergence Rates
 3. Computational Layer & Pareto Optimization Solver across bases/types
+4. Quadric Hypersurface Algebraic Geometry & Schubert Combinatorics
 """
 
 import subprocess
+import math
 import numpy as np
 import pytest
 
@@ -25,6 +27,12 @@ from Gregenbauer_demistify.computational_layer import (
     NumericalBase,
     HAS_MPMATH,
 )
+from Gregenbauer_demistify.algebraic_geometry_combinatorics import (
+    quadric_hilbert_polynomial,
+    pieri_coefficients,
+    pochhammer,
+    schubert_intersection_coefficients,
+)
 
 
 def test_prolog_formal_proof():
@@ -35,9 +43,47 @@ def test_prolog_formal_proof():
     assert "PROOF COMPLETED SUCCESSFULLY WITH ALL THEOREMS VERIFIED LOGICALLY!" in res.stdout
     assert "Symmetric Space: so(5)/so(4)" in res.stdout
     assert "Three-Term Recurrence & Hypergeometric Algebra" in res.stdout
+    assert "Quadric Hypersurface Algebraic Geometry & Combinatorics" in res.stdout
     assert "Antipodal Parity Symmetry" in res.stdout
     assert "Demystification of the Singular Scaling Limit (4-Fold Unification)" in res.stdout
     assert "Matched Asymptotic Overlap Verification (Regime III" in res.stdout
+
+
+def test_quadric_hilbert_polynomial_and_normalization():
+    """Verifies C_n^(lambda)(1) = (lambda / (n + lambda)) * dim H^0(Q_{d-2}, O(n))."""
+    d = 5
+    n = 6
+    lambda_val = (d - 2) / 2.0
+
+    h0 = quadric_hilbert_polynomial(d, n)
+    c_n_1 = c_n_1_val(n, lambda_val)
+
+    # h^0 = binom(n+d-1, d-1) - binom(n+d-3, d-1)
+    expected_h0 = math.comb(n + d - 1, d - 1) - math.comb(n + d - 3, d - 1)
+    assert h0 == expected_h0
+
+    # Relation C_n^(lambda)(1) = (lambda / (n + lambda)) * h^0
+    rel_c_n_1 = (lambda_val / (n + lambda_val)) * h0
+    assert abs(c_n_1 - rel_c_n_1) < 1e-12
+
+
+def test_pieri_coefficients_sum_identity():
+    """Verifies that Pieri rule coefficients C_+ + C_- = 1 for any n, lambda."""
+    for n in range(1, 10):
+        for lambda_val in [0.5, 1.0, 1.5, 2.5]:
+            c_plus, c_minus = pieri_coefficients(n, lambda_val)
+            assert abs((c_plus + c_minus) - 1.0) < 1e-12
+
+
+def test_pochhammer_and_schubert_coefficients():
+    """Tests rising Pochhammer symbol and Schubert intersection coefficients."""
+    # (3)_4 = 3 * 4 * 5 * 6 = 360
+    assert pochhammer(3.0, 4) == 360.0
+
+    coeffs = schubert_intersection_coefficients(2, 1.5)
+    assert len(coeffs) == 3
+    # c_0 should always be 1.0
+    assert abs(coeffs[0] - 1.0) < 1e-12
 
 
 def test_wkb_interior_asymptotic_convergence():
