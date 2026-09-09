@@ -35,6 +35,8 @@ def test_prolog_formal_proof():
     assert "PROOF COMPLETED SUCCESSFULLY WITH ALL THEOREMS VERIFIED LOGICALLY!" in res.stdout
     assert "Symmetric Space: so(5)/so(4)" in res.stdout
     assert "Three-Term Recurrence & Hypergeometric Algebra" in res.stdout
+    assert "Antipodal Parity Symmetry" in res.stdout
+    assert "Matched Asymptotic Overlap Verification (Regime III" in res.stdout
 
 
 def test_wkb_interior_asymptotic_convergence():

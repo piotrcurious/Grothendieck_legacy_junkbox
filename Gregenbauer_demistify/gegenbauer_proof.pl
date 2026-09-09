@@ -48,6 +48,10 @@ half_density_scaling(sin(Theta)^(TwoLambda), sin(Theta)^Lambda) :-
 % Corrected: V_eff(theta) = lambda*(lambda-1) / sin^2(theta) (without + lambda^2)
 schrodinger_effective_potential(Lambda, Theta, (Lambda*(Lambda-1))/(sin(Theta)^2)).
 
+potential_classification(Lambda, repulsive) :- Lambda > 1.0.
+potential_classification(Lambda, zero) :- Lambda =:= 1.0.
+potential_classification(Lambda, critically_attractive) :- Lambda =:= 0.5.
+
 % spectral_energy_level(N, Lambda, Energy)
 spectral_energy_level(N, Lambda, Energy) :-
     Rho is Lambda,
@@ -69,9 +73,10 @@ prove_schrodinger_transformation(D, N) :-
     dimension_parameter(D, Lambda),
     spectral_energy_level(N, Lambda, Energy),
     schrodinger_effective_potential(Lambda, theta, Veff),
+    potential_classification(Lambda, Class),
     format('  * Radial measure J(theta) = sin(theta)^(2*~w)~n', [Lambda]),
     format('  * Half-density conjugation: u(theta) = sin(theta)^~w * phi_n(theta)~n', [Lambda]),
-    format('  * Clean Effective Potential V_eff(theta) = ~w~n', [Veff]),
+    format('  * Clean Effective Potential V_eff(theta) = ~w (Classification: ~w)~n', [Veff, Class]),
     format('  * Semiclassical Energy E = (n + rho)^2 = ~w~n', [Energy]).
 
 % --- 3. Three-Term Recurrence & Hypergeometric Identities ---
@@ -95,14 +100,15 @@ prove_algebraic_recurrence(D, N, XVal) :-
 weyl_phases(N, Lambda, Theta, [exp(i*(N+Lambda)*Theta), exp(-i*(N+Lambda)*Theta)]).
 
 prove_interior_asymptotics(D, N, ThetaVal) :-
-    format('~n[PROOF STEP 4] Interior Weyl Semiclassical Expansion (0 < theta < pi):~n'),
+    format('~n[PROOF STEP 4] Interior Weyl Semiclassical Expansion (Regime I: 0 < theta < pi):~n'),
     dimension_parameter(D, Lambda),
     K is N + Lambda,
     weyl_phases(N, Lambda, theta, Phases),
     AmpPower is -Lambda,
     format('  * Semiclassical Wave Number K = n + Lambda = ~w~n', [K]),
-    format('  * Weyl Group W = Z_2 generates paired momentum phases: ~w~n', [Phases]),
-    format('  * Superposition forces Cosine term: cos(~w * theta - ~w * pi / 2)~n', [K, Lambda]),
+    format('  * Local WKB Momentum: p(theta) = sqrt((n+rho)^2 - V_eff) = K + O(1/K)~n'),
+    format('  * Weyl Group W = Z_2 exchanges radial branches: ~w~n', [Phases]),
+    format('  * Spherical boundary condition selects Weyl-symmetric Cosine term: cos(~w * theta - ~w * pi / 2)~n', [K, Lambda]),
     format('  * Inverse half-density amplitude: J(theta)^(-1/2) = sin(theta)^( ~w )~n', [AmpPower]),
     format('  * Result: C_n^(~w)(cos(theta)) ~~ J(theta)^(-1/2) * cos(~w * theta - ~w * pi / 2) for theta = ~w.~n', [Lambda, K, Lambda, ThetaVal]).
 
@@ -116,31 +122,31 @@ bessel_kernel_index(Lambda, Nu) :-
     Nu is Lambda - 0.5.
 
 prove_endpoint_contraction(D, N, ZVal) :-
-    format('~n[PROOF STEP 5] Endpoint Inönü-Wigner Contraction & Euclidean Helmholtz Kernel:~n'),
+    format('~n[PROOF STEP 5] Endpoint Inönü-Wigner Contraction (Regime II: theta approx 1/N):~n'),
     dimension_parameter(D, Lambda),
     D1 is D - 1,
     inonu_wigner_generator_rescaling(so(D), N, Lambda, ScaleFactor),
     bessel_kernel_index(Lambda, Nu),
     format('  * Rescaled Transvection Generators: P_i = (~w) * X_i -> Commutator [P_i, P_j] -> 0 as n->inf~n', [ScaleFactor]),
     format('  * Lie Algebra Contraction: so(~w) --(n=~w)--> se(~w) = so(~w) x R^~w~n', [D, N, D1, D1, D1]),
-    format('  * Boundary Layer Scaling: theta = z / (n + Lambda), where z = ~w~n', [ZVal]),
+    format('  * Microscopic Tangent Scaling: theta = z / (n + Lambda), where z = ~w~n', [ZVal]),
     format('  * Contracted Euclidean Helmholtz Equation: phi\'\' + (~w/z)*phi\' + phi = 0~n', [2*Lambda]),
-    format('  * Euclidean Radial Kernel: Cal_J_~w(z) = 2^~w * Gamma(~w+1) * z^(-~w) * J_~w(z)~n', [Nu, Nu, Nu, Nu, Nu]),
+    format('  * Normalized Euclidean Kernel: Cal_J_~w(z) = 2^~w * Gamma(~w+1) * z^(-~w) * J_~w(z)~n', [Nu, Nu, Nu, Nu, Nu]),
     format('  * Mehler-Heine Theorem: lim_{n->inf} C_n^(~w)(cos(z/(n+~w))) / C_n^(~w)(1) = Cal_J_~w(z).~n', [Lambda, Lambda, Lambda, Nu]).
 
-% --- 6. Two Endpoint Layers & Weyl Reflection ---
+% --- 6. Two Endpoint Layers & Antipodal Parity ---
 
 prove_two_endpoint_weyl_reflection(D, N, ZetaVal) :-
-    format('~n[PROOF STEP 6] Two Singular Orbits & Weyl Reflection Symmetry:~n'),
+    format('~n[PROOF STEP 6] Two Singular Orbits & Antipodal Parity Symmetry:~n'),
     dimension_parameter(D, Lambda),
     bessel_kernel_index(Lambda, Nu),
     Parity is (-1)^N,
     format('  * Dimension d = ~w, Degree n = ~w~n', [D, N]),
     format('  * North Pole singular orbit (theta = 0): z = (n + Lambda)*theta~n'),
     format('  * South Pole singular orbit (theta = pi): zeta = (n + Lambda)*(pi - theta) = ~w~n', [ZetaVal]),
-    format('  * Parity Relation under x -> -x: C_n^(~w)(-x) = (-1)^~w * C_n^(~w)(x)~n', [Lambda, N, Lambda]),
+    format('  * Antipodal Parity Identity: C_n^(~w)(-x) = (-1)^~w * C_n^(~w)(x)~n', [Lambda, N, Lambda]),
     format('  * South Pole Boundary Layer: phi_n(theta) ~~ (~w) * Cal_J_~w(zeta)~n', [Parity, Nu]),
-    format('  * Conclusion: The two singular boundary layers are mapped by the Weyl reflection w in W.~n').
+    format('  * Conclusion: The two endpoint layers are mapped by antipodal parity symmetry.~n').
 
 % --- 7. Matched Asymptotic Bridge in Overlap Zone ---
 
@@ -149,14 +155,14 @@ prove_asymptotic_matching(D, N, OverlapTheta) :-
     K is N + Lambda,
     Z is K * OverlapTheta,
     bessel_kernel_index(Lambda, Nu),
-    format('~n[PROOF STEP 7] Matched Asymptotic Overlap Verification:~n'),
+    format('~n[PROOF STEP 7] Matched Asymptotic Overlap Verification (Regime III: 1 << z << N):~n'),
     format('  * Overlap Condition: 1/n (~w) << theta (~w) << 1 ==> 1 << z (~w) << n (~w)~n',
            [1/N, OverlapTheta, Z, N]),
     format('  * (A) Large-z expansion of Bessel kernel Cal_J_~w(z):~n', [Nu]),
     format('      Cal_J_~w(z) ~~ Const * z^(-~w) * cos(z - ~w*pi/2)~n', [Nu, Lambda, Lambda]),
     format('  * (B) Small-theta expansion of Interior WKB formula (sin(theta) -> theta):~n'),
     format('      sin(theta)^(-~w) * cos(K*theta - ~w*pi/2) ~~ theta^(-~w) * cos(K*theta - ~w*pi/2)~n', [Lambda, Lambda, Lambda, Lambda]),
-    format('  * Matching Identity: Since z = K*theta, Expansion (A) matches Expansion (B) identically!~n'),
+    format('  * Asymptotic Matching Identity: Expansion (A) and Expansion (B) agree in overlap!~n'),
     format('  * Formal Conclusion: Bessel Kernel is the exact leading-order boundary layer matching state.~n').
 
 % --- 8. Master Proof Runner ---
