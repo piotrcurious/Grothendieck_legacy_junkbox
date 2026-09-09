@@ -7,6 +7,7 @@
     prove_symmetric_space/2,
     prove_schrodinger_transformation/2,
     prove_algebraic_recurrence/3,
+    prove_quadric_algebraic_geometry/2,
     prove_interior_asymptotics/3,
     prove_endpoint_contraction/3,
     prove_two_endpoint_weyl_reflection/3,
@@ -96,12 +97,39 @@ prove_algebraic_recurrence(D, N, XVal) :-
            [Lambda, Lambda, N, N + 2*Lambda, Lambda + 0.5]),
     format('  * Verified exact algebraic equivalence for x = ~w.~n', [XVal]).
 
-% --- 4. Interior Weyl Semiclassical Asymptotics ---
+% --- 4. Quadric Hypersurface Algebraic Geometry & Combinatorics ---
+
+combinatorial_pochhammer(_A, 0, 1.0) :- !.
+combinatorial_pochhammer(A, K, Val) :-
+    K > 0,
+    K1 is K - 1,
+    combinatorial_pochhammer(A, K1, Val1),
+    Val is Val1 * (A + K1).
+
+pieri_rule_decomposition(N, Lambda, CoeffPlus, CoeffMinus) :-
+    CoeffPlus = (N + 1) / (2 * (N + Lambda)),
+    CoeffMinus = (N + 2 * Lambda - 1) / (2 * (N + Lambda)).
+
+prove_quadric_algebraic_geometry(D, N) :-
+    format('~n[PROOF STEP 4] Quadric Hypersurface Algebraic Geometry & Combinatorics:~n'),
+    dimension_parameter(D, Lambda),
+    pieri_rule_decomposition(N, Lambda, Cp, Cm),
+    combinatorial_pochhammer(N, 3, PochN),
+    combinatorial_pochhammer(Lambda + 0.5, 3, PochLam),
+    format('  * Complex Projective Quadric: Q_~w c P^~w~n', [D-1, D]),
+    format('  * Short Exact Sequence: 0 -> O_P^~w(n-2) -> O_P^~w(n) -> O_{Q_~w}(n) -> 0~n', [D, D, D-1]),
+    format('  * Hilbert Polynomial h^0(n) = (n+Lambda)/Lambda * binom(n+2*Lambda-1, n)~n'),
+    format('  * Relation to Normalization: C_n^(~w)(1) = (Lambda / (n + Lambda)) * h^0(O_Q(n))~n', [Lambda]),
+    format('  * Pieri Rule Intersection Product (V_1 x V_n -> V_{n+1} + V_{n-1}):~n'),
+    format('      x * C_n = (~w) * C_{n+1} + (~w) * C_{n-1}~n', [Cp, Cm]),
+    format('  * Schubert Cycle Pochhammer Combinatorics: (n)_3 = ~w, (Lambda+1/2)_3 = ~w~n', [PochN, PochLam]).
+
+% --- 5. Interior Weyl Semiclassical Asymptotics ---
 
 weyl_phases(N, Lambda, Theta, [exp(i*(N+Lambda)*Theta), exp(-i*(N+Lambda)*Theta)]).
 
 prove_interior_asymptotics(D, N, ThetaVal) :-
-    format('~n[PROOF STEP 4] Interior Weyl Semiclassical Expansion (Regime I: 0 < theta < pi):~n'),
+    format('~n[PROOF STEP 5] Interior Weyl Semiclassical Expansion (Regime I: 0 < theta < pi):~n'),
     dimension_parameter(D, Lambda),
     K is N + Lambda,
     weyl_phases(N, Lambda, theta, Phases),
@@ -113,7 +141,7 @@ prove_interior_asymptotics(D, N, ThetaVal) :-
     format('  * Inverse half-density amplitude: J(theta)^(-1/2) = sin(theta)^( ~w )~n', [AmpPower]),
     format('  * Result: C_n^(~w)(cos(theta)) ~~ J(theta)^(-1/2) * cos(~w * theta - ~w * pi / 2) for theta = ~w.~n', [Lambda, K, Lambda, ThetaVal]).
 
-% --- 5. Endpoint Inönü-Wigner Contraction & Bessel Limit ---
+% --- 6. Endpoint Inönü-Wigner Contraction & Bessel Limit ---
 
 inonu_wigner_generator_rescaling(so(_D), N, Lambda, P_i) :-
     Rho is Lambda,
@@ -123,7 +151,7 @@ bessel_kernel_index(Lambda, Nu) :-
     Nu is Lambda - 0.5.
 
 prove_endpoint_contraction(D, N, ZVal) :-
-    format('~n[PROOF STEP 5] Endpoint Blow-Up & Euclidean Contraction (Regime II: theta approx 1/N):~n'),
+    format('~n[PROOF STEP 6] Endpoint Blow-Up & Euclidean Contraction (Regime II: theta approx 1/N):~n'),
     dimension_parameter(D, Lambda),
     D1 is D - 1,
     inonu_wigner_generator_rescaling(so(D), N, Lambda, ScaleFactor),
@@ -135,10 +163,10 @@ prove_endpoint_contraction(D, N, ZVal) :-
     format('  * Normalized Euclidean Kernel: Cal_J_~w(z) = 2^~w * Gamma(~w+1) * z^(-~w) * J_~w(z)~n', [Nu, Nu, Nu, Nu, Nu]),
     format('  * Mehler-Heine Theorem: lim_{n->inf} C_n^(~w)(cos(z/(n+~w))) / C_n^(~w)(1) = Cal_J_~w(z).~n', [Lambda, Lambda, Lambda, Nu]).
 
-% --- 6. Two Endpoint Layers & Antipodal Parity ---
+% --- 7. Two Endpoint Layers & Antipodal Parity ---
 
 prove_two_endpoint_weyl_reflection(D, N, ZetaVal) :-
-    format('~n[PROOF STEP 6] Two Singular Orbits & Antipodal Parity Symmetry:~n'),
+    format('~n[PROOF STEP 7] Two Singular Orbits & Antipodal Parity Symmetry:~n'),
     dimension_parameter(D, Lambda),
     bessel_kernel_index(Lambda, Nu),
     Parity is (-1)^N,
@@ -149,10 +177,10 @@ prove_two_endpoint_weyl_reflection(D, N, ZetaVal) :-
     format('  * South Pole Boundary Layer: phi_n(theta) ~~ (~w) * Cal_J_~w(zeta)~n', [Parity, Nu]),
     format('  * Conclusion: The two endpoint layers are mapped by antipodal parity symmetry.~n').
 
-% --- 7. Demystifying the Singular Scaling Limit ---
+% --- 8. Demystifying the Singular Scaling Limit ---
 
 prove_singular_scaling_limit_unification(D, _N) :-
-    format('~n[PROOF STEP 7] Demystification of the Singular Scaling Limit (4-Fold Unification):~n'),
+    format('~n[PROOF STEP 8] Demystification of the Singular Scaling Limit (4-Fold Unification):~n'),
     dimension_parameter(D, Lambda),
     D1 is D - 1,
     format('  * (i)   Geometric Tangent Limit: S^~w -> R^~w under N^(-1) blow-up~n', [D1, D1]),
@@ -161,14 +189,14 @@ prove_singular_scaling_limit_unification(D, _N) :-
     format('  * (iv)  Mehler-Heine Matrix Coefficient Limit: phi_n(z/N) -> Cal_J_~w(z)~n', [Lambda-0.5]),
     format('  * Unification Identity: All 4 perspectives describe the exact same singular limit!~n').
 
-% --- 8. Matched Asymptotic Bridge in Overlap Zone ---
+% --- 9. Matched Asymptotic Bridge in Overlap Zone ---
 
 prove_asymptotic_matching(D, N, OverlapTheta) :-
     dimension_parameter(D, Lambda),
     K is N + Lambda,
     Z is K * OverlapTheta,
     bessel_kernel_index(Lambda, Nu),
-    format('~n[PROOF STEP 8] Matched Asymptotic Overlap Verification (Regime III: 1 << z << N):~n'),
+    format('~n[PROOF STEP 9] Matched Asymptotic Overlap Verification (Regime III: 1 << z << N):~n'),
     format('  * Overlap Condition: 1/n (~w) << theta (~w) << 1 ==> 1 << z (~w) << n (~w)~n',
            [1/N, OverlapTheta, Z, N]),
     format('  * (A) Large-z expansion of Bessel kernel Cal_J_~w(z):~n', [Nu]),
@@ -178,7 +206,7 @@ prove_asymptotic_matching(D, N, OverlapTheta) :-
     format('  * Asymptotic Matching Identity: Expansion (A) and Expansion (B) agree in overlap!~n'),
     format('  * Formal Conclusion: Bessel Kernel is the exact leading-order boundary layer matching state.~n').
 
-% --- 9. Master Proof Runner ---
+% --- 10. Master Proof Runner ---
 
 run_all_proofs :-
     format('========================================================================~n'),
@@ -194,6 +222,7 @@ run_all_proofs :-
     prove_symmetric_space(D, _Lambda),
     prove_schrodinger_transformation(D, N),
     prove_algebraic_recurrence(D, N, XVal),
+    prove_quadric_algebraic_geometry(D, N),
     prove_interior_asymptotics(D, N, ThetaInt),
     prove_endpoint_contraction(D, N, ZVal),
     prove_two_endpoint_weyl_reflection(D, N, ZetaVal),

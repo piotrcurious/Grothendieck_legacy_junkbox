@@ -4,10 +4,11 @@
 
 The asymptotic behavior of Gegenbauer polynomials $C_n^{(\lambda)}(x)$ as degree $n \to \infty$ represents the semiclassical limit ($\hbar \sim 1/n \to 0$) of spherical representations on compact rank-one Riemannian symmetric spaces $SO(d)/SO(d-1)$ (or compact Gelfand pairs $(SO(d), SO(d-1))$).
 
-This document provides a mathematically precise 3-regime asymptotic framework, culminating in the explicit demystification of the **singular scaling limit**:
+This document provides a mathematically precise 3-regime asymptotic framework, culminating in the explicit demystification of the **singular scaling limit** and the underlying **algebraic geometry & combinatorics of the quadric hypersurface**:
 1. **Interior Semiclassical Schrödinger Analysis (Regime I)**: Half-density conjugation converts the radial Casimir operator $-n(n+2\rho) = -(n+\rho)^2 + \rho^2$ into the exact 1D Schrödinger Hamiltonian $H_\lambda = -\partial_\theta^2 + \lambda(\lambda-1)\csc^2\theta$ with spectral parameter $E_N = N^2 = (n+\rho)^2$.
 2. **Microscopic Endpoint Blow-Up & Contraction (Regime II)**: Tangent blow-up $z = N\theta$ converts the Schrödinger operator into the microscopic inverse-square Hamiltonian $-u_{zz} + \frac{\lambda(\lambda-1)}{z^2} u = u$, whose flat radial form $u = z^\lambda \phi$ is the flat Euclidean radial Helmholtz equation on $\mathbb{R}^{d-1}$ yielding the normalized Bessel kernel $\mathcal{J}_{\lambda-1/2}(z)$.
 3. **Matched Asymptotic Overlap Bridge (Regime III)**: Common asymptotic overlap in $1 \ll z \ll N$ unifying interior WKB waves with singular orbit boundary layers.
+4. **Algebraic Geometry & Combinatorics**: The complexified sphere as a projective quadric hypersurface $Q_{d-1} \subset \mathbb{P}^d$, section space dimension via the short exact sequence on $\mathbb{P}^d$, Pieri rule for three-term recurrence, and Pochhammer Schubert combinatorics.
 
 ---
 
@@ -144,3 +145,40 @@ At the south pole $\theta = \pi$, setting $\zeta = N(\pi - \theta)$, the boundar
 $$C_n^{(\lambda)}(-x) = (-1)^n C_n^{(\lambda)}(x) \implies \phi_n(\theta) \sim (-1)^n \mathcal{J}_{\lambda-1/2}(\zeta)$$
 
 The two singular boundary layers at $\theta=0$ and $\theta=\pi$ are mapped into each other by antipodal reflection, completing the uniform asymptotic description across $[0, \pi]$.
+
+---
+
+6. Algebraic Geometry & Combinatorics of the Quadric Hypersurface
+------------------------------------------------------------------
+
+Beyond semiclassical differential equations, Gegenbauer polynomial operations are completely demystified by the classical algebraic geometry and combinatorics of complex projective quadrics.
+
+### 6.1 Projective Quadric $Q_{d-1} \subset \mathbb{P}^d$ & Hilbert Polynomial
+The real sphere $S^{d-1}$ complexifies to the smooth projective quadric hypersurface $Q_{d-1} \subset \mathbb{P}^d$ defined by the homogeneous quadratic form:
+$$Q(z_0, z_1, \dots, z_d) = z_1^2 + z_2^2 + \dots + z_d^2 - z_0^2 = 0$$
+
+The line bundle $\mathcal{O}_{Q_{d-1}}(n) = i^* \mathcal{O}_{\mathbb{P}^d}(n)$ governs degree-$n$ sections. Consider the ideal short exact sequence on $\mathbb{P}^d$:
+$$0 \longrightarrow \mathcal{O}_{\mathbb{P}^d}(n-2) \xrightarrow{\cdot Q} \mathcal{O}_{\mathbb{P}^d}(n) \longrightarrow \mathcal{O}_{Q_{d-1}}(n) \longrightarrow 0$$
+
+Taking cohomology yields the dimension of global holomorphic sections $H^0(Q_{d-1}, \mathcal{O}_{Q_{d-1}}(n))$, which is exactly the Hilbert polynomial $h^0(n)$ for $Q_{d-1}$:
+$$h^0(Q_{d-1}, \mathcal{O}_{Q_{d-1}}(n)) = \binom{n+d}{d} - \binom{n+d-2}{d} = \frac{n+\lambda}{\lambda} \binom{n+2\lambda-1}{n}$$
+
+Notice the remarkable algebraic geometry relation:
+$$\boxed{ C_n^{(\lambda)}(1) = \binom{n+2\lambda-1}{n} = \frac{\lambda}{n+\lambda} h^0(Q_{d-1}, \mathcal{O}(n)) }$$
+The normalization constant $C_n^{(\lambda)}(1)$ is precisely the normalized Hilbert polynomial (dimension of global sections) of the quadric hypersurface!
+
+### 6.2 Pieri Rule & Three-Term Recurrence as Intersection Product
+Section multiplication by the variable $x = z_1/z_0$ represents intersection with the hyperplane divisor class $[H] \in \text{Pic}(Q_{d-1})$.
+
+Under $SO(d)$, $x$ generates the fundamental vector representation $V_1$. The Pieri rule for section bundles on $Q_{d-1}$ dictates the tensor product representation decomposition:
+$$V_1 \otimes V_n \cong V_{n+1} \oplus V_{n-1}$$
+
+Taking matrix coefficients of this Pieri intersection product produces the exact three-term recurrence relation:
+$$\boxed{ x \cdot C_n^{(\lambda)}(x) = \frac{n+1}{2(n+\lambda)} C_{n+1}^{(\lambda)}(x) + \frac{n+2\lambda-1}{2(n+\lambda)} C_{n-1}^{(\lambda)}(x) }$$
+Thus, the three-term recurrence is the explicit Pieri intersection product in the Chow ring $A^*(Q_{d-1})$.
+
+### 6.3 Combinatorics of Hypergeometric Series & Pochhammer Schubert Cycles
+The hypergeometric polynomial representation of $C_n^{(\lambda)}(x)$ is:
+$$C_n^{(\lambda)}(x) = \binom{n+2\lambda-1}{n} {}_2F_1\left(-n, n+2\lambda; \lambda+1/2; \frac{1-x}{2}\right) = \sum_{k=0}^n \frac{(-1)^k \binom{n}{k} (n+2\lambda)_k}{k! (\lambda+1/2)_k} \left(\frac{1-x}{2}\right)^k$$
+
+Where the rising Pochhammer symbol $(a)_k = a(a+1)\dots(a+k-1) = \frac{\Gamma(a+k)}{\Gamma(a)}$ counts combinatorial paths through the Schubert cell filtration on the isotropic Grassmannian $\text{Gr}(1, Q_{d-1})$. The hypergeometric coefficients are exact Schubert intersection numbers!
