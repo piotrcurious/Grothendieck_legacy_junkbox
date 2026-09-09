@@ -178,11 +178,11 @@ prove_quadric_representation_geometry(D, N) :-
     D1 is D - 1,
     D2 is D - 2,
     format('  * Representation Null Quadric: Q^~w c P^~w defined by z_1^2+...+z_d^2 = 0~n', [D2, D1]),
-    format('  * Global Section Isomorphism: H^0(Q^~w, O(n)) = Harm_n(C^~w) = V_n~n', [D2, D]),
+    format('  * Harmonic Quotient Isomorphism: H^0(Q^~w, O(n)) = Sym^n(C^~w)/(q) = Harm_n(C^~w) = V_n~n', [D2, D, D]),
     format('  * Dimension Formula: dim V_n = ~w [VERIFIED EXACT]~n', [DimVn]),
-    format('  * Zonal Normalization Identity: C_~w^(~w)(1) = ~w = (~w / (~w + ~w)) * dim V_n [VERIFIED EXACT]~n',
+    format('  * Normalization Identity: C_~w^(~w)(1) = ~w = (~w / (~w + ~w)) * dim V_n [VERIFIED EXACT]~n',
            [N, Lambda, Cn1, Lambda, N, Lambda]),
-    format('  * Spherical Projection Pieri Product Proj_spherical(V_1 x V_n) = V_{n+1}^H + V_{n-1}^H:~n'),
+    format('  * Commutative Gelfand Algebra Jacobi Operator phi_1 * phi_n = a_n * phi_{n+1} + b_n * phi_{n-1}:~n'),
     format('      x * C_n = (~w) * C_{n+1} + (~w) * C_{n-1} [Sum = ~w, VERIFIED EXACT]~n', [Cp, Cm, Cp + Cm]).
 
 prove_interior_asymptotics(D, N, ThetaVal) :-
