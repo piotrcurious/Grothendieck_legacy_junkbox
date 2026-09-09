@@ -26,6 +26,12 @@ from typing import Dict, List, Optional
 import numpy as np
 from scipy.special import eval_gegenbauer, gamma, gammaln, jv, hyp2f1
 
+try:
+    import mpmath
+    HAS_MPMATH = True
+except ImportError:
+    HAS_MPMATH = False
+
 
 class NumericalBase(Enum):
     BASE_2 = "Base 2 (IEEE Binary)"
@@ -60,6 +66,14 @@ class NumericalContext:
     def fixed_point_q16(cls):
         return cls(base=NumericalBase.FIXED_POINT, precision=PrecisionType.FLOAT32, bits=32, eps=1.52e-5)
 
+    @classmethod
+    def logarithmic_lns(cls):
+        return cls(base=NumericalBase.LOGARITHMIC, precision=PrecisionType.FLOAT32, bits=32, eps=1e-4)
+
+    @classmethod
+    def mpmath_arbitrary(cls, dps: int = 50):
+        return cls(base=NumericalBase.BASE_10, precision=PrecisionType.ARBITRARY, bits=dps * 4, eps=10**(-dps))
+
 
 class AlgebraicPermutation(Enum):
     CLENSHAW_RECURRENCE = "Clenshaw Three-Term Recurrence"
@@ -92,13 +106,27 @@ class GegenbauerComputationalSolver:
         self.lambda_val = lambda_val
         self.context = context or NumericalContext.default_float64()
 
+    def _apply_context_quantization(self, arr: np.ndarray) -> np.ndarray:
+        """Simulates precision and numerical base constraints."""
+        if self.context.base == NumericalBase.FIXED_POINT:
+            # Q16.16 quantization (step size 1/65536)
+            scale = 65536.0
+            return np.round(arr * scale) / scale
+        elif self.context.base == NumericalBase.LOGARITHMIC:
+            # LNS simulation with noise proportional to eps
+            noise = 1.0 + np.random.normal(0, self.context.eps, size=arr.shape)
+            return arr * noise
+        elif self.context.precision == PrecisionType.FLOAT32:
+            return arr.astype(np.float32).astype(np.float64)
+        return arr
+
     def _c_n_1(self) -> float:
         log_c_n_1 = gammaln(self.n + 2.0 * self.lambda_val) - gammaln(2.0 * self.lambda_val) - gammaln(self.n + 1.0)
         return float(np.exp(log_c_n_1))
 
     def evaluate_clenshaw_recurrence(self, x: np.ndarray) -> np.ndarray:
         """Clenshaw Three-term Recurrence: O(n) FLOPs."""
-        x = np.asarray(x, dtype=np.float64)
+        x = self._apply_context_quantization(np.asarray(x, dtype=np.float64))
         if self.n == 0:
             return np.ones_like(x)
         if self.n == 1:
@@ -111,29 +139,31 @@ class GegenbauerComputationalSolver:
             c2 = (2.0 * (k + self.lambda_val - 1.0) / k) * x * c1 - ((k + 2.0 * self.lambda_val - 2.0) / k) * c0
             c0, c1 = c1, c2
 
-        return c1
+        return self._apply_context_quantization(c1)
 
     def evaluate_hypergeometric(self, x: np.ndarray) -> np.ndarray:
         """Hypergeometric _2F1(-n, n + 2*lambda; lambda + 0.5; (1-x)/2) evaluation via hyp2f1."""
-        x = np.asarray(x, dtype=np.float64)
+        x = self._apply_context_quantization(np.asarray(x, dtype=np.float64))
         z = (1.0 - x) / 2.0
         c_n_1 = self._c_n_1()
         h_val = hyp2f1(-self.n, self.n + 2.0 * self.lambda_val, self.lambda_val + 0.5, z)
-        return c_n_1 * h_val
+        return self._apply_context_quantization(c_n_1 * h_val)
 
     def evaluate_wkb_weyl(self, x: np.ndarray) -> np.ndarray:
         """Interior WKB / Weyl expression: O(1) FLOPs."""
-        x = np.clip(x, -0.999999, 0.999999)
-        theta = np.arccos(x)
+        x_q = self._apply_context_quantization(np.clip(x, -0.999999, 0.999999))
+        theta = np.arccos(x_q)
         K = self.n + self.lambda_val
         coeff = (2.0 ** (1.0 - self.lambda_val) / gamma(self.lambda_val)) * (self.n ** (self.lambda_val - 1.0))
         amplitude = (np.sin(theta)) ** (-self.lambda_val)
         phase = K * theta - (self.lambda_val * np.pi / 2.0)
-        return coeff * amplitude * np.cos(phase)
+        res = coeff * amplitude * np.cos(phase)
+        return self._apply_context_quantization(res)
 
     def evaluate_mehler_heine(self, x: np.ndarray) -> np.ndarray:
         """Mehler-Heine Bessel Boundary-Layer expression: O(1) FLOPs."""
-        theta = np.arccos(np.clip(x, -1.0, 1.0))
+        x_q = self._apply_context_quantization(np.clip(x, -1.0, 1.0))
+        theta = np.arccos(x_q)
         K = self.n + self.lambda_val
         z = K * theta
         nu = self.lambda_val - 0.5
@@ -143,11 +173,12 @@ class GegenbauerComputationalSolver:
         cal_j_nu = (2.0 ** nu) * gamma(nu + 1.0) * (z_safe ** (-nu)) * jv(nu, z_safe)
         cal_j_nu = np.where(z == 0, 1.0, cal_j_nu)
 
-        return c_n_1 * cal_j_nu
+        return self._apply_context_quantization(c_n_1 * cal_j_nu)
 
     def evaluate_composite_matched(self, x: np.ndarray) -> np.ndarray:
         """Composite Matched Asymptotic expression: O(1) FLOPs."""
-        theta = np.arccos(np.clip(x, -0.999999, 0.999999))
+        x_q = self._apply_context_quantization(np.clip(x, -0.999999, 0.999999))
+        theta = np.arccos(x_q)
         K = self.n + self.lambda_val
         z = K * theta
         nu = self.lambda_val - 0.5
@@ -160,14 +191,58 @@ class GegenbauerComputationalSolver:
         matching = (c_n_1 * (2.0 ** nu) * gamma(nu + 1.0) * (z_safe ** (-nu)) *
                     np.sqrt(2.0 / (np.pi * z_safe)) * np.cos(z_safe - self.lambda_val * np.pi / 2.0))
 
-        return bessel + wkb - matching
+        return self._apply_context_quantization(bessel + wkb - matching)
+
+    def evaluate_barycentric_rational(self, x: np.ndarray, num_nodes: int = 16) -> np.ndarray:
+        """
+        Barycentric Rational Proxy: Interpolates C_n^(lambda)(x) using Chebyshev nodes.
+        Cost: O(num_nodes) FLOPs per point.
+        """
+        x_eval = self._apply_context_quantization(np.asarray(x, dtype=np.float64))
+
+        # Chebyshev nodes
+        j = np.arange(num_nodes)
+        nodes = np.cos((2 * j + 1) * np.pi / (2 * num_nodes))
+        node_vals = eval_gegenbauer(self.n, self.lambda_val, nodes)
+        weights = ((-1.0) ** j) * np.sin((2 * j + 1) * np.pi / (2 * num_nodes))
+
+        # Evaluate via barycentric formula
+        out = np.zeros_like(x_eval)
+        for i, xi in enumerate(x_eval):
+            diffs = xi - nodes
+            exact_match = np.where(np.abs(diffs) < 1e-14)[0]
+            if len(exact_match) > 0:
+                out[i] = node_vals[exact_match[0]]
+            else:
+                terms = weights / diffs
+                out[i] = np.sum(terms * node_vals) / np.sum(terms)
+
+        return self._apply_context_quantization(out)
+
+    def evaluate_mpmath_arbitrary(self, x: np.ndarray) -> np.ndarray:
+        """Arbitrary precision evaluation via mpmath if installed."""
+        if not HAS_MPMATH:
+            return self.evaluate_clenshaw_recurrence(x)
+
+        dps = max(15, int(abs(np.log10(self.context.eps))))
+        mpmath.mp.dps = dps
+
+        out = np.zeros_like(x, dtype=np.float64)
+        n_mp = mpmath.mpf(self.n)
+        lam_mp = mpmath.mpf(self.lambda_val)
+
+        for i, xi in enumerate(x):
+            v = mpmath.gegenbauer(n_mp, lam_mp, mpmath.mpf(xi))
+            out[i] = float(v)
+
+        return out
 
     def estimate_flops(self, perm: AlgebraicPermutation, num_points: int) -> int:
         """Estimates computational FLOP count for evaluation of N points."""
         if perm == AlgebraicPermutation.CLENSHAW_RECURRENCE:
             return 5 * self.n * num_points
         elif perm == AlgebraicPermutation.HYPERGEOMETRIC_2F1:
-            return 20 * num_points  # Scipy C library hyp2f1 call
+            return 20 * num_points
         elif perm == AlgebraicPermutation.INTERIOR_WKB_WEYL:
             return 12 * num_points
         elif perm == AlgebraicPermutation.MEHLER_HEINE_BESSEL:
@@ -175,7 +250,7 @@ class GegenbauerComputationalSolver:
         elif perm == AlgebraicPermutation.COMPOSITE_MATCHED:
             return 40 * num_points
         elif perm == AlgebraicPermutation.BARYCENTRIC_RATIONAL:
-            return 10 * num_points
+            return 16 * 4 * num_points  # 16 Chebyshev nodes
         return 100 * num_points
 
     def benchmark_permutations(self, domain_x: np.ndarray) -> Dict[AlgebraicPermutation, SolverPerformanceMetrics]:
@@ -194,6 +269,7 @@ class GegenbauerComputationalSolver:
             AlgebraicPermutation.INTERIOR_WKB_WEYL: self.evaluate_wkb_weyl,
             AlgebraicPermutation.MEHLER_HEINE_BESSEL: self.evaluate_mehler_heine,
             AlgebraicPermutation.COMPOSITE_MATCHED: self.evaluate_composite_matched,
+            AlgebraicPermutation.BARYCENTRIC_RATIONAL: self.evaluate_barycentric_rational,
         }
 
         for perm, fn in eval_map.items():
@@ -209,7 +285,6 @@ class GegenbauerComputationalSolver:
             max_res = float(np.max(abs_res))
 
             # Relative error
-            c_n_1 = self._c_n_1()
             scale = np.maximum(np.abs(ground_truth), 1e-12)
             rel_errs = abs_res / scale
             max_rel_err = float(np.max(rel_errs))
@@ -227,15 +302,12 @@ class GegenbauerComputationalSolver:
                 max_relative_error=max_rel_err,
             )
 
-        # Determine Pareto Optimality on Cost vs Relative Error plane
         self._compute_pareto_frontier(results)
         return results
 
     def _compute_pareto_frontier(self, metrics_map: Dict[AlgebraicPermutation, SolverPerformanceMetrics]):
         """
         Identifies non-dominated solutions on the (Cost, Relative Error) plane.
-        A point A dominates point B if Cost(A) <= Cost(B) and RelErr(A) <= RelErr(B)
-        with at least one strict inequality.
         """
         items = list(metrics_map.values())
         for a in items:
@@ -290,7 +362,7 @@ if __name__ == "__main__":
     print(f"Problem: Degree n={n_deg}, Lambda={lambda_p}, Num Points={len(domain)}")
 
     results = solver.benchmark_permutations(domain)
-    print("\n[Benchmark Results across Algebraic Permutations]")
+    print("\n[Benchmark Results across All 6 Algebraic Permutations]")
     print(f"{'Algebraic Permutation':<35} | {'FLOPs':>8} | {'Exec Time (ms)':>14} | {'Max Rel Error':>14} | {'Pareto Optimal'}")
     print("-" * 92)
     for perm, m in results.items():

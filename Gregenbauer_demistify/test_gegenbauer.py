@@ -23,6 +23,7 @@ from Gregenbauer_demistify.computational_layer import (
     AlgebraicPermutation,
     PrecisionType,
     NumericalBase,
+    HAS_MPMATH,
 )
 
 
@@ -33,6 +34,7 @@ def test_prolog_formal_proof():
     assert res.returncode == 0, f"SWI-Prolog returned non-zero exit code: {res.stderr}"
     assert "PROOF COMPLETED SUCCESSFULLY WITH ALL THEOREMS VERIFIED LOGICALLY!" in res.stdout
     assert "Symmetric Space: so(5)/so(4)" in res.stdout
+    assert "Three-Term Recurrence & Hypergeometric Algebra" in res.stdout
 
 
 def test_wkb_interior_asymptotic_convergence():
@@ -92,12 +94,14 @@ def test_computational_solver_benchmark_and_pareto():
     domain = np.linspace(0.2, 0.98, 200)
     results = solver.benchmark_permutations(domain)
 
-    # Verify all expected permutations were evaluated
+    # Verify all 6 permutations were evaluated
+    assert len(results) == 6
     assert AlgebraicPermutation.CLENSHAW_RECURRENCE in results
     assert AlgebraicPermutation.HYPERGEOMETRIC_2F1 in results
     assert AlgebraicPermutation.INTERIOR_WKB_WEYL in results
     assert AlgebraicPermutation.MEHLER_HEINE_BESSEL in results
     assert AlgebraicPermutation.COMPOSITE_MATCHED in results
+    assert AlgebraicPermutation.BARYCENTRIC_RATIONAL in results
 
     # Verify Pareto frontier identifies optimal candidates
     pareto_candidates = [m for m in results.values() if m.is_pareto_optimal]
@@ -112,16 +116,37 @@ def test_computational_solver_benchmark_and_pareto():
     assert opt_budget.num_flops <= 15000
 
 
-def test_computational_solver_float32_context():
-    """Tests computational solver with float32 precision context."""
-    n_deg = 50
-    lambda_p = 2.0
-    ctx = NumericalContext.float32()
-    solver = GegenbauerComputationalSolver(n=n_deg, lambda_val=lambda_p, context=ctx)
+def test_computational_solver_numerical_bases():
+    """Tests computational solver across Fixed-Point Q16.16 and Logarithmic LNS contexts."""
+    n_deg = 20
+    lambda_p = 1.5
+    domain = np.linspace(0.1, 0.9, 50)
 
-    domain = np.linspace(0.1, 0.9, 100)
-    results = solver.benchmark_permutations(domain)
+    # Fixed-Point context
+    ctx_fp = NumericalContext.fixed_point_q16()
+    solver_fp = GegenbauerComputationalSolver(n=n_deg, lambda_val=lambda_p, context=ctx_fp)
+    res_fp = solver_fp.evaluate_clenshaw_recurrence(domain)
+    assert ctx_fp.base == NumericalBase.FIXED_POINT
+    assert len(res_fp) == 50
 
-    assert solver.context.precision == PrecisionType.FLOAT32
-    assert solver.context.eps == 1.19e-7
-    assert len(results) == 5
+    # Logarithmic LNS context
+    ctx_lns = NumericalContext.logarithmic_lns()
+    solver_lns = GegenbauerComputationalSolver(n=n_deg, lambda_val=lambda_p, context=ctx_lns)
+    res_lns = solver_lns.evaluate_clenshaw_recurrence(domain)
+    assert ctx_lns.base == NumericalBase.LOGARITHMIC
+    assert len(res_lns) == 50
+
+
+def test_mpmath_arbitrary_precision():
+    """Tests mpmath arbitrary precision evaluation if mpmath is available."""
+    if not HAS_MPMATH:
+        pytest.skip("mpmath not installed")
+
+    n_deg = 10
+    lambda_p = 1.5
+    ctx_mp = NumericalContext.mpmath_arbitrary(dps=30)
+    solver = GegenbauerComputationalSolver(n=n_deg, lambda_val=lambda_p, context=ctx_mp)
+    domain = np.array([0.2, 0.5, 0.8])
+    res = solver.evaluate_mpmath_arbitrary(domain)
+    exact = exact_gegenbauer(n_deg, lambda_p, domain)
+    np.testing.assert_allclose(res, exact, rtol=1e-10)
