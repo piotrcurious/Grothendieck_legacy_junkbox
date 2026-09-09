@@ -6,7 +6,7 @@ for Gegenbauer polynomials C_n^{(lambda)}(x) based on the representation-theoret
 and semiclassical framework:
 1. Exact Evaluation via scipy.special / mpmath
 2. Interior WKB / Weyl Semiclassical Expansion
-3. Endpoint Mehler-Heine Bessel Boundary-Layer Expansion
+3. Endpoint Mehler-Heine Bessel Boundary-Layer Expansion (Euclidean Kernel)
 4. Composite Matched Asymptotic Expansion
 """
 
@@ -38,6 +38,7 @@ def interior_wkb_approx(n: int, lambda_val: float, theta: np.ndarray) -> np.ndar
     Formula:
       C_n^(lambda)(cos(theta)) ~ [2^(1-lambda) / Gamma(lambda)] * n^(lambda-1) * (sin(theta))^(-lambda)
                                  * cos((n + lambda)*theta - lambda * pi / 2)
+      where (n + lambda) = (n + rho) is the Harish-Chandra / Weyl spectral shift.
     """
     K = n + lambda_val
     coeff = (2.0 ** (1.0 - lambda_val) / gamma(lambda_val)) * (n ** (lambda_val - 1.0))
@@ -55,6 +56,7 @@ def mehler_heine_bessel_approx(n: int, lambda_val: float, theta: np.ndarray) -> 
     where:
       C_n^(lambda)(1) = binom(n + 2*lambda - 1, n)
       Cal_J_{nu}(z) = 2^{nu} * Gamma(nu + 1) * z^{-nu} * J_{nu}(z)
+      is the Euclidean radial Helmholtz kernel on R^{d-1}.
     """
     K = n + lambda_val
     z = K * theta
@@ -64,7 +66,6 @@ def mehler_heine_bessel_approx(n: int, lambda_val: float, theta: np.ndarray) -> 
     c_n_1 = c_n_1_val(n, lambda_val)
 
     # Normalized Bessel kernel Cal_J_nu(z)
-    # Handle z -> 0 limit gracefully
     z_safe = np.where(z == 0, 1e-15, z)
     cal_j_nu = (2.0 ** nu) * gamma(nu + 1.0) * (z_safe ** (-nu)) * jv(nu, z_safe)
     cal_j_nu = np.where(z == 0, 1.0, cal_j_nu)
@@ -89,7 +90,6 @@ def composite_matched_approx(n: int, lambda_val: float, theta: np.ndarray) -> np
     wkb_term = interior_wkb_approx(n, lambda_val, theta)
 
     # Overlap / Matching term:
-    # Large-z limit of Bessel / Small-theta limit of WKB
     z_safe = np.where(z == 0, 1e-15, z)
     matching_term = (c_n_1 * (2.0 ** nu) * gamma(nu + 1.0) * (z_safe ** (-nu)) *
                      np.sqrt(2.0 / (np.pi * z_safe)) * np.cos(z_safe - lambda_val * np.pi / 2.0))
