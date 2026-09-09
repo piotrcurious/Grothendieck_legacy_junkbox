@@ -40,10 +40,10 @@ def test_prolog_formal_proof():
     cmd = ["swipl", "-g", "run_all_proofs", "-t", "halt", "Gregenbauer_demistify/gegenbauer_proof.pl"]
     res = subprocess.run(cmd, capture_output=True, text=True)
     assert res.returncode == 0, f"SWI-Prolog returned non-zero exit code: {res.stderr}"
-    assert "PROOF COMPLETED SUCCESSFULLY WITH ALL THEOREMS VERIFIED LOGICALLY!" in res.stdout
+    assert "PROOF COMPLETED SUCCESSFULLY WITH ALL ASSERTIONS VERIFIED EXACTLY!" in res.stdout
     assert "Symmetric Space: so(5)/so(4)" in res.stdout
-    assert "Three-Term Recurrence & Hypergeometric Algebra" in res.stdout
-    assert "Quadric Hypersurface Algebraic Geometry & Combinatorics" in res.stdout
+    assert "Three-Term Recurrence & Numerical Evaluation Verification" in res.stdout
+    assert "Representation Geometry of Null Quadric Q^{d-2} c P^{d-1}" in res.stdout
     assert "Antipodal Parity Symmetry" in res.stdout
     assert "Demystification of the Singular Scaling Limit (4-Fold Unification)" in res.stdout
     assert "Matched Asymptotic Overlap Verification (Regime III" in res.stdout

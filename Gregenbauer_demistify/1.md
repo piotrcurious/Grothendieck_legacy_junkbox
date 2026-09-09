@@ -4,11 +4,11 @@
 
 The asymptotic behavior of Gegenbauer polynomials $C_n^{(\lambda)}(x)$ as degree $n \to \infty$ represents the semiclassical limit ($\hbar \sim 1/n \to 0$) of spherical representations on compact rank-one Riemannian symmetric spaces $SO(d)/SO(d-1)$ (or compact Gelfand pairs $(SO(d), SO(d-1))$).
 
-This document provides a mathematically precise 3-regime asymptotic framework, culminating in the explicit demystification of the **singular scaling limit** and the underlying **algebraic geometry & combinatorics of the quadric hypersurface**:
+This document provides a mathematically precise 3-regime asymptotic framework, culminating in the explicit demystification of the **singular scaling limit** and the **representation geometry of the projectivized null quadric**:
 1. **Interior Semiclassical Schrödinger Analysis (Regime I)**: Half-density conjugation converts the radial Casimir operator $-n(n+2\rho) = -(n+\rho)^2 + \rho^2$ into the exact 1D Schrödinger Hamiltonian $H_\lambda = -\partial_\theta^2 + \lambda(\lambda-1)\csc^2\theta$ with spectral parameter $E_N = N^2 = (n+\rho)^2$.
 2. **Microscopic Endpoint Blow-Up & Contraction (Regime II)**: Tangent blow-up $z = N\theta$ converts the Schrödinger operator into the microscopic inverse-square Hamiltonian $-u_{zz} + \frac{\lambda(\lambda-1)}{z^2} u = u$, whose flat radial form $u = z^\lambda \phi$ is the flat Euclidean radial Helmholtz equation on $\mathbb{R}^{d-1}$ yielding the normalized Bessel kernel $\mathcal{J}_{\lambda-1/2}(z)$.
 3. **Matched Asymptotic Overlap Bridge (Regime III)**: Common asymptotic overlap in $1 \ll z \ll N$ unifying interior WKB waves with singular orbit boundary layers.
-4. **Algebraic Geometry & Combinatorics**: The complexified sphere as a projective quadric hypersurface $Q_{d-1} \subset \mathbb{P}^d$, section space dimension via the short exact sequence on $\mathbb{P}^d$, Pieri rule for three-term recurrence, and Pochhammer Schubert combinatorics.
+4. **Representation Geometry & Spherical Projection**: Distinction between affine sphere compactification $Q^{d-1} \subset \mathbb{P}^d$ and projectivized null quadric $Q^{d-2} \subset \mathbb{P}^{d-1}$, representation dimension formula $H^0(Q^{d-2}, \mathcal{O}(n)) \cong V_n$, normalization identity $C_n^{(\lambda)}(1) = \frac{\lambda}{n+\lambda}\dim V_n$, and spherical projection of tensor multiplication for the three-term recurrence.
 
 ---
 
@@ -148,37 +148,38 @@ The two singular boundary layers at $\theta=0$ and $\theta=\pi$ are mapped into 
 
 ---
 
-6. Algebraic Geometry & Combinatorics of the Quadric Hypersurface
-------------------------------------------------------------------
+6. Representation Geometry of Projective Quadrics & Spherical Projection
+-------------------------------------------------------------------------
 
-Beyond semiclassical differential equations, Gegenbauer polynomial operations are completely demystified by the classical algebraic geometry and combinatorics of complex projective quadrics.
+To connect Gegenbauer polynomials to algebraic geometry, we must clearly distinguish two distinct quadric varieties:
 
-### 6.1 Projective Quadric $Q_{d-1} \subset \mathbb{P}^d$ & Hilbert Polynomial
-The real sphere $S^{d-1}$ complexifies to the smooth projective quadric hypersurface $Q_{d-1} \subset \mathbb{P}^d$ defined by the homogeneous quadratic form:
-$$Q(z_0, z_1, \dots, z_d) = z_1^2 + z_2^2 + \dots + z_d^2 - z_0^2 = 0$$
+### 6.1 Distinguishing the Two Quadric Geometries
+1. **Geometry A (Complexified Sphere Compactification)**: $Q^{d-1} = \{z_1^2 + \dots + z_d^2 - z_0^2 = 0\} \subset \mathbb{P}^d$. This carries an action of $SO(d+1, \mathbb{C})$. Its global section space $H^0(Q^{d-1}, \mathcal{O}(n))$ contains powers of $z_0$ and is NOT an irreducible $SO(d)$-representation.
+2. **Geometry B (Representation-Theoretic Null Quadric)**: The projectivized null cone $Q^{d-2} \subset \mathbb{P}^{d-1}$ defined by $z_1^2 + \dots + z_d^2 = 0$ in $\mathbb{P}^{d-1}$. This is the exact variety associated with the $SO(d)$ harmonic representation!
 
-The line bundle $\mathcal{O}_{Q_{d-1}}(n) = i^* \mathcal{O}_{\mathbb{P}^d}(n)$ governs degree-$n$ sections. Consider the ideal short exact sequence on $\mathbb{P}^d$:
-$$0 \longrightarrow \mathcal{O}_{\mathbb{P}^d}(n-2) \xrightarrow{\cdot Q} \mathcal{O}_{\mathbb{P}^d}(n) \longrightarrow \mathcal{O}_{Q_{d-1}}(n) \longrightarrow 0$$
+### 6.2 Section Space & The Exact Normalization Identity
+Consider the ideal short exact sequence for $Q^{d-2}$ on $\mathbb{P}^{d-1}$:
+$$0 \longrightarrow \mathcal{O}_{\mathbb{P}^{d-1}}(n-2) \xrightarrow{\cdot (z_1^2+\dots+z_d^2)} \mathcal{O}_{\mathbb{P}^{d-1}}(n) \longrightarrow \mathcal{O}_{Q^{d-2}}(n) \longrightarrow 0$$
 
-Taking cohomology yields the dimension of global holomorphic sections $H^0(Q_{d-1}, \mathcal{O}_{Q_{d-1}}(n))$, which is exactly the Hilbert polynomial $h^0(n)$ for $Q_{d-1}$:
-$$h^0(Q_{d-1}, \mathcal{O}_{Q_{d-1}}(n)) = \binom{n+d}{d} - \binom{n+d-2}{d} = \frac{n+\lambda}{\lambda} \binom{n+2\lambda-1}{n}$$
+Taking global sections yields:
+$$H^0(Q^{d-2}, \mathcal{O}_{Q^{d-2}}(n)) \cong \frac{\text{Sym}^n(\mathbb{C}^d)}{(z_1^2+\dots+z_d^2)\text{Sym}^{n-2}(\mathbb{C}^d)} \cong \mathcal{H}_n(\mathbb{C}^d) \cong V_n$$
 
-Notice the remarkable algebraic geometry relation:
-$$\boxed{ C_n^{(\lambda)}(1) = \binom{n+2\lambda-1}{n} = \frac{\lambda}{n+\lambda} h^0(Q_{d-1}, \mathcal{O}(n)) }$$
-The normalization constant $C_n^{(\lambda)}(1)$ is precisely the normalized Hilbert polynomial (dimension of global sections) of the quadric hypersurface!
+The dimension of this section space is:
+$$\dim V_n = \binom{n+d-1}{d-1} - \binom{n+d-3}{d-1} = \frac{2n+d-2}{d-2} \binom{n+d-3}{n} = \frac{n+\lambda}{\lambda} \binom{n+2\lambda-1}{n}$$
 
-### 6.2 Pieri Rule & Three-Term Recurrence as Intersection Product
-Section multiplication by the variable $x = z_1/z_0$ represents intersection with the hyperplane divisor class $[H] \in \text{Pic}(Q_{d-1})$.
+Since $C_n^{(\lambda)}(1) = \binom{n+2\lambda-1}{n}$, we discover the exact representation-theoretic normalization identity:
+$$\boxed{ C_n^{(\lambda)}(1) = \frac{\lambda}{n+\lambda} \dim V_n = \frac{\rho}{n+\rho} \dim V_n }$$
 
-Under $SO(d)$, $x$ generates the fundamental vector representation $V_1$. The Pieri rule for section bundles on $Q_{d-1}$ dictates the tensor product representation decomposition:
-$$V_1 \otimes V_n \cong V_{n+1} \oplus V_{n-1}$$
+This provides a direct bridge: $C_n^{(\lambda)}(1)$ is the representation dimension $\dim V_n$ scaled by the Harish-Chandra / Weyl factor $\frac{\rho}{n+\rho}$ arising from zonal vector normalization under the spherical function addition theorem!
 
-Taking matrix coefficients of this Pieri intersection product produces the exact three-term recurrence relation:
-$$\boxed{ x \cdot C_n^{(\lambda)}(x) = \frac{n+1}{2(n+\lambda)} C_{n+1}^{(\lambda)}(x) + \frac{n+2\lambda-1}{2(n+\lambda)} C_{n-1}^{(\lambda)}(x) }$$
-Thus, the three-term recurrence is the explicit Pieri intersection product in the Chow ring $A^*(Q_{d-1})$.
+### 6.3 Spherical Projection & The Three-Term Recurrence
+For $SO(d)$, tensor product $V_1 \otimes V_n$ decomposes into multiple irreducible components. However, taking the product of the degree-1 zonal spherical function $x = \cos\theta$ with $C_n^{(\lambda)}(x)$ and projecting onto the $H$-fixed spherical subspace $V^H$ isolates only $V_{n+1}^H$ and $V_{n-1}^H$:
+$$\boxed{ \operatorname{Proj}_{\text{spherical}}(V_1 \otimes V_n) \cong V_{n+1}^H \oplus V_{n-1}^H }$$
 
-### 6.3 Combinatorics of Hypergeometric Series & Pochhammer Schubert Cycles
-The hypergeometric polynomial representation of $C_n^{(\lambda)}(x)$ is:
+Taking matrix coefficients yields the exact three-term recurrence:
+$$x \cdot C_n^{(\lambda)}(x) = \frac{n+1}{2(n+\lambda)} C_{n+1}^{(\lambda)}(x) + \frac{n+2\lambda-1}{2(n+\lambda)} C_{n-1}^{(\lambda)}(x)$$
+
+### 6.4 Hypergeometric Representation & Weight Series
+The terminating hypergeometric series for $C_n^{(\lambda)}(x)$:
 $$C_n^{(\lambda)}(x) = \binom{n+2\lambda-1}{n} {}_2F_1\left(-n, n+2\lambda; \lambda+1/2; \frac{1-x}{2}\right) = \sum_{k=0}^n \frac{(-1)^k \binom{n}{k} (n+2\lambda)_k}{k! (\lambda+1/2)_k} \left(\frac{1-x}{2}\right)^k$$
-
-Where the rising Pochhammer symbol $(a)_k = a(a+1)\dots(a+k-1) = \frac{\Gamma(a+k)}{\Gamma(a)}$ counts combinatorial paths through the Schubert cell filtration on the isotropic Grassmannian $\text{Gr}(1, Q_{d-1})$. The hypergeometric coefficients are exact Schubert intersection numbers!
+reflects the explicit branching law and weight diagram decomposition of $V_n$ under the subgroup chain $SO(d) \supset SO(d-1)$.
