@@ -36,6 +36,7 @@ def test_prolog_formal_proof():
     assert "Symmetric Space: so(5)/so(4)" in res.stdout
     assert "Three-Term Recurrence & Hypergeometric Algebra" in res.stdout
     assert "Antipodal Parity Symmetry" in res.stdout
+    assert "Demystification of the Singular Scaling Limit (4-Fold Unification)" in res.stdout
     assert "Matched Asymptotic Overlap Verification (Regime III" in res.stdout
 
 
