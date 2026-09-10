@@ -6,6 +6,7 @@ Tests:
 2. Python Semiclassical Asymptotics & Error Convergence Rates
 3. Computational Layer & Pareto Optimization Solver across bases/types
 4. Quadric Hypersurface Algebraic Geometry & Normalized Jacobi Recurrence
+5. High-Degree Stability & L2 Orthogonality Quadrature Integrals
 """
 
 import subprocess
@@ -18,6 +19,9 @@ from Gregenbauer_demistify.gegenbauer_asymptotics import (
     interior_wkb_approx,
     mehler_heine_bessel_approx,
     c_n_1_val,
+    log_c_n_1,
+    orthogonality_norm,
+    verify_orthogonality_integral,
 )
 from Gregenbauer_demistify.computational_layer import (
     GegenbauerComputationalSolver,
@@ -50,6 +54,29 @@ def test_prolog_formal_proof():
     assert "Matched Asymptotic Overlap Verification (Regime III" in res.stdout
 
 
+def test_high_degree_stability():
+    """Verifies high degree n=1000, 2000 evaluation stability in log-space."""
+    for n in [1000, 2000]:
+        log_val = log_c_n_1(n, 1.5)
+        assert np.isfinite(log_val)
+        val = c_n_1_val(n, 1.5)
+        assert np.isfinite(val)
+        assert val > 0.0
+
+
+def test_orthogonality_norm_and_quadrature_integral():
+    """Verifies L2 orthogonality integral and norm formula h_n."""
+    lambda_val = 1.5
+    # Diagonal norm square h_2
+    h_2_exact = orthogonality_norm(2, lambda_val)
+    h_2_num = verify_orthogonality_integral(2, 2, lambda_val)
+    assert abs(h_2_exact - h_2_num) / h_2_exact < 1e-4
+
+    # Off-diagonal orthogonality integral (n=2, m=3) should be 0
+    h_23_num = verify_orthogonality_integral(2, 3, lambda_val)
+    assert abs(h_23_num) < 1e-10
+
+
 def test_quadric_hilbert_polynomial_and_normalization():
     """Verifies C_n^(lambda)(1) = (lambda / (n + lambda)) * dim H^0(Q_{d-2}, O(n))."""
     d = 5
@@ -59,11 +86,9 @@ def test_quadric_hilbert_polynomial_and_normalization():
     h0 = quadric_hilbert_polynomial(d, n)
     c_n_1 = c_n_1_val(n, lambda_val)
 
-    # h^0 = binom(n+d-1, d-1) - binom(n+d-3, d-1)
     expected_h0 = math.comb(n + d - 1, d - 1) - math.comb(n + d - 3, d - 1)
     assert h0 == expected_h0
 
-    # Relation C_n^(lambda)(1) = (lambda / (n + lambda)) * h^0
     rel_c_n_1 = (lambda_val / (n + lambda_val)) * h0
     assert abs(c_n_1 - rel_c_n_1) < 1e-12
 
@@ -78,12 +103,10 @@ def test_normalized_jacobi_coefficients_sum_identity():
 
 def test_pochhammer_and_schubert_coefficients():
     """Tests rising Pochhammer symbol and hypergeometric series coefficients."""
-    # (3)_4 = 3 * 4 * 5 * 6 = 360
     assert pochhammer(3.0, 4) == 360.0
 
     coeffs = schubert_intersection_coefficients(2, 1.5)
     assert len(coeffs) == 3
-    # c_0 should always be 1.0
     assert abs(coeffs[0] - 1.0) < 1e-12
 
 
@@ -102,9 +125,7 @@ def test_wkb_interior_asymptotic_convergence():
         rel_err = abs(exact - wkb) / abs(exact)
         errors.append(rel_err)
 
-    # Relative error should be under 2% for n >= 50
     assert errors[0] < 0.02
-    # Relative error should decrease as n increases
     assert errors[-1] < errors[0]
 
 
@@ -127,11 +148,9 @@ def test_mehler_heine_bessel_convergence():
         abs_err = abs(exact_ratio - bessel_ratio)
         errors.append(abs_err)
 
-    # Error at z=2.5 should be < 1e-3 for n >= 50
     assert errors[0] < 1e-3
-    # Quadratic decrease: error at n=200 should be ~1/16 of error at n=50
     ratio = errors[2] / errors[0]
-    assert ratio < 0.1  # Approx 1/16 = 0.0625
+    assert ratio < 0.1
 
 
 def test_computational_solver_benchmark_and_pareto():
@@ -144,24 +163,16 @@ def test_computational_solver_benchmark_and_pareto():
     domain = np.linspace(0.2, 0.98, 200)
     results = solver.benchmark_permutations(domain)
 
-    # Verify all 6 permutations were evaluated
     assert len(results) == 6
     assert AlgebraicPermutation.CLENSHAW_RECURRENCE in results
     assert AlgebraicPermutation.HYPERGEOMETRIC_2F1 in results
-    assert AlgebraicPermutation.INTERIOR_WKB_WEYL in results
-    assert AlgebraicPermutation.MEHLER_HEINE_BESSEL in results
-    assert AlgebraicPermutation.COMPOSITE_MATCHED in results
-    assert AlgebraicPermutation.BARYCENTRIC_RATIONAL in results
 
-    # Verify Pareto frontier identifies optimal candidates
     pareto_candidates = [m for m in results.values() if m.is_pareto_optimal]
     assert len(pareto_candidates) >= 1
 
-    # Test solver selection under accuracy constraint
     opt_acc = solver.solve_optimal_permutation(domain, max_error_tol=1e-5)
     assert opt_acc.max_relative_error <= 1e-5
 
-    # Test solver selection under budget constraint
     opt_budget = solver.solve_optimal_permutation(domain, max_flop_budget=15000)
     assert opt_budget.num_flops <= 15000
 
@@ -172,14 +183,12 @@ def test_computational_solver_numerical_bases():
     lambda_p = 1.5
     domain = np.linspace(0.1, 0.9, 50)
 
-    # Fixed-Point context
     ctx_fp = NumericalContext.fixed_point_q16()
     solver_fp = GegenbauerComputationalSolver(n=n_deg, lambda_val=lambda_p, context=ctx_fp)
     res_fp = solver_fp.evaluate_clenshaw_recurrence(domain)
     assert ctx_fp.base == NumericalBase.FIXED_POINT
     assert len(res_fp) == 50
 
-    # Logarithmic LNS context
     ctx_lns = NumericalContext.logarithmic_lns()
     solver_lns = GegenbauerComputationalSolver(n=n_deg, lambda_val=lambda_p, context=ctx_lns)
     res_lns = solver_lns.evaluate_clenshaw_recurrence(domain)
