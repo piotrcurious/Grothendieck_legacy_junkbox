@@ -5,7 +5,7 @@ Tests:
 1. Formal Prolog Proof Knowledgebase Execution (via swipl)
 2. Python Semiclassical Asymptotics & Error Convergence Rates
 3. Computational Layer & Pareto Optimization Solver across bases/types
-4. Quadric Hypersurface Algebraic Geometry & Schubert Combinatorics
+4. Quadric Hypersurface Algebraic Geometry & Normalized Jacobi Recurrence
 """
 
 import subprocess
@@ -30,6 +30,7 @@ from Gregenbauer_demistify.computational_layer import (
 from Gregenbauer_demistify.algebraic_geometry_combinatorics import (
     quadric_hilbert_polynomial,
     pieri_coefficients,
+    normalized_jacobi_coefficients,
     pochhammer,
     schubert_intersection_coefficients,
 )
@@ -67,16 +68,16 @@ def test_quadric_hilbert_polynomial_and_normalization():
     assert abs(c_n_1 - rel_c_n_1) < 1e-12
 
 
-def test_pieri_coefficients_sum_identity():
-    """Verifies that Pieri rule coefficients C_+ + C_- = 1 for any n, lambda."""
+def test_normalized_jacobi_coefficients_sum_identity():
+    """Verifies that normalized Jacobi coefficients a_n + b_n = 1 for any n, lambda."""
     for n in range(1, 10):
         for lambda_val in [0.5, 1.0, 1.5, 2.5]:
-            c_plus, c_minus = pieri_coefficients(n, lambda_val)
-            assert abs((c_plus + c_minus) - 1.0) < 1e-12
+            a_n, b_n = normalized_jacobi_coefficients(n, lambda_val)
+            assert abs((a_n + b_n) - 1.0) < 1e-12
 
 
 def test_pochhammer_and_schubert_coefficients():
-    """Tests rising Pochhammer symbol and Schubert intersection coefficients."""
+    """Tests rising Pochhammer symbol and hypergeometric series coefficients."""
     # (3)_4 = 3 * 4 * 5 * 6 = 360
     assert pochhammer(3.0, 4) == 360.0
 
