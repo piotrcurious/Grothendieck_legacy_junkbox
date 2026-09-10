@@ -8,10 +8,12 @@ and semiclassical framework:
 2. Interior WKB / Weyl Semiclassical Expansion
 3. Endpoint Mehler-Heine Bessel Boundary-Layer Expansion (Euclidean Kernel)
 4. Composite Matched Asymptotic Expansion
+5. Log-space Orthogonality Norm & Quadrature Integral Verification
 """
 
 import numpy as np
 from scipy.special import eval_gegenbauer, gamma, gammaln, jv
+from scipy.integrate import quad
 
 
 def exact_gegenbauer(n: int, lambda_val: float, x: np.ndarray) -> np.ndarray:
@@ -28,7 +30,42 @@ def log_c_n_1(n: int, lambda_val: float) -> float:
 
 def c_n_1_val(n: int, lambda_val: float) -> float:
     """Computes C_n^(lambda)(1) stably."""
-    return np.exp(log_c_n_1(n, lambda_val))
+    return float(np.exp(log_c_n_1(n, lambda_val)))
+
+
+def log_orthogonality_norm(n: int, lambda_val: float) -> float:
+    """
+    Computes ln(h_n) stably for the orthogonality norm square:
+      int_{-1}^1 C_n^(lambda)(x) C_m^(lambda)(x) (1 - x^2)^(lambda - 1/2) dx = h_n * delta_{nm}
+    Formula:
+      ln h_n = ln(pi) + (1 - 2*lambda)*ln(2) + gammaln(n + 2*lambda)
+               - gammaln(n + 1) - ln(n + lambda) - 2*gammaln(lambda)
+    """
+    return (np.log(np.pi) +
+            (1.0 - 2.0 * lambda_val) * np.log(2.0) +
+            gammaln(n + 2.0 * lambda_val) -
+            gammaln(n + 1.0) -
+            np.log(n + lambda_val) -
+            2.0 * gammaln(lambda_val))
+
+
+def orthogonality_norm(n: int, lambda_val: float) -> float:
+    """Computes h_n stably using log-space exponential."""
+    return float(np.exp(log_orthogonality_norm(n, lambda_val)))
+
+
+def verify_orthogonality_integral(n: int, m: int, lambda_val: float) -> float:
+    """
+    Numerically computes the L2 orthogonality integral:
+      I_{nm} = int_{-1}^1 C_n^(lambda)(x) C_m^(lambda)(x) (1 - x^2)^(lambda - 1/2) dx
+    Returns the numerical integral value.
+    """
+    def integrand(x):
+        w = (1.0 - x**2) ** (lambda_val - 0.5)
+        return eval_gegenbauer(n, lambda_val, x) * eval_gegenbauer(m, lambda_val, x) * w
+
+    val, _err = quad(integrand, -1.0, 1.0, limit=100)
+    return val
 
 
 def interior_wkb_approx(n: int, lambda_val: float, theta: np.ndarray) -> np.ndarray:
