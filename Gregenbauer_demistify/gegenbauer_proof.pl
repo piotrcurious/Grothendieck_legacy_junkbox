@@ -203,7 +203,7 @@ prove_endpoint_contraction(D, N, ZVal) :-
     D1 is D - 1,
     inonu_wigner_generator_rescaling(so(D), N, Lambda, ScaleFactor),
     bessel_kernel_index(Lambda, Nu),
-    format('  * Rescaled Transvection Generators: P_i = (~w) * X_i -> Commutator [P_i, P_j] -> 0 as n->inf~n', [ScaleFactor]),
+    format('  * High-Weight Tangent Contraction: P_i = (~w) * X_i -> Commutator [P_i, P_j] -> 0 as n->inf~n', [ScaleFactor]),
     format('  * Lie Algebra Contraction: so(~w) --(n=~w)--> se(~w) = so(~w) x R^~w~n', [D, N, D1, D1, D1]),
     format('  * Microscopic Tangent Scaling: theta = z / (n + Lambda), where z = ~w~n', [ZVal]),
     format('  * Rescaled Half-Density Factor: U_N(z) = N^lambda * u(z/N) -> z^lambda * Cal_J_~w(z)~n', [Nu]),
