@@ -8,7 +8,7 @@ This document provides a mathematically precise 3-regime asymptotic framework, c
 1. **Interior Semiclassical Schrödinger Analysis (Regime I)**: Half-density conjugation converts the radial differential realization of the Casimir/Laplacian eigenvalue equation $-n(n+2\rho) = -(n+\rho)^2 + \rho^2$ into the exact 1D Schrödinger Hamiltonian $H_\lambda = -\partial_\theta^2 + \lambda(\lambda-1)\csc^2\theta$ with spectral parameter $E_N = N^2 = (n+\rho)^2$.
 2. **Microscopic Endpoint Blow-Up & Contraction (Regime II)**: Tangent blow-up $z = N\theta$ and rescaled half-density $U_N(z) = N^\lambda u(z/N)$ convert the Schrödinger operator into the microscopic inverse-square Hamiltonian $-U_{zz} + \frac{\lambda(\lambda-1)}{z^2} U = U$, whose flat radial form $U = z^\lambda \phi$ is the flat Euclidean radial Helmholtz equation on $\mathbb{R}^{d-1}$ yielding the normalized Bessel kernel $\mathcal{J}_{\lambda-1/2}(z)$.
 3. **Matched Asymptotic Overlap Bridge (Regime III)**: Common asymptotic overlap in $1 \ll z \ll N$ unifying interior WKB waves with singular orbit boundary layers.
-4. **Representation Geometry & Commutative Gelfand Algebra**: Harmonic quotient decomposition $\operatorname{Sym}^n(\mathbb{C}^d)/(q) \cong V_n$, projectivized null quadric $Q^{d-2} \subset \mathbb{P}^{d-1}$, normalization identity $C_n^{(\lambda)}(1) = \frac{\lambda}{n+\lambda}\dim V_n$, and the exact normalized Jacobi recurrence in the commutative spherical function algebra.
+4. **Representation Geometry & Commutative Gelfand Algebra**: Harmonic quotient decomposition $\operatorname{Sym}^n(\mathbb{C}^d)/(q) \cong V_n$, projectivized null quadric $Q^{d-2} \subset \mathbb{P}^{d-1}$, representation-growth stripping via normalization identity $C_n^{(\lambda)}(1) = \frac{\lambda}{n+\lambda}\dim V_n$, and the exact normalized Jacobi recurrence in the commutative spherical function algebra.
 
 ---
 
@@ -67,7 +67,7 @@ Near $\theta \to 0$, $V_{\text{eff}}(\theta) \sim \frac{\lambda(\lambda-1)}{\the
         ▼                                ▼                                ▼
   [ REGIME I: Interior ]        [ REGIME II: Micro Blow-Up ]     [ REGIME III: Overlap ]
   - θ ∈ [ε, π-ε]                - z = Nθ = O(1)                  - 1 << z << N
-  - Semiclassical WKB           - Gelfand Pair Contraction       - Asymptotic Agreement
+  - Semiclassical WKB           - Rescaled Half-Density          - Asymptotic Agreement
   - Momentum p(θ) = N + O(1/N)  - Flat Euclidean Helmholtz      - Bessel Hankel ~ WKB
   - Cosine standing wave        - Normalized Kernel J_{λ-1/2}    - Smooth Matching Bridge
 ```
@@ -122,22 +122,22 @@ The central theoretical insight is that the endpoint Bessel kernel behavior is n
 
 $$\boxed{
 \begin{array}{ccc}
-\textbf{Compact Gelfand Pair} & \xrightarrow[\text{Contraction}]{\theta = z/N} & \textbf{Euclidean Gelfand Pair} \\
+\textbf{Compact Gelfand Pair} & \xrightarrow[\theta = z/N,\; N \to \infty]{\text{High-Weight Tangent Contraction}} & \textbf{Euclidean Gelfand Pair} \\
 (SO(d), SO(d-1)) && (E(d-1), SO(d-1)) \\[3mm]
 \downarrow && \downarrow \\[1mm]
 \textbf{Spherical Radial Laplacian} & \xrightarrow[\text{Blow-Up}]{\Delta_{\text{rad}}} & \textbf{Euclidean Radial Laplacian} \\
 \partial_\theta^2 + 2\lambda\cot\theta\,\partial_\theta && \partial_z^2 + \frac{2\lambda}{z}\partial_z \\[3mm]
 \downarrow && \downarrow \\[1mm]
 \textbf{Compact Zonal Function} & \xrightarrow[\text{Mehler-Heine}]{N \to \infty} & \textbf{Euclidean Spherical Kernel} \\
-\phi_n(\theta) = \frac{C_n^{(\lambda)}(\cos\theta)}{C_n^{(\lambda)}(1)} && \mathcal{J}_{\lambda-1/2}(z) = 2^{\nu}\Gamma(\nu+1) \frac{J_\nu(z)}{z^\nu}
+\phi_n(\theta) = \frac{C_n^{(\lambda)}(\cos\theta)}{C_n^{(\lambda)}(1)} && \mathcal{J}_{\lambda-1/2}(z) = \frac{1}{|S^{d-2}|} \int_{S^{d-2}} e^{i z \omega_1} d\omega
 \end{array}
 }$$
 
 ### The 4 Unified Perspectives of the Singular Scaling Limit:
 1. **(i) Geometric Tangent-Space Limit**: The $N^{-1}$ microscopic blow-up flattens the compact sphere $S^{d-1}$ into its tangent space $T_p S^{d-1} \cong \mathbb{R}^{d-1}$.
-2. **(ii) Inönü–Wigner Gelfand Pair Contraction**: Decomposing $\mathfrak{so}(d) = \mathfrak{so}(d-1) \oplus \mathfrak{p}$ and rescaling transvection generators $P_i^{(n)} = \frac{1}{n+\rho} X_i$ ($[P_i^{(n)}, P_j^{(n)}] \to 0$) contracts the compact Gelfand pair $(SO(d), SO(d-1))$ into the Euclidean Gelfand pair $(E(d-1), SO(d-1))$.
-3. **(iii) Singular Schrödinger Operator Blow-Up**: Rescaling the compact Schrödinger operator $H_\lambda$ by $N^{-2}$ yields the flat inverse-square Bessel Hamiltonian $-U_{zz} + \frac{\lambda(\lambda-1)}{z^2} U = U$.
-4. **(iv) Mehler–Heine Matrix Coefficient Limit**: The zonal spherical functions $\phi_n(z/N)$ converge uniformly on compact $z$-sets to the Euclidean radial spherical function $\mathcal{J}_{\lambda-1/2}(z)$.
+2. **(ii) High-Weight Tangent Contraction of Gelfand Pairs**: Decomposing $\mathfrak{so}(d) = \mathfrak{so}(d-1) \oplus \mathfrak{p}$ and rescaling transvection generators $P_i^{(n)} = \frac{1}{n+\rho} X_i$ ($[P_i^{(n)}, P_j^{(n)}] \to 0$) contracts the compact Gelfand pair $(SO(d), SO(d-1))$ into the Euclidean Gelfand pair $(E(d-1), SO(d-1))$.
+3. **(iii) Singular Schrödinger Operator Blow-Up**: Rescaling the compact Schrödinger operator $H_\lambda$ by $N^{-2}$ and half-density scaling $U_N(z) = N^\lambda u(z/N)$ yields the flat inverse-square Bessel Hamiltonian $-U_{zz} + \frac{\lambda(\lambda-1)}{z^2} U = U$.
+4. **(iv) Mehler–Heine Matrix Coefficient Limit**: The zonal spherical functions $\phi_n(z/N)$ converge uniformly on compact $z$-sets to the Euclidean radial spherical function $\mathcal{J}_{\lambda-1/2}(z) = \frac{1}{|S^{d-2}|} \int_{S^{d-2}} e^{i z \omega_1} d\omega$.
 
 ---
 
@@ -157,19 +157,20 @@ The two singular boundary layers at $\theta=0$ and $\theta=\pi$ are mapped into 
 To connect Gegenbauer polynomials to algebraic geometry, we clearly distinguish the two quadric varieties and formulate the recurrence in the commutative algebra of spherical functions.
 
 ### 6.1 Representation Null Quadric & Harmonic Quotient
-1. **Sphere Geometry vs Representation Geometry**: While the complexified sphere compactifies to $Q^{d-1} = \{z_1^2 + \dots + z_d^2 - z_0^2 = 0\} \subset \mathbb{P}^d$ ($SO(d+1)$ action), the irreducible $SO(d)$ representation $V_n = \mathcal{H}_n(\mathbb{C}^d)$ is encoded by the projectivized null quadric $Q^{d-2} \subset \mathbb{P}^{d-1}$ given by $q(z) = z_1^2 + \dots + z_d^2 = 0$.
+1. **Sphere Geometry vs Representation Geometry**: While the complexified sphere compactifies to $Q^{d-1} = \{z_1^2 + \dots + z_d^2 - z_0^2 = 0\} \subset \mathbb{P}^d$ ($SO(d+1)$ conformal action), the irreducible $SO(d)$ representation $V_n = \mathcal{H}_n(\mathbb{C}^d)$ is encoded by the projectivized null quadric $Q^{d-2} \subset \mathbb{P}^{d-1}$ given by $q(z) = z_1^2 + \dots + z_d^2 = 0$.
 2. **Harmonic Polynomial Quotient**: Homogeneous degree-$n$ polynomials / symmetric tensors $\operatorname{Sym}^n(\mathbb{C}^d)$ decompose into trace spaces via $q$:
    $$\operatorname{Sym}^n(\mathbb{C}^d) = \bigoplus_{j=0}^{\lfloor n/2 \rfloor} q^j \mathcal{H}_{n-2j}(\mathbb{C}^d)$$
    Quotienting by the trace ideal $(q)$ directly isolates the harmonic representation:
    $$\boxed{ H^0(Q^{d-2}, \mathcal{O}_{Q^{d-2}}(n)) \cong \frac{\text{Sym}^n(\mathbb{C}^d)}{(q)} \cong \mathcal{H}_n(\mathbb{C}^d) \cong V_n }$$
 
-### 6.2 Normalization Dimension Identity
+### 6.2 Representation-Growth Stripping via Normalization
 Taking the dimension of $H^0(Q^{d-2}, \mathcal{O}(n))$ gives:
 $$\dim V_n = \binom{n+d-1}{d-1} - \binom{n+d-3}{d-1} = \frac{2n+d-2}{d-2} \binom{n+d-3}{n} = \frac{n+\lambda}{\lambda} \binom{n+2\lambda-1}{n}$$
 
 Since $C_n^{(\lambda)}(1) = \binom{n+2\lambda-1}{n}$, we obtain the exact normalization dimension identity:
 $$\boxed{ C_n^{(\lambda)}(1) = \frac{\lambda}{n+\lambda} \dim V_n = \frac{\rho}{n+\rho} \dim V_n }$$
-The zonal normalization $C_n^{(\lambda)}(1)$ is the representation dimension $\dim V_n$ scaled by the dimension-normalization factor $\frac{\rho}{n+\rho}$ under the spherical function addition theorem.
+
+As $n \to \infty$, $\dim V_n \sim \frac{2}{(d-2)!} n^{d-2}$. Normalizing by $C_n^{(\lambda)}(1) = \frac{\rho}{n+\rho} \dim V_n$ strips one power of representation growth, preparing the zonal function $\phi_n = C_n^{(\lambda)} / C_n^{(\lambda)}(1)$ for the $O(1)$ semiclassical limit.
 
 ### 6.3 Commutative Gelfand Algebra & Exact Normalized Jacobi Recurrence
 Because $(SO(d), SO(d-1))$ is a compact Gelfand pair, every irreducible spherical representation $V_n$ has a 1-dimensional $H$-fixed subspace $V_n^H$, and the normalized zonal spherical functions $\phi_n = C_n^{(\lambda)} / C_n^{(\lambda)}(1)$ form the spherical basis.
@@ -177,7 +178,9 @@ Because $(SO(d), SO(d-1))$ is a compact Gelfand pair, every irreducible spherica
 Pointwise multiplication by the degree-1 fundamental spherical function $\phi_1(x) = x$ defines an exact Jacobi operator in the spherical function algebra:
 $$\boxed{ x \cdot \phi_n(x) = \frac{n+2\lambda}{2(n+\lambda)} \phi_{n+1}(x) + \frac{n}{2(n+\lambda)} \phi_{n-1}(x) }$$
 
-Undoing the normalization $\phi_n = C_n^{(\lambda)} / C_n^{(\lambda)}(1)$ yields the standard Gegenbauer three-term recurrence:
+As $n \to \infty$, $\frac{n+2\lambda}{2(n+\lambda)} \to \frac{1}{2}$ and $\frac{n}{2(n+\lambda)} \to \frac{1}{2}$, so the Jacobi operator limits to $x \phi_n \sim \frac{1}{2}(\phi_{n+1} + \phi_{n-1})$, which is the discrete free-wave / discrete semiclassical momentum operator!
+
+Undoing the normalization $\phi_n = C_n^{(\lambda)} / C_n^{(\lambda)}(1)$ recovers the standard Gegenbauer three-term recurrence:
 $$x \cdot C_n^{(\lambda)}(x) = \frac{n+1}{2(n+\lambda)} C_{n+1}^{(\lambda)}(x) + \frac{n+2\lambda-1}{2(n+\lambda)} C_{n-1}^{(\lambda)}(x)$$
 
 #### Case Study: $SO(3)$ ($d=3, \lambda=1/2$) Parity Demonstration
