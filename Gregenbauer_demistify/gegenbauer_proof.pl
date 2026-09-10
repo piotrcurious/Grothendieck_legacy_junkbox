@@ -109,10 +109,10 @@ assert_dim_v_n_identity(D, N, DimVn, C_n_1) :-
     Diff is abs(C_n_1 - Expected_C_n_1),
     Diff < 1e-10.
 
-assert_pieri_spherical_projection(N, Lambda, Cp, Cm) :-
-    Cp is (N + 1.0) / (2.0 * (N + Lambda)),
-    Cm is (N + 2.0 * Lambda - 1.0) / (2.0 * (N + Lambda)),
-    Sum is Cp + Cm,
+assert_pieri_spherical_projection(N, Lambda, An, Bn) :-
+    An is (N + 2.0 * Lambda) / (2.0 * (N + Lambda)),
+    Bn is N / (2.0 * (N + Lambda)),
+    Sum is An + Bn,
     Diff is abs(Sum - 1.0),
     Diff < 1e-10.
 
@@ -174,7 +174,7 @@ prove_quadric_representation_geometry(D, N) :-
     format('~n[PROOF STEP 4] Representation Geometry of Null Quadric Q^{d-2} c P^{d-1}:~n'),
     dimension_parameter(D, Lambda),
     assert_dim_v_n_identity(D, N, DimVn, Cn1),
-    assert_pieri_spherical_projection(N, Lambda, Cp, Cm),
+    assert_pieri_spherical_projection(N, Lambda, An, Bn),
     D1 is D - 1,
     D2 is D - 2,
     format('  * Representation Null Quadric: Q^~w c P^~w defined by z_1^2+...+z_d^2 = 0~n', [D2, D1]),
@@ -182,8 +182,8 @@ prove_quadric_representation_geometry(D, N) :-
     format('  * Dimension Formula: dim V_n = ~w [VERIFIED EXACT]~n', [DimVn]),
     format('  * Normalization Identity: C_~w^(~w)(1) = ~w = (~w / (~w + ~w)) * dim V_n [VERIFIED EXACT]~n',
            [N, Lambda, Cn1, Lambda, N, Lambda]),
-    format('  * Commutative Gelfand Algebra Jacobi Operator phi_1 * phi_n = a_n * phi_{n+1} + b_n * phi_{n-1}:~n'),
-    format('      x * C_n = (~w) * C_{n+1} + (~w) * C_{n-1} [Sum = ~w, VERIFIED EXACT]~n', [Cp, Cm, Cp + Cm]).
+    format('  * Exact Normalized Jacobi Recurrence phi_1 * phi_n = a_n * phi_{n+1} + b_n * phi_{n-1}:~n'),
+    format('      x * phi_n = (~w) * phi_{n+1} + (~w) * phi_{n-1} [a_n + b_n = ~w, VERIFIED EXACT]~n', [An, Bn, An + Bn]).
 
 prove_interior_asymptotics(D, N, ThetaVal) :-
     format('~n[PROOF STEP 5] Interior Weyl Semiclassical Expansion (Regime I: 0 < theta < pi):~n'),
@@ -207,6 +207,7 @@ prove_endpoint_contraction(D, N, ZVal) :-
     format('  * Rescaled Transvection Generators: P_i = (~w) * X_i -> Commutator [P_i, P_j] -> 0 as n->inf~n', [ScaleFactor]),
     format('  * Lie Algebra Contraction: so(~w) --(n=~w)--> se(~w) = so(~w) x R^~w~n', [D, N, D1, D1, D1]),
     format('  * Microscopic Tangent Scaling: theta = z / (n + Lambda), where z = ~w~n', [ZVal]),
+    format('  * Rescaled Half-Density Factor: U_N(z) = N^lambda * u(z/N) -> z^lambda * Cal_J_~w(z)~n', [Nu]),
     format('  * Contracted Euclidean Helmholtz Equation: phi\'\' + (~w/z)*phi\' + phi = 0~n', [2*Lambda]),
     format('  * Normalized Euclidean Kernel: Cal_J_~w(z) = 2^~w * Gamma(~w+1) * z^(-~w) * J_~w(z)~n', [Nu, Nu, Nu, Nu, Nu]),
     format('  * Mehler-Heine Theorem: lim_{n->inf} C_n^(~w)(cos(z/(n+~w))) / C_n^(~w)(1) = Cal_J_~w(z).~n', [Lambda, Lambda, Lambda, Nu]).

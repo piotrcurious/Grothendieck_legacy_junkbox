@@ -4,7 +4,7 @@ Algebraic Geometry and Combinatorics of Projective Quadrics
 This module implements exact algebraic geometry and combinatorial operations
 for Gegenbauer polynomials and complex projective quadric hypersurfaces Q_{d-2} c P^{d-1}:
 1. Hilbert Polynomial h^0(Q_{d-2}, O(n)) via ideal short exact sequence on P^{d-1}
-2. Pieri Rule Intersection Products for tensor decomposition V_1 x V_n -> V_{n+1} + V_{n-1}
+2. Normalized Jacobi Recurrence Coefficients for Gelfand algebra multiplication phi_1 * phi_n
 3. Pochhammer Symbols and Schubert Cycle Intersection Numbers
 """
 
@@ -29,13 +29,26 @@ def quadric_hilbert_polynomial(d: int, n: int) -> int:
 
 def pieri_coefficients(n: int, lambda_val: float) -> Tuple[float, float]:
     """
-    Computes Pieri rule intersection coefficients for section bundle multiplication
-    x * C_n^(lambda) = C_+ * C_{n+1}^(lambda) + C_- * C_{n-1}^(lambda)
-    corresponding to tensor product decomposition V_1 x V_n -> V_{n+1} + V_{n-1}.
+    Computes unnormalized Pieri rule coefficients for C_n^(lambda):
+      x * C_n^(lambda) = C_+ * C_{n+1}^(lambda) + C_- * C_{n-1}^(lambda)
     """
     c_plus = (n + 1.0) / (2.0 * (n + lambda_val))
     c_minus = (n + 2.0 * lambda_val - 1.0) / (2.0 * (n + lambda_val))
     return c_plus, c_minus
+
+
+def normalized_jacobi_coefficients(n: int, lambda_val: float) -> Tuple[float, float]:
+    """
+    Computes exact normalized Jacobi recurrence coefficients for zonal functions phi_n:
+      phi_1(x) * phi_n(x) = a_n * phi_{n+1}(x) + b_n * phi_{n-1}(x)
+    where:
+      a_n = (n + 2*lambda) / (2 * (n + lambda))
+      b_n = n / (2 * (n + lambda))
+      a_n + b_n = 1.0
+    """
+    a_n = (n + 2.0 * lambda_val) / (2.0 * (n + lambda_val))
+    b_n = n / (2.0 * (n + lambda_val))
+    return a_n, b_n
 
 
 def pochhammer(a: float, k: int) -> float:
@@ -50,9 +63,8 @@ def pochhammer(a: float, k: int) -> float:
 
 def schubert_intersection_coefficients(n: int, lambda_val: float) -> List[float]:
     """
-    Computes the hypergeometric Schubert cycle intersection coefficients:
+    Computes the hypergeometric series coefficients:
       c_k = [(-1)^k * binom(n, k) * (n + 2*lambda)_k] / [k! * (lambda + 0.5)_k]
-    which represent intersection counts in the Schubert filtration of Gr(1, Q_{d-2}).
     """
     coeffs = []
     for k in range(n + 1):
@@ -69,10 +81,8 @@ if __name__ == "__main__":
     lambda_p = (d_dim - 2) / 2.0
 
     h0 = quadric_hilbert_polynomial(d_dim, n_deg)
-    c_p, c_m = pieri_coefficients(n_deg, lambda_p)
-    schubert = schubert_intersection_coefficients(n_deg, lambda_p)
+    a_n, b_n = normalized_jacobi_coefficients(n_deg, lambda_p)
 
     print(f"Projective Quadric Q_{d_dim-2} c P^{d_dim-1}, degree n={n_deg}:")
     print(f"  * Hilbert Polynomial dim H^0(O_Q({n_deg})): {h0}")
-    print(f"  * Pieri Rule Coefficients (C_+, C_-): ({c_p:.6f}, {c_m:.6f})")
-    print(f"  * Schubert Cycle Intersection Coefficients: {[round(c, 4) for c in schubert]}")
+    print(f"  * Normalized Jacobi Recurrence Coefficients (a_n, b_n): ({a_n:.6f}, {b_n:.6f}) [a_n + b_n = {a_n + b_n:.1f}]")
