@@ -159,6 +159,7 @@ prove_schrodinger_transformation(D, N) :-
     format('  * Radial measure J(theta) = sin(theta)^(2*~w)~n', [Lambda]),
     format('  * Half-density conjugation: u(theta) = sin(theta)^~w * phi_n(theta)~n', [Lambda]),
     format('  * Clean Effective Potential V_eff(theta) = ~w (Classification: ~w)~n', [Veff, Class]),
+    format('  * Effective Planck Constant hbar_eff = 1 / (n + Lambda) = ~w~n', [1.0 / (N + Lambda)]),
     format('  * Asserted Casimir Identity: n(n+2*lambda) = (n+rho)^2 - rho^2 [VERIFIED EXACT]~n').
 
 prove_algebraic_recurrence(D, N, XVal) :-
@@ -201,6 +202,7 @@ prove_endpoint_contraction(D, N, ZVal) :-
     format('~n[PROOF STEP 6] Endpoint Blow-Up & Euclidean Contraction (Regime II: theta approx 1/N):~n'),
     dimension_parameter(D, Lambda),
     D1 is D - 1,
+    D2 is D - 2,
     inonu_wigner_generator_rescaling(so(D), N, Lambda, ScaleFactor),
     bessel_kernel_index(Lambda, Nu),
     format('  * High-Weight Tangent Contraction: P_i = (~w) * X_i -> Commutator [P_i, P_j] -> 0 as n->inf~n', [ScaleFactor]),
@@ -208,7 +210,7 @@ prove_endpoint_contraction(D, N, ZVal) :-
     format('  * Microscopic Tangent Scaling: theta = z / (n + Lambda), where z = ~w~n', [ZVal]),
     format('  * Rescaled Half-Density Factor: U_N(z) = N^lambda * u(z/N) -> z^lambda * Cal_J_~w(z)~n', [Nu]),
     format('  * Contracted Euclidean Helmholtz Equation: phi\'\' + (~w/z)*phi\' + phi = 0~n', [2*Lambda]),
-    format('  * Normalized Euclidean Kernel: Cal_J_~w(z) = 2^~w * Gamma(~w+1) * z^(-~w) * J_~w(z)~n', [Nu, Nu, Nu, Nu, Nu]),
+    format('  * Normalized Euclidean Kernel: Cal_J_~w(z) = 1/|S^~w| * int e^(iz*w1) dw = 2^~w * Gamma(~w+1) * z^(-~w) * J_~w(z)~n', [Nu, D2, Nu, Nu, Nu, Nu]),
     format('  * Mehler-Heine Theorem: lim_{n->inf} C_n^(~w)(cos(z/(n+~w))) / C_n^(~w)(1) = Cal_J_~w(z).~n', [Lambda, Lambda, Lambda, Nu]).
 
 prove_two_endpoint_weyl_reflection(D, N, ZetaVal) :-
@@ -238,7 +240,7 @@ prove_asymptotic_matching(D, N, OverlapTheta) :-
     K is N + Lambda,
     Z is K * OverlapTheta,
     bessel_kernel_index(Lambda, Nu),
-    format('~n[PROOF STEP 9] Matched Asymptotic Overlap Verification (Regime III: 1 << z << N):~n'),
+    format('~n[PROOF STEP 9] Matched Asymptotic Overlap Verification (Regime III: z -> inf, z/N -> 0):~n'),
     format('  * Overlap Condition: 1/n (~w) << theta (~w) << 1 ==> 1 << z (~w) << n (~w)~n',
            [1/N, OverlapTheta, Z, N]),
     format('  * (A) Large-z expansion of Bessel kernel Cal_J_~w(z):~n', [Nu]),

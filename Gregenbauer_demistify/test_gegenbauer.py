@@ -67,12 +67,10 @@ def test_high_degree_stability():
 def test_orthogonality_norm_and_quadrature_integral():
     """Verifies L2 orthogonality integral and norm formula h_n."""
     lambda_val = 1.5
-    # Diagonal norm square h_2
     h_2_exact = orthogonality_norm(2, lambda_val)
     h_2_num = verify_orthogonality_integral(2, 2, lambda_val)
     assert abs(h_2_exact - h_2_num) / h_2_exact < 1e-4
 
-    # Off-diagonal orthogonality integral (n=2, m=3) should be 0
     h_23_num = verify_orthogonality_integral(2, 3, lambda_val)
     assert abs(h_23_num) < 1e-10
 
@@ -101,13 +99,24 @@ def test_normalized_jacobi_coefficients_sum_identity():
             assert abs((a_n + b_n) - 1.0) < 1e-12
 
 
-def test_pochhammer_and_schubert_coefficients():
-    """Tests rising Pochhammer symbol and hypergeometric series coefficients."""
+def test_pochhammer_and_hypergeometric_coefficients():
+    """Tests rising Pochhammer symbol and hypergeometric series expansion."""
     assert pochhammer(3.0, 4) == 360.0
 
-    coeffs = schubert_intersection_coefficients(2, 1.5)
+    n = 2
+    lambda_val = 1.5
+    coeffs = schubert_intersection_coefficients(n, lambda_val)
     assert len(coeffs) == 3
     assert abs(coeffs[0] - 1.0) < 1e-12
+    assert abs(coeffs[1] - (-5.0)) < 1e-12
+    assert abs(coeffs[2] - 5.0) < 1e-12
+
+    # Verify polynomial value at x = 0
+    c_n_1 = c_n_1_val(n, lambda_val)
+    t = 0.5  # (1-0)/2
+    poly_val = c_n_1 * sum(c * (t**k) for k, c in enumerate(coeffs))
+    exact_val = exact_gegenbauer(n, lambda_val, np.array([0.0]))[0]
+    assert abs(poly_val - exact_val) < 1e-12
 
 
 def test_wkb_interior_asymptotic_convergence():

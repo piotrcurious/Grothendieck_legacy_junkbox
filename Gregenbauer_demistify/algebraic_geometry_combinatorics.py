@@ -5,7 +5,7 @@ This module implements exact algebraic geometry and combinatorial operations
 for Gegenbauer polynomials and complex projective quadric hypersurfaces Q_{d-2} c P^{d-1}:
 1. Hilbert Polynomial h^0(Q_{d-2}, O(n)) via ideal short exact sequence on P^{d-1}
 2. Normalized Jacobi Recurrence Coefficients for Gelfand algebra multiplication phi_1 * phi_n
-3. Pochhammer Symbols and Schubert Cycle Intersection Numbers
+3. Pochhammer Symbols and Hypergeometric Series Expansion Coefficients
 """
 
 import math
@@ -63,13 +63,15 @@ def pochhammer(a: float, k: int) -> float:
 
 def schubert_intersection_coefficients(n: int, lambda_val: float) -> List[float]:
     """
-    Computes the hypergeometric series coefficients:
-      c_k = [(-1)^k * binom(n, k) * (n + 2*lambda)_k] / [k! * (lambda + 0.5)_k]
+    Computes the exact hypergeometric series coefficients:
+      c_k = [(-1)^k * binom(n, k) * (n + 2*lambda)_k] / (lambda + 0.5)_k
+    where C_n^(lambda)(x) = binom(n+2*lambda-1, n) * sum_{k=0}^n c_k * ((1-x)/2)^k.
+    Note: No extra k! in the denominator because (-n)_k / k! = (-1)^k * binom(n, k).
     """
     coeffs = []
     for k in range(n + 1):
         num = ((-1.0) ** k) * math.comb(n, k) * pochhammer(n + 2.0 * lambda_val, k)
-        den = math.factorial(k) * pochhammer(lambda_val + 0.5, k)
+        den = pochhammer(lambda_val + 0.5, k)
         coeffs.append(num / den)
     return coeffs
 
@@ -82,7 +84,9 @@ if __name__ == "__main__":
 
     h0 = quadric_hilbert_polynomial(d_dim, n_deg)
     a_n, b_n = normalized_jacobi_coefficients(n_deg, lambda_p)
+    schubert = schubert_intersection_coefficients(n_deg, lambda_p)
 
     print(f"Projective Quadric Q_{d_dim-2} c P^{d_dim-1}, degree n={n_deg}:")
     print(f"  * Hilbert Polynomial dim H^0(O_Q({n_deg})): {h0}")
     print(f"  * Normalized Jacobi Recurrence Coefficients (a_n, b_n): ({a_n:.6f}, {b_n:.6f}) [a_n + b_n = {a_n + b_n:.1f}]")
+    print(f"  * Exact Hypergeometric Coefficients: {[round(c, 4) for c in schubert]}")
