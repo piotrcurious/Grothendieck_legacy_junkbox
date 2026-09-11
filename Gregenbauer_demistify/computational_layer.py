@@ -9,12 +9,12 @@ Features:
 - Representation of Numerical Types (float32, float64, float128, mpmath)
   and Numerical Bases (Base 2, Base 10, Fixed-Point, Logarithmic).
 - Algebraic Geometry Expression Permutations:
-    1. Three-Term Clenshaw Recurrence
-    2. Hypergeometric _2F_1 Series Expansion
-    3. Interior WKB / Weyl Semiclassical Expression
-    4. Mehler-Heine Bessel Boundary-Layer Expression
-    5. Composite Matched Asymptotic Expression
-    6. Barycentric Rational / Chebyshev Proxy
+    1. Normalized Three-Term Recurrence phi_n(x)
+    2. Quotient Ring Normal Form Polynomial Remainder
+    3. Hypergeometric _2F_1 Series Expansion
+    4. Interior WKB / Weyl Semiclassical Expression
+    5. Mehler-Heine Bessel Boundary-Layer Expression
+    6. Composite Matched Asymptotic Expression
 - Pareto Solver finding optimal expression permutations under user speed/accuracy constraints.
 """
 
@@ -31,6 +31,13 @@ try:
     HAS_MPMATH = True
 except ImportError:
     HAS_MPMATH = False
+
+try:
+    from algebraic_geometry_combinatorics import QuadricQuotientPolynomial, normalized_jacobi_coefficients
+    from gegenbauer_asymptotics import normalized_phi_recurrence, mehler_heine_bessel_approx, interior_wkb_approx, composite_matched_approx, c_n_1_val
+except ModuleNotFoundError:
+    from Gregenbauer_demistify.algebraic_geometry_combinatorics import QuadricQuotientPolynomial, normalized_jacobi_coefficients
+    from Gregenbauer_demistify.gegenbauer_asymptotics import normalized_phi_recurrence, mehler_heine_bessel_approx, interior_wkb_approx, composite_matched_approx, c_n_1_val
 
 
 class NumericalBase(Enum):
@@ -76,12 +83,12 @@ class NumericalContext:
 
 
 class AlgebraicPermutation(Enum):
-    CLENSHAW_RECURRENCE = "Clenshaw Three-Term Recurrence"
+    NORMALIZED_RECURRENCE = "Normalized Recurrence phi_n(x)"
+    QUOTIENT_RING_NORMAL_FORM = "Quotient Ring Normal Form Remainder"
     HYPERGEOMETRIC_2F1 = "Hypergeometric _2F1 Series"
     INTERIOR_WKB_WEYL = "Interior WKB / Weyl Semiclassical"
     MEHLER_HEINE_BESSEL = "Mehler-Heine Bessel Boundary-Layer"
     COMPOSITE_MATCHED = "Composite Matched Asymptotic"
-    BARYCENTRIC_RATIONAL = "Barycentric Rational Proxy"
 
 
 @dataclass
@@ -98,7 +105,7 @@ class SolverPerformanceMetrics:
 class GegenbauerComputationalSolver:
     """
     Evaluates equivalent algebraic geometry permutations for Gegenbauer polynomials
-    under specific numerical contexts and solves for Pareto-optimal expressions.
+    and zonal functions under specific numerical contexts and solves for Pareto-optimal expressions.
     """
 
     def __init__(self, n: int, lambda_val: float, context: NumericalContext = None):
@@ -109,138 +116,80 @@ class GegenbauerComputationalSolver:
     def _apply_context_quantization(self, arr: np.ndarray) -> np.ndarray:
         """Simulates precision and numerical base constraints."""
         if self.context.base == NumericalBase.FIXED_POINT:
-            # Q16.16 quantization (step size 1/65536)
             scale = 65536.0
             return np.round(arr * scale) / scale
         elif self.context.base == NumericalBase.LOGARITHMIC:
-            # LNS simulation with noise proportional to eps
             noise = 1.0 + np.random.normal(0, self.context.eps, size=arr.shape)
             return arr * noise
         elif self.context.precision == PrecisionType.FLOAT32:
             return arr.astype(np.float32).astype(np.float64)
         return arr
 
-    def _c_n_1(self) -> float:
-        log_c_n_1 = gammaln(self.n + 2.0 * self.lambda_val) - gammaln(2.0 * self.lambda_val) - gammaln(self.n + 1.0)
-        return float(np.exp(log_c_n_1))
+    def evaluate_normalized_recurrence(self, x: np.ndarray) -> np.ndarray:
+        """Normalized Three-term Recurrence for phi_n(x): O(n) FLOPs."""
+        x_q = self._apply_context_quantization(np.asarray(x, dtype=np.float64))
+        phi_vals = normalized_phi_recurrence(self.n, self.lambda_val, x_q)
+        return self._apply_context_quantization(phi_vals)
 
-    def evaluate_clenshaw_recurrence(self, x: np.ndarray) -> np.ndarray:
-        """Clenshaw Three-term Recurrence: O(n) FLOPs."""
-        x = self._apply_context_quantization(np.asarray(x, dtype=np.float64))
-        if self.n == 0:
-            return np.ones_like(x)
-        if self.n == 1:
-            return 2.0 * self.lambda_val * x
+    def evaluate_quotient_ring_normal_form(self, x: np.ndarray) -> np.ndarray:
+        """Quotient Ring Polynomial Remainder normal form evaluation."""
+        x_q = self._apply_context_quantization(np.asarray(x, dtype=np.float64))
+        d = int(2 * self.lambda_val + 2)
 
-        c0 = np.ones_like(x)
-        c1 = 2.0 * self.lambda_val * x
+        # Build z_1^n modulo q in R(Q)
+        poly = QuadricQuotientPolynomial(d, {(0,) * d: 1.0})
+        for _ in range(self.n):
+            poly = poly.multiply_by_x(0)
 
-        for k in range(2, self.n + 1):
-            c2 = (2.0 * (k + self.lambda_val - 1.0) / k) * x * c1 - ((k + 2.0 * self.lambda_val - 2.0) / k) * c0
-            c0, c1 = c1, c2
+        # Evaluate on zonal points (x_q, sqrt(1-x_q^2)/(d-1), ...)
+        out = np.zeros_like(x_q)
+        for i, xi in enumerate(x_q):
+            rem_sq = max(0.0, 1.0 - xi**2) / max(1, d - 1)
+            pt = [xi] + [np.sqrt(rem_sq)] * (d - 1)
+            out[i] = poly.evaluate(pt)
 
-        return self._apply_context_quantization(c1)
-
-    def evaluate_hypergeometric(self, x: np.ndarray) -> np.ndarray:
-        """Hypergeometric _2F1(-n, n + 2*lambda; lambda + 0.5; (1-x)/2) evaluation via hyp2f1."""
-        x = self._apply_context_quantization(np.asarray(x, dtype=np.float64))
-        z = (1.0 - x) / 2.0
-        c_n_1 = self._c_n_1()
-        h_val = hyp2f1(-self.n, self.n + 2.0 * self.lambda_val, self.lambda_val + 0.5, z)
-        return self._apply_context_quantization(c_n_1 * h_val)
-
-    def evaluate_wkb_weyl(self, x: np.ndarray) -> np.ndarray:
-        """Interior WKB / Weyl expression: O(1) FLOPs."""
-        x_q = self._apply_context_quantization(np.clip(x, -0.999999, 0.999999))
-        theta = np.arccos(x_q)
-        K = self.n + self.lambda_val
-        coeff = (2.0 ** (1.0 - self.lambda_val) / gamma(self.lambda_val)) * (self.n ** (self.lambda_val - 1.0))
-        amplitude = (np.sin(theta)) ** (-self.lambda_val)
-        phase = K * theta - (self.lambda_val * np.pi / 2.0)
-        res = coeff * amplitude * np.cos(phase)
-        return self._apply_context_quantization(res)
-
-    def evaluate_mehler_heine(self, x: np.ndarray) -> np.ndarray:
-        """Mehler-Heine Bessel Boundary-Layer expression: O(1) FLOPs."""
-        x_q = self._apply_context_quantization(np.clip(x, -1.0, 1.0))
-        theta = np.arccos(x_q)
-        K = self.n + self.lambda_val
-        z = K * theta
-        nu = self.lambda_val - 0.5
-        c_n_1 = self._c_n_1()
-
-        z_safe = np.where(z == 0, 1e-15, z)
-        cal_j_nu = (2.0 ** nu) * gamma(nu + 1.0) * (z_safe ** (-nu)) * jv(nu, z_safe)
-        cal_j_nu = np.where(z == 0, 1.0, cal_j_nu)
-
-        return self._apply_context_quantization(c_n_1 * cal_j_nu)
-
-    def evaluate_composite_matched(self, x: np.ndarray) -> np.ndarray:
-        """Composite Matched Asymptotic expression: O(1) FLOPs."""
-        x_q = self._apply_context_quantization(np.clip(x, -0.999999, 0.999999))
-        theta = np.arccos(x_q)
-        K = self.n + self.lambda_val
-        z = K * theta
-        nu = self.lambda_val - 0.5
-        c_n_1 = self._c_n_1()
-
-        bessel = self.evaluate_mehler_heine(x)
-        wkb = self.evaluate_wkb_weyl(x)
-
-        z_safe = np.where(z == 0, 1e-15, z)
-        matching = (c_n_1 * (2.0 ** nu) * gamma(nu + 1.0) * (z_safe ** (-nu)) *
-                    np.sqrt(2.0 / (np.pi * z_safe)) * np.cos(z_safe - self.lambda_val * np.pi / 2.0))
-
-        return self._apply_context_quantization(bessel + wkb - matching)
-
-    def evaluate_barycentric_rational(self, x: np.ndarray, num_nodes: int = 16) -> np.ndarray:
-        """
-        Barycentric Rational Proxy: Interpolates C_n^(lambda)(x) using Chebyshev nodes.
-        Cost: O(num_nodes) FLOPs per point.
-        """
-        x_eval = self._apply_context_quantization(np.asarray(x, dtype=np.float64))
-
-        # Chebyshev nodes
-        j = np.arange(num_nodes)
-        nodes = np.cos((2 * j + 1) * np.pi / (2 * num_nodes))
-        node_vals = eval_gegenbauer(self.n, self.lambda_val, nodes)
-        weights = ((-1.0) ** j) * np.sin((2 * j + 1) * np.pi / (2 * num_nodes))
-
-        # Evaluate via barycentric formula
-        out = np.zeros_like(x_eval)
-        for i, xi in enumerate(x_eval):
-            diffs = xi - nodes
-            exact_match = np.where(np.abs(diffs) < 1e-14)[0]
-            if len(exact_match) > 0:
-                out[i] = node_vals[exact_match[0]]
-            else:
-                terms = weights / diffs
-                out[i] = np.sum(terms * node_vals) / np.sum(terms)
-
+        # Normalize to zonal function phi_n(x)
+        c_n_1 = c_n_1_val(self.n, self.lambda_val) if self.n > 0 else 1.0
         return self._apply_context_quantization(out)
 
-    def evaluate_mpmath_arbitrary(self, x: np.ndarray) -> np.ndarray:
-        """Arbitrary precision evaluation via mpmath if installed."""
-        if not HAS_MPMATH:
-            return self.evaluate_clenshaw_recurrence(x)
+    def evaluate_hypergeometric(self, x: np.ndarray) -> np.ndarray:
+        """Hypergeometric _2F1 Series Evaluation."""
+        x_q = self._apply_context_quantization(np.asarray(x, dtype=np.float64))
+        z = (1.0 - x_q) / 2.0
+        c_n_1 = c_n_1_val(self.n, self.lambda_val)
+        h_val = hyp2f1(-self.n, self.n + 2.0 * self.lambda_val, self.lambda_val + 0.5, z)
+        return self._apply_context_quantization((c_n_1 * h_val) / c_n_1)
 
-        dps = max(15, int(abs(np.log10(self.context.eps))))
-        mpmath.mp.dps = dps
+    def evaluate_wkb_weyl(self, x: np.ndarray) -> np.ndarray:
+        """Interior WKB / Weyl expression for zonal function phi_n(x)."""
+        x_q = self._apply_context_quantization(np.clip(x, -0.999999, 0.999999))
+        theta = np.arccos(x_q)
+        c_n_1 = c_n_1_val(self.n, self.lambda_val)
+        wkb_c = interior_wkb_approx(self.n, self.lambda_val, theta)
+        return self._apply_context_quantization(wkb_c / c_n_1)
 
-        out = np.zeros_like(x, dtype=np.float64)
-        n_mp = mpmath.mpf(self.n)
-        lam_mp = mpmath.mpf(self.lambda_val)
+    def evaluate_mehler_heine(self, x: np.ndarray) -> np.ndarray:
+        """Mehler-Heine Bessel Boundary-Layer expression for zonal function phi_n(x)."""
+        x_q = self._apply_context_quantization(np.clip(x, -1.0, 1.0))
+        theta = np.arccos(x_q)
+        c_n_1 = c_n_1_val(self.n, self.lambda_val)
+        bessel_c = mehler_heine_bessel_approx(self.n, self.lambda_val, theta)
+        return self._apply_context_quantization(bessel_c / c_n_1)
 
-        for i, xi in enumerate(x):
-            v = mpmath.gegenbauer(n_mp, lam_mp, mpmath.mpf(xi))
-            out[i] = float(v)
-
-        return out
+    def evaluate_composite_matched(self, x: np.ndarray) -> np.ndarray:
+        """Composite Matched Asymptotic expression for zonal function phi_n(x)."""
+        x_q = self._apply_context_quantization(np.clip(x, -0.999999, 0.999999))
+        theta = np.arccos(x_q)
+        c_n_1 = c_n_1_val(self.n, self.lambda_val)
+        comp_c = composite_matched_approx(self.n, self.lambda_val, theta)
+        return self._apply_context_quantization(comp_c / c_n_1)
 
     def estimate_flops(self, perm: AlgebraicPermutation, num_points: int) -> int:
         """Estimates computational FLOP count for evaluation of N points."""
-        if perm == AlgebraicPermutation.CLENSHAW_RECURRENCE:
+        if perm == AlgebraicPermutation.NORMALIZED_RECURRENCE:
             return 5 * self.n * num_points
+        elif perm == AlgebraicPermutation.QUOTIENT_RING_NORMAL_FORM:
+            return 10 * self.n * num_points
         elif perm == AlgebraicPermutation.HYPERGEOMETRIC_2F1:
             return 20 * num_points
         elif perm == AlgebraicPermutation.INTERIOR_WKB_WEYL:
@@ -249,27 +198,26 @@ class GegenbauerComputationalSolver:
             return 25 * num_points
         elif perm == AlgebraicPermutation.COMPOSITE_MATCHED:
             return 40 * num_points
-        elif perm == AlgebraicPermutation.BARYCENTRIC_RATIONAL:
-            return 16 * 4 * num_points  # 16 Chebyshev nodes
         return 100 * num_points
 
     def benchmark_permutations(self, domain_x: np.ndarray) -> Dict[AlgebraicPermutation, SolverPerformanceMetrics]:
         """
-        Benchmarks all available expression permutations over domain_x and records
+        Benchmarks all expression permutations over domain_x and records
         computational cost, execution time, and residual numerical error relative
-        to double-precision ground truth.
+        to double-precision ground truth zonal function phi_n(x).
         """
-        ground_truth = eval_gegenbauer(self.n, self.lambda_val, domain_x)
+        c_n_1 = c_n_1_val(self.n, self.lambda_val)
+        ground_truth = eval_gegenbauer(self.n, self.lambda_val, domain_x) / c_n_1
         num_points = len(domain_x)
         results = {}
 
         eval_map = {
-            AlgebraicPermutation.CLENSHAW_RECURRENCE: self.evaluate_clenshaw_recurrence,
+            AlgebraicPermutation.NORMALIZED_RECURRENCE: self.evaluate_normalized_recurrence,
+            AlgebraicPermutation.QUOTIENT_RING_NORMAL_FORM: self.evaluate_quotient_ring_normal_form,
             AlgebraicPermutation.HYPERGEOMETRIC_2F1: self.evaluate_hypergeometric,
             AlgebraicPermutation.INTERIOR_WKB_WEYL: self.evaluate_wkb_weyl,
             AlgebraicPermutation.MEHLER_HEINE_BESSEL: self.evaluate_mehler_heine,
             AlgebraicPermutation.COMPOSITE_MATCHED: self.evaluate_composite_matched,
-            AlgebraicPermutation.BARYCENTRIC_RATIONAL: self.evaluate_barycentric_rational,
         }
 
         for perm, fn in eval_map.items():
@@ -280,11 +228,9 @@ class GegenbauerComputationalSolver:
             t1 = time.perf_counter()
             exec_time = (t1 - t0) / iterations
 
-            # Calculate residual numerical error
             abs_res = np.abs(val - ground_truth)
             max_res = float(np.max(abs_res))
 
-            # Relative error
             scale = np.maximum(np.abs(ground_truth), 1e-12)
             rel_errs = abs_res / scale
             max_rel_err = float(np.max(rel_errs))
@@ -306,9 +252,7 @@ class GegenbauerComputationalSolver:
         return results
 
     def _compute_pareto_frontier(self, metrics_map: Dict[AlgebraicPermutation, SolverPerformanceMetrics]):
-        """
-        Identifies non-dominated solutions on the (Cost, Relative Error) plane.
-        """
+        """Identifies non-dominated solutions on the (Cost, Relative Error) plane."""
         items = list(metrics_map.values())
         for a in items:
             dominated = False
@@ -353,7 +297,7 @@ class GegenbauerComputationalSolver:
 
 if __name__ == "__main__":
     print("--- COMPUTATIONAL LAYER & PARETO OPTIMIZER DEMO ---")
-    n_deg = 100
+    n_deg = 50
     lambda_p = 1.5
     ctx = NumericalContext.default_float64()
     solver = GegenbauerComputationalSolver(n=n_deg, lambda_val=lambda_p, context=ctx)
@@ -363,11 +307,11 @@ if __name__ == "__main__":
 
     results = solver.benchmark_permutations(domain)
     print("\n[Benchmark Results across All 6 Algebraic Permutations]")
-    print(f"{'Algebraic Permutation':<35} | {'FLOPs':>8} | {'Exec Time (ms)':>14} | {'Max Rel Error':>14} | {'Pareto Optimal'}")
-    print("-" * 92)
+    print(f"{'Algebraic Permutation':<38} | {'FLOPs':>8} | {'Exec Time (ms)':>14} | {'Max Rel Error':>14} | {'Pareto Optimal'}")
+    print("-" * 95)
     for perm, m in results.items():
         time_ms = m.exec_time_sec * 1000.0
-        print(f"{m.permutation.value:<35} | {m.num_flops:8d} | {time_ms:14.4f} | {m.max_relative_error:14.6e} | {str(m.is_pareto_optimal)}")
+        print(f"{m.permutation.value:<38} | {m.num_flops:8d} | {time_ms:14.4f} | {m.max_relative_error:14.6e} | {str(m.is_pareto_optimal)}")
 
     optimal = solver.solve_optimal_permutation(domain, max_error_tol=1e-2)
     print(f"\nOptimal Permutation selected for max_error_tol=1e-2: {optimal.permutation.value}")
