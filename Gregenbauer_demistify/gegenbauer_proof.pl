@@ -156,10 +156,12 @@ prove_schrodinger_transformation(D, N) :-
     assert_schrodinger_energy_shift(N, Lambda),
     schrodinger_effective_potential(Lambda, theta, Veff),
     potential_classification(Lambda, Class),
+    HbarEff is 1.0 / (N + Lambda),
     format('  * Radial measure J(theta) = sin(theta)^(2*~w)~n', [Lambda]),
     format('  * Half-density conjugation: u(theta) = sin(theta)^~w * phi_n(theta)~n', [Lambda]),
     format('  * Clean Effective Potential V_eff(theta) = ~w (Classification: ~w)~n', [Veff, Class]),
-    format('  * Effective Planck Constant hbar_eff = 1 / (n + Lambda) = ~w~n', [1.0 / (N + Lambda)]),
+    format('  * Effective Planck Constant hbar_eff = 1 / (n + Lambda) = ~w~n', [HbarEff]),
+    format('  * Equivalence: H_lambda u = N^2 u <==> hbar_eff^2 * H_lambda u = 1.0 * u~n'),
     format('  * Asserted Casimir Identity: n(n+2*lambda) = (n+rho)^2 - rho^2 [VERIFIED EXACT]~n').
 
 prove_algebraic_recurrence(D, N, XVal) :-
@@ -182,6 +184,7 @@ prove_quadric_representation_geometry(D, N) :-
     format('  * Dimension Formula: dim V_n = ~w [VERIFIED EXACT]~n', [DimVn]),
     format('  * Normalization Identity: C_~w^(~w)(1) = ~w = (~w / (~w + ~w)) * dim V_n [VERIFIED EXACT]~n',
            [N, Lambda, Cn1, Lambda, N, Lambda]),
+    format('  * Representation Growth Stripping Chain: dim V_n (~w) -> C_n(1) (~w) -> phi_n(z/N) -> O(1)~n', [DimVn, Cn1]),
     format('  * Exact Normalized Jacobi Recurrence phi_1 * phi_n = a_n * phi_{n+1} + b_n * phi_{n-1}:~n'),
     format('      x * phi_n = (~w) * phi_{n+1} + (~w) * phi_{n-1} [a_n + b_n = ~w, VERIFIED EXACT]~n', [Cp, Cm, Cp + Cm]).
 
