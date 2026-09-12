@@ -7,13 +7,14 @@ asymptotic approximations for Gegenbauer polynomials C_n^{(lambda)}(x) and zonal
 spherical functions phi_n(x) on S^{d-1} = SO(d)/SO(d-1) (where lambda = (d-2)/2):
 
 1. Production Scaled Spherical Recurrence for phi_n^{(d)}(theta)
-2. Analytic Gegenbauer Derivatives via k-th Order Shift Formula
-3. Normalized Interior WKB / Weyl Semiclassical Wave
-4. Two-Endpoint Bessel Boundary-Layer Kernels (North z_0 = K*theta, South z_pi = K*(pi-theta))
-5. Two-Endpoint Composite Matched Asymptotic Expansion
-6. Natural Boundary-Layer Phase Map Classifier in (z_0, z_pi) Coordinates
-7. Normalized Error Surface Diagram E(n, theta)
-8. Theta-Space Orthogonality Quadrature Integral
+2. Normalized Spherical Derivative Evaluator phi_n^{(k)}(x)
+3. Analytic Gegenbauer Derivatives via k-th Order Shift Formula
+4. Normalized Interior WKB / Weyl Semiclassical Wave
+5. Two-Endpoint Bessel Boundary-Layer Kernels (North z_0 = K*theta, South z_pi = K*(pi-theta))
+6. Two-Overlap Composite Matched Asymptotic Expansion
+7. Natural Boundary-Layer Phase Map Classifier in (z_0, z_pi) Coordinates
+8. Normalized Error Surface Diagram E(n, theta)
+9. Theta-Space Orthogonality Quadrature Integral
 """
 
 import numpy as np
@@ -53,13 +54,23 @@ def gegenbauer_derivative(n: int, lambda_val: float, x: np.ndarray, k: int = 1) 
     if k > n:
         return np.zeros_like(x_arr)
 
-    # Calculate 2^k * pochhammer(lambda_val, k)
     poch = 1.0
     for i in range(k):
         poch *= (lambda_val + i)
     scale = (2.0 ** k) * poch
 
     return scale * exact_gegenbauer(n - k, lambda_val + k, x_arr)
+
+
+def normalized_phi_derivative(n: int, lambda_val: float, x: np.ndarray, k: int = 1) -> np.ndarray:
+    """
+    Computes exact k-th derivative of normalized zonal function phi_n(x) = C_n^(lambda)(x) / C_n^(lambda)(1):
+      phi_n^{(k)}(x) = 2^k * (lambda)_k / C_n^(lambda)(1) * C_{n-k}^(lambda+k)(x).
+    """
+    if k == 0:
+        return normalized_phi_recurrence(n, lambda_val, x)
+    c1 = c_n_1_val(n, lambda_val)
+    return gegenbauer_derivative(n, lambda_val, x, k=k) / c1
 
 
 def normalized_phi_recurrence(n: int, lambda_val: float, x: np.ndarray) -> np.ndarray:
@@ -182,7 +193,6 @@ def interior_wkb_approx(n: int, lambda_val: float, theta: np.ndarray) -> np.ndar
     coeff = (2.0 ** lambda_val) * gamma(lambda_val + 0.5) / np.sqrt(np.pi)
     sin_theta = np.sin(theta_arr)
 
-    # Avoid singular evaluation at endpoints
     sin_safe = np.where(sin_theta <= 1e-15, 1e-15, sin_theta)
     amplitude = (K * sin_safe) ** (-lambda_val)
     phase = K * theta_arr - (lambda_val * np.pi / 2.0)
@@ -195,8 +205,9 @@ def interior_wkb_approx(n: int, lambda_val: float, theta: np.ndarray) -> np.ndar
 def composite_matched_approx(n: int, lambda_val: float, theta: np.ndarray) -> np.ndarray:
     """
     Two-Endpoint Composite Matched Asymptotic Approximation for zonal function phi_n(theta):
+    F_comp = F_north(z_0) + F_south(z_pi) + F_interior(N, theta) - F_{+,overlap}(z_0) - F_{-,overlap}(z_pi).
     Combines North pole Bessel layer (z_0 = K*theta), South pole Bessel layer (z_pi = K*(pi-theta)),
-    and Interior WKB wave, subtracting overlap matching terms.
+    and Interior WKB wave, subtracting both North and South overlap matching terms.
     Evaluates stable limits at endpoints: phi_n(0) = 1.0 and phi_n(pi) = (-1)^n.
     """
     theta_arr = np.asarray(theta, dtype=np.float64)
@@ -217,7 +228,7 @@ def composite_matched_approx(n: int, lambda_val: float, theta: np.ndarray) -> np
             bessel_south = ((-1.0) ** n) * normalized_bessel_kernel(nu, np.array([z_pi]))[0]
             wkb_val = interior_wkb_approx(n, lambda_val, np.array([th]))[0]
 
-            # Matching terms
+            # Matching terms for North and South overlaps
             match_north = (2.0 ** nu) * gamma(nu + 1.0) * (z0 ** (-nu)) * np.sqrt(2.0 / (np.pi * z0)) * np.cos(z0 - lambda_val * np.pi / 2.0)
             match_south = ((-1.0) ** n) * (2.0 ** nu) * gamma(nu + 1.0) * (z_pi ** (-nu)) * np.sqrt(2.0 / (np.pi * z_pi)) * np.cos(z_pi - lambda_val * np.pi / 2.0)
 
