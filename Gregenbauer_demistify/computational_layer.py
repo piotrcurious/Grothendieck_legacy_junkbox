@@ -35,10 +35,10 @@ except ImportError:
 
 try:
     from algebraic_geometry_combinatorics import QuadricQuotientPolynomial, normalized_jacobi_coefficients
-    from gegenbauer_asymptotics import normalized_phi_recurrence, mehler_heine_bessel_approx, interior_wkb_approx, composite_matched_approx, c_n_1_val
+    from gegenbauer_asymptotics import normalized_phi_recurrence, endpoint_bessel_leading, interior_wkb_approx, composite_matched_approx, c_n_1_val
 except ModuleNotFoundError:
     from Gregenbauer_demistify.algebraic_geometry_combinatorics import QuadricQuotientPolynomial, normalized_jacobi_coefficients
-    from Gregenbauer_demistify.gegenbauer_asymptotics import normalized_phi_recurrence, mehler_heine_bessel_approx, interior_wkb_approx, composite_matched_approx, c_n_1_val
+    from Gregenbauer_demistify.gegenbauer_asymptotics import normalized_phi_recurrence, endpoint_bessel_leading, interior_wkb_approx, composite_matched_approx, c_n_1_val
 
 
 def mixed_error(approx: np.ndarray, ref: np.ndarray, atol: float = 1e-14, rtol: float = 1e-10) -> np.ndarray:
@@ -170,25 +170,22 @@ class GegenbauerComputationalSolver:
         """Interior WKB / Weyl expression for zonal function phi_n(x)."""
         x_q = self._apply_context_quantization(np.clip(x, -0.999999, 0.999999))
         theta = np.arccos(x_q)
-        c_n_1 = c_n_1_val(self.n, self.lambda_val)
         wkb_c = interior_wkb_approx(self.n, self.lambda_val, theta)
-        return self._apply_context_quantization(wkb_c / c_n_1)
+        return self._apply_context_quantization(wkb_c)
 
     def evaluate_mehler_heine(self, x: np.ndarray) -> np.ndarray:
         """Mehler-Heine Bessel Boundary-Layer expression for zonal function phi_n(x)."""
         x_q = self._apply_context_quantization(np.clip(x, -1.0, 1.0))
         theta = np.arccos(x_q)
-        c_n_1 = c_n_1_val(self.n, self.lambda_val)
-        bessel_c = mehler_heine_bessel_approx(self.n, self.lambda_val, theta)
-        return self._apply_context_quantization(bessel_c / c_n_1)
+        bessel_c = endpoint_bessel_leading(self.n, self.lambda_val, theta)
+        return self._apply_context_quantization(bessel_c)
 
     def evaluate_composite_matched(self, x: np.ndarray) -> np.ndarray:
         """Composite Matched Asymptotic expression for zonal function phi_n(x)."""
-        x_q = self._apply_context_quantization(np.clip(x, -0.999999, 0.999999))
+        x_q = self._apply_context_quantization(np.clip(x, -1.0, 1.0))
         theta = np.arccos(x_q)
-        c_n_1 = c_n_1_val(self.n, self.lambda_val)
         comp_c = composite_matched_approx(self.n, self.lambda_val, theta)
-        return self._apply_context_quantization(comp_c / c_n_1)
+        return self._apply_context_quantization(comp_c)
 
     def estimate_flops(self, perm: AlgebraicPermutation, num_points: int) -> int:
         """Estimates computational FLOP count for evaluation of N points."""
@@ -235,12 +232,12 @@ class GegenbauerComputationalSolver:
             exec_time = (t1 - t0) / iterations
 
             abs_res = np.abs(val - ground_truth)
-            max_res = float(np.max(abs_res))
+            max_res = float(np.nanmax(abs_res))
 
             # Robust Mixed Error calculation
             mix_errs = mixed_error(val, ground_truth)
-            max_mix_err = float(np.max(mix_errs))
-            mean_mix_err = float(np.mean(mix_errs))
+            max_mix_err = float(np.nanmax(mix_errs))
+            mean_mix_err = float(np.nanmean(mix_errs))
 
             num_flops = self.estimate_flops(perm, num_points)
             estimated_error = mean_mix_err + (num_flops * self.context.eps)

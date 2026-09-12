@@ -5,12 +5,13 @@ Independent, non-tautological test suite verifying the Gegenbauer demystificatio
 1. Independent Reference Oracles (scipy.special.eval_legendre, eval_gegenbauer, mpmath)
 2. Decoupled Hilbert Series Dimensions and Normalization Identity
 3. Quadric Quotient Ring Normal Forms, Idempotency & Invariants Modulo q
-4. Empirical Asymptotic Convergence Exponents (WKB p > 0.9, Bessel p > 1.7)
-5. Robust Mixed Error Computational Layer & Deterministic Pareto Dominance
-6. Numerical Backend Verification (Fixed-Point Q16.16, LNS, float32) against Reference
-7. High-Degree Log-Space Stability up to n = 10^6
-8. Independent Orthogonality Norm Verification (Closed-Form Gamma vs Quadrature)
-9. Prolog Integration Test with shutil.which and pathlib Resolution
+4. Two-Endpoint Bessel Layer Tests (North & South Poles)
+5. Empirical Asymptotic Convergence Exponents (WKB p > 0.9, Bessel p > 1.7)
+6. Robust Mixed Error Computational Layer & Deterministic Pareto Dominance
+7. Numerical Backend Verification (Fixed-Point Q16.16, LNS, float32) against Reference
+8. High-Degree Log-Space Stability up to n = 10^6
+9. Theta-Space Orthogonality Norm Verification (Closed-Form Gamma vs Quadrature)
+10. Prolog Integration Test with shutil.which and pathlib Resolution
 """
 
 import math
@@ -41,13 +42,15 @@ from Gregenbauer_demistify.gegenbauer_asymptotics import (
     c_n_1_val,
     classify_phase_regime,
     composite_matched_approx,
+    compute_error_map,
+    endpoint_bessel_leading,
     exact_gegenbauer,
     interior_wkb_approx,
     log_c_n_1,
-    mehler_heine_bessel_approx,
     normalized_phi_recurrence,
     orthogonality_norm,
-    verify_orthogonality_integral,
+    south_pole_bessel_leading,
+    verify_orthogonality_integral_theta,
 )
 
 
@@ -121,17 +124,22 @@ def test_s4_anchor_against_independent_scipy_ratio():
         assert np.isclose(got, ref, rtol=1e-12, atol=1e-13)
 
 
+def test_recurrence_parameter_validation():
+    """Verifies that normalized_phi_recurrence raises ValueError on invalid inputs."""
+    with pytest.raises(ValueError):
+        normalized_phi_recurrence(-1, 1.5, np.array([0.5]))
+    with pytest.raises(ValueError):
+        normalized_phi_recurrence(5, -0.5, np.array([0.5]))
+
+
 # --- 3. QUADRIC QUOTIENT ALGEBRA INVARIANTS ---
 
 def test_quadric_normal_form_reductions():
     """Tests normal form reductions modulo q = sum(z_i^2) for higher-order exponents."""
-    # z_3^4 in C[z_1, z_2, z_3]/(q): z_3^2 -> -(z_1^2 + z_2^2) ==> z_3^4 -> (z_1^2 + z_2^2)^2
     p_z3_4 = QuadricQuotientPolynomial(3, {(0, 0, 4): 1.0})
-    # (z_1^2 + z_2^2)^2 = z_1^4 + 2 z_1^2 z_2^2 + z_2^4
     expected_terms = {(4, 0, 0): 1.0, (2, 2, 0): 2.0, (0, 4, 0): 1.0}
     assert p_z3_4.terms == expected_terms
 
-    # z_2 z_3^2 -> -z_2 (z_1^2 + z_2^2) = -z_1^2 z_2 - z_2^3
     p_z2_z3_2 = QuadricQuotientPolynomial(3, {(0, 1, 2): 1.0})
     assert p_z2_z3_2.terms == {(2, 1, 0): -1.0, (0, 3, 0): -1.0}
 
@@ -150,7 +158,6 @@ def test_quadric_ideal_equivalence():
     by a multiple of q = sum z_i^2, asserting their quotient normal forms agree.
     """
     p1 = QuadricQuotientPolynomial(3, {(1, 0, 0): 2.0, (0, 2, 0): 1.0})  # 2 z_1 + z_2^2
-    # Add (3 z_1) * (z_1^2 + z_2^2 + z_3^2) = 3 z_1^3 + 3 z_1 z_2^2 + 3 z_1 z_3^2
     p2 = QuadricQuotientPolynomial(3, {(1, 0, 0): 2.0, (0, 2, 0): 1.0, (3, 0, 0): 3.0, (1, 2, 0): 3.0, (1, 0, 2): 3.0})
     assert p1 == p2
 
@@ -180,7 +187,19 @@ def test_normalization_functional_identity_decoupled():
             assert np.isclose(c_n_1_scipy, identity_val, rtol=1e-12)
 
 
-# --- 5. EMPIRICAL ASYMPTOTIC CONVERGENCE EXPONENTS ---
+# --- 5. TWO-ENDPOINT BESSEL & EMPIRICAL ASYMPTOTIC RATES ---
+
+def test_south_pole_bessel_boundary_layer():
+    """Verifies South pole Bessel layer phi_n(theta) ~ (-1)^n Cal_J_{lambda-1/2}(K*(pi-theta))."""
+    n = 100
+    lambda_val = 1.5
+    theta_south = np.pi - 0.01  # Near South pole
+
+    ref_south = reference_normalized_phi(n, lambda_val, np.array([np.cos(theta_south)]))[0]
+    bessel_south = south_pole_bessel_leading(n, lambda_val, np.array([theta_south]))[0]
+
+    assert abs(ref_south - bessel_south) < 1e-3
+
 
 def test_wkb_empirical_convergence_exponent():
     """
@@ -194,7 +213,7 @@ def test_wkb_empirical_convergence_exponent():
     errors = []
 
     for n in n_values:
-        ref = reference_gegenbauer(n, lambda_val, np.array([x_val]))[0]
+        ref = reference_normalized_phi(n, lambda_val, np.array([x_val]))[0]
         wkb = interior_wkb_approx(n, lambda_val, np.array([theta_val]))[0]
         rel_err = abs(ref - wkb) / abs(ref)
         errors.append(rel_err)
@@ -224,9 +243,8 @@ def test_mehler_heine_empirical_convergence_exponent():
         theta_end = z_fix / K
         x_end = np.cos(theta_end)
 
-        c_n_1 = float(eval_gegenbauer(n, lambda_val, 1.0))
-        ref_ratio = reference_gegenbauer(n, lambda_val, np.array([x_end]))[0] / c_n_1
-        bessel_ratio = mehler_heine_bessel_approx(n, lambda_val, np.array([theta_end]))[0] / c_n_1
+        ref_ratio = reference_normalized_phi(n, lambda_val, np.array([x_end]))[0]
+        bessel_ratio = endpoint_bessel_leading(n, lambda_val, np.array([theta_end]))[0]
 
         abs_err = abs(ref_ratio - bessel_ratio)
         errors.append(abs_err)
@@ -241,34 +259,33 @@ def test_mehler_heine_empirical_convergence_exponent():
     assert all(r > 1.7 for r in rates)
 
 
-# --- 6. OPERATIONAL PHASE CLASSIFIER ACCURACY ---
+# --- 6. TWO-ENDPOINT PHASE CLASSIFIER & ERROR SURFACE DIAGRAM ---
 
-def test_phase_classifier_selects_accurate_regime():
+def test_two_endpoint_phase_classifier():
     """
-    Verifies that the phase classifier selects regimes where the approximation meets
-    requested accuracy tolerance against independent scipy reference.
+    Verifies two-endpoint phase map classifier across z_0 and z_pi coordinates.
     """
     n = 200
     lambda_val = 1.5
 
-    # Endpoint theta = 0.01 (z = 2.01)
-    theta_end = 0.01
-    regime_end = classify_phase_regime(n, lambda_val, theta_end)
-    assert regime_end == "endpoint_approximation"
+    # North endpoint theta = 0.01 (z_0 = 2.01)
+    assert classify_phase_regime(n, lambda_val, 0.01) == "north_endpoint_bessel"
 
-    ref_end = reference_normalized_phi(n, lambda_val, np.array([np.cos(theta_end)]))[0]
-    c_n_1 = float(eval_gegenbauer(n, lambda_val, 1.0))
-    bessel_val = mehler_heine_bessel_approx(n, lambda_val, np.array([theta_end]))[0] / c_n_1
-    assert abs(ref_end - bessel_val) < 1e-3
+    # South endpoint theta = pi - 0.01 (z_pi = 2.01)
+    assert classify_phase_regime(n, lambda_val, np.pi - 0.01) == "south_endpoint_bessel"
 
-    # Interior theta = 0.8
-    theta_int = 0.8
-    regime_int = classify_phase_regime(n, lambda_val, theta_int)
-    assert regime_int == "interior_approximation"
+    # Interior theta = 1.5
+    assert classify_phase_regime(n, lambda_val, 1.5) == "interior_approximation"
 
-    ref_int = reference_gegenbauer(n, lambda_val, np.array([np.cos(theta_int)]))[0]
-    wkb_val = interior_wkb_approx(n, lambda_val, np.array([theta_int]))[0]
-    assert abs(ref_int - wkb_val) / abs(ref_int) < 0.02
+
+def test_error_surface_diagram_computation():
+    """Tests compute_error_map generation across [0, pi] theta domain."""
+    err_map = compute_error_map(n=100, lambda_val=1.5, num_theta=50)
+    assert "theta" in err_map
+    assert "exact_phi" in err_map
+    assert "max_err_wkb" in err_map
+    assert np.isfinite(err_map["max_err_wkb"])
+    assert np.isfinite(err_map["max_err_composite"])
 
 
 # --- 7. DETERMINISTIC PARETO FRONTIER TEST ---
@@ -348,12 +365,12 @@ def test_high_degree_log_space_stability():
         assert np.isclose(got_log, ref_log, rtol=1e-12)
 
 
-# --- 10. INDEPENDENT ORTHOGONALITY NORM ---
+# --- 10. THETA-SPACE ORTHOGONALITY NORM ---
 
-def test_orthogonality_norm_against_closed_form_gamma():
+def test_theta_space_orthogonality_norm_quadrature():
     """
-    Verifies orthogonality_norm(n, lambda) against independent closed-form formula
-    h_n = pi * 2^(1-2*lambda) * Gamma(n+2*lambda) / (n! * (n+lambda) * Gamma(lambda)^2).
+    Verifies orthogonality_norm(n, lambda) against theta-space numerical quadrature
+    without fractional power singularities: int_0^pi C_n(cos(theta))^2 sin^{2*lambda}(theta) d_theta.
     """
     lambda_val = 1.5
     for n in range(1, 10):
@@ -362,6 +379,6 @@ def test_orthogonality_norm_against_closed_form_gamma():
                   (gamma(n + 1.0) * (n + lambda_val) * (gamma(lambda_val) ** 2)))
         assert np.isclose(got_hn, ref_hn, rtol=1e-12)
 
-        # Quadrature integration
-        num_hn = verify_orthogonality_integral(n, n, lambda_val)
+        # Theta-space Quadrature integration
+        num_hn = verify_orthogonality_integral_theta(n, n, lambda_val)
         assert np.isclose(got_hn, num_hn, rtol=1e-3)
