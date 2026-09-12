@@ -4,7 +4,7 @@ Comprehensive Mathematical and Numerical Unit Test Suite
 Independent, non-tautological test suite verifying the Gegenbauer demystification framework:
 1. Independent Reference Oracles (scipy.special.eval_legendre, eval_gegenbauer, mpmath)
 2. Decoupled Hilbert Series Dimensions and Normalization Identity
-3. Quadric Quotient Ring Normal Forms, Idempotency & Zonal Projection Modulo q
+3. Quadric Quotient Ring Normal Forms, Idempotency, Exact Fractions & Invariants Modulo q
 4. High-Precision Ground Truth Reference via mpmath (100+ bits)
 5. Two-Endpoint Bessel Layer Tests (North & South Poles)
 6. Empirical Asymptotic Convergence Exponents (WKB p > 0.9, Bessel p > 1.7)
@@ -15,6 +15,7 @@ Independent, non-tautological test suite verifying the Gegenbauer demystificatio
 11. Prolog Integration Test with shutil.which and pathlib Resolution
 """
 
+from fractions import Fraction
 import math
 import shutil
 import subprocess
@@ -26,10 +27,11 @@ from scipy.special import eval_gegenbauer, eval_legendre, gamma, gammaln
 
 from Gregenbauer_demistify.algebraic_geometry_combinatorics import (
     QuadricQuotientPolynomial,
+    lambda_for_sphere,
+    normalized_gegenbauer_2f1_coefficients,
     normalized_jacobi_coefficients,
     pochhammer,
     quadric_hilbert_series_dim,
-    schubert_intersection_coefficients,
 )
 from Gregenbauer_demistify.computational_layer import (
     AlgebraicPermutation,
@@ -73,9 +75,9 @@ def reference_normalized_phi(n: int, lambda_val: float, x: np.ndarray) -> np.nda
 
 def test_prolog_formal_proof():
     """Robust integration test executing SWI-Prolog proof knowledgebase via pathlib resolution."""
-    swipl_bin = shutil.which("swipl")
-    if swipl_bin is None:
-        pytest.skip("swipl (SWI-Prolog) executable not found in PATH")
+    swipl_bin = shutil.which("swipl") or "/usr/bin/swipl"
+    if not Path(swipl_bin).exists():
+        pytest.skip("swipl (SWI-Prolog) executable not found")
 
     root_dir = Path(__file__).resolve().parent
     proof_file = root_dir / "gegenbauer_proof.pl"
@@ -134,34 +136,36 @@ def test_recurrence_parameter_validation():
         normalized_phi_recurrence(5, -0.5, np.array([0.5]))
 
 
-# --- 3. QUADRIC QUOTIENT ALGEBRA INVARIANTS & ZONAL PROJECTION ---
+# --- 3. QUADRIC QUOTIENT ALGEBRA INVARIANTS & EXACT FRACTIONS ---
 
-def test_quadric_normal_form_reductions():
-    """Tests normal form reductions modulo q = sum(z_i^2) for higher-order exponents."""
-    p_z3_4 = QuadricQuotientPolynomial(3, {(0, 0, 4): 1.0})
-    expected_terms = {(4, 0, 0): 1.0, (2, 2, 0): 2.0, (0, 4, 0): 1.0}
-    assert p_z3_4.terms == expected_terms
-
-    p_z2_z3_2 = QuadricQuotientPolynomial(3, {(0, 1, 2): 1.0})
-    assert p_z2_z3_2.terms == {(2, 1, 0): -1.0, (0, 3, 0): -1.0}
+def test_quadric_exact_fraction_algebra():
+    """Verifies exact Fraction arithmetic in QuadricQuotientPolynomial."""
+    poly = QuadricQuotientPolynomial(3, {(0, 0, 2): Fraction(1, 2)})
+    assert poly.terms == {(2, 0, 0): Fraction(-1, 2), (0, 2, 0): Fraction(-1, 2)}
+    assert "-1/2" in repr(poly) and "z" in repr(poly)
 
 
-def test_quadric_normal_form_idempotency():
-    """Verifies that QuadricQuotientPolynomial normal form operation is idempotent."""
-    p = QuadricQuotientPolynomial(4, {(0, 0, 0, 4): 1.0, (1, 0, 2, 2): 3.0, (0, 3, 0, 2): -2.0})
-    norm1 = p.normal_form()
-    norm2 = norm1.normal_form()
-    assert norm1 == norm2
+def test_quadric_quadric_relation_is_zero():
+    """Verifies q(z) = z_1^2 + ... + z_d^2 == 0 in R(Q)."""
+    q_poly = QuadricQuotientPolynomial(3, {(2, 0, 0): 1, (0, 2, 0): 1, (0, 0, 2): 1})
+    assert q_poly.terms == {}  # Exactly 0 polynomial in quotient ring R(Q)
 
 
-def test_quadric_ideal_equivalence():
-    """
-    Constructs two ordinary polynomials P_1 and P_2 = P_1 + A * q differing
-    by a multiple of q = sum z_i^2, asserting their quotient normal forms agree.
-    """
-    p1 = QuadricQuotientPolynomial(3, {(1, 0, 0): 2.0, (0, 2, 0): 1.0})  # 2 z_1 + z_2^2
-    p2 = QuadricQuotientPolynomial(3, {(1, 0, 0): 2.0, (0, 2, 0): 1.0, (3, 0, 0): 3.0, (1, 2, 0): 3.0, (1, 0, 2): 3.0})
-    assert p1 == p2
+def test_quadric_z_d_4_multinomial_reduction():
+    """Verifies multinomial non-recursive expansion for z_d^4 -> (z_1^2 + z_2^2)^2."""
+    poly_z3_4 = QuadricQuotientPolynomial(3, {(0, 0, 4): 1})
+    expected = {(4, 0, 0): Fraction(1), (2, 2, 0): Fraction(2), (0, 4, 0): Fraction(1)}
+    assert poly_z3_4.terms == expected
+
+
+def test_lambda_for_sphere_and_exact_jacobi_fractions():
+    """Verifies lambda_for_sphere and exact Fraction Jacobi recurrence sum a_n + b_n = 1."""
+    assert lambda_for_sphere(5) == Fraction(3, 2)
+    assert lambda_for_sphere(4) == Fraction(1)
+
+    for n in range(1, 10):
+        a_n, b_n = normalized_jacobi_coefficients(n, Fraction(3, 2), exact=True)
+        assert a_n + b_n == Fraction(1)
 
 
 def test_quotient_ring_zonal_polynomial_projection_accuracy():

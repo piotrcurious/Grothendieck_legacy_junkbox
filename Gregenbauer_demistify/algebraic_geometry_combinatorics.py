@@ -4,26 +4,37 @@ Algebraic Geometry and Combinatorics of Projective Quadrics
 This module implements exact algebraic geometry and combinatorial operations
 for Gegenbauer polynomials and complex projective quadric hypersurfaces Q_{d-2} c P^{d-1}:
 1. Hilbert Polynomial h^0(Q_{d-2}, O(n)) via Hilbert series H_{R(Q)}(t) = (1-t^2)/(1-t)^d
-2. Quotient Ring Normal Forms: Polynomial remainder modulo q = sum(z_i^2) in C[z_1,...,z_d]/(q)
+2. Exact Rational Quotient Ring Normal Forms: Polynomial remainder modulo q = sum(z_i^2) in C[z_1,...,z_d]/(q)
    Note: Normal form reduction convention maps z_d^2 -> -(z_1^2 + ... + z_{d-1}^2)
-3. Normalized Jacobi Recurrence Coefficients for Gelfand algebra multiplication M_x: phi_n -> x * phi_n
-4. Pochhammer Symbols and Hypergeometric Series Expansion Coefficients
+3. Exact Rational Jacobi Recurrence Coefficients for Gelfand algebra multiplication M_x: phi_n -> x * phi_n
+4. Normalized Gegenbauer _2F_1 Hypergeometric Expansion Coefficients
+5. Helper lambda_for_sphere(d) = Fraction(d-2, 2)
 """
 
+from fractions import Fraction
 import math
-from typing import Dict, Tuple, List
+from typing import Dict, List, Tuple, Union
+
+Number = Union[int, Fraction, float]
+
+
+def lambda_for_sphere(d: int) -> Fraction:
+    """Returns exact rational Gegenbauer parameter lambda = (d-2)/2 for sphere S^{d-1}."""
+    if d < 3 or int(d) != d:
+        raise ValueError("Ambient Euclidean dimension d must be an integer >= 3")
+    return Fraction(d - 2, 2)
 
 
 def quadric_hilbert_series_dim(d: int, n: int) -> int:
     """
     Computes dim R(Q)_n = dim H^0(Q_{d-2}, O(n)) for complex projective quadric Q_{d-2} c P^{d-1}
-    defined by z_1^2 + ... + z_d^2 = 0 via the Hilbert series:
+    defined by z_1^2 + ... + z_d^2 = 0 in ambient dimension d via the Hilbert series:
       H_{R(Q)}(t) = (1 - t^2) / (1 - t)^d = sum_{n=0}^inf (dim R(Q)_n) t^n
 
     Formula: binom(n+d-1, d-1) - binom(n+d-3, d-1)
     """
     if d < 3 or n < 0:
-        raise ValueError("Sphere dimension d must be >= 3 and degree n >= 0.")
+        raise ValueError("Ambient Euclidean dimension d must be >= 3 and degree n >= 0.")
     if n == 0:
         return 1
     return math.comb(n + d - 1, d - 1) - math.comb(n + d - 3, d - 1)
@@ -31,46 +42,66 @@ def quadric_hilbert_series_dim(d: int, n: int) -> int:
 
 class QuadricQuotientPolynomial:
     """
-    Represents a polynomial in C[z_1, ..., z_d] / (q) where q = z_1^2 + ... + z_d^2.
+    Represents an exact polynomial in C[z_1, ..., z_d] / (q) where q = z_1^2 + ... + z_d^2.
     Monomials are represented as tuples of non-negative integers (a_1, ..., a_d).
-    Normal form reduction convention recursively replaces z_d^2 -> -(z_1^2 + ... + z_{d-1}^2).
+    Coefficients use exact rational arithmetic (fractions.Fraction).
+    Canonical normal form invariant: z_d exponent is always <= 1.
     """
 
-    def __init__(self, d: int, terms: Dict[Tuple[int, ...], float] = None):
+    def __init__(self, d: int, terms: Dict[Tuple[int, ...], Number] = None):
+        if d < 3 or int(d) != d:
+            raise ValueError("Ambient Euclidean dimension d must be an integer >= 3")
         self.d = d
-        self.terms: Dict[Tuple[int, ...], float] = {}
+        self.terms: Dict[Tuple[int, ...], Fraction] = {}
         if terms:
             for exp_tuple, coeff in terms.items():
                 if len(exp_tuple) != d:
                     raise ValueError(f"Exponent tuple {exp_tuple} must have length {d}")
-                self._add_term(exp_tuple, coeff)
+                self._add_term(exp_tuple, Fraction(coeff))
 
-    def _add_term(self, exp_tuple: Tuple[int, ...], coeff: float):
-        if abs(coeff) < 1e-12:
+    def _add_term(self, exp_tuple: Tuple[int, ...], coeff: Fraction):
+        if coeff == 0:
             return
 
-        # Check if reduction modulo q = z_1^2 + ... + z_d^2 is needed (using z_d^2 = -(z_1^2 + ... + z_{d-1}^2))
         exp_list = list(exp_tuple)
-        if exp_list[-1] >= 2:
-            # Replace one instance of z_d^2 with -sum_{i=1}^{d-1} z_i^2 and reduce recursively
-            remainder_z_d = exp_list[-1] - 2
-            for i in range(self.d - 1):
-                new_exp = list(exp_list)
-                new_exp[-1] = remainder_z_d
-                new_exp[i] += 2
-                self._add_term(tuple(new_exp), -coeff)
+        z_d_exp = exp_list[-1]
+
+        if z_d_exp >= 2:
+            m = z_d_exp // 2
+            r = z_d_exp % 2
+            base_exp = exp_list[:-1]
+
+            # Multinomial expansion for z_d^{2m} = (-1)^m (z_1^2 + ... + z_{d-1}^2)^m
+            sign = Fraction((-1) ** m)
+            sub_d = self.d - 1
+
+            for partition in _partitions_of_m(sub_d, m):
+                multinomial_coeff = Fraction(math.factorial(m))
+                for a_i in partition:
+                    multinomial_coeff //= math.factorial(a_i)
+
+                term_coeff = coeff * sign * multinomial_coeff
+
+                new_exp = [b + 2 * a for b, a in zip(base_exp, partition)] + [r]
+                t = tuple(new_exp)
+                self.terms[t] = self.terms.get(t, Fraction(0)) + term_coeff
+                if self.terms[t] == 0:
+                    del self.terms[t]
         else:
             t = tuple(exp_list)
-            self.terms[t] = self.terms.get(t, 0.0) + coeff
-            if abs(self.terms[t]) < 1e-12:
+            self.terms[t] = self.terms.get(t, Fraction(0)) + coeff
+            if self.terms[t] == 0:
                 del self.terms[t]
 
     def normal_form(self) -> 'QuadricQuotientPolynomial':
-        """Returns the idempotent normal form polynomial in R(Q)."""
-        return QuadricQuotientPolynomial(self.d, self.terms)
+        """Invariant: QuadricQuotientPolynomial is always in canonical normal form."""
+        return self
 
     def multiply_by_x(self, var_idx: int = 0) -> 'QuadricQuotientPolynomial':
         """Multiplies by variable z_{var_idx+1} (default z_1 = x) in quotient ring R(Q)."""
+        if not (0 <= var_idx < self.d):
+            raise ValueError(f"var_idx={var_idx} must be in range [0, {self.d - 1}]")
+
         res = QuadricQuotientPolynomial(self.d)
         for exp_tuple, coeff in self.terms.items():
             new_exp = list(exp_tuple)
@@ -78,92 +109,173 @@ class QuadricQuotientPolynomial:
             res._add_term(tuple(new_exp), coeff)
         return res
 
-    def evaluate(self, point: List[float]) -> float:
-        """Evaluates normal form polynomial at a given point in R^d."""
+    def evaluate(self, point: List[float], on_quadric_check: bool = False) -> float:
+        """
+        Evaluates the canonical normal form representative at a point in R^d.
+        If on_quadric_check is True, asserts that sum(point_i^2) == 0.
+        """
         if len(point) != self.d:
             raise ValueError(f"Point length must be {self.d}")
+
+        if on_quadric_check:
+            q_val = sum(pt * pt for pt in point)
+            if abs(q_val) > 1e-8:
+                raise ValueError(f"Point {point} is not on the quadric sum z_i^2 = 0 (q = {q_val})")
+
         total = 0.0
         for exp_tuple, coeff in self.terms.items():
             monomial_val = 1.0
             for var_val, exp in zip(point, exp_tuple):
                 monomial_val *= (var_val ** exp)
-            total += coeff * monomial_val
+            total += float(coeff) * monomial_val
         return total
+
+    def isclose(self, other: 'QuadricQuotientPolynomial', atol: float = 1e-10) -> bool:
+        """Floating point tolerance comparison for polynomial terms."""
+        if self.d != other.d:
+            return False
+        all_keys = set(self.terms.keys()).union(set(other.terms.keys()))
+        for k in all_keys:
+            v1 = float(self.terms.get(k, 0))
+            v2 = float(other.terms.get(k, 0))
+            if abs(v1 - v2) > atol:
+                return False
+        return True
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, QuadricQuotientPolynomial):
             return False
-        if self.d != other.d:
-            return False
-        # Compare terms within 1e-10 tolerance
-        all_keys = set(self.terms.keys()).union(set(other.terms.keys()))
-        for k in all_keys:
-            v1 = self.terms.get(k, 0.0)
-            v2 = other.terms.get(k, 0.0)
-            if abs(v1 - v2) > 1e-10:
-                return False
-        return True
+        return self.d == other.d and self.terms == other.terms
+
+    def __repr__(self) -> str:
+        if not self.terms:
+            return "0"
+        str_terms = []
+        for exp_tuple, coeff in sorted(self.terms.items()):
+            coeff_str = str(coeff)
+            monomial_parts = []
+            for i, exp in enumerate(exp_tuple):
+                if exp == 1:
+                    monomial_parts.append(f"z{i+1}")
+                elif exp > 1:
+                    monomial_parts.append(f"z{i+1}^{exp}")
+
+            monomial_str = "*".join(monomial_parts)
+            if monomial_str:
+                str_terms.append(f"{coeff_str}*{monomial_str}")
+            else:
+                str_terms.append(f"{coeff_str}")
+
+        return " + ".join(str_terms).replace("+ -", "- ")
 
 
-def pieri_coefficients(n: int, lambda_val: float) -> Tuple[float, float]:
+def _partitions_of_m(length: int, m: int) -> List[Tuple[int, ...]]:
+    """Helper returning all tuples (a_1, ..., a_length) of non-negative integers with sum = m."""
+    if length == 1:
+        return [(m,)]
+    res = []
+    for i in range(m + 1):
+        for sub in _partitions_of_m(length - 1, m - i):
+            res.append((i,) + sub)
+    return res
+
+
+def pieri_coefficients(n: int, lambda_val: Union[float, Fraction], exact: bool = False) -> Tuple[Union[float, Fraction], Union[float, Fraction]]:
     """
-    Computes unnormalized Pieri rule coefficients for C_n^(lambda):
+    Computes three-term recurrence coefficients for unnormalized Gegenbauer polynomials C_n^(lambda):
       x * C_n^(lambda) = C_+ * C_{n+1}^(lambda) + C_- * C_{n-1}^(lambda)
     """
-    c_plus = (n + 1.0) / (2.0 * (n + lambda_val))
-    c_minus = (n + 2.0 * lambda_val - 1.0) / (2.0 * (n + lambda_val))
-    return c_plus, c_minus
+    if lambda_val <= 0:
+        raise ValueError("lambda_val must be > 0 for spherical Gegenbauer functions")
+
+    if exact:
+        lam_frac = Fraction(lambda_val)
+        c_plus = Fraction(n + 1, 2 * (n + lam_frac))
+        c_minus = Fraction(n + 2 * lam_frac - 1, 2 * (n + lam_frac))
+        return c_plus, c_minus
+    else:
+        lam_f = float(lambda_val)
+        c_plus = (n + 1.0) / (2.0 * (n + lam_f))
+        c_minus = (n + 2.0 * lam_f - 1.0) / (2.0 * (n + lam_f))
+        return c_plus, c_minus
 
 
-def normalized_jacobi_coefficients(n: int, lambda_val: float) -> Tuple[float, float]:
+def normalized_jacobi_coefficients(n: int, lambda_val: Union[float, Fraction], exact: bool = False) -> Tuple[Union[float, Fraction], Union[float, Fraction]]:
     """
-    Computes exact normalized Jacobi recurrence coefficients for zonal functions phi_n:
+    Computes exact normalized Jacobi recurrence coefficients for zonal functions phi_n(1) = 1:
       M_x phi_n = a_n * phi_{n+1} + b_n * phi_{n-1}
     where:
       a_n = (n + 2*lambda) / (2 * (n + lambda))
       b_n = n / (2 * (n + lambda))
-      a_n + b_n = 1.0
+      a_n + b_n = 1 exactly.
     """
-    a_n = (n + 2.0 * lambda_val) / (2.0 * (n + lambda_val))
-    b_n = n / (2.0 * (n + lambda_val))
-    return a_n, b_n
+    if lambda_val <= 0:
+        raise ValueError("lambda_val must be > 0 for spherical Gegenbauer functions")
+
+    if exact:
+        lam_frac = Fraction(lambda_val)
+        a_n = Fraction(n + 2 * lam_frac, 2 * (n + lam_frac))
+        b_n = Fraction(n, 2 * (n + lam_frac))
+        return a_n, b_n
+    else:
+        lam_f = float(lambda_val)
+        a_n = (n + 2.0 * lam_f) / (2.0 * (n + lam_f))
+        b_n = n / (2.0 * (n + lam_f))
+        return a_n, b_n
 
 
-def pochhammer(a: float, k: int) -> float:
-    """Computes the rising Pochhammer symbol (a)_k = a * (a+1) * ... * (a+k-1)."""
+def pochhammer(a: Union[float, Fraction], k: int) -> Union[float, Fraction]:
+    """Computes rising Pochhammer symbol (a)_k = a * (a+1) * ... * (a+k-1)."""
     if k < 0:
-        raise ValueError("k must be non-negative.")
-    val = 1.0
-    for i in range(k):
-        val *= (a + i)
-    return val
+        raise ValueError("k must be non-negative integer")
+    if isinstance(a, Fraction) or isinstance(a, int):
+        val = Fraction(1)
+        for i in range(k):
+            val *= (a + i)
+        return val
+    else:
+        val = 1.0
+        for i in range(k):
+            val *= (a + i)
+        return val
 
 
-def schubert_intersection_coefficients(n: int, lambda_val: float) -> List[float]:
+def normalized_gegenbauer_2f1_coefficients(n: int, lambda_val: float) -> List[float]:
     """
-    Computes exact hypergeometric series expansion coefficients.
+    Computes exact hypergeometric expansion coefficients for normalized zonal function:
+      phi_n(x) = C_n^(lambda)(x) / C_n^(lambda)(1) = sum_{k=0}^n c_k * t^k, where t = (1-x)/2.
+    Formula:
+      c_k = (-1)^k * binom(n, k) * (n + 2*lambda)_k / (lambda + 1/2)_k.
     """
+    if lambda_val <= 0:
+        raise ValueError("lambda_val must be > 0 for spherical Gegenbauer functions")
+
     coeffs = []
     for k in range(n + 1):
-        num = ((-1.0) ** k) * math.comb(n, k) * pochhammer(n + 2.0 * lambda_val, k)
-        den = pochhammer(lambda_val + 0.5, k)
+        num = ((-1.0) ** k) * math.comb(n, k) * float(pochhammer(n + 2.0 * lambda_val, k))
+        den = float(pochhammer(lambda_val + 0.5, k))
         coeffs.append(num / den)
     return coeffs
 
 
+# Alias for backward compatibility
+schubert_intersection_coefficients = normalized_gegenbauer_2f1_coefficients
+
+
 if __name__ == "__main__":
-    print("--- ALGEBRAIC GEOMETRY & COMBINATORICS DEMO ---")
+    print("--- REFACTORED ALGEBRAIC GEOMETRY & COMBINATORICS DEMO ---")
     d_dim = 5  # d=5 -> Lambda=1.5, Q_3 c P^4
     n_deg = 4
-    lambda_p = (d_dim - 2) / 2.0
+    lam_frac = lambda_for_sphere(d_dim)
 
     h0 = quadric_hilbert_series_dim(d_dim, n_deg)
-    a_n, b_n = normalized_jacobi_coefficients(n_deg, lambda_p)
+    a_n, b_n = normalized_jacobi_coefficients(n_deg, lam_frac, exact=True)
 
     print(f"Projective Quadric Q_{d_dim-2} c P^{d_dim-1}, degree n={n_deg}:")
+    print(f"  * Sphere Gegenbauer Parameter Lambda: {lam_frac}")
     print(f"  * Hilbert Series Dimension dim R(Q)_{n_deg}: {h0}")
-    print(f"  * Normalized Jacobi Recurrence Coefficients (a_n, b_n): ({a_n:.6f}, {b_n:.6f}) [a_n + b_n = {a_n + b_n:.1f}]")
+    print(f"  * Exact Rational Jacobi Recurrence Coefficients (a_n, b_n): ({a_n}, {b_n}) [a_n + b_n = {a_n + b_n}]")
 
     # Test Quotient Ring Normal Form
-    poly = QuadricQuotientPolynomial(3, {(0, 0, 2): 1.0})  # z_3^2 in C[z_1, z_2, z_3]/(z_1^2+z_2^2+z_3^2)
-    print(f"  * Normal form of z_3^2 modulo q: {poly.terms}")
+    poly = QuadricQuotientPolynomial(3, {(0, 0, 2): 1})  # z_3^2 in C[z_1, z_2, z_3]/(z_1^2+z_2^2+z_3^2)
+    print(f"  * Exact Normal Form of z_3^2 modulo q: {poly}")
