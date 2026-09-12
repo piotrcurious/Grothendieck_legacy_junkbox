@@ -14,6 +14,7 @@
     assert_dim_v_n_identity/4,
     assert_dim_v_n_exact_rational/3,
     assert_normalized_recurrence/4,
+    assert_derivative_anchor/3,
     select_numerical_regime/4,
     run_all_proofs/0
 ]).
@@ -133,6 +134,10 @@ assert_normalized_recurrence(N, Lambda, X, Tol) :-
     Diff is abs(LHS - RHS),
     Diff < Tol.
 
+assert_derivative_anchor(N, Lambda, ExpectedPrime) :-
+    integer(N), N >= 1,
+    ExpectedPrime is (N * (N + 2.0 * Lambda)) / (2.0 * Lambda + 1.0).
+
 % --- 5. Layer V: Two-Endpoint Phase Map Selection ---
 
 select_numerical_regime(N, Lambda, Theta, Regime) :-
@@ -171,6 +176,9 @@ test(hilbert_series_dimension_exact) :-
 test(normalized_recurrence_verification) :-
     assert_normalized_recurrence(10, 1.5, 0.5, 1e-10),
     assert_normalized_recurrence(10, 1.5, -0.3, 1e-10).
+
+test(derivative_anchor_identity) :-
+    assert_derivative_anchor(10, 1.5, 32.5).
 
 test(s2_s3_s4_exact_anchors) :-
     N = 10, Theta = 0.5, X = cos(Theta),
