@@ -16,6 +16,9 @@ from fractions import Fraction
 import math
 from typing import Dict, List, Tuple, Union
 
+import numpy as np
+from scipy.special import gamma
+
 Number = Union[int, Fraction, float]
 
 
@@ -276,6 +279,105 @@ def normalized_gegenbauer_2f1_coefficients(n: int, lambda_val: float) -> List[fl
 
 # Alias for backward compatibility
 schubert_intersection_coefficients = normalized_gegenbauer_2f1_coefficients
+
+
+def exact_rational_gegenbauer(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction]) -> Fraction:
+    """
+    Evaluates Gegenbauer polynomial C_n^(lambda)(x) exactly in the field extension Q(lambda, x)
+    using the three-term recurrence (bypassing Gamma, factorials, and floating-point errors).
+
+    C_0^(lambda)(x) = 1
+    C_1^(lambda)(x) = 2 * lambda * x
+    n * C_n^(lambda)(x) = 2*(n + lambda - 1)*x * C_{n-1}^(lambda)(x) - (n + 2*lambda - 2) * C_{n-2}^(lambda)(x)
+    """
+    if n < 0:
+        raise ValueError("Degree n must be non-negative integer")
+    lam = Fraction(lambda_val)
+    x_frac = Fraction(x)
+
+    if n == 0:
+        return Fraction(1)
+    if n == 1:
+        return 2 * lam * x_frac
+
+    c_prev = Fraction(1)
+    c_curr = 2 * lam * x_frac
+
+    for k in range(2, n + 1):
+        # k * C_k = 2 * (k + lam - 1) * x * c_curr - (k + 2*lam - 2) * c_prev
+        term1 = 2 * (k + lam - 1) * x_frac * c_curr
+        term2 = (k + 2 * lam - 2) * c_prev
+        c_next = (term1 - term2) / k
+        c_prev, c_curr = c_curr, c_next
+
+    return c_curr
+
+
+def exact_rational_gegenbauer_derivative(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction]) -> Fraction:
+    """
+    Computes exact first derivative d/dx C_n^(lambda)(x) = 2 * lambda * C_{n-1}^(lambda + 1)(x) over Q(lambda, x).
+    """
+    if n < 0:
+        raise ValueError("Degree n must be non-negative integer")
+    if n == 0:
+        return Fraction(0)
+
+    lam = Fraction(lambda_val)
+    x_frac = Fraction(x)
+    return 2 * lam * exact_rational_gegenbauer(n - 1, lam + 1, x_frac)
+
+
+def exact_rational_gegenbauer_second_derivative(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction]) -> Fraction:
+    """
+    Computes exact second derivative d^2/dx^2 C_n^(lambda)(x) over Q(lambda, x):
+      - For x != +-1: uses ODE substitution y'' = ((2*lambda + 1)*x*y' - n*(n + 2*lambda)*y) / (1 - x^2)
+      - For x = +-1 or general: shifted formula 4 * lambda * (lambda + 1) * C_{n-2}^(lambda + 2)(x)
+    """
+    if n < 2:
+        return Fraction(0)
+
+    lam = Fraction(lambda_val)
+    x_frac = Fraction(x)
+
+    if x_frac**2 != 1:
+        y = exact_rational_gegenbauer(n, lam, x_frac)
+        y_prime = exact_rational_gegenbauer_derivative(n, lam, x_frac)
+        num = (2 * lam + 1) * x_frac * y_prime - n * (n + 2 * lam) * y
+        den = 1 - x_frac**2
+        return num / den
+    else:
+        return 4 * lam * (lam + 1) * exact_rational_gegenbauer(n - 2, lam + 2, x_frac)
+
+
+def gauss_gegenbauer_quadrature(n: int, lambda_val: float) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Computes Gauss-Gegenbauer quadrature nodes x_k and weights w_k using Golub-Welsch
+    spectral decomposition of the symmetric tridiagonal Jacobi matrix J_n.
+    Weight function: w(x) = (1-x^2)^(lambda - 1/2) over [-1, 1].
+    Total integral weight norm mu_0 = sqrt(pi) * gamma(lambda + 0.5) / gamma(lambda + 1.0).
+    """
+    if n <= 0:
+        raise ValueError("Number of quadrature nodes n must be > 0")
+    if lambda_val <= -0.5:
+        raise ValueError("lambda_val must be > -0.5")
+
+    # Build symmetric tridiagonal Jacobi matrix J_n using orthonormal subdiagonal alpha_k
+    subdiag = np.zeros(n - 1, dtype=np.float64)
+    for k in range(n - 1):
+        subdiag[k] = orthonormal_jacobi_coefficients(k, lambda_val)
+
+    J = np.diag(subdiag, k=1) + np.diag(subdiag, k=-1)
+
+    # Golub-Welsch algorithm: Eigendecomposition of symmetric tridiagonal J
+    nodes, eigenvectors = np.linalg.eigh(J)
+
+    # Total integral weight norm mu_0
+    mu_0 = float(math.sqrt(math.pi) * gamma(lambda_val + 0.5) / gamma(lambda_val + 1.0))
+
+    # Weights w_k = mu_0 * (v_{k, 0})^2 where v_{k, 0} is first component of k-th normalized eigenvector
+    weights = mu_0 * (eigenvectors[0, :] ** 2)
+
+    return nodes, weights
 
 
 if __name__ == "__main__":

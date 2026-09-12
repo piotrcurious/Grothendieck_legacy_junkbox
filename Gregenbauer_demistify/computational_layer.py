@@ -73,6 +73,7 @@ class NumericalBase(Enum):
     BASE_10 = "Base 10 (Decimal)"
     FIXED_POINT = "Fixed-Point (Q16.16)"
     LOGARITHMIC = "Logarithmic Number System (LNS)"
+    FIELD_EXTENSION = "Field Extension Q(lambda, x)"
 
 
 class PrecisionType(Enum):
@@ -80,6 +81,7 @@ class PrecisionType(Enum):
     FLOAT64 = "float64"
     LONGDOUBLE = "longdouble"
     ARBITRARY = "mpmath_arbitrary"
+    EXACT_RATIONAL = "exact_rational"
 
 
 @dataclass

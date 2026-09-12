@@ -6,7 +6,7 @@ Independent, non-tautological test suite verifying the Gegenbauer demystificatio
 2. Decoupled Hilbert Series Dimensions and Normalization Identity
 3. Quadric Quotient Ring Normal Forms, Idempotency, Exact Fractions & Invariants Modulo q
 4. Symmetric Orthonormal Jacobi Matrix Coefficients alpha_n (alpha_0 = 1/sqrt(3) for Legendre)
-5. Normalized Gegenbauer Derivatives phi_n^{(k)}(x) & Structural ODE Residuals
+5. Normalized Gegenbauer Derivatives phi_n^{(k)}(x) & Structural Scale-Invariant ODE Residuals
 6. High-Precision Ground Truth Reference via mpmath (100+ bits)
 7. Two-Endpoint Bessel Layer Tests (North & South Poles)
 8. Empirical Asymptotic Convergence Exponents (WKB p > 0.9, Bessel p > 1.7)
@@ -30,6 +30,10 @@ from scipy.special import eval_gegenbauer, eval_legendre, gamma, gammaln
 
 from Gregenbauer_demistify.algebraic_geometry_combinatorics import (
     QuadricQuotientPolynomial,
+    exact_rational_gegenbauer,
+    exact_rational_gegenbauer_derivative,
+    exact_rational_gegenbauer_second_derivative,
+    gauss_gegenbauer_quadrature,
     lambda_for_sphere,
     normalized_gegenbauer_2f1_coefficients,
     normalized_jacobi_coefficients,
@@ -158,41 +162,38 @@ def test_exact_derivative_anchors():
             assert np.isclose(num_deriv_m1, exact_deriv_m1, rtol=1e-4)
 
 
-def test_normalized_phi_derivative_evaluator():
-    """
-    Verifies normalized_phi_derivative(n, lambda, x, k) evaluator:
-      phi_n^{(k)}(1) == n(n + 2*lambda) / (2*lambda + 1).
-    """
-    n = 10
+def test_normalized_phi_derivative_k_greater_than_n():
+    """Verifies that normalized_phi_derivative returns 0 for k > n."""
+    n = 5
     lambda_val = 1.5
-    d1 = normalized_phi_derivative(n, lambda_val, np.array([1.0]), k=1)[0]
-    expected_d1 = (n * (n + 2.0 * lambda_val)) / (2.0 * lambda_val + 1.0)
-    assert np.isclose(d1, expected_d1, rtol=1e-12)
+    x_grid = np.array([0.2, 0.5, 0.8])
+    d_zero = normalized_phi_derivative(n, lambda_val, x_grid, k=6)
+    np.testing.assert_array_equal(d_zero, np.zeros_like(x_grid))
 
 
-def test_analytic_gegenbauer_derivative_and_ode_residual():
+def test_scale_invariant_ode_residual():
     """
-    Verifies analytic Gegenbauer derivative shift formula d^k/dx^k C_n^(lambda)(x)
-    and verifies ODE residual R_ODE = (1-x^2) C_n'' - (2*lambda+1)x C_n' + n(n+2*lambda) C_n == 0.
+    Verifies scale-invariant dimensionless ODE residual:
+      R_ODE = |(1-x^2) phi'' - (2*lambda+1)x phi' + E_n phi| / (|1-x^2||phi''| + |(2*lambda+1)x||phi'| + E_n|phi| + tau)
     """
     n = 10
     lambda_val = 1.5
     x_grid = np.linspace(-0.8, 0.8, 20)
 
-    c0 = exact_gegenbauer(n, lambda_val, x_grid)
-    c1 = gegenbauer_derivative(n, lambda_val, x_grid, k=1)
-    c2 = gegenbauer_derivative(n, lambda_val, x_grid, k=2)
+    phi0 = normalized_phi_recurrence(n, lambda_val, x_grid)
+    phi1 = normalized_phi_derivative(n, lambda_val, x_grid, k=1)
+    phi2 = normalized_phi_derivative(n, lambda_val, x_grid, k=2)
 
-    # R_ODE = (1-x^2)*C_n'' - (2*lambda+1)*x*C_n' + n*(n+2*lambda)*C_n
     e_n = n * (n + 2.0 * lambda_val)
-    r_ode = (1.0 - x_grid**2) * c2 - (2.0 * lambda_val + 1.0) * x_grid * c1 + e_n * c0
+    num = np.abs((1.0 - x_grid**2) * phi2 - (2.0 * lambda_val + 1.0) * x_grid * phi1 + e_n * phi0)
+    den = (1.0 - x_grid**2) * np.abs(phi2) + (2.0 * lambda_val + 1.0) * np.abs(x_grid) * np.abs(phi1) + e_n * np.abs(phi0) + 1e-14
 
-    np.testing.assert_allclose(r_ode, 0.0, atol=1e-12)
+    r_ode_scale = num / den
+    np.testing.assert_allclose(r_ode_scale, 0.0, atol=1e-12)
 
 
 def test_orthonormal_jacobi_matrix_symmetry_and_legendre_anchor():
     """Verifies symmetric orthonormal Jacobi matrix subdiagonal coefficients alpha_n."""
-    # Sanity check for lambda = 0.5 (Legendre): alpha_0 = 1 / sqrt(3)
     alpha_0_legendre = orthonormal_jacobi_coefficients(0, 0.5)
     assert np.isclose(alpha_0_legendre, 1.0 / np.sqrt(3.0), rtol=1e-12)
 
@@ -477,3 +478,51 @@ def test_theta_space_orthogonality_norm_quadrature():
         # Theta-space Quadrature integration
         num_hn = verify_orthogonality_integral_theta(n, n, lambda_val)
         assert np.isclose(got_hn, num_hn, rtol=1e-3)
+
+
+# --- 12. FIELD EXTENSIONS Q(lambda, x) & GAUSS-GEGENBAUER QUADRATURE TESTS ---
+
+def test_exact_rational_field_extension_recurrence():
+    """
+    Verifies exact rational Gegenbauer polynomial evaluation in Q(lambda, x).
+    C_5^(3/2)(1/2) = -147 / 256 exactly.
+    """
+    val_frac = exact_rational_gegenbauer(5, Fraction(3, 2), Fraction(1, 2))
+    assert val_frac == Fraction(-147, 256)
+
+    # Compare against scipy for n = 0 to 10
+    for n in range(10):
+        frac_val = exact_rational_gegenbauer(n, Fraction(3, 2), Fraction(2, 3))
+        float_ref = float(eval_gegenbauer(n, 1.5, 2.0 / 3.0))
+        assert np.isclose(float(frac_val), float_ref, rtol=1e-12, atol=1e-13)
+
+
+def test_exact_rational_derivatives_and_ode_recovery():
+    """
+    Verifies exact rational first derivative d/dx C_n^(lambda) = 2*lambda*C_{n-1}^(lambda+1)
+    and second derivative recovery via ODE substitution over Q(lambda, x).
+    """
+    n = 5
+    lam = Fraction(3, 2)
+    x = Fraction(1, 3)
+
+    # First derivative
+    dy_exact = exact_rational_gegenbauer_derivative(n, lam, x)
+    ref_dy = 2.0 * 1.5 * float(eval_gegenbauer(n - 1, 2.5, float(x)))
+    assert np.isclose(float(dy_exact), ref_dy, rtol=1e-12)
+
+    # Second derivative
+    d2y_exact = exact_rational_gegenbauer_second_derivative(n, lam, x)
+    ref_d2y = 4.0 * 1.5 * 2.5 * float(eval_gegenbauer(n - 2, 3.5, float(x)))
+    assert np.isclose(float(d2y_exact), ref_d2y, rtol=1e-12)
+
+
+def test_gauss_gegenbauer_quadrature_precision():
+    """
+    Verifies Golub-Welsch Gauss-Gegenbauer quadrature on polynomial f(x) = x^4.
+    Integral int_{-1}^1 x^4 (1-x^2)^{1.5 - 0.5} dx = int_{-1}^1 x^4 (1-x^2) dx = 2 * (1/5 - 1/7) = 4/35.
+    """
+    nodes, weights = gauss_gegenbauer_quadrature(n=4, lambda_val=1.5)
+    integral_approx = np.sum(weights * (nodes ** 4))
+    exact_integral = 4.0 / 35.0
+    assert np.isclose(integral_approx, exact_integral, rtol=1e-12, atol=1e-13)

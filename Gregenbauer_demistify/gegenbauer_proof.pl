@@ -9,12 +9,14 @@
     dimension_parameter_exact/2,
     binom/3,
     gegenbauer_val/4,
+    gegenbauer_val_exact_rational/4,
     normalized_phi_val/4,
     assert_schrodinger_energy_shift/2,
     assert_dim_v_n_identity/4,
     assert_dim_v_n_exact_rational/3,
     assert_normalized_recurrence/4,
     assert_derivative_anchor/3,
+    assert_ode_second_derivative/4,
     select_numerical_regime/4,
     run_all_proofs/0
 ]).
@@ -78,6 +80,26 @@ gegenbauer_loop(K, N, Lambda, X, Ck1, Ck0, Val) :-
     K1 is K + 1,
     gegenbauer_loop(K1, N, Lambda, X, Ck2, Ck1, Val).
 
+% --- 3b. Exact Rational Arithmetic over Q(Lambda, X) ---
+
+gegenbauer_val_exact_rational(0, _Lambda, _X, 1) :- !.
+gegenbauer_val_exact_rational(1, Lambda, X, Val) :- !, Val is 2 * Lambda * X.
+gegenbauer_val_exact_rational(N, Lambda, X, Val) :-
+    integer(N), N >= 2,
+    C0 = 1,
+    C1 is 2 * Lambda * X,
+    gegenbauer_rational_loop(2, N, Lambda, X, C1, C0, Val).
+
+gegenbauer_rational_loop(K, N, _Lambda, _X, Ck1, _Ck0, Val) :-
+    K > N, !, Val = Ck1.
+gegenbauer_rational_loop(K, N, Lambda, X, Ck1, Ck0, Val) :-
+    K =< N,
+    Coeff1 is (2 * (K + Lambda - 1)) rdiv K,
+    Coeff2 is (K + 2 * Lambda - 2) rdiv K,
+    Ck2 is Coeff1 * X * Ck1 - Coeff2 * Ck0,
+    K1 is K + 1,
+    gegenbauer_rational_loop(K1, N, Lambda, X, Ck2, Ck1, Val).
+
 normalized_phi_val(N, Lambda, X, Val) :-
     gegenbauer_val(N, Lambda, X, Cn),
     gegenbauer_val(N, Lambda, 1.0, Cn1),
@@ -138,6 +160,23 @@ assert_derivative_anchor(N, Lambda, ExpectedPrime) :-
     integer(N), N >= 1,
     ExpectedPrime is (N * (N + 2.0 * Lambda)) / (2.0 * Lambda + 1.0).
 
+assert_ode_second_derivative(N, Lambda, X, Tol) :-
+    integer(N), N >= 2,
+    gegenbauer_val(N, Lambda, X, Y),
+    N1 is N - 1,
+    L1 is Lambda + 1.0,
+    gegenbauer_val(N1, L1, X, Cn1_L1),
+    YPrime is 2.0 * Lambda * Cn1_L1,
+    Num is (2.0 * Lambda + 1.0) * X * YPrime - N * (N + 2.0 * Lambda) * Y,
+    Den is 1.0 - X * X,
+    YSecondODE is Num / Den,
+    N2 is N - 2,
+    L2 is Lambda + 2.0,
+    gegenbauer_val(N2, L2, X, Cn2_L2),
+    YSecondShifted is 4.0 * Lambda * (Lambda + 1.0) * Cn2_L2,
+    Diff is abs(YSecondODE - YSecondShifted),
+    Diff < Tol.
+
 % --- 5. Layer V: Two-Endpoint Phase Map Selection ---
 
 select_numerical_regime(N, Lambda, Theta, Regime) :-
@@ -179,6 +218,14 @@ test(normalized_recurrence_verification) :-
 
 test(derivative_anchor_identity) :-
     assert_derivative_anchor(10, 1.5, 32.5).
+
+test(exact_rational_evaluation) :-
+    % C_5^(3/2)(1/2) = -147/256
+    gegenbauer_val_exact_rational(5, 3 rdiv 2, 1 rdiv 2, Val),
+    Val =:= -147 rdiv 256.
+
+test(ode_second_derivative_identity) :-
+    assert_ode_second_derivative(5, 1.5, 0.4, 1e-10).
 
 test(s2_s3_s4_exact_anchors) :-
     N = 10, Theta = 0.5, X = cos(Theta),
