@@ -6,15 +6,16 @@ Independent, non-tautological test suite verifying the Gegenbauer demystificatio
 2. Decoupled Hilbert Series Dimensions and Normalization Identity
 3. Quadric Quotient Ring Normal Forms, Idempotency, Exact Fractions & Invariants Modulo q
 4. Symmetric Orthonormal Jacobi Matrix Coefficients alpha_n (alpha_0 = 1/sqrt(3) for Legendre)
-5. High-Precision Ground Truth Reference via mpmath (100+ bits)
-6. Two-Endpoint Bessel Layer Tests (North & South Poles)
-7. Empirical Asymptotic Convergence Exponents (WKB p > 0.9, Bessel p > 1.7)
-8. Robust Mixed Error Computational Layer, Hard Constraints & Deterministic Pareto Dominance
-9. Real Execution Backends (FLOAT32, FLOAT64, LONGDOUBLE, MPMATH, Q16.16, LNS)
-10. High-Degree Log-Space Stability up to n = 10^6
-11. Theta-Space Orthogonality Norm Verification (Closed-Form Gamma vs Quadrature)
-12. Exact Derivative Anchors phi_n'(1) and phi_n'(-1)
-13. Prolog Integration Test with shutil.which and pathlib Resolution
+5. Analytic Gegenbauer Derivatives & Structural ODE Residuals
+6. High-Precision Ground Truth Reference via mpmath (100+ bits)
+7. Two-Endpoint Bessel Layer Tests (North & South Poles)
+8. Empirical Asymptotic Convergence Exponents (WKB p > 0.9, Bessel p > 1.7)
+9. Robust Mixed Error Computational Layer, Hard Constraints & Deterministic Pareto Dominance
+10. Real Execution Backends (FLOAT32, FLOAT64, LONGDOUBLE, MPMATH, Q16.16, LNS)
+11. High-Degree Log-Space Stability up to n = 10^6
+12. Theta-Space Orthogonality Norm Verification (Closed-Form Gamma vs Quadrature)
+13. Exact Derivative Anchors phi_n'(1) and phi_n'(-1)
+14. Prolog Integration Test with shutil.which and pathlib Resolution
 """
 
 from fractions import Fraction
@@ -52,6 +53,7 @@ from Gregenbauer_demistify.gegenbauer_asymptotics import (
     compute_error_map,
     endpoint_bessel_leading,
     exact_gegenbauer,
+    gegenbauer_derivative,
     interior_wkb_approx,
     log_c_n_1,
     normalized_phi_recurrence,
@@ -153,6 +155,26 @@ def test_exact_derivative_anchors():
             num_deriv_m1 = (phi_m1_h - phi_m1) / h
             exact_deriv_m1 = ((-1.0) ** (n - 1)) * (n * (n + 2.0 * lambda_val)) / (2.0 * lambda_val + 1.0)
             assert np.isclose(num_deriv_m1, exact_deriv_m1, rtol=1e-4)
+
+
+def test_analytic_gegenbauer_derivative_and_ode_residual():
+    """
+    Verifies analytic Gegenbauer derivative shift formula d^k/dx^k C_n^(lambda)(x)
+    and verifies ODE residual R_ODE = (1-x^2) C_n'' - (2*lambda+1)x C_n' + n(n+2*lambda) C_n == 0.
+    """
+    n = 10
+    lambda_val = 1.5
+    x_grid = np.linspace(-0.8, 0.8, 20)
+
+    c0 = exact_gegenbauer(n, lambda_val, x_grid)
+    c1 = gegenbauer_derivative(n, lambda_val, x_grid, k=1)
+    c2 = gegenbauer_derivative(n, lambda_val, x_grid, k=2)
+
+    # R_ODE = (1-x^2)*C_n'' - (2*lambda+1)*x*C_n' + n*(n+2*lambda)*C_n
+    e_n = n * (n + 2.0 * lambda_val)
+    r_ode = (1.0 - x_grid**2) * c2 - (2.0 * lambda_val + 1.0) * x_grid * c1 + e_n * c0
+
+    np.testing.assert_allclose(r_ode, 0.0, atol=1e-12)
 
 
 def test_orthonormal_jacobi_matrix_symmetry_and_legendre_anchor():

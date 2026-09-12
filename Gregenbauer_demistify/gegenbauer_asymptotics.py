@@ -7,12 +7,13 @@ asymptotic approximations for Gegenbauer polynomials C_n^{(lambda)}(x) and zonal
 spherical functions phi_n(x) on S^{d-1} = SO(d)/SO(d-1) (where lambda = (d-2)/2):
 
 1. Production Scaled Spherical Recurrence for phi_n^{(d)}(theta)
-2. Normalized Interior WKB / Weyl Semiclassical Wave
-3. Two-Endpoint Bessel Boundary-Layer Kernels (North z_0 = K*theta, South z_pi = K*(pi-theta))
-4. Two-Endpoint Composite Matched Asymptotic Expansion
-5. Natural Boundary-Layer Phase Map Classifier in (z_0, z_pi) Coordinates
-6. Normalized Error Surface Diagram E(n, theta)
-7. Theta-Space Orthogonality Quadrature Integral
+2. Analytic Gegenbauer Derivatives via k-th Order Shift Formula
+3. Normalized Interior WKB / Weyl Semiclassical Wave
+4. Two-Endpoint Bessel Boundary-Layer Kernels (North z_0 = K*theta, South z_pi = K*(pi-theta))
+5. Two-Endpoint Composite Matched Asymptotic Expansion
+6. Natural Boundary-Layer Phase Map Classifier in (z_0, z_pi) Coordinates
+7. Normalized Error Surface Diagram E(n, theta)
+8. Theta-Space Orthogonality Quadrature Integral
 """
 
 import numpy as np
@@ -37,6 +38,28 @@ def log_c_n_1(n: int, lambda_val: float) -> float:
 def c_n_1_val(n: int, lambda_val: float) -> float:
     """Computes C_n^(lambda)(1) value. Note: may overflow for very large n, lambda."""
     return float(np.exp(log_c_n_1(n, lambda_val)))
+
+
+def gegenbauer_derivative(n: int, lambda_val: float, x: np.ndarray, k: int = 1) -> np.ndarray:
+    """
+    Computes exact k-th derivative of Gegenbauer polynomial C_n^(lambda)(x) via formula:
+      d^k/dx^k C_n^(lambda)(x) = 2^k * (lambda)_k * C_{n-k}^(lambda+k)(x).
+    """
+    x_arr = np.asarray(x, dtype=np.float64)
+    if k < 0:
+        raise ValueError("Derivative order k must be >= 0")
+    if k == 0:
+        return exact_gegenbauer(n, lambda_val, x_arr)
+    if k > n:
+        return np.zeros_like(x_arr)
+
+    # Calculate 2^k * pochhammer(lambda_val, k)
+    poch = 1.0
+    for i in range(k):
+        poch *= (lambda_val + i)
+    scale = (2.0 ** k) * poch
+
+    return scale * exact_gegenbauer(n - k, lambda_val + k, x_arr)
 
 
 def normalized_phi_recurrence(n: int, lambda_val: float, x: np.ndarray) -> np.ndarray:
@@ -151,7 +174,7 @@ def south_pole_bessel_leading(n: int, lambda_val: float, theta: np.ndarray) -> n
 def interior_wkb_approx(n: int, lambda_val: float, theta: np.ndarray) -> np.ndarray:
     """
     Normalized Interior WKB / Weyl Semiclassical Wave for zonal spherical function phi_n(theta):
-      phi_n(theta) ~ [2^lambda * Gamma(lambda + 1/2) / sqrt(pi)] * cos((n + lambda)*theta - lambda*pi/2) / (n*sin(theta))^lambda
+      phi_n(theta) ~ [2^lambda * Gamma(lambda + 1/2) / sqrt(pi)] * cos((n + lambda)*theta - lambda*pi/2) / (N*sin(theta))^lambda
     Valid in the interior oscillatory domain theta >> 1/n and (pi - theta) >> 1/n.
     """
     theta_arr = np.asarray(theta, dtype=np.float64)
@@ -161,11 +184,10 @@ def interior_wkb_approx(n: int, lambda_val: float, theta: np.ndarray) -> np.ndar
 
     # Avoid singular evaluation at endpoints
     sin_safe = np.where(sin_theta <= 1e-15, 1e-15, sin_theta)
-    amplitude = (n * sin_safe) ** (-lambda_val)
+    amplitude = (K * sin_safe) ** (-lambda_val)
     phase = K * theta_arr - (lambda_val * np.pi / 2.0)
 
     out = coeff * amplitude * np.cos(phase)
-    # Zero out singular endpoint masks if exact endpoints theta=0 or theta=pi
     out = np.where((theta_arr <= 1e-15) | (theta_arr >= np.pi - 1e-15), np.nan, out)
     return out
 
