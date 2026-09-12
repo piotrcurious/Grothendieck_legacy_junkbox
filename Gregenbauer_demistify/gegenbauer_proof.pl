@@ -20,7 +20,7 @@
 
 :- use_module(library(plunit)).
 
-% --- 1. Symmetric Space Geometry & Representation Structures ---
+% --- 1. Layer I & II: Symmetric Space Geometry & Spherical Subspaces ---
 
 symmetric_space(AmbientD, so(AmbientD)/so(D1)) :-
     integer(AmbientD),
@@ -82,7 +82,7 @@ normalized_phi_val(N, Lambda, X, Val) :-
     gegenbauer_val(N, Lambda, 1.0, Cn1),
     Val is Cn / Cn1.
 
-% --- 4. Mathematical Assertions ---
+% --- 4. Layer III & IV: Mathematical Assertions ---
 
 assert_schrodinger_energy_shift(N, Lambda) :-
     integer(N), N >= 0,
@@ -133,14 +133,16 @@ assert_normalized_recurrence(N, Lambda, X, Tol) :-
     Diff is abs(LHS - RHS),
     Diff < Tol.
 
-% --- 5. Phase Map Selection Heuristic ---
+% --- 5. Layer V: Two-Endpoint Phase Map Selection ---
 
 select_numerical_regime(N, Lambda, Theta, Regime) :-
-    Z is (N + Lambda) * Theta,
-    SqrtN is sqrt(N + Lambda),
-    (   N =< 100 -> Regime = direct_recurrence
-    ;   Z =< 10.0 -> Regime = endpoint_bessel
-    ;   Z =< SqrtN -> Regime = matched_asymptotics
+    K is N + Lambda,
+    Z0 is K * Theta,
+    ZPi is K * (pi - Theta),
+    SqrtK is sqrt(K),
+    (   Z0 =< 10.0 -> Regime = north_endpoint_bessel
+    ;   ZPi =< 10.0 -> Regime = south_endpoint_bessel
+    ;   (Z0 =< SqrtK ; ZPi =< SqrtK) -> Regime = overlap_approximation
     ;   Regime = interior_wkb
     ).
 
@@ -181,9 +183,10 @@ test(s2_s3_s4_exact_anchors) :-
     % S^4 (d=5, Lambda=1.5)
     normalized_phi_val(N, 1.5, X, _ValS4).
 
-test(regime_selection_heuristics) :-
-    select_numerical_regime(10, 1.5, 0.05, direct_recurrence),
-    select_numerical_regime(500, 1.5, 0.005, endpoint_bessel).
+test(two_endpoint_regime_selection) :-
+    select_numerical_regime(10, 1.5, 0.05, north_endpoint_bessel),
+    select_numerical_regime(500, 1.5, 0.005, north_endpoint_bessel),
+    select_numerical_regime(500, 1.5, 3.136, south_endpoint_bessel).
 
 :- end_tests(gegenbauer_consistency).
 
@@ -194,7 +197,7 @@ run_all_proofs :-
     AmbientD = 5, D1 is AmbientD - 1, N = 10, XVal = 0.5,
     format('[STEP 1] Geometry of SO(~w)/SO(~w) (Ambient D=~w):~n', [AmbientD, D1, AmbientD]),
     format('[STEP 2] Exact Hilbert Series Dimension dim V_~w = 506 [EXACT RATIONAL]~n', [N]),
-    format('[STEP 3] Normalized Jacobi Recurrence Verified at x=~w~n', [XVal]),
+    format('[STEP 3] Radial Projection Operator T_x Verified at x=~w~n', [XVal]),
     format('[STEP 4] Executing PLUnit Test Suite...~n~n'),
     run_tests(gegenbauer_consistency),
     format('~n========================================================================~n'),
