@@ -2,7 +2,7 @@
 
 ## Abstract
 
-This document presents a mathematically closed VIII-Layer architectural framework for Gegenbauer polynomials $C_n^{(\lambda)}(x)$ and normalized zonal spherical functions $\phi_n(x)$ on the real sphere $S^{d-1} \cong SO(d)/SO(d-1)$, where parameter $\lambda = \frac{d-2}{2}$ ($d \ge 3$). The framework establishes formal operator morphisms connecting representation geometry, quotient algebras, exact differential operators, self-adjoint Jacobi spectral matrices, two-endpoint singular asymptotics, and high-precision numerical solvers.
+This document presents a mathematically closed VIII-Layer architectural framework for Gegenbauer polynomials $C_n^{(\lambda)}(x)$ and normalized zone spherical functions $\phi_n(x)$ on the real sphere $S^{d-1} \cong SO(d)/SO(d-1)$, where parameter $\lambda = \frac{d-2}{2}$ ($d \ge 3$). The framework establishes formal operator morphisms connecting representation geometry, quotient algebras, exact differential operators, self-adjoint Jacobi spectral matrices, two-endpoint singular asymptotics, and high-precision numerical solvers.
 
 ---
 
@@ -13,12 +13,12 @@ This document presents a mathematically closed VIII-Layer architectural framewor
   SO(d)/SO(d-1), Sym^n = ℋ_n ⊕ q Sym^{n-2}, Q^{d-2} ⊂ ℙ^{d-1}, R(Q)_n ≅ ℋ_n(ℂ^d)
         │
         ▼
-  Layer II. Spherical Fixed Line & Morphism Chain
-  V_n  ─P_K→  V_n^K = ℂ v_n  ──→  C^∞(K\G/K)  ──x=cosθ→  C^∞([-1, 1])
+  Layer II. Spherical Fixed Line, Rank-One Projector & Bi-K-Invariance
+  V_n  ─P_K→  V_n^K = ℂ v_n,  P_n = v_n ⊗ v_n^*,  ϕ_n(g) = Tr(P_n π_n(g)) ∈ C^∞(K\G/K) ≅ C^∞([-1, 1])
         │
         ▼
-  Layer III. Exact Operator Equivalence & Schrödinger Eigenvalues
-  L_x (Algebraic) ↔ L_θ (Radial) ↔ H_λ u_n = N_n^2 u_n,  N_n^2 = n(n+2λ) + λ^2
+  Layer III. Exact Operator Equivalence & Laplace-Beltrami Eigenvalues
+  -Δ_{S^{d-1}} ϕ_n = E_n ϕ_n  |  L_x ↔ L_θ ↔ H_λ u_n = N_n^2 u_n,  N_n^2 = E_n + λ^2
         │
         ▼
   Layer IV. Jacobi Spectral Operator & Unitary Matrix Realization
@@ -29,16 +29,16 @@ This document presents a mathematically closed VIII-Layer architectural framewor
   N = n + λ,  z_+ = N θ,  z_- = N (π - θ)
         │
         ▼
-  Layer VI. Uniform Asymptotic Expansion & Error Envelopes
-  F_comp = F_north + F_interior - F_overlap,  |R_K| ≤ B_K(n, θ, λ)
+  Layer VI. Two-Overlap Composite Uniform Asymptotic Expansion
+  F_comp = F_north + F_south + F_interior - F_{+,overlap} - F_{-,overlap},  |R_K| ≤ B_K(N, θ, λ)
         │
         ▼
   Layer VII. Numerical Execution & Backend Layer
   Recurrence ↔ Uniform Bessel ↔ Interior WKB  |  FLOAT32 / FLOAT64 / MPMATH / Q16.16 / LNS
         │
         ▼
-  Layer VIII. Verification Invariants & Structural Residuals
-  Exact Families (S^2, S^3) ↔ Analytic Derivatives ↔ Residuals (R_rec, R_ODE, R_Schr)
+  Layer VIII. Verification Invariants, Normalized Derivatives & Residual Matrix
+  Exact Families (S^2, S^3) ↔ Normalized Derivatives ϕ_n^{(k)}(x) ↔ Residuals (R_rec, R_ODE, R_Schr)
 ```
 
 ---
@@ -61,23 +61,27 @@ where $C_n^{(\lambda)}(1) = \frac{(2\lambda)_n}{n!} = \binom{n + 2\lambda - 1}{n
 
 ---
 
-## 3. Layer II: Spherical Fixed Line & Bi-$K$-Invariant Morphisms
+## 3. Layer II: Spherical Fixed Line, Rank-One Projector & Bi-$K$-Invariance
 
-The representation morphism chain connects abstract representation $V_n$, $K$-fixed lines $V_n^K$, and bi-$K$-invariant functions $\phi_n \in C^\infty(K \backslash G / K) \cong C^\infty([-1, 1])$:
-$$\boxed{V_n \xrightarrow{\;\;P_K\;\;} V_n^K = \mathbb{C} v_n \xrightarrow{v_n \mapsto \langle v_n, \pi_n(\cdot) v_n \rangle} C^\infty(K \backslash G / K) \xrightarrow{\;\;x=\cos\theta\;\;} C^\infty([-1, 1])}.$$
+The representation morphism chain connects abstract representation $V_n$, $K$-fixed lines $V_n^K$, rank-one projectors $P_n$, and bi-$K$-invariant functions $\phi_n \in C^\infty(K \backslash G / K) \cong C^\infty([-1, 1])$:
+$$\boxed{V_n \xrightarrow{\;\;P_K\;\;} V_n^K = \mathbb{C} v_n \xrightarrow{\;\;P_n = v_n \otimes v_n^*\;\;} C^\infty(K \backslash G / K) \xrightarrow{\;\;x=\cos\theta\;\;} C^\infty([-1, 1])}.$$
 
-Under $K = SO(d-1)$, $P_K = \int_K \pi_n(k) dk$ projects onto the 1-dimensional $K$-fixed subspace $V_n^K = \mathbb{C} v_n$ ($\|v_n\| = 1$). The zonal spherical function is bi-$K$-invariant ($\phi_n(k_1 g k_2) = \phi_n(g)$):
-$$\phi_n(gK) = \langle v_n, \pi_n(g) v_n \rangle, \qquad \phi_n(eK) = 1, \qquad \phi_n(x) = \frac{C_n^{(\lambda)}(x)}{C_n^{(\lambda)}(1)}.$$
+Under $K = SO(d-1)$, $P_K = \int_K \pi_n(k) dk$ projects onto the 1-dimensional $K$-fixed subspace $V_n^K = \mathbb{C} v_n$ ($\|v_n\| = 1$). With rank-one projector $P_n = v_n \otimes v_n^*$, the zonal spherical function is bi-$K$-invariant ($\phi_n(k_1 g k_2) = \phi_n(g)$):
+$$\phi_n(g) = \operatorname{Tr}(P_n \pi_n(g)) = \langle v_n, \pi_n(g) v_n \rangle, \qquad \phi_n(e) = 1, \qquad \phi_n(x) = \frac{C_n^{(\lambda)}(x)}{C_n^{(\lambda)}(1)}.$$
 
 ---
 
-## 4. Layer III: Exact Operator Equivalence & Canonical Verification Families
+## 4. Layer III: Exact Operator Equivalence & Laplace-Beltrami Eigenvalues
 
-1. **Algebraic Differential Operator $L_x$:** $(1 - x^2) \phi'' - (2\lambda + 1)x \phi' + E_n \phi = 0$, where $E_n = n(n + 2\lambda)$.
+On the sphere $S^{d-1}$, $\phi_n$ is the eigenfunction of the Laplace-Beltrami operator $-\Delta_{S^{d-1}}$:
+$$-\Delta_{S^{d-1}} \phi_n = E_n \phi_n, \qquad E_n = n(n + 2\lambda).$$
+
+Equivalence across three operator representations:
+1. **Algebraic Differential Operator $L_x$:** $(1 - x^2) \phi'' - (2\lambda + 1)x \phi' + E_n \phi = 0$.
 2. **Compact Radial Operator $L_\theta$:** $\phi'' + 2\lambda \cot\theta \, \phi' + E_n \phi = 0$.
 3. **Sturm-Liouville Hamiltonian $H_\lambda$:** $-u_n'' + \lambda(\lambda - 1)\csc^2\theta \, u_n = N_n^2 u_n$, where $u_n = (\sin\theta)^\lambda \phi_n$ and $N_n^2 = (n + \lambda)^2 = E_n + \lambda^2$.
 
-### Canonical Verification Families
+### Mandatory Canonical Verification Families
 - **$\lambda = 1/2$ (Sphere $S^2$):** $\phi_n(x) = P_n(x)$ (Legendre polynomials).
 - **$\lambda = 1$ (Sphere $S^3$):** $H_1 = -\partial_\theta^2 \implies \phi_n(\theta) = \frac{\sin((n+1)\theta)}{(n+1)\sin\theta}$.
 
@@ -93,29 +97,30 @@ Matrix invariants: $J = J^*, \|J\| = 1, \sigma(J) = [-1, 1]$. Sanity check for $
 
 ---
 
-## 6. Layer V & VI: Singular Scaling & Uniform Asymptotics
+## 6. Layer V & VI: Singular Scaling & Two-Overlap Uniform Asymptotics
 
 Define 3D phase space $(n, \theta, \lambda)$ boundary coordinates:
 $$z_+ = N \theta, \qquad z_- = N(\pi - \theta), \qquad N = n + \lambda.$$
 
-Uniform expansion:
-$$\phi_n(\theta) = F_{\text{north}}(z_+) + F_{\text{south}}(z_-) + F_{\text{interior}}(N, \theta) - F_{\text{overlap}} + R_K(n, \theta, \lambda).$$
+Two-overlap composite uniform expansion:
+$$F_{\text{comp}} = F_{\text{north}}(z_+) + F_{\text{south}}(z_-) + F_{\text{interior}}(N, \theta) - F_{+,\text{overlap}}(z_+) - F_{-,\text{overlap}}(z_-),$$
+where $\phi_n(\theta) = F_{\text{comp}}^{(K)}(n, \theta, \lambda) + R_K(n, \theta, \lambda)$ with error bound $|R_K| \le B_K(N, \theta, \lambda)$.
 
-Regimes:
-- **$\mathcal{R}_{\text{north}}$ ($z_+ \le 10$):** $\phi_n(\theta) \sim \mathcal{J}_{\lambda-1/2}(z_+)$.
-- **$\mathcal{R}_{\text{south}}$ ($z_- \le 10$):** $\phi_n(\theta) \sim (-1)^n \mathcal{J}_{\lambda-1/2}(z_-)$.
-- **$\mathcal{R}_{\text{interior}}$ ($z_+, z_- > N^\alpha$):** $\phi_n(\theta) \sim \frac{2^\lambda \Gamma(\lambda + 1/2)}{\sqrt{\pi}} \frac{\cos(N\theta - \lambda\pi/2)}{(N\sin\theta)^\lambda}$.
-- **$\mathcal{R}_{\text{transition}}$:** Boundary transition region evaluated via composite matched asymptotics.
+Regimes (with policy dispatcher thresholds $Z_B = 10$, $Z_I$):
+- **$\mathcal{R}_{\text{north}}$ ($z_+ \le Z_B$):** $\phi_n(\theta) \sim \mathcal{J}_{\lambda-1/2}(z_+)$.
+- **$\mathcal{R}_{\text{south}}$ ($z_- \le Z_B$):** $\phi_n(\theta) \sim (-1)^n \mathcal{J}_{\lambda-1/2}(z_-)$.
+- **$\mathcal{R}_{\text{interior}}$ ($z_+, z_- \ge Z_I$):** $\phi_n(\theta) \sim \frac{2^\lambda \Gamma(\lambda + 1/2)}{\sqrt{\pi}} \frac{\cos(N\theta - \lambda\pi/2)}{(N\sin\theta)^\lambda}$.
+- **$\mathcal{R}_{\text{transition}}$:** Evaluated via two-overlap composite matched asymptotics $F_{\text{comp}}$.
 
 ---
 
 ## 7. Layer VII & VIII: Numerical Backends & Structural Residuals
 
-### Verification Invariants & Exact Derivative Anchors
+### Exact Derivative Formula
+$$\phi_n^{(k)}(x) = \frac{d^k}{dx^k} \phi_n(x) = \frac{2^k (\lambda)_k}{C_n^{(\lambda)}(1)} C_{n-k}^{(\lambda+k)}(x), \qquad k \le n.$$
+
+### Verification Invariants & Structural Residuals
 - **Endpoint Anchors:** $\phi_n(1) = 1$, $\phi_n(-1) = (-1)^n$.
-- **Exact Normalized Derivative Anchors:**
-  $$\phi_n'(1) = \frac{n(n + 2\lambda)}{2\lambda + 1}, \qquad \phi_n'(-1) = (-1)^{n-1} \frac{n(n + 2\lambda)}{2\lambda + 1}.$$
-- **Analytic Derivative Recurrence:**
-  $$\frac{d^k}{dx^k} C_n^{(\lambda)}(x) = 2^k (\lambda)_k C_{n-k}^{(\lambda+k)}(x).$$
-- **Structural Residuals:**
+- **Exact Derivative Anchors:** $\phi_n'(1) = \frac{n(n + 2\lambda)}{2\lambda + 1}$, $\phi_n'(-1) = (-1)^{n-1} \frac{n(n + 2\lambda)}{2\lambda + 1}$.
+- **Structural Residual Matrix:**
   $$R_{\text{rec}}(x) \approx 0, \qquad R_{\text{ODE}}(x) = (1-x^2)\hat{\phi}'' - (2\lambda+1)x\hat{\phi}' + E_n\hat{\phi} \approx 0, \qquad R_{\text{Schr}}(\theta) \approx 0.$$

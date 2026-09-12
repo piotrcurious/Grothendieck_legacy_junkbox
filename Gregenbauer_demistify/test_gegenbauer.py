@@ -6,7 +6,7 @@ Independent, non-tautological test suite verifying the Gegenbauer demystificatio
 2. Decoupled Hilbert Series Dimensions and Normalization Identity
 3. Quadric Quotient Ring Normal Forms, Idempotency, Exact Fractions & Invariants Modulo q
 4. Symmetric Orthonormal Jacobi Matrix Coefficients alpha_n (alpha_0 = 1/sqrt(3) for Legendre)
-5. Analytic Gegenbauer Derivatives & Structural ODE Residuals
+5. Normalized Gegenbauer Derivatives phi_n^{(k)}(x) & Structural ODE Residuals
 6. High-Precision Ground Truth Reference via mpmath (100+ bits)
 7. Two-Endpoint Bessel Layer Tests (North & South Poles)
 8. Empirical Asymptotic Convergence Exponents (WKB p > 0.9, Bessel p > 1.7)
@@ -56,6 +56,7 @@ from Gregenbauer_demistify.gegenbauer_asymptotics import (
     gegenbauer_derivative,
     interior_wkb_approx,
     log_c_n_1,
+    normalized_phi_derivative,
     normalized_phi_recurrence,
     orthogonality_norm,
     south_pole_bessel_leading,
@@ -155,6 +156,18 @@ def test_exact_derivative_anchors():
             num_deriv_m1 = (phi_m1_h - phi_m1) / h
             exact_deriv_m1 = ((-1.0) ** (n - 1)) * (n * (n + 2.0 * lambda_val)) / (2.0 * lambda_val + 1.0)
             assert np.isclose(num_deriv_m1, exact_deriv_m1, rtol=1e-4)
+
+
+def test_normalized_phi_derivative_evaluator():
+    """
+    Verifies normalized_phi_derivative(n, lambda, x, k) evaluator:
+      phi_n^{(k)}(1) == n(n + 2*lambda) / (2*lambda + 1).
+    """
+    n = 10
+    lambda_val = 1.5
+    d1 = normalized_phi_derivative(n, lambda_val, np.array([1.0]), k=1)[0]
+    expected_d1 = (n * (n + 2.0 * lambda_val)) / (2.0 * lambda_val + 1.0)
+    assert np.isclose(d1, expected_d1, rtol=1e-12)
 
 
 def test_analytic_gegenbauer_derivative_and_ode_residual():
