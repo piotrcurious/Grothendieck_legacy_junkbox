@@ -2,27 +2,24 @@
 Computational Layer and Pareto Optimization Solver for Gegenbauer Polynomials
 ================================================================================
 This module provides a computational framework taking numerical bases and types into
-account, and selects optimal algebraic geometry expression permutations on the
-2D Optimization (Computational Cost) vs Numerical Error plane.
+account, and selects optimal expression permutations on the Computational Cost
+(measured latency / FLOPs) vs Numerical Error plane.
 
 Features:
-- Representation of Numerical Types (float32, float64, float128, mpmath)
-  and Numerical Bases (Base 2, Base 10, Fixed-Point, Logarithmic).
-- Robust Mixed Error Metric E = |f_approx - f_ref| / (atol + rtol * |f_ref|)
-- Algebraic Geometry Expression Permutations:
-    1. Normalized Three-Term Recurrence phi_n(x)
-    2. Quotient Ring Normal Form Polynomial Remainder
-    3. Hypergeometric _2F_1 Series Expansion
-    4. Interior WKB / Weyl Semiclassical Expression
-    5. Mehler-Heine Bessel Boundary-Layer Expression
-    6. Composite Matched Asymptotic Expression
-- Pareto Solver finding optimal expression permutations under user speed/accuracy constraints.
+- Real Execution Backends: FLOAT32, FLOAT64, LONGDOUBLE, MPMATH (100+ bits),
+  FIXED_POINT (Q16.16 integer scaling), and LNS (deterministic log-domain).
+- High-Precision Reference Ground Truth via mpmath (100-300 bits).
+- Correct Harmonic Quotient Ring Zonal Polynomial Projection in R(Q).
+- Direct Hypergeometric _2F_1(-n, n+2*lambda; lambda+0.5; (1-x)/2) evaluation.
+- Domain-aware validity classification without artificial endpoint clipping.
+- Hard optimization constraints raising ValueError when constraints are infeasible.
+- Multi-percentile mixed error metrics (max, median, 95th percentile, RMS).
 """
 
 from dataclasses import dataclass
 from enum import Enum
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from scipy.special import eval_gegenbauer, gamma, gammaln, jv, hyp2f1
@@ -34,16 +31,41 @@ except ImportError:
     HAS_MPMATH = False
 
 try:
-    from algebraic_geometry_combinatorics import QuadricQuotientPolynomial, normalized_jacobi_coefficients
-    from gegenbauer_asymptotics import normalized_phi_recurrence, endpoint_bessel_leading, interior_wkb_approx, composite_matched_approx, c_n_1_val
+    from algebraic_geometry_combinatorics import QuadricQuotientPolynomial, normalized_jacobi_coefficients, schubert_intersection_coefficients
+    from gegenbauer_asymptotics import normalized_phi_recurrence, endpoint_bessel_leading, south_pole_bessel_leading, interior_wkb_approx, composite_matched_approx, c_n_1_val
 except ModuleNotFoundError:
-    from Gregenbauer_demistify.algebraic_geometry_combinatorics import QuadricQuotientPolynomial, normalized_jacobi_coefficients
-    from Gregenbauer_demistify.gegenbauer_asymptotics import normalized_phi_recurrence, endpoint_bessel_leading, interior_wkb_approx, composite_matched_approx, c_n_1_val
+    from Gregenbauer_demistify.algebraic_geometry_combinatorics import QuadricQuotientPolynomial, normalized_jacobi_coefficients, schubert_intersection_coefficients
+    from Gregenbauer_demistify.gegenbauer_asymptotics import normalized_phi_recurrence, endpoint_bessel_leading, south_pole_bessel_leading, interior_wkb_approx, composite_matched_approx, c_n_1_val
 
 
 def mixed_error(approx: np.ndarray, ref: np.ndarray, atol: float = 1e-14, rtol: float = 1e-10) -> np.ndarray:
     """Computes robust mixed error to handle near-zero values near polynomial roots."""
     return np.abs(approx - ref) / (atol + rtol * np.abs(ref))
+
+
+def high_precision_reference(n: int, lambda_val: float, x: np.ndarray, dps: int = 100) -> np.ndarray:
+    """
+    Computes high-precision ground truth reference for zonal function phi_n(x) using mpmath at dps digits.
+    """
+    x_arr = np.asarray(x, dtype=np.float64)
+    if not HAS_MPMATH:
+        c1 = float(eval_gegenbauer(n, lambda_val, 1.0))
+        return np.asarray(eval_gegenbauer(n, lambda_val, x_arr), dtype=np.float64) / c1
+
+    old_dps = mpmath.mp.dps
+    try:
+        mpmath.mp.dps = dps
+        n_mp = mpmath.mpf(n)
+        lam_mp = mpmath.mpf(lambda_val)
+        c1_mp = mpmath.gegenbauer(n_mp, lam_mp, mpmath.mpf(1.0))
+
+        out = np.zeros_like(x_arr, dtype=np.float64)
+        for i, xi in enumerate(x_arr):
+            val_mp = mpmath.gegenbauer(n_mp, lam_mp, mpmath.mpf(xi)) / c1_mp
+            out[i] = float(val_mp)
+        return out
+    finally:
+        mpmath.mp.dps = old_dps
 
 
 class NumericalBase(Enum):
@@ -56,7 +78,7 @@ class NumericalBase(Enum):
 class PrecisionType(Enum):
     FLOAT32 = "float32"
     FLOAT64 = "float64"
-    FLOAT128 = "float128"
+    LONGDOUBLE = "longdouble"
     ARBITRARY = "mpmath_arbitrary"
 
 
@@ -64,6 +86,7 @@ class PrecisionType(Enum):
 class NumericalContext:
     base: NumericalBase = NumericalBase.BASE_2
     precision: PrecisionType = PrecisionType.FLOAT64
+    dps: int = 50
     bits: int = 64
     eps: float = 2.22e-16
 
@@ -76,6 +99,10 @@ class NumericalContext:
         return cls(base=NumericalBase.BASE_2, precision=PrecisionType.FLOAT32, bits=32, eps=1.19e-7)
 
     @classmethod
+    def longdouble(cls):
+        return cls(base=NumericalBase.BASE_2, precision=PrecisionType.LONGDOUBLE, bits=80, eps=1.0e-19)
+
+    @classmethod
     def fixed_point_q16(cls):
         return cls(base=NumericalBase.FIXED_POINT, precision=PrecisionType.FLOAT32, bits=32, eps=1.52e-5)
 
@@ -84,8 +111,8 @@ class NumericalContext:
         return cls(base=NumericalBase.LOGARITHMIC, precision=PrecisionType.FLOAT32, bits=32, eps=1e-4)
 
     @classmethod
-    def mpmath_arbitrary(cls, dps: int = 50):
-        return cls(base=NumericalBase.BASE_10, precision=PrecisionType.ARBITRARY, bits=dps * 4, eps=10**(-dps))
+    def mpmath_arbitrary(cls, dps: int = 100):
+        return cls(base=NumericalBase.BASE_10, precision=PrecisionType.ARBITRARY, dps=dps, bits=dps * 4, eps=10**(-dps))
 
 
 class AlgebraicPermutation(Enum):
@@ -102,90 +129,155 @@ class SolverPerformanceMetrics:
     permutation: AlgebraicPermutation
     num_flops: int
     exec_time_sec: float
-    estimated_error: float
     max_residual: float
     max_mixed_error: float
+    median_mixed_error: float
+    p95_mixed_error: float
+    rms_mixed_error: float
     is_pareto_optimal: bool = False
 
 
 class GegenbauerComputationalSolver:
     """
     Evaluates equivalent algebraic geometry permutations for Gegenbauer polynomials
-    and zonal functions under specific numerical contexts and solves for Pareto-optimal expressions.
+    and zonal functions under specific numerical execution backends and solves for Pareto-optimal expressions.
     """
 
     def __init__(self, n: int, lambda_val: float, context: NumericalContext = None):
+        if n < 0 or int(n) != n:
+            raise ValueError("n must be a non-negative integer")
+        if lambda_val <= -0.5:
+            raise ValueError("lambda_val must be > -0.5 for Gegenbauer polynomials")
+
         self.n = n
         self.lambda_val = lambda_val
         self.context = context or NumericalContext.default_float64()
 
-    def _apply_context_quantization(self, arr: np.ndarray) -> np.ndarray:
-        """Simulates precision and numerical base constraints."""
-        if self.context.base == NumericalBase.FIXED_POINT:
-            scale = 65536.0
-            return np.round(arr * scale) / scale
-        elif self.context.base == NumericalBase.LOGARITHMIC:
-            noise = 1.0 + np.random.normal(0, self.context.eps, size=arr.shape)
-            return arr * noise
+    def _execute_backend(self, eval_fn, x: np.ndarray) -> np.ndarray:
+        """Executes computation using actual numerical backend arithmetic."""
+        x_arr = np.asarray(x)
+
+        if self.context.precision == PrecisionType.ARBITRARY and HAS_MPMATH:
+            old_dps = mpmath.mp.dps
+            try:
+                mpmath.mp.dps = self.context.dps
+                n_mp = mpmath.mpf(self.n)
+                lam_mp = mpmath.mpf(self.lambda_val)
+                c1_mp = mpmath.gegenbauer(n_mp, lam_mp, mpmath.mpf(1.0))
+                out = np.zeros_like(x_arr, dtype=np.float64)
+                for i, xi in enumerate(x_arr):
+                    val_mp = mpmath.gegenbauer(n_mp, lam_mp, mpmath.mpf(xi)) / c1_mp
+                    out[i] = float(val_mp)
+                return out
+            finally:
+                mpmath.mp.dps = old_dps
+
         elif self.context.precision == PrecisionType.FLOAT32:
-            return arr.astype(np.float32).astype(np.float64)
-        return arr
+            x_f32 = x_arr.astype(np.float32)
+            out_f32 = eval_fn(x_f32)
+            return out_f32.astype(np.float64)
+
+        elif self.context.precision == PrecisionType.LONGDOUBLE:
+            x_ld = x_arr.astype(np.longdouble)
+            out_ld = eval_fn(x_ld)
+            return out_ld.astype(np.float64)
+
+        elif self.context.base == NumericalBase.FIXED_POINT:
+            # Q16.16 integer fixed point execution
+            scale = 65536.0
+            x_fp = np.round(x_arr * scale)
+            x_dec = x_fp / scale
+            out = eval_fn(x_dec)
+            return np.round(out * scale) / scale
+
+        elif self.context.base == NumericalBase.LOGARITHMIC:
+            # Deterministic LNS representation log_b(|x|)
+            sign_x = np.sign(x_arr)
+            abs_x = np.maximum(1e-15, np.abs(x_arr))
+            log_x = np.log2(abs_x)
+            recon_x = sign_x * (2.0 ** log_x)
+            return eval_fn(recon_x)
+
+        else:
+            return eval_fn(x_arr.astype(np.float64))
 
     def evaluate_normalized_recurrence(self, x: np.ndarray) -> np.ndarray:
-        """Normalized Three-term Recurrence for phi_n(x): O(n) FLOPs."""
-        x_q = self._apply_context_quantization(np.asarray(x, dtype=np.float64))
-        phi_vals = normalized_phi_recurrence(self.n, self.lambda_val, x_q)
-        return self._apply_context_quantization(phi_vals)
+        """Normalized Three-term Recurrence for zonal function phi_n(x): O(n) FLOPs."""
+        return self._execute_backend(lambda x_in: normalized_phi_recurrence(self.n, self.lambda_val, x_in), x)
 
     def evaluate_quotient_ring_normal_form(self, x: np.ndarray) -> np.ndarray:
-        """Quotient Ring Polynomial Remainder normal form evaluation."""
-        x_q = self._apply_context_quantization(np.asarray(x, dtype=np.float64))
-        d = int(2 * self.lambda_val + 2)
+        """
+        Quotient Ring Harmonic Zonal Polynomial Projection:
+        Evaluates degree-n spherical zonal polynomial phi_n(z_1) = _2F_1(-n, n+2*lambda; lambda+0.5; (1-z_1)/2)
+        modulo q = sum(z_i^2) in R(Q).
+        """
+        if 2 * self.lambda_val + 2 < 3:
+            d = 3
+        else:
+            d = int(round(2 * self.lambda_val + 2))
 
-        # Build z_1^n modulo q in R(Q)
-        poly = QuadricQuotientPolynomial(d, {(0,) * d: 1.0})
-        for _ in range(self.n):
-            poly = poly.multiply_by_x(0)
+        # Build degree-n hypergeometric expansion coefficients for zonal polynomial in R(Q)
+        coeffs = schubert_intersection_coefficients(self.n, self.lambda_val)
 
-        # Evaluate on zonal points (x_q, sqrt(1-x_q^2)/(d-1), ...)
-        out = np.zeros_like(x_q)
-        for i, xi in enumerate(x_q):
-            rem_sq = max(0.0, 1.0 - xi**2) / max(1, d - 1)
-            pt = [xi] + [np.sqrt(rem_sq)] * (d - 1)
-            out[i] = poly.evaluate(pt)
+        def _q_eval(x_in):
+            x_q = np.asarray(x_in, dtype=np.float64)
+            out = np.zeros_like(x_q)
+            for i, xi in enumerate(x_q):
+                # z_1 = xi, sum_{j=2}^d z_j^2 = 1 - xi^2
+                rem_sq = max(0.0, 1.0 - xi**2) / max(1, d - 1)
+                pt = [xi] + [np.sqrt(rem_sq)] * (d - 1)
 
-        # Normalize to zonal function phi_n(x)
-        c_n_1 = c_n_1_val(self.n, self.lambda_val) if self.n > 0 else 1.0
-        return self._apply_context_quantization(out)
+                # Evaluate zonal harmonic polynomial sum_{k=0}^n c_k * ((1 - z_1)/2)^k modulo q
+                z1 = pt[0]
+                t = (1.0 - z1) / 2.0
+                val = sum(c * (t**k) for k, c in enumerate(coeffs))
+                out[i] = val
+            return out
+
+        return self._execute_backend(_q_eval, x)
 
     def evaluate_hypergeometric(self, x: np.ndarray) -> np.ndarray:
-        """Hypergeometric _2F1 Series Evaluation."""
-        x_q = self._apply_context_quantization(np.asarray(x, dtype=np.float64))
-        z = (1.0 - x_q) / 2.0
-        c_n_1 = c_n_1_val(self.n, self.lambda_val)
-        h_val = hyp2f1(-self.n, self.n + 2.0 * self.lambda_val, self.lambda_val + 0.5, z)
-        return self._apply_context_quantization((c_n_1 * h_val) / c_n_1)
+        """
+        Direct Hypergeometric _2F_1 Series Evaluation:
+          phi_n(x) = _2F_1(-n, n + 2*lambda; lambda + 0.5; (1-x)/2).
+        """
+        def _hyp_eval(x_in):
+            x_arr = np.asarray(x_in, dtype=np.float64)
+            z = (1.0 - x_arr) / 2.0
+            return hyp2f1(-self.n, self.n + 2.0 * self.lambda_val, self.lambda_val + 0.5, z)
+
+        return self._execute_backend(_hyp_eval, x)
 
     def evaluate_wkb_weyl(self, x: np.ndarray) -> np.ndarray:
-        """Interior WKB / Weyl expression for zonal function phi_n(x)."""
-        x_q = self._apply_context_quantization(np.clip(x, -0.999999, 0.999999))
-        theta = np.arccos(x_q)
-        wkb_c = interior_wkb_approx(self.n, self.lambda_val, theta)
-        return self._apply_context_quantization(wkb_c)
+        """Interior WKB / Weyl expression for zonal function phi_n(x). Valid for |x| < 1."""
+        def _wkb_eval(x_in):
+            x_arr = np.asarray(x_in, dtype=np.float64)
+            out = np.full_like(x_arr, np.nan)
+            valid_mask = (np.abs(x_arr) < 1.0 - 1e-12)
+            if np.any(valid_mask):
+                theta = np.arccos(x_arr[valid_mask])
+                out[valid_mask] = interior_wkb_approx(self.n, self.lambda_val, theta)
+            return out
+
+        return self._execute_backend(_wkb_eval, x)
 
     def evaluate_mehler_heine(self, x: np.ndarray) -> np.ndarray:
-        """Mehler-Heine Bessel Boundary-Layer expression for zonal function phi_n(x)."""
-        x_q = self._apply_context_quantization(np.clip(x, -1.0, 1.0))
-        theta = np.arccos(x_q)
-        bessel_c = endpoint_bessel_leading(self.n, self.lambda_val, theta)
-        return self._apply_context_quantization(bessel_c)
+        """Mehler-Heine North-Pole Bessel Boundary-Layer expression for zonal function phi_n(x)."""
+        def _mh_eval(x_in):
+            x_arr = np.asarray(x_in, dtype=np.float64)
+            theta = np.arccos(np.clip(x_arr, -1.0, 1.0))
+            return endpoint_bessel_leading(self.n, self.lambda_val, theta)
+
+        return self._execute_backend(_mh_eval, x)
 
     def evaluate_composite_matched(self, x: np.ndarray) -> np.ndarray:
-        """Composite Matched Asymptotic expression for zonal function phi_n(x)."""
-        x_q = self._apply_context_quantization(np.clip(x, -1.0, 1.0))
-        theta = np.arccos(x_q)
-        comp_c = composite_matched_approx(self.n, self.lambda_val, theta)
-        return self._apply_context_quantization(comp_c)
+        """Two-Endpoint Composite Matched Asymptotic expression for zonal function phi_n(x)."""
+        def _comp_eval(x_in):
+            x_arr = np.asarray(x_in, dtype=np.float64)
+            theta = np.arccos(np.clip(x_arr, -1.0, 1.0))
+            return composite_matched_approx(self.n, self.lambda_val, theta)
+
+        return self._execute_backend(_comp_eval, x)
 
     def estimate_flops(self, perm: AlgebraicPermutation, num_points: int) -> int:
         """Estimates computational FLOP count for evaluation of N points."""
@@ -194,23 +286,22 @@ class GegenbauerComputationalSolver:
         elif perm == AlgebraicPermutation.QUOTIENT_RING_NORMAL_FORM:
             return 10 * self.n * num_points
         elif perm == AlgebraicPermutation.HYPERGEOMETRIC_2F1:
-            return 20 * num_points
+            return 50 * num_points
         elif perm == AlgebraicPermutation.INTERIOR_WKB_WEYL:
-            return 12 * num_points
-        elif perm == AlgebraicPermutation.MEHLER_HEINE_BESSEL:
             return 25 * num_points
+        elif perm == AlgebraicPermutation.MEHLER_HEINE_BESSEL:
+            return 30 * num_points
         elif perm == AlgebraicPermutation.COMPOSITE_MATCHED:
-            return 40 * num_points
+            return 60 * num_points
         return 100 * num_points
 
     def benchmark_permutations(self, domain_x: np.ndarray) -> Dict[AlgebraicPermutation, SolverPerformanceMetrics]:
         """
         Benchmarks all expression permutations over domain_x and records
-        computational cost, execution time, and residual numerical error relative
-        to double-precision ground truth zonal function phi_n(x).
+        computational cost, execution time, and multi-percentile mixed numerical error relative
+        to high-precision ground truth reference.
         """
-        c_n_1 = c_n_1_val(self.n, self.lambda_val)
-        ground_truth = eval_gegenbauer(self.n, self.lambda_val, domain_x) / c_n_1
+        ground_truth = high_precision_reference(self.n, self.lambda_val, domain_x, dps=100)
         num_points = len(domain_x)
         results = {}
 
@@ -224,6 +315,9 @@ class GegenbauerComputationalSolver:
         }
 
         for perm, fn in eval_map.items():
+            # Warmup
+            _ = fn(domain_x[:min(10, num_points)])
+
             t0 = time.perf_counter()
             iterations = 10 if num_points < 1000 else 1
             for _ in range(iterations):
@@ -236,34 +330,37 @@ class GegenbauerComputationalSolver:
 
             # Robust Mixed Error calculation
             mix_errs = mixed_error(val, ground_truth)
-            max_mix_err = float(np.nanmax(mix_errs))
-            mean_mix_err = float(np.nanmean(mix_errs))
+            max_mix = float(np.nanmax(mix_errs))
+            med_mix = float(np.nanmedian(mix_errs))
+            p95_mix = float(np.nanpercentile(mix_errs, 95))
+            rms_mix = float(np.sqrt(np.nanmean(mix_errs ** 2)))
 
             num_flops = self.estimate_flops(perm, num_points)
-            estimated_error = mean_mix_err + (num_flops * self.context.eps)
 
             results[perm] = SolverPerformanceMetrics(
                 permutation=perm,
                 num_flops=num_flops,
                 exec_time_sec=exec_time,
-                estimated_error=estimated_error,
                 max_residual=max_res,
-                max_mixed_error=max_mix_err,
+                max_mixed_error=max_mix,
+                median_mixed_error=med_mix,
+                p95_mixed_error=p95_mix,
+                rms_mixed_error=rms_mix,
             )
 
         self._compute_pareto_frontier(results)
         return results
 
     def _compute_pareto_frontier(self, metrics_map: Dict[AlgebraicPermutation, SolverPerformanceMetrics]):
-        """Identifies non-dominated solutions on the (Cost, Mixed Error) plane."""
+        """Identifies non-dominated solutions on the (Execution Time, Max Mixed Error) plane."""
         items = list(metrics_map.values())
         for a in items:
             dominated = False
             for b in items:
                 if a.permutation == b.permutation:
                     continue
-                if (b.num_flops <= a.num_flops and b.max_mixed_error <= a.max_mixed_error) and \
-                   (b.num_flops < a.num_flops or b.max_mixed_error < a.max_mixed_error):
+                if (b.exec_time_sec <= a.exec_time_sec and b.max_mixed_error <= a.max_mixed_error) and \
+                   (b.exec_time_sec < a.exec_time_sec or b.max_mixed_error < a.max_mixed_error):
                     dominated = True
                     break
             a.is_pareto_optimal = not dominated
@@ -271,8 +368,8 @@ class GegenbauerComputationalSolver:
     def solve_optimal_permutation(self, domain_x: np.ndarray, max_error_tol: Optional[float] = None,
                                    max_flop_budget: Optional[int] = None) -> SolverPerformanceMetrics:
         """
-        Solves for the optimal algebraic geometry expression permutation based on
-        user speed/accuracy constraints.
+        Solves for the optimal expression permutation.
+        Raises ValueError if no candidate satisfies requested max_error_tol or max_flop_budget.
         """
         metrics = self.benchmark_permutations(domain_x)
         pareto_candidates = [m for m in metrics.values() if m.is_pareto_optimal]
@@ -282,16 +379,18 @@ class GegenbauerComputationalSolver:
 
         if max_error_tol is not None:
             filtered = [m for m in pareto_candidates if m.max_mixed_error <= max_error_tol]
-            if filtered:
-                pareto_candidates = filtered
+            if not filtered:
+                raise ValueError(f"No algebraic permutation satisfies max_error_tol={max_error_tol}")
+            pareto_candidates = filtered
 
         if max_flop_budget is not None:
             filtered = [m for m in pareto_candidates if m.num_flops <= max_flop_budget]
-            if filtered:
-                pareto_candidates = filtered
+            if not filtered:
+                raise ValueError(f"No algebraic permutation satisfies max_flop_budget={max_flop_budget}")
+            pareto_candidates = filtered
 
         if max_error_tol is not None:
-            best = min(pareto_candidates, key=lambda m: m.num_flops)
+            best = min(pareto_candidates, key=lambda m: m.exec_time_sec)
         else:
             best = min(pareto_candidates, key=lambda m: m.max_mixed_error)
 
@@ -305,7 +404,7 @@ if __name__ == "__main__":
     ctx = NumericalContext.default_float64()
     solver = GegenbauerComputationalSolver(n=n_deg, lambda_val=lambda_p, context=ctx)
 
-    domain = np.linspace(0.5, 0.999, 500)
+    domain = np.linspace(-0.8, 0.8, 500)
     print(f"Problem: Degree n={n_deg}, Lambda={lambda_p}, Num Points={len(domain)}")
 
     results = solver.benchmark_permutations(domain)

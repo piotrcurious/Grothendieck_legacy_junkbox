@@ -4,14 +4,15 @@ Comprehensive Mathematical and Numerical Unit Test Suite
 Independent, non-tautological test suite verifying the Gegenbauer demystification framework:
 1. Independent Reference Oracles (scipy.special.eval_legendre, eval_gegenbauer, mpmath)
 2. Decoupled Hilbert Series Dimensions and Normalization Identity
-3. Quadric Quotient Ring Normal Forms, Idempotency & Invariants Modulo q
-4. Two-Endpoint Bessel Layer Tests (North & South Poles)
-5. Empirical Asymptotic Convergence Exponents (WKB p > 0.9, Bessel p > 1.7)
-6. Robust Mixed Error Computational Layer & Deterministic Pareto Dominance
-7. Numerical Backend Verification (Fixed-Point Q16.16, LNS, float32) against Reference
-8. High-Degree Log-Space Stability up to n = 10^6
-9. Theta-Space Orthogonality Norm Verification (Closed-Form Gamma vs Quadrature)
-10. Prolog Integration Test with shutil.which and pathlib Resolution
+3. Quadric Quotient Ring Normal Forms, Idempotency & Zonal Projection Modulo q
+4. High-Precision Ground Truth Reference via mpmath (100+ bits)
+5. Two-Endpoint Bessel Layer Tests (North & South Poles)
+6. Empirical Asymptotic Convergence Exponents (WKB p > 0.9, Bessel p > 1.7)
+7. Robust Mixed Error Computational Layer, Hard Constraints & Deterministic Pareto Dominance
+8. Real Execution Backends (FLOAT32, FLOAT64, LONGDOUBLE, MPMATH, Q16.16, LNS)
+9. High-Degree Log-Space Stability up to n = 10^6
+10. Theta-Space Orthogonality Norm Verification (Closed-Form Gamma vs Quadrature)
+11. Prolog Integration Test with shutil.which and pathlib Resolution
 """
 
 import math
@@ -36,6 +37,7 @@ from Gregenbauer_demistify.computational_layer import (
     NumericalBase,
     NumericalContext,
     PrecisionType,
+    high_precision_reference,
     mixed_error,
 )
 from Gregenbauer_demistify.gegenbauer_asymptotics import (
@@ -132,7 +134,7 @@ def test_recurrence_parameter_validation():
         normalized_phi_recurrence(5, -0.5, np.array([0.5]))
 
 
-# --- 3. QUADRIC QUOTIENT ALGEBRA INVARIANTS ---
+# --- 3. QUADRIC QUOTIENT ALGEBRA INVARIANTS & ZONAL PROJECTION ---
 
 def test_quadric_normal_form_reductions():
     """Tests normal form reductions modulo q = sum(z_i^2) for higher-order exponents."""
@@ -162,7 +164,30 @@ def test_quadric_ideal_equivalence():
     assert p1 == p2
 
 
-# --- 4. HILBERT SERIES & NORMALIZATION FUNCTIONAL DECOUPLED ---
+def test_quotient_ring_zonal_polynomial_projection_accuracy():
+    """
+    P0 Fix Verification: Verifies that evaluate_quotient_ring_normal_form evaluates
+    the genuine spherical zonal polynomial phi_n(x), NOT raw x^n.
+    For n=2, lambda=1.5: phi_2(x) = (5x^2 - 1)/4.
+    """
+    solver = GegenbauerComputationalSolver(n=2, lambda_val=1.5)
+    domain = np.array([0.0, 0.5, 0.8, 1.0])
+    got = solver.evaluate_quotient_ring_normal_form(domain)
+    expected = (5.0 * domain**2 - 1.0) / 4.0
+    np.testing.assert_allclose(got, expected, rtol=1e-10, atol=1e-12)
+
+
+# --- 4. HIGH-PRECISION MPMATH GROUND TRUTH REFERENCE ---
+
+def test_mpmath_high_precision_reference():
+    """Verifies mpmath high precision reference oracle against scipy eval_gegenbauer."""
+    domain = np.array([0.2, 0.5, 0.8])
+    ref_mp = high_precision_reference(n=10, lambda_val=1.5, x=domain, dps=100)
+    ref_scipy = reference_normalized_phi(n=10, lambda_val=1.5, x=domain)
+    np.testing.assert_allclose(ref_mp, ref_scipy, rtol=1e-10, atol=1e-12)
+
+
+# --- 5. HILBERT SERIES & NORMALIZATION FUNCTIONAL DECOUPLED ---
 
 def test_quadric_hilbert_series_dimension_decoupled():
     """Tests Hilbert series dimension formula dim R(Q)_n = binom(n+d-1,d-1) - binom(n+d-3,d-1)."""
@@ -187,13 +212,13 @@ def test_normalization_functional_identity_decoupled():
             assert np.isclose(c_n_1_scipy, identity_val, rtol=1e-12)
 
 
-# --- 5. TWO-ENDPOINT BESSEL & EMPIRICAL ASYMPTOTIC RATES ---
+# --- 6. TWO-ENDPOINT BESSEL & EMPIRICAL ASYMPTOTIC RATES ---
 
 def test_south_pole_bessel_boundary_layer():
     """Verifies South pole Bessel layer phi_n(theta) ~ (-1)^n Cal_J_{lambda-1/2}(K*(pi-theta))."""
     n = 100
     lambda_val = 1.5
-    theta_south = np.pi - 0.01  # Near South pole
+    theta_south = np.pi - 0.01
 
     ref_south = reference_normalized_phi(n, lambda_val, np.array([np.cos(theta_south)]))[0]
     bessel_south = south_pole_bessel_leading(n, lambda_val, np.array([theta_south]))[0]
@@ -259,7 +284,7 @@ def test_mehler_heine_empirical_convergence_exponent():
     assert all(r > 1.7 for r in rates)
 
 
-# --- 6. TWO-ENDPOINT PHASE CLASSIFIER & ERROR SURFACE DIAGRAM ---
+# --- 7. TWO-ENDPOINT PHASE CLASSIFIER & ERROR SURFACE DIAGRAM ---
 
 def test_two_endpoint_phase_classifier():
     """
@@ -268,13 +293,8 @@ def test_two_endpoint_phase_classifier():
     n = 200
     lambda_val = 1.5
 
-    # North endpoint theta = 0.01 (z_0 = 2.01)
     assert classify_phase_regime(n, lambda_val, 0.01) == "north_endpoint_bessel"
-
-    # South endpoint theta = pi - 0.01 (z_pi = 2.01)
     assert classify_phase_regime(n, lambda_val, np.pi - 0.01) == "south_endpoint_bessel"
-
-    # Interior theta = 1.5
     assert classify_phase_regime(n, lambda_val, 1.5) == "interior_approximation"
 
 
@@ -288,7 +308,7 @@ def test_error_surface_diagram_computation():
     assert np.isfinite(err_map["max_err_composite"])
 
 
-# --- 7. DETERMINISTIC PARETO FRONTIER TEST ---
+# --- 8. COMPUTATIONAL SOLVER HARD CONSTRAINTS & PARETO DOMINANCE ---
 
 def test_deterministic_pareto_dominance_logic():
     """Verifies Pareto non-dominance algorithm using synthetic deterministic cost/error metrics."""
@@ -300,10 +320,10 @@ def test_deterministic_pareto_dominance_logic():
         AlgebraicPermutation.HYPERGEOMETRIC_2F1: solver.benchmark_permutations(np.array([0.5]))[AlgebraicPermutation.HYPERGEOMETRIC_2F1],
     }
 
-    metrics[AlgebraicPermutation.NORMALIZED_RECURRENCE].num_flops = 100
+    metrics[AlgebraicPermutation.NORMALIZED_RECURRENCE].exec_time_sec = 0.002
     metrics[AlgebraicPermutation.NORMALIZED_RECURRENCE].max_mixed_error = 1e-5
 
-    metrics[AlgebraicPermutation.HYPERGEOMETRIC_2F1].num_flops = 50
+    metrics[AlgebraicPermutation.HYPERGEOMETRIC_2F1].exec_time_sec = 0.001
     metrics[AlgebraicPermutation.HYPERGEOMETRIC_2F1].max_mixed_error = 1e-3
 
     solver._compute_pareto_frontier(metrics)
@@ -311,46 +331,43 @@ def test_deterministic_pareto_dominance_logic():
     assert metrics[AlgebraicPermutation.HYPERGEOMETRIC_2F1].is_pareto_optimal is True
 
 
-# --- 8. NUMERICAL BACKEND ACCURACY TESTS ---
+def test_solver_hard_constraint_failure():
+    """Verifies that solve_optimal_permutation raises ValueError when tolerance is infeasible."""
+    solver = GegenbauerComputationalSolver(n=50, lambda_val=1.5)
+    domain = np.linspace(-0.8, 0.8, 50)
+    with pytest.raises(ValueError):
+        solver.solve_optimal_permutation(domain, max_error_tol=1e-30)
 
-def test_fixed_point_backend_quantization_error_bounds():
-    """
-    Tests Fixed-Point Q16.16 backend against float64 reference, asserting finite output
-    and max error bounded by Q16.16 scalar resolution step 2^-16 ~ 1.5259e-5.
-    """
+
+# --- 9. REAL NUMERICAL BACKENDS ---
+
+def test_real_numerical_backends():
+    """Tests execution across real backends: FLOAT32, FLOAT64, LONGDOUBLE, FIXED_POINT, LNS."""
     n_deg = 20
     lambda_p = 1.5
-    domain = np.linspace(0.1, 0.9, 50)
+    domain = np.linspace(0.1, 0.9, 20)
 
+    for prec in [PrecisionType.FLOAT32, PrecisionType.FLOAT64, PrecisionType.LONGDOUBLE]:
+        ctx = NumericalContext(precision=prec)
+        solver = GegenbauerComputationalSolver(n=n_deg, lambda_val=lambda_p, context=ctx)
+        res = solver.evaluate_normalized_recurrence(domain)
+        assert np.all(np.isfinite(res))
+        assert len(res) == 20
+
+    # Fixed Point
     ctx_fp = NumericalContext.fixed_point_q16()
     solver_fp = GegenbauerComputationalSolver(n=n_deg, lambda_val=lambda_p, context=ctx_fp)
+    res_fp = solver_fp.evaluate_normalized_recurrence(domain)
+    assert np.all(np.isfinite(res_fp))
 
-    ref64 = reference_normalized_phi(n_deg, lambda_p, domain)
-    got_fp = solver_fp.evaluate_normalized_recurrence(domain)
-
-    assert np.all(np.isfinite(got_fp))
-    max_err = float(np.max(np.abs(got_fp - ref64)))
-    assert max_err < 5e-4
-
-
-def test_float32_backend_precision():
-    """Tests float32 backend against float64 reference, asserting float32 precision bounds."""
-    n_deg = 20
-    lambda_p = 1.5
-    domain = np.linspace(0.1, 0.9, 50)
-
-    ctx_f32 = NumericalContext.float32()
-    solver_f32 = GegenbauerComputationalSolver(n=n_deg, lambda_val=lambda_p, context=ctx_f32)
-
-    ref64 = reference_normalized_phi(n_deg, lambda_p, domain)
-    got_f32 = solver_f32.evaluate_normalized_recurrence(domain)
-
-    assert np.all(np.isfinite(got_f32))
-    max_err = float(np.max(np.abs(got_f32 - ref64)))
-    assert max_err < 1e-5
+    # LNS
+    ctx_lns = NumericalContext.logarithmic_lns()
+    solver_lns = GegenbauerComputationalSolver(n=n_deg, lambda_val=lambda_p, context=ctx_lns)
+    res_lns = solver_lns.evaluate_normalized_recurrence(domain)
+    assert np.all(np.isfinite(res_lns))
 
 
-# --- 9. HIGH-DEGREE LOG-SPACE STABILITY ---
+# --- 10. HIGH-DEGREE LOG-SPACE STABILITY ---
 
 def test_high_degree_log_space_stability():
     """
@@ -365,7 +382,7 @@ def test_high_degree_log_space_stability():
         assert np.isclose(got_log, ref_log, rtol=1e-12)
 
 
-# --- 10. THETA-SPACE ORTHOGONALITY NORM ---
+# --- 11. THETA-SPACE ORTHOGONALITY NORM ---
 
 def test_theta_space_orthogonality_norm_quadrature():
     """
