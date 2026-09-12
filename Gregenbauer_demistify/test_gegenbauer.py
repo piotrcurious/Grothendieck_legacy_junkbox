@@ -7,6 +7,7 @@ Tests:
 3. Quadric Quotient Ring Normal Forms & Hilbert Series Data
 4. Scaled Normalized Recurrence & Exact Anchors (S^2, S^3, S^4)
 5. Computational Layer & Pareto Optimization Solver across bases/types
+6. Antipodal Parity Symmetry and Boundary Endpoint Conditions
 """
 
 import subprocess
@@ -31,6 +32,7 @@ from Gregenbauer_demistify.computational_layer import (
     NumericalContext,
     AlgebraicPermutation,
     NumericalBase,
+    PrecisionType,
     HAS_MPMATH,
 )
 from Gregenbauer_demistify.algebraic_geometry_combinatorics import (
@@ -63,6 +65,17 @@ def test_quotient_ring_normal_form_algebra():
     # Test multiplication by x (z_1)
     poly_x = poly.multiply_by_x(0)
     assert poly_x.terms == {(3, 0, 0): -1.0, (1, 2, 0): -1.0}
+
+
+def test_higher_dimensional_quadric_normal_form():
+    """Verifies normal form reductions for d=4 and d=5 quadrics."""
+    # d=4: z_4^2 reduces to -(z_1^2 + z_2^2 + z_3^2)
+    poly_d4 = QuadricQuotientPolynomial(4, {(0, 0, 0, 2): 1.0})
+    assert poly_d4.terms == {(2, 0, 0, 0): -1.0, (0, 2, 0, 0): -1.0, (0, 0, 2, 0): -1.0}
+
+    # d=5: z_5^2 reduces to -(z_1^2 + z_2^2 + z_3^2 + z_4^2)
+    poly_d5 = QuadricQuotientPolynomial(5, {(0, 0, 0, 0, 2): 1.0})
+    assert len(poly_d5.terms) == 4
 
 
 def test_hilbert_series_dimension_growth():
@@ -100,6 +113,24 @@ def test_exact_anchors_and_scaled_recurrence():
     phi_s4 = normalized_phi_recurrence(n, 1.5, np.array([x]))[0]
     anchor_s4 = exact_anchor_eval(d=5, n=n, theta=theta)
     assert abs(phi_s4 - anchor_s4) < 1e-12
+
+
+def test_antipodal_parity_and_endpoints():
+    """Verifies antipodal parity phi_n(-x) = (-1)^n phi_n(x) and phi_n(1) = 1."""
+    x = 0.6
+    lambda_val = 1.5
+
+    for n in [3, 4, 15, 16]:
+        phi_pos = normalized_phi_recurrence(n, lambda_val, np.array([x]))[0]
+        phi_neg = normalized_phi_recurrence(n, lambda_val, np.array([-x]))[0]
+        expected_neg = ((-1.0) ** n) * phi_pos
+        assert abs(phi_neg - expected_neg) < 1e-12
+
+        # Endpoints
+        phi_1 = normalized_phi_recurrence(n, lambda_val, np.array([1.0]))[0]
+        phi_m1 = normalized_phi_recurrence(n, lambda_val, np.array([-1.0]))[0]
+        assert abs(phi_1 - 1.0) < 1e-12
+        assert abs(phi_m1 - ((-1.0) ** n)) < 1e-12
 
 
 def test_operational_phase_map_regimes():
@@ -215,3 +246,16 @@ def test_computational_solver_numerical_bases():
     res_lns = solver_lns.evaluate_normalized_recurrence(domain)
     assert ctx_lns.base == NumericalBase.LOGARITHMIC
     assert len(res_lns) == 50
+
+
+def test_float32_precision_quantization():
+    """Tests computational solver under float32 context."""
+    n_deg = 20
+    lambda_p = 1.5
+    domain = np.linspace(0.2, 0.8, 20)
+
+    ctx_f32 = NumericalContext.float32()
+    solver = GegenbauerComputationalSolver(n=n_deg, lambda_val=lambda_p, context=ctx_f32)
+    res = solver.evaluate_normalized_recurrence(domain)
+    assert ctx_f32.precision == PrecisionType.FLOAT32
+    assert len(res) == 20
