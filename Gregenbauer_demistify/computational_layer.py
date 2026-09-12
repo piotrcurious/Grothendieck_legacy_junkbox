@@ -8,6 +8,7 @@ account, and selects optimal algebraic geometry expression permutations on the
 Features:
 - Representation of Numerical Types (float32, float64, float128, mpmath)
   and Numerical Bases (Base 2, Base 10, Fixed-Point, Logarithmic).
+- Robust Mixed Error Metric E = |f_approx - f_ref| / (atol + rtol * |f_ref|)
 - Algebraic Geometry Expression Permutations:
     1. Normalized Three-Term Recurrence phi_n(x)
     2. Quotient Ring Normal Form Polynomial Remainder
@@ -38,6 +39,11 @@ try:
 except ModuleNotFoundError:
     from Gregenbauer_demistify.algebraic_geometry_combinatorics import QuadricQuotientPolynomial, normalized_jacobi_coefficients
     from Gregenbauer_demistify.gegenbauer_asymptotics import normalized_phi_recurrence, mehler_heine_bessel_approx, interior_wkb_approx, composite_matched_approx, c_n_1_val
+
+
+def mixed_error(approx: np.ndarray, ref: np.ndarray, atol: float = 1e-14, rtol: float = 1e-10) -> np.ndarray:
+    """Computes robust mixed error to handle near-zero values near polynomial roots."""
+    return np.abs(approx - ref) / (atol + rtol * np.abs(ref))
 
 
 class NumericalBase(Enum):
@@ -98,7 +104,7 @@ class SolverPerformanceMetrics:
     exec_time_sec: float
     estimated_error: float
     max_residual: float
-    max_relative_error: float
+    max_mixed_error: float
     is_pareto_optimal: bool = False
 
 
@@ -231,13 +237,13 @@ class GegenbauerComputationalSolver:
             abs_res = np.abs(val - ground_truth)
             max_res = float(np.max(abs_res))
 
-            scale = np.maximum(np.abs(ground_truth), 1e-12)
-            rel_errs = abs_res / scale
-            max_rel_err = float(np.max(rel_errs))
-            mean_rel_err = float(np.mean(rel_errs))
+            # Robust Mixed Error calculation
+            mix_errs = mixed_error(val, ground_truth)
+            max_mix_err = float(np.max(mix_errs))
+            mean_mix_err = float(np.mean(mix_errs))
 
             num_flops = self.estimate_flops(perm, num_points)
-            estimated_error = mean_rel_err + (num_flops * self.context.eps)
+            estimated_error = mean_mix_err + (num_flops * self.context.eps)
 
             results[perm] = SolverPerformanceMetrics(
                 permutation=perm,
@@ -245,22 +251,22 @@ class GegenbauerComputationalSolver:
                 exec_time_sec=exec_time,
                 estimated_error=estimated_error,
                 max_residual=max_res,
-                max_relative_error=max_rel_err,
+                max_mixed_error=max_mix_err,
             )
 
         self._compute_pareto_frontier(results)
         return results
 
     def _compute_pareto_frontier(self, metrics_map: Dict[AlgebraicPermutation, SolverPerformanceMetrics]):
-        """Identifies non-dominated solutions on the (Cost, Relative Error) plane."""
+        """Identifies non-dominated solutions on the (Cost, Mixed Error) plane."""
         items = list(metrics_map.values())
         for a in items:
             dominated = False
             for b in items:
                 if a.permutation == b.permutation:
                     continue
-                if (b.num_flops <= a.num_flops and b.max_relative_error <= a.max_relative_error) and \
-                   (b.num_flops < a.num_flops or b.max_relative_error < a.max_relative_error):
+                if (b.num_flops <= a.num_flops and b.max_mixed_error <= a.max_mixed_error) and \
+                   (b.num_flops < a.num_flops or b.max_mixed_error < a.max_mixed_error):
                     dominated = True
                     break
             a.is_pareto_optimal = not dominated
@@ -278,7 +284,7 @@ class GegenbauerComputationalSolver:
             pareto_candidates = list(metrics.values())
 
         if max_error_tol is not None:
-            filtered = [m for m in pareto_candidates if m.max_relative_error <= max_error_tol]
+            filtered = [m for m in pareto_candidates if m.max_mixed_error <= max_error_tol]
             if filtered:
                 pareto_candidates = filtered
 
@@ -290,7 +296,7 @@ class GegenbauerComputationalSolver:
         if max_error_tol is not None:
             best = min(pareto_candidates, key=lambda m: m.num_flops)
         else:
-            best = min(pareto_candidates, key=lambda m: m.max_relative_error)
+            best = min(pareto_candidates, key=lambda m: m.max_mixed_error)
 
         return best
 
@@ -307,11 +313,11 @@ if __name__ == "__main__":
 
     results = solver.benchmark_permutations(domain)
     print("\n[Benchmark Results across All 6 Algebraic Permutations]")
-    print(f"{'Algebraic Permutation':<38} | {'FLOPs':>8} | {'Exec Time (ms)':>14} | {'Max Rel Error':>14} | {'Pareto Optimal'}")
-    print("-" * 95)
+    print(f"{'Algebraic Permutation':<38} | {'FLOPs':>8} | {'Exec Time (ms)':>14} | {'Max Mixed Error':>15} | {'Pareto Optimal'}")
+    print("-" * 96)
     for perm, m in results.items():
         time_ms = m.exec_time_sec * 1000.0
-        print(f"{m.permutation.value:<38} | {m.num_flops:8d} | {time_ms:14.4f} | {m.max_relative_error:14.6e} | {str(m.is_pareto_optimal)}")
+        print(f"{m.permutation.value:<38} | {m.num_flops:8d} | {time_ms:14.4f} | {m.max_mixed_error:15.6e} | {str(m.is_pareto_optimal)}")
 
     optimal = solver.solve_optimal_permutation(domain, max_error_tol=1e-2)
     print(f"\nOptimal Permutation selected for max_error_tol=1e-2: {optimal.permutation.value}")

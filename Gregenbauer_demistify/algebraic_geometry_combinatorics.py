@@ -5,6 +5,7 @@ This module implements exact algebraic geometry and combinatorial operations
 for Gegenbauer polynomials and complex projective quadric hypersurfaces Q_{d-2} c P^{d-1}:
 1. Hilbert Polynomial h^0(Q_{d-2}, O(n)) via Hilbert series H_{R(Q)}(t) = (1-t^2)/(1-t)^d
 2. Quotient Ring Normal Forms: Polynomial remainder modulo q = sum(z_i^2) in C[z_1,...,z_d]/(q)
+   Note: Normal form reduction convention maps z_d^2 -> -(z_1^2 + ... + z_{d-1}^2)
 3. Normalized Jacobi Recurrence Coefficients for Gelfand algebra multiplication M_x: phi_n -> x * phi_n
 4. Pochhammer Symbols and Hypergeometric Series Expansion Coefficients
 """
@@ -32,7 +33,7 @@ class QuadricQuotientPolynomial:
     """
     Represents a polynomial in C[z_1, ..., z_d] / (q) where q = z_1^2 + ... + z_d^2.
     Monomials are represented as tuples of non-negative integers (a_1, ..., a_d).
-    Normal form reduces z_d^2 -> -(z_1^2 + ... + z_{d-1}^2).
+    Normal form reduction convention recursively replaces z_d^2 -> -(z_1^2 + ... + z_{d-1}^2).
     """
 
     def __init__(self, d: int, terms: Dict[Tuple[int, ...], float] = None):
@@ -51,27 +52,22 @@ class QuadricQuotientPolynomial:
         # Check if reduction modulo q = z_1^2 + ... + z_d^2 is needed (using z_d^2 = -(z_1^2 + ... + z_{d-1}^2))
         exp_list = list(exp_tuple)
         if exp_list[-1] >= 2:
-            # z_d^2 = -sum_{i=1}^{d-1} z_i^2
-            p_rem = exp_list[-1] // 2
-            r_rem = exp_list[-1] % 2
-            base_tuple = list(exp_list)
-            base_tuple[-1] = r_rem
-
-            # Expand (-1)^p_rem (z_1^2 + ... + z_{d-1}^2)^p_rem
-            # For simplicity, reduce step-by-step for p_rem = 1
-            for p in range(p_rem):
-                # Subtract 2 from z_d and multiply by -sum_{i=1}^{d-1} z_i^2
-                for i in range(self.d - 1):
-                    new_exp = list(exp_tuple)
-                    new_exp[-1] -= 2
-                    new_exp[i] += 2
-                    self._add_term(tuple(new_exp), -coeff)
-                return
+            # Replace one instance of z_d^2 with -sum_{i=1}^{d-1} z_i^2 and reduce recursively
+            remainder_z_d = exp_list[-1] - 2
+            for i in range(self.d - 1):
+                new_exp = list(exp_list)
+                new_exp[-1] = remainder_z_d
+                new_exp[i] += 2
+                self._add_term(tuple(new_exp), -coeff)
         else:
             t = tuple(exp_list)
             self.terms[t] = self.terms.get(t, 0.0) + coeff
             if abs(self.terms[t]) < 1e-12:
                 del self.terms[t]
+
+    def normal_form(self) -> 'QuadricQuotientPolynomial':
+        """Returns the idempotent normal form polynomial in R(Q)."""
+        return QuadricQuotientPolynomial(self.d, self.terms)
 
     def multiply_by_x(self, var_idx: int = 0) -> 'QuadricQuotientPolynomial':
         """Multiplies by variable z_{var_idx+1} (default z_1 = x) in quotient ring R(Q)."""
@@ -93,6 +89,20 @@ class QuadricQuotientPolynomial:
                 monomial_val *= (var_val ** exp)
             total += coeff * monomial_val
         return total
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, QuadricQuotientPolynomial):
+            return False
+        if self.d != other.d:
+            return False
+        # Compare terms within 1e-10 tolerance
+        all_keys = set(self.terms.keys()).union(set(other.terms.keys()))
+        for k in all_keys:
+            v1 = self.terms.get(k, 0.0)
+            v2 = other.terms.get(k, 0.0)
+            if abs(v1 - v2) > 1e-10:
+                return False
+        return True
 
 
 def pieri_coefficients(n: int, lambda_val: float) -> Tuple[float, float]:
