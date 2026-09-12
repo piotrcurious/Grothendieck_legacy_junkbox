@@ -1,4 +1,4 @@
-# 3_repair.md: Algebraic Geometry and Combinatorics Repair Plan
+# 3_repair.md: VIII-Layer Architectural Pipeline and Operator Refinement Repair Plan
 
 Ogólnie: kod ma poprawny rdzeń matematyczny dla przypadku sferycznego
 
@@ -828,9 +828,9 @@ Decimal
 float
 sympy.Number
 
-i funkcje niech działają nad abstrakcyjnym skalarami tam, where to sensowne.
+i funkcje niech działają nad abstrakcyjnym skalarami tam, gdzie to sensowne.
 
-Najprostitzy upgrade:
+Najprostszy upgrade:
 
 Number = Union[int, Fraction, float]
 
