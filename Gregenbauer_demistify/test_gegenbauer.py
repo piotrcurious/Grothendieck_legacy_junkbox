@@ -5,15 +5,16 @@ Independent, non-tautological test suite verifying the Gegenbauer demystificatio
 1. Independent Reference Oracles (scipy.special.eval_legendre, eval_gegenbauer, mpmath)
 2. Decoupled Hilbert Series Dimensions and Normalization Identity
 3. Quadric Quotient Ring Normal Forms, Idempotency, Exact Fractions & Invariants Modulo q
-4. High-Precision Ground Truth Reference via mpmath (100+ bits)
-5. Two-Endpoint Bessel Layer Tests (North & South Poles)
-6. Empirical Asymptotic Convergence Exponents (WKB p > 0.9, Bessel p > 1.7)
-7. Robust Mixed Error Computational Layer, Hard Constraints & Deterministic Pareto Dominance
-8. Real Execution Backends (FLOAT32, FLOAT64, LONGDOUBLE, MPMATH, Q16.16, LNS)
-9. High-Degree Log-Space Stability up to n = 10^6
-10. Theta-Space Orthogonality Norm Verification (Closed-Form Gamma vs Quadrature)
-11. Exact Derivative Anchors phi_n'(1) = n(n+2*lambda)/(2*lambda+1)
-12. Prolog Integration Test with shutil.which and pathlib Resolution
+4. Symmetric Orthonormal Jacobi Matrix Coefficients alpha_n
+5. High-Precision Ground Truth Reference via mpmath (100+ bits)
+6. Two-Endpoint Bessel Layer Tests (North & South Poles)
+7. Empirical Asymptotic Convergence Exponents (WKB p > 0.9, Bessel p > 1.7)
+8. Robust Mixed Error Computational Layer, Hard Constraints & Deterministic Pareto Dominance
+9. Real Execution Backends (FLOAT32, FLOAT64, LONGDOUBLE, MPMATH, Q16.16, LNS)
+10. High-Degree Log-Space Stability up to n = 10^6
+11. Theta-Space Orthogonality Norm Verification (Closed-Form Gamma vs Quadrature)
+12. Exact Derivative Anchors phi_n'(1) and phi_n'(-1)
+13. Prolog Integration Test with shutil.which and pathlib Resolution
 """
 
 from fractions import Fraction
@@ -31,6 +32,7 @@ from Gregenbauer_demistify.algebraic_geometry_combinatorics import (
     lambda_for_sphere,
     normalized_gegenbauer_2f1_coefficients,
     normalized_jacobi_coefficients,
+    orthonormal_jacobi_coefficients,
     pochhammer,
     quadric_hilbert_series_dim,
 )
@@ -89,7 +91,7 @@ def test_prolog_formal_proof():
     assert "ALL REGISTERED EXECUTABLE CONSISTENCY CHECKS PASSED SUCCESSFULLY!" in res.stdout
 
 
-# --- 2. INDEPENDENT ANCHOR TESTS ---
+# --- 2. INDEPENDENT ANCHOR TESTS & DERIVATIVES ---
 
 def test_s2_anchor_against_independent_legendre():
     """
@@ -129,19 +131,36 @@ def test_s4_anchor_against_independent_scipy_ratio():
         assert np.isclose(got, ref, rtol=1e-12, atol=1e-13)
 
 
-def test_exact_derivative_anchor():
+def test_exact_derivative_anchors():
     """
-    Verifies exact derivative anchor identity phi_n'(1) = n(n + 2*lambda) / (2*lambda + 1)
-    using numerical finite differentiation at x=1.
+    Verifies exact derivative anchor identities:
+      phi_n'(1) = n(n + 2*lambda) / (2*lambda + 1)
+      phi_n'(-1) = (-1)^{n-1} * n(n + 2*lambda) / (2*lambda + 1)
     """
     h = 1e-7
     for n in [1, 2, 5, 10]:
         for lambda_val in [0.5, 1.0, 1.5]:
+            # North pole x=1
             phi_1 = normalized_phi_recurrence(n, lambda_val, np.array([1.0]))[0]
             phi_1_h = normalized_phi_recurrence(n, lambda_val, np.array([1.0 - h]))[0]
-            num_deriv = (phi_1 - phi_1_h) / h
-            exact_deriv = (n * (n + 2.0 * lambda_val)) / (2.0 * lambda_val + 1.0)
-            assert np.isclose(num_deriv, exact_deriv, rtol=1e-4)
+            num_deriv_1 = (phi_1 - phi_1_h) / h
+            exact_deriv_1 = (n * (n + 2.0 * lambda_val)) / (2.0 * lambda_val + 1.0)
+            assert np.isclose(num_deriv_1, exact_deriv_1, rtol=1e-4)
+
+            # South pole x=-1
+            phi_m1 = normalized_phi_recurrence(n, lambda_val, np.array([-1.0]))[0]
+            phi_m1_h = normalized_phi_recurrence(n, lambda_val, np.array([-1.0 + h]))[0]
+            num_deriv_m1 = (phi_m1_h - phi_m1) / h
+            exact_deriv_m1 = ((-1.0) ** (n - 1)) * (n * (n + 2.0 * lambda_val)) / (2.0 * lambda_val + 1.0)
+            assert np.isclose(num_deriv_m1, exact_deriv_m1, rtol=1e-4)
+
+
+def test_orthonormal_jacobi_matrix_symmetry():
+    """Verifies symmetric orthonormal Jacobi matrix subdiagonal coefficients alpha_n."""
+    for n in range(1, 10):
+        alpha_n = orthonormal_jacobi_coefficients(n, 1.5)
+        assert np.isfinite(alpha_n)
+        assert alpha_n > 0.0
 
 
 def test_recurrence_parameter_validation():
