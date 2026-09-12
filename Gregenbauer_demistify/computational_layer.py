@@ -31,10 +31,10 @@ except ImportError:
     HAS_MPMATH = False
 
 try:
-    from algebraic_geometry_combinatorics import QuadricQuotientPolynomial, normalized_jacobi_coefficients, schubert_intersection_coefficients
+    from algebraic_geometry_combinatorics import QuadricQuotientPolynomial, normalized_jacobi_coefficients, normalized_gegenbauer_2f1_coefficients
     from gegenbauer_asymptotics import normalized_phi_recurrence, endpoint_bessel_leading, south_pole_bessel_leading, interior_wkb_approx, composite_matched_approx, c_n_1_val
 except ModuleNotFoundError:
-    from Gregenbauer_demistify.algebraic_geometry_combinatorics import QuadricQuotientPolynomial, normalized_jacobi_coefficients, schubert_intersection_coefficients
+    from Gregenbauer_demistify.algebraic_geometry_combinatorics import QuadricQuotientPolynomial, normalized_jacobi_coefficients, normalized_gegenbauer_2f1_coefficients
     from Gregenbauer_demistify.gegenbauer_asymptotics import normalized_phi_recurrence, endpoint_bessel_leading, south_pole_bessel_leading, interior_wkb_approx, composite_matched_approx, c_n_1_val
 
 
@@ -216,18 +216,15 @@ class GegenbauerComputationalSolver:
         else:
             d = int(round(2 * self.lambda_val + 2))
 
-        # Build degree-n hypergeometric expansion coefficients for zonal polynomial in R(Q)
-        coeffs = schubert_intersection_coefficients(self.n, self.lambda_val)
+        coeffs = normalized_gegenbauer_2f1_coefficients(self.n, self.lambda_val)
 
         def _q_eval(x_in):
             x_q = np.asarray(x_in, dtype=np.float64)
             out = np.zeros_like(x_q)
             for i, xi in enumerate(x_q):
-                # z_1 = xi, sum_{j=2}^d z_j^2 = 1 - xi^2
                 rem_sq = max(0.0, 1.0 - xi**2) / max(1, d - 1)
                 pt = [xi] + [np.sqrt(rem_sq)] * (d - 1)
 
-                # Evaluate zonal harmonic polynomial sum_{k=0}^n c_k * ((1 - z_1)/2)^k modulo q
                 z1 = pt[0]
                 t = (1.0 - z1) / 2.0
                 val = sum(c * (t**k) for k, c in enumerate(coeffs))
@@ -315,7 +312,6 @@ class GegenbauerComputationalSolver:
         }
 
         for perm, fn in eval_map.items():
-            # Warmup
             _ = fn(domain_x[:min(10, num_points)])
 
             t0 = time.perf_counter()
@@ -328,7 +324,6 @@ class GegenbauerComputationalSolver:
             abs_res = np.abs(val - ground_truth)
             max_res = float(np.nanmax(abs_res))
 
-            # Robust Mixed Error calculation
             mix_errs = mixed_error(val, ground_truth)
             max_mix = float(np.nanmax(mix_errs))
             med_mix = float(np.nanmedian(mix_errs))
