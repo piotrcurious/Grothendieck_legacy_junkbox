@@ -10,6 +10,7 @@
     binom/3,
     gegenbauer_val/4,
     gegenbauer_val_exact_rational/4,
+    gegenbauer_val_modular/5,
     normalized_phi_val/4,
     assert_schrodinger_energy_shift/2,
     assert_dim_v_n_identity/4,
@@ -17,6 +18,7 @@
     assert_normalized_recurrence/4,
     assert_derivative_anchor/3,
     assert_ode_second_derivative/4,
+    assert_modular_congruence/5,
     select_numerical_regime/4,
     run_all_proofs/0
 ]).
@@ -100,6 +102,28 @@ gegenbauer_rational_loop(K, N, Lambda, X, Ck1, Ck0, Val) :-
     K1 is K + 1,
     gegenbauer_rational_loop(K1, N, Lambda, X, Ck2, Ck1, Val).
 
+% --- 3c. Modular Ring Arithmetic Z/Mod Z ---
+
+gegenbauer_val_modular(0, _Lambda, _X, _Mod, 1) :- !.
+gegenbauer_val_modular(1, Lambda, X, Mod, Val) :- !, Val is (2 * Lambda * X) mod Mod.
+gegenbauer_val_modular(N, Lambda, X, Mod, Val) :-
+    integer(N), N >= 2,
+    C0 is 1 mod Mod,
+    C1 is (2 * Lambda * X) mod Mod,
+    gegenbauer_modular_loop(2, N, Lambda, X, Mod, C1, C0, Val).
+
+gegenbauer_modular_loop(K, N, _Lambda, _X, _Mod, Ck1, _Ck0, Val) :-
+    K > N, !, Val = Ck1.
+gegenbauer_modular_loop(K, N, Lambda, X, Mod, Ck1, Ck0, Val) :-
+    K =< N,
+    % Invert K modulo Mod via Fermat / Euclid:
+    KInv is pow(K, Mod - 2) mod Mod,
+    Term1 is (2 * (K + Lambda - 1) * X * Ck1) mod Mod,
+    Term2 is ((K + 2 * Lambda - 2) * Ck0) mod Mod,
+    Ck2 is (((Term1 - Term2) mod Mod + Mod) * KInv) mod Mod,
+    K1 is K + 1,
+    gegenbauer_modular_loop(K1, N, Lambda, X, Mod, Ck2, Ck1, Val).
+
 normalized_phi_val(N, Lambda, X, Val) :-
     gegenbauer_val(N, Lambda, X, Cn),
     gegenbauer_val(N, Lambda, 1.0, Cn1),
@@ -177,6 +201,17 @@ assert_ode_second_derivative(N, Lambda, X, Tol) :-
     Diff is abs(YSecondODE - YSecondShifted),
     Diff < Tol.
 
+assert_modular_congruence(N, Lambda, X, Mod, ValMod) :-
+    integer(N), N >= 0,
+    integer(Mod), Mod > 1,
+    gegenbauer_val_exact_rational(N, Lambda, X, ValExact),
+    Num is numerator(ValExact),
+    Den is denominator(ValExact),
+    DenInv is pow(Den, Mod - 2) mod Mod,
+    ExpectedMod is ((Num mod Mod + Mod) * DenInv) mod Mod,
+    gegenbauer_val_modular(N, Lambda, X, Mod, ValMod),
+    ValMod =:= ExpectedMod.
+
 % --- 5. Layer V: Two-Endpoint Phase Map Selection ---
 
 select_numerical_regime(N, Lambda, Theta, Regime) :-
@@ -226,6 +261,9 @@ test(exact_rational_evaluation) :-
 
 test(ode_second_derivative_identity) :-
     assert_ode_second_derivative(5, 1.5, 0.4, 1e-10).
+
+test(modular_congruence_rns) :-
+    assert_modular_congruence(5, 1, 2, 10007, 780).
 
 test(s2_s3_s4_exact_anchors) :-
     N = 10, Theta = 0.5, X = cos(Theta),

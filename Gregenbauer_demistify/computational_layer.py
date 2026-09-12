@@ -31,10 +31,10 @@ except ImportError:
     HAS_MPMATH = False
 
 try:
-    from algebraic_geometry_combinatorics import QuadricQuotientPolynomial, normalized_jacobi_coefficients, normalized_gegenbauer_2f1_coefficients
+    from algebraic_geometry_combinatorics import QuadricQuotientPolynomial, normalized_jacobi_coefficients, normalized_gegenbauer_2f1_coefficients, modular_gegenbauer_recurrence, rns_crt_gegenbauer_eval
     from gegenbauer_asymptotics import normalized_phi_recurrence, endpoint_bessel_leading, south_pole_bessel_leading, interior_wkb_approx, composite_matched_approx, c_n_1_val
 except ModuleNotFoundError:
-    from Gregenbauer_demistify.algebraic_geometry_combinatorics import QuadricQuotientPolynomial, normalized_jacobi_coefficients, normalized_gegenbauer_2f1_coefficients
+    from Gregenbauer_demistify.algebraic_geometry_combinatorics import QuadricQuotientPolynomial, normalized_jacobi_coefficients, normalized_gegenbauer_2f1_coefficients, modular_gegenbauer_recurrence, rns_crt_gegenbauer_eval
     from Gregenbauer_demistify.gegenbauer_asymptotics import normalized_phi_recurrence, endpoint_bessel_leading, south_pole_bessel_leading, interior_wkb_approx, composite_matched_approx, c_n_1_val
 
 
@@ -74,6 +74,7 @@ class NumericalBase(Enum):
     FIXED_POINT = "Fixed-Point (Q16.16)"
     LOGARITHMIC = "Logarithmic Number System (LNS)"
     FIELD_EXTENSION = "Field Extension Q(lambda, x)"
+    MODULAR_RNS = "Modulus Residue Number System (RNS/CRT)"
 
 
 class PrecisionType(Enum):

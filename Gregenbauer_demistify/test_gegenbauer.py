@@ -35,11 +35,13 @@ from Gregenbauer_demistify.algebraic_geometry_combinatorics import (
     exact_rational_gegenbauer_second_derivative,
     gauss_gegenbauer_quadrature,
     lambda_for_sphere,
+    modular_gegenbauer_recurrence,
     normalized_gegenbauer_2f1_coefficients,
     normalized_jacobi_coefficients,
     orthonormal_jacobi_coefficients,
     pochhammer,
     quadric_hilbert_series_dim,
+    rns_crt_gegenbauer_eval,
 )
 from Gregenbauer_demistify.computational_layer import (
     AlgebraicPermutation,
@@ -526,3 +528,17 @@ def test_gauss_gegenbauer_quadrature_precision():
     integral_approx = np.sum(weights * (nodes ** 4))
     exact_integral = 4.0 / 35.0
     assert np.isclose(integral_approx, exact_integral, rtol=1e-12, atol=1e-13)
+
+
+def test_modular_rns_crt_exact_recovery():
+    """
+    Verifies exact integer recovery via Residue Number System (RNS) and Chinese Remainder Theorem (CRT).
+    C_5^(1)(2) = 780.
+    Moduli primes: [10007, 10009]
+    """
+    n, lam, x = 5, 1, 2
+    exact_val = int(exact_rational_gegenbauer(n, lam, x))
+    assert exact_val == 780
+
+    rns_crt_val = rns_crt_gegenbauer_eval(n, lam, x, moduli=[10007, 10009])
+    assert rns_crt_val == exact_val

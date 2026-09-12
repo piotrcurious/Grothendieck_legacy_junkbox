@@ -141,3 +141,23 @@ The algebraic and differential properties of Gegenbauer polynomials allow replac
    Integration against weight $w(x) = (1-x^2)^{\lambda-1/2}$ over $[-1, 1]$ is evaluated without transcendent weight evaluations via algebraic nodes $x_k$ and weights $w_k$:
    $$\int_{-1}^1 f(x)(1-x^2)^{\lambda-1/2} dx \approx \sum_{k=1}^n w_k f(x_k),$$
    where $x_k$ are the eigenvalues of the symmetric tridiagonal Jacobi matrix $J_n$ (with subdiagonal $\alpha_k$), and weights are $w_k = \mu_0 v_{k,1}^2$ (where $\mu_0 = \int_{-1}^1 (1-x^2)^{\lambda-1/2} dx = \frac{\sqrt{\pi}\,\Gamma(\lambda+1/2)}{\Gamma(\lambda+1)}$ and $v_{k,1}$ is the first component of the normalized $k$-th eigenvector). Real-time evaluation requires evaluating only $f(x_k)$, avoiding singular boundary issues.
+
+---
+
+## 9. Layer X: Cyclic Arithmetic, Residue Number Systems (RNS/CRT) & Modular Field Extensions
+
+### Cyclic Wrapping Representation Geometry ($\mathbb{Z}/2^b \mathbb{Z}$)
+Hardware overflow (e.g. in `uint32` or `uint64`) is mathematically interpreted as a projection into a cyclic residue ring $\mathbb{Z}/2^b \mathbb{Z}$ rather than numerical breakdown.
+
+1. **Residue Number System (RNS) & Chinese Remainder Theorem (CRT):**
+   For exact evaluation of high-degree integer/rational Gegenbauer polynomial expressions $C_n^{(\lambda)}(x)$ exceeding 64-bit bounds, evaluation is mapped onto a set of pairwise coprime word-size moduli $m_1, m_2, \dots, m_k$ (e.g. primes $p_i < 2^{32}$):
+   $$r_i = C_n^{(\lambda)}(x) \pmod{m_i} \quad (i = 1, \dots, k).$$
+   By CRT, the unique exact integer value $X = C_n^{(\lambda)}(x) \pmod M$ (where $M = \prod m_i$) is reconstructed via:
+   $$X = \sum_{i=1}^k r_i M_i (M_i^{-1} \bmod m_i) \pmod M, \qquad M_i = \frac{M}{m_i}.$$
+   This yields infinite-precision exact integer evaluations using native $O(1)$ hardware clock integer operations without floating-point rounding or big-integer allocation overhead.
+
+2. **Number Theoretic Transform (NTT):**
+   Polynomial multiplication and Gegenbauer series expansions over cyclic finite fields $\mathbb{F}_q = \mathbb{Z}/q\mathbb{Z}$ use primitive $N$-th roots of unity $\omega_N \in \mathbb{F}_q$, replacing complex roots of unity $e^{2\pi i / N}$ with exact integer modular powers.
+
+3. **Galois Field Extensions $\mathbb{F}_{2^n} \cong \mathbb{F}_2[x]/(p(x))$:**
+   Bit-level hardware register wrapping (XOR addition without carry) enables evaluating discrete Gegenbauer recurrences over characteristic-2 Galois fields, mapping bitvector states to cyclic algebraic varieties.

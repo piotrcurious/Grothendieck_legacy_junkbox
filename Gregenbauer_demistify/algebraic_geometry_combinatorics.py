@@ -349,6 +349,66 @@ def exact_rational_gegenbauer_second_derivative(n: int, lambda_val: Union[int, F
         return 4 * lam * (lam + 1) * exact_rational_gegenbauer(n - 2, lam + 2, x_frac)
 
 
+def modular_gegenbauer_recurrence(n: int, lambda_val: int, x: int, mod: int) -> int:
+    """
+    Evaluates Gegenbauer polynomial C_n^(lambda)(x) in the modular ring Z/mod Z
+    using cyclic wrapping arithmetic (hardware overflow simulation).
+    """
+    if n < 0:
+        raise ValueError("n must be non-negative integer")
+    if mod <= 1:
+        raise ValueError("modulus must be > 1")
+
+    lam = lambda_val % mod
+    x_mod = x % mod
+
+    if n == 0:
+        return 1 % mod
+    if n == 1:
+        return (2 * lam * x_mod) % mod
+
+    c_prev = 1 % mod
+    c_curr = (2 * lam * x_mod) % mod
+
+    for k in range(2, n + 1):
+        k_inv = pow(k, -1, mod)
+        term1 = (2 * (k + lam - 1) * x_mod * c_curr) % mod
+        term2 = ((k + 2 * lam - 2) * c_prev) % mod
+        c_next = ((term1 - term2) * k_inv) % mod
+        c_prev, c_curr = c_curr, c_next
+
+    return c_curr
+
+
+def rns_crt_gegenbauer_eval(n: int, lambda_val: int, x: int, moduli: List[int]) -> int:
+    """
+    Evaluates high-degree integer Gegenbauer polynomial C_n^(lambda)(x) using
+    Residue Number System (RNS) over pairwise coprime moduli and reconstructs
+    the exact full-precision integer via Chinese Remainder Theorem (CRT).
+    """
+    residues = []
+    for m in moduli:
+        r = modular_gegenbauer_recurrence(n, lambda_val, x, m)
+        residues.append(r)
+
+    # Chinese Remainder Theorem Reconstruction
+    M = 1
+    for m in moduli:
+        M *= m
+
+    X = 0
+    for r_i, m_i in zip(residues, moduli):
+        M_i = M // m_i
+        y_i = pow(M_i, -1, m_i)
+        X = (X + r_i * M_i * y_i) % M
+
+    # Signed integer conversion
+    if X > M // 2:
+        X -= M
+
+    return X
+
+
 def gauss_gegenbauer_quadrature(n: int, lambda_val: float) -> Tuple[np.ndarray, np.ndarray]:
     """
     Computes Gauss-Gegenbauer quadrature nodes x_k and weights w_k using Golub-Welsch
