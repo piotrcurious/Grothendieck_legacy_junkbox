@@ -78,7 +78,7 @@ def test_prolog_formal_proof():
     cmd = [swipl_bin, "-g", "run_all_proofs", "-t", "halt", str(proof_file)]
     res = subprocess.run(cmd, capture_output=True, text=True)
     assert res.returncode == 0, f"SWI-Prolog returned non-zero exit code: {res.stderr}"
-    assert "PROOF COMPLETED SUCCESSFULLY WITH ALL ASSERTIONS VERIFIED EXACTLY!" in res.stdout
+    assert "ALL REGISTERED EXECUTABLE CONSISTENCY CHECKS PASSED SUCCESSFULLY!" in res.stdout
 
 
 # --- 2. INDEPENDENT ANCHOR TESTS ---
