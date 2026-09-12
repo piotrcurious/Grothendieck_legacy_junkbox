@@ -2,7 +2,7 @@
 
 ## Abstract
 
-This document presents a mathematically closed VIII-Layer architectural framework for Gegenbauer polynomials $C_n^{(\lambda)}(x)$ and normalized zonal spherical functions $\phi_n(x)$ on the real sphere $S^{d-1} \cong SO(d)/SO(d-1)$, where parameter $\lambda = \frac{d-2}{2}$ ($d \ge 3$). The framework establishes formal operator morphisms connecting representation geometry, quotient algebras, exact differential operators, self-adjoint Jacobi spectral matrices, two-endpoint singular asymptotics, and high-precision numerical solvers.
+This document presents a mathematically closed VIII-Layer architectural framework for Gegenbauer polynomials $C_n^{(\lambda)}(x)$ and normalized zone spherical functions $\phi_n(x)$ on the real sphere $S^{d-1} \cong SO(d)/SO(d-1)$, where parameter $\lambda = \frac{d-2}{2}$ ($d \ge 3$). The framework establishes formal operator morphisms connecting representation geometry, quotient algebras, exact differential operators, self-adjoint Jacobi spectral matrices, two-endpoint singular asymptotics, and high-precision numerical solvers.
 
 ---
 
@@ -22,7 +22,7 @@ This document presents a mathematically closed VIII-Layer architectural framewor
         │
         ▼
   Layer IV. Jacobi Spectral Operator & Orthonormal Matrix
-  M_x e_n = α_n e_{n+1} + α_{n-1} e_{n-1},  J = J^*,  σ(J) = [-1, 1]
+  M_x e_n = α_n e_{n+1} + α_{n-1} e_{n-1},  J = J^*,  ||J|| = 1,  σ(J) = [-1, 1]
         │
         ▼
   Layer V. Two-Endpoint Boundary Coordinates
@@ -107,15 +107,15 @@ Note that for $d=4$ ($\lambda=1$), the potential vanishes: $H_1 = -\partial_\the
 
 ## 5. Layer IV: Jacobi Spectral Operator & Orthonormal Matrix
 
-On the space of $K$-fixed spherical lines $\mathcal{H}^K = \bigoplus_{n \ge 0} V_n^K$, coordinate multiplication $M_x f(x) = x f(x)$ defines a self-adjoint Jacobi operator.
+On the Hilbert space $\mathscr{H}_\lambda = L^2([-1, 1], (1-x^2)^{\lambda-1/2} dx)$, coordinate multiplication $M_x f(x) = x f(x)$ defines a bounded self-adjoint Jacobi operator with $\|M_x\| = 1$ and spectrum $\sigma(M_x) = [-1, 1]$.
 
 ### 1. Polynomial Basis Recurrence ($\phi_n(1) = 1$)
 $$M_x \phi_n = a_n \phi_{n+1} + b_n \phi_{n-1}, \qquad a_n = \frac{n + 2\lambda}{2(n + \lambda)}, \quad b_n = \frac{n}{2(n + \lambda)} \quad (a_n + b_n = 1 \text{ exactly}).$$
 
 ### 2. Orthonormal Jacobi Basis ($e_n = \phi_n / \|\phi_n\|$)
 In the $L^2(w_\lambda)$ orthonormal basis $e_n(x)$, $M_x$ is represented by a symmetric Jacobi matrix $J = J^*$:
-$$M_x e_n = \alpha_n e_{n+1} + \alpha_{n-1} e_{n-1}, \qquad \alpha_n = \frac{1}{2} \sqrt{\frac{(n+1)(n+2\lambda-1)}{(n+\lambda)(n+\lambda+1)}}.$$
-Matrix properties: $J = J^*, \|J\| \le 1, \sigma(J) = [-1, 1]$.
+$$M_x e_n = \alpha_n e_{n+1} + \alpha_{n-1} e_{n-1}, \qquad \alpha_n = \frac{1}{2} \sqrt{\frac{(n+1)(n+2\lambda)}{(n+\lambda)(n+\lambda+1)}}.$$
+Matrix properties: $J = J^*, \|J\| = 1, \sigma(J) = [-1, 1]$. Sanity check for $\lambda=0.5$ (Legendre): $\alpha_0 = 1/\sqrt{3}$.
 
 ---
 
@@ -127,7 +127,7 @@ $$z_+ = N \theta, \qquad z_- = N(\pi - \theta), \qquad N = n + \lambda.$$
 Regimes:
 - **$\mathcal{R}_{\text{north}}$ ($z_+ \le 10$):** $\phi_n(\theta) \sim \mathcal{J}_{\lambda-1/2}(z_+)$.
 - **$\mathcal{R}_{\text{south}}$ ($z_- \le 10$):** $\phi_n(\theta) \sim (-1)^n \mathcal{J}_{\lambda-1/2}(z_-)$.
-- **$\mathcal{R}_{\text{interior}}$ ($z_+, z_- > N^\alpha$):** $\phi_n(\theta) \sim \frac{2^\lambda \Gamma(\lambda + 1/2)}{\sqrt{\pi}} \frac{\cos(N\theta - \lambda\pi/2)}{(n\sin\theta)^\lambda}$.
+- **$\mathcal{R}_{\text{interior}}$ ($z_+, z_- > N^\alpha$):** $\phi_n(\theta) \sim \frac{2^\lambda \Gamma(\lambda + 1/2)}{\sqrt{\pi}} \frac{\cos(N\theta - \lambda\pi/2)}{(N\sin\theta)^\lambda}$.
 - **$\mathcal{R}_{\text{transition}}$:** Boundary transition region evaluated via composite matched asymptotics.
 
 ---

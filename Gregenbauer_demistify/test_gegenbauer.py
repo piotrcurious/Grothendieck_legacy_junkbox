@@ -5,7 +5,7 @@ Independent, non-tautological test suite verifying the Gegenbauer demystificatio
 1. Independent Reference Oracles (scipy.special.eval_legendre, eval_gegenbauer, mpmath)
 2. Decoupled Hilbert Series Dimensions and Normalization Identity
 3. Quadric Quotient Ring Normal Forms, Idempotency, Exact Fractions & Invariants Modulo q
-4. Symmetric Orthonormal Jacobi Matrix Coefficients alpha_n
+4. Symmetric Orthonormal Jacobi Matrix Coefficients alpha_n (alpha_0 = 1/sqrt(3) for Legendre)
 5. High-Precision Ground Truth Reference via mpmath (100+ bits)
 6. Two-Endpoint Bessel Layer Tests (North & South Poles)
 7. Empirical Asymptotic Convergence Exponents (WKB p > 0.9, Bessel p > 1.7)
@@ -155,8 +155,12 @@ def test_exact_derivative_anchors():
             assert np.isclose(num_deriv_m1, exact_deriv_m1, rtol=1e-4)
 
 
-def test_orthonormal_jacobi_matrix_symmetry():
+def test_orthonormal_jacobi_matrix_symmetry_and_legendre_anchor():
     """Verifies symmetric orthonormal Jacobi matrix subdiagonal coefficients alpha_n."""
+    # Sanity check for lambda = 0.5 (Legendre): alpha_0 = 1 / sqrt(3)
+    alpha_0_legendre = orthonormal_jacobi_coefficients(0, 0.5)
+    assert np.isclose(alpha_0_legendre, 1.0 / np.sqrt(3.0), rtol=1e-12)
+
     for n in range(1, 10):
         alpha_n = orthonormal_jacobi_coefficients(n, 1.5)
         assert np.isfinite(alpha_n)

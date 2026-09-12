@@ -7,7 +7,7 @@ for Gegenbauer polynomials and complex projective quadric hypersurfaces Q_{d-2} 
 2. Exact Rational Quotient Ring Normal Forms: Polynomial remainder modulo q = sum(z_i^2) in C[z_1,...,z_d]/(q)
    Note: Normal form reduction convention maps z_d^2 -> -(z_1^2 + ... + z_{d-1}^2)
 3. Exact Rational Jacobi Recurrence Coefficients for Gelfand algebra multiplication M_x: phi_n -> x * phi_n
-4. Orthonormal Symmetric Jacobi Matrix Coefficients alpha_n = 1/2 * sqrt( (n+1)(n+2*lambda-1) / ((n+lambda)(n+lambda+1)) )
+4. Orthonormal Symmetric Jacobi Matrix Coefficients alpha_n = 1/2 * sqrt( (n+1)(n+2*lambda) / ((n+lambda)(n+lambda+1)) )
 5. Normalized Gegenbauer _2F_1 Hypergeometric Expansion Coefficients
 6. Helper lambda_for_sphere(d) = Fraction(d-2, 2)
 """
@@ -230,11 +230,12 @@ def orthonormal_jacobi_coefficients(n: int, lambda_val: float) -> float:
     Computes symmetric subdiagonal coefficient alpha_n for self-adjoint Jacobi matrix J = J^*:
       M_x e_n = alpha_n e_{n+1} + alpha_{n-1} e_{n-1}
     where e_n = phi_n / ||phi_n|| is the orthonormal basis:
-      alpha_n = 1/2 * sqrt( (n + 1)(n + 2*lambda - 1) / ((n + lambda)(n + lambda + 1)) ).
+      alpha_n = 1/2 * sqrt( (n + 1)(n + 2*lambda) / ((n + lambda)(n + lambda + 1)) ).
+    Sanity check for lambda = 0.5 (Legendre): alpha_0 = 1 / sqrt(3).
     """
     if lambda_val <= 0:
         raise ValueError("lambda_val must be > 0 for spherical Gegenbauer functions")
-    num = (n + 1.0) * (n + 2.0 * lambda_val - 1.0)
+    num = (n + 1.0) * (n + 2.0 * lambda_val)
     den = (n + lambda_val) * (n + lambda_val + 1.0)
     return 0.5 * math.sqrt(num / den)
 
@@ -285,13 +286,13 @@ if __name__ == "__main__":
 
     h0 = quadric_hilbert_series_dim(d_dim, n_deg)
     a_n, b_n = normalized_jacobi_coefficients(n_deg, lam_frac, exact=True)
-    alpha_4 = orthonormal_jacobi_coefficients(4, 1.5)
+    alpha_0_legendre = orthonormal_jacobi_coefficients(0, 0.5)
 
     print(f"Projective Quadric Q_{d_dim-2} c P^{d_dim-1}, degree n={n_deg}:")
     print(f"  * Sphere Gegenbauer Parameter Lambda: {lam_frac}")
     print(f"  * Hilbert Series Dimension dim R(Q)_{n_deg}: {h0}")
     print(f"  * Exact Rational Jacobi Recurrence Coefficients (a_n, b_n): ({a_n}, {b_n}) [a_n + b_n = {a_n + b_n}]")
-    print(f"  * Orthonormal Symmetric Jacobi Matrix Subdiagonal alpha_4: {alpha_4:.6f}")
+    print(f"  * Orthonormal Symmetric Jacobi Matrix Subdiagonal alpha_0 (lambda=0.5): {alpha_0_legendre:.6f} [expected 1/sqrt(3) = {1/math.sqrt(3):.6f}]")
 
     # Test Quotient Ring Normal Form
     poly = QuadricQuotientPolynomial(3, {(0, 0, 2): 1})  # z_3^2 in C[z_1, z_2, z_3]/(z_1^2+z_2^2+z_3^2)
