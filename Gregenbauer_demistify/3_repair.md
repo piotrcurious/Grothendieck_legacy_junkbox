@@ -1,4 +1,4 @@
-# 3_repair.md: VIII-Layer Closed Architecture, Normalization, and Jacobi Operator Repair Plan
+# 3_repair.md: Orthonormal Jacobi Matrix, Morphism Chain, and Structural Residuals Repair Plan
 
 Verdict
 
@@ -844,49 +844,5 @@ That version has a much cleaner mathematical flow:
 \text{algorithm}
 \rightarrow
 \text{verification}.
-}
-\]
-
-Overall assessment
-
-I'd rate the current framework roughly 8/10 mathematically, but only 6/10 as a production computational specification.
-
-The strong parts are the \(SO(d)/SO(d-1)\) geometry, quadric/Hilbert-series layer, exact radial–Schrödinger transformation, normalized recurrence, and endpoint/interior asymptotic structure.
-
-The things that need fixing before treating it as a closed framework are:
-
-\[
-\boxed{
-\text{incorrect Layer-II formula}
-}
-\]
-
-\[
-\boxed{
-\text{incorrect }V_1\otimes V_n\text{ decomposition}
-}
-\]
-
-\[
-\boxed{
-\text{missing transition asymptotic regime}
-}
-\]
-
-\[
-\boxed{
-\text{missing remainder/error bounds}
-}
-\]
-
-\[
-\boxed{
-\text{LNS/Q16.16 not specified as actual numerical models}
-}
-\]
-
-\[
-\boxed{
-\text{verification needs structural residuals, not only high-precision comparison}
 }
 \]
