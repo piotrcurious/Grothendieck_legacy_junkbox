@@ -7,7 +7,7 @@ asymptotic approximations for Gegenbauer polynomials C_n^{(lambda)}(x) and zonal
 spherical functions phi_n(x) on S^{d-1} = SO(d)/SO(d-1) (where lambda = (d-2)/2):
 
 1. Production Scaled Spherical Recurrence for phi_n^{(d)}(theta)
-2. Normalized Spherical Derivative Evaluator phi_n^{(k)}(x)
+2. Normalized Spherical Derivative Evaluator phi_n^{(k)}(x) (returns 0 for k > n)
 3. Analytic Gegenbauer Derivatives via k-th Order Shift Formula
 4. Normalized Interior WKB / Weyl Semiclassical Wave
 5. Two-Endpoint Bessel Boundary-Layer Kernels (North z_0 = K*theta, South z_pi = K*(pi-theta))
@@ -65,12 +65,19 @@ def gegenbauer_derivative(n: int, lambda_val: float, x: np.ndarray, k: int = 1) 
 def normalized_phi_derivative(n: int, lambda_val: float, x: np.ndarray, k: int = 1) -> np.ndarray:
     """
     Computes exact k-th derivative of normalized zonal function phi_n(x) = C_n^(lambda)(x) / C_n^(lambda)(1):
-      phi_n^{(k)}(x) = 2^k * (lambda)_k / C_n^(lambda)(1) * C_{n-k}^(lambda+k)(x).
+      phi_n^{(k)}(x) = 2^k * (lambda)_k / C_n^(lambda)(1) * C_{n-k}^(lambda+k)(x)   (k <= n)
+      phi_n^{(k)}(x) = 0                                                           (k > n)
     """
+    x_arr = np.asarray(x, dtype=np.float64)
+    if k < 0:
+        raise ValueError("Derivative order k must be >= 0")
     if k == 0:
-        return normalized_phi_recurrence(n, lambda_val, x)
+        return normalized_phi_recurrence(n, lambda_val, x_arr)
+    if k > n:
+        return np.zeros_like(x_arr)
+
     c1 = c_n_1_val(n, lambda_val)
-    return gegenbauer_derivative(n, lambda_val, x, k=k) / c1
+    return gegenbauer_derivative(n, lambda_val, x_arr, k=k) / c1
 
 
 def normalized_phi_recurrence(n: int, lambda_val: float, x: np.ndarray) -> np.ndarray:
