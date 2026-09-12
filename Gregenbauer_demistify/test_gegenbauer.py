@@ -12,7 +12,8 @@ Independent, non-tautological test suite verifying the Gegenbauer demystificatio
 8. Real Execution Backends (FLOAT32, FLOAT64, LONGDOUBLE, MPMATH, Q16.16, LNS)
 9. High-Degree Log-Space Stability up to n = 10^6
 10. Theta-Space Orthogonality Norm Verification (Closed-Form Gamma vs Quadrature)
-11. Prolog Integration Test with shutil.which and pathlib Resolution
+11. Exact Derivative Anchors phi_n'(1) = n(n+2*lambda)/(2*lambda+1)
+12. Prolog Integration Test with shutil.which and pathlib Resolution
 """
 
 from fractions import Fraction
@@ -126,6 +127,21 @@ def test_s4_anchor_against_independent_scipy_ratio():
         got = normalized_phi_recurrence(n, 1.5, np.array([x]))[0]
         ref = reference_normalized_phi(n, 1.5, np.array([x]))[0]
         assert np.isclose(got, ref, rtol=1e-12, atol=1e-13)
+
+
+def test_exact_derivative_anchor():
+    """
+    Verifies exact derivative anchor identity phi_n'(1) = n(n + 2*lambda) / (2*lambda + 1)
+    using numerical finite differentiation at x=1.
+    """
+    h = 1e-7
+    for n in [1, 2, 5, 10]:
+        for lambda_val in [0.5, 1.0, 1.5]:
+            phi_1 = normalized_phi_recurrence(n, lambda_val, np.array([1.0]))[0]
+            phi_1_h = normalized_phi_recurrence(n, lambda_val, np.array([1.0 - h]))[0]
+            num_deriv = (phi_1 - phi_1_h) / h
+            exact_deriv = (n * (n + 2.0 * lambda_val)) / (2.0 * lambda_val + 1.0)
+            assert np.isclose(num_deriv, exact_deriv, rtol=1e-4)
 
 
 def test_recurrence_parameter_validation():
