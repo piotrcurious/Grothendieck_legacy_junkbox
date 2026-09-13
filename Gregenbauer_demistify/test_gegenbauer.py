@@ -50,6 +50,7 @@ from Gregenbauer_demistify.computational_layer import (
     NumericalContext,
     PrecisionType,
     high_precision_reference,
+    jacobi_eigenpair_residual,
     mixed_error,
 )
 from Gregenbauer_demistify.gegenbauer_asymptotics import (
@@ -74,13 +75,13 @@ from Gregenbauer_demistify.gegenbauer_asymptotics import (
 
 def reference_gegenbauer(n: int, lambda_val: float, x: np.ndarray) -> np.ndarray:
     """Independent reference oracle via scipy.special.eval_gegenbauer."""
-    return np.asarray(eval_gegenbauer(n, lambda_val, x), dtype=np.float64)
+    return eval_gegenbauer(n, lambda_val, x)
 
 
 def reference_normalized_phi(n: int, lambda_val: float, x: np.ndarray) -> np.ndarray:
     """Independent reference oracle for zonal function phi_n(x) = C_n^(lambda)(x) / C_n^(lambda)(1)."""
     c1 = float(eval_gegenbauer(n, lambda_val, 1.0))
-    return np.asarray(eval_gegenbauer(n, lambda_val, x), dtype=np.float64) / c1
+    return eval_gegenbauer(n, lambda_val, x) / c1
 
 
 # --- 1. PROLOG PROOF INTEGRATION TEST ---
@@ -570,7 +571,6 @@ def test_gauss_gegenbauer_quadrature_precision():
     along with direct Layer VIII Jacobi spectral eigenpair residual R_J(v, x) = ||J_m v_k - x_k v_k||.
     Integral int_{-1}^1 x^4 (1-x^2)^{1.5 - 0.5} dx = int_{-1}^1 x^4 (1-x^2) dx = 2 * (1/5 - 1/7) = 4/35.
     """
-    from Gregenbauer_demistify.computational_layer import jacobi_eigenpair_residual
     nodes, weights = gauss_gegenbauer_quadrature(m=4, lambda_val=1.5)
     integral_approx = np.sum(weights * (nodes ** 4))
     exact_integral = 4.0 / 35.0
