@@ -349,29 +349,32 @@ def exact_rational_gegenbauer_second_derivative(n: int, lambda_val: Union[int, F
         return 4 * lam * (lam + 1) * exact_rational_gegenbauer(n - 2, lam + 2, x_frac)
 
 
-def exact_rational_bit_length(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction]) -> Tuple[int, int]:
+def exact_rational_bit_length(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction]) -> Tuple[Tuple[int, int], Tuple[int, int]]:
     """
-    Computes numerator and denominator bit-length B_bits(n) for exact Gegenbauer polynomial C_n^(lambda)(x).
-    Returns tuple (num_bit_len, den_bit_len).
+    Computes numerator and denominator bit-lengths B_bits^(C)(n) for C_n^(lambda)(x)
+    and B_bits^(phi)(n) for normalized spherical function phi_n(x).
+    Returns tuple ((num_bits_C, den_bits_C), (num_bits_phi, den_bits_phi)).
     """
-    val = exact_rational_gegenbauer(n, lambda_val, x)
-    num_bits = abs(val.numerator).bit_length()
-    den_bits = abs(val.denominator).bit_length()
-    return num_bits, den_bits
+    c_val = exact_rational_gegenbauer(n, lambda_val, x)
+    c1_val = exact_rational_gegenbauer(n, lambda_val, Fraction(1))
+    phi_val = c_val / c1_val if c1_val != 0 else Fraction(0)
+
+    bits_C = (abs(c_val.numerator).bit_length(), abs(c_val.denominator).bit_length())
+    bits_phi = (abs(phi_val.numerator).bit_length(), abs(phi_val.denominator).bit_length())
+    return bits_C, bits_phi
 
 
 def modular_gegenbauer_recurrence(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], mod: int) -> int:
     """
     Evaluates Gegenbauer polynomial C_n^(lambda)(x) in the modular ring Z/mod Z
     using unsigned cyclic wrapping arithmetic (hardware overflow simulation).
-    Admissibility requirement: mod > n (or gcd(k, mod) == 1 for all k in [2, n]),
-    if lambda = a/b then gcd(b, mod) == 1, and if x = c/d then gcd(d, mod) == 1
-    (mod > 2, p > n, p \nmid b, p \nmid d).
+    Admissibility certificate A_C(mod): mod > max(2, n), mod \nmid b (for lambda = a/b),
+    and mod \nmid d (for x = c/d).
     """
     if n < 0:
         raise ValueError("n must be non-negative integer")
-    if mod <= 2:
-        raise ValueError("Modulus must be > 2 for standard Gegenbauer recurrence (p > 2)")
+    if mod <= max(2, n):
+        raise ValueError(f"Modulus {mod} must be > max(2, n={n}) for characteristic p > n recurrence evaluation")
 
     if isinstance(lambda_val, Fraction):
         a, b = lambda_val.numerator, lambda_val.denominator

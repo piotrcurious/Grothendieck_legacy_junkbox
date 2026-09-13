@@ -63,6 +63,18 @@ def scale_invariant_schrodinger_residual(u_val: float, u_second_val: float, thet
     return float(num / den)
 
 
+def scale_invariant_recurrence_residual(phi_n: float, phi_np1: float, phi_nm1: float, x: float, n: int, lambda_val: float, tau: float = 1e-14) -> float:
+    """
+    Computes Layer VIII Normalized Scale-Invariant Recurrence Residual R_rec(n, x).
+    Formula: |x*phi_n - a_n*phi_{n+1} - b_n*phi_{n-1}| / (|x*phi_n| + |a_n*phi_{n+1}| + |b_n*phi_{n-1}| + tau)
+    """
+    a_n = (n + 2.0 * lambda_val) / (2.0 * (n + lambda_val))
+    b_n = n / (2.0 * (n + lambda_val))
+    num = abs(x * phi_n - a_n * phi_np1 - b_n * phi_nm1)
+    den = abs(x * phi_n) + abs(a_n * phi_np1) + abs(b_n * phi_nm1) + tau
+    return float(num / den)
+
+
 def high_precision_reference(n: int, lambda_val: float, x: np.ndarray, dps: int = 100) -> np.ndarray:
     """
     Computes high-precision ground truth reference for zonal function phi_n(x) using mpmath at dps digits.
