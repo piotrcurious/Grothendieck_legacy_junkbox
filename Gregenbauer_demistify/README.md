@@ -8,19 +8,19 @@ This repository implements a mathematically closed, VIII-Layer unified architect
 
 ```
   Layer I. Representation Geometry & Fischer Decomposition
-  G = SO(d), K = SO(d-1), Sym^n = ℋ_n ⊕ q Sym^{n-2}, Q^{d-2} ⊂ ℙ^{d-1}, R(Q)_n ≅ ℋ_n(ℂ^d)
+  G = SO(d), K = SO(d-1), Sym^n = ℋ_n ⊕ q Sym^{n-2}, Q^{d-2} ⊂ ℙ^{d-1}, R(Q)_n ≅ ℋ_n(ℂ^d), ℋ_n(ℝ^d) ──→ 𝒴_n(S^{d-1})
         │
         ▼
   Layer II. Spherical Fixed Line, Rank-One Projector & Bi-K-Invariance
-  v_n ∈ V_n^K, ||v_n|| = 1  ⟹  P_K = P_n = v_n ⊗ v_n^*  ⟹  ϕ_n is K-bi-invariant, radial representative ϕ_n(x) ∈ C^∞([-1, 1]), x = cos θ
+  v_n ∈ V_n^K, ||v_n|| = 1  ⟹  P_{K,n} = v_n ⊗ v_n^*  ⟹  ϕ_n is K-bi-invariant, radial representative ϕ_n(x) ∈ C^∞([-1, 1]), x = cos θ, |ϕ_n(x)| ≤ 1
         │
         ▼
   Layer III. Exact Operator Equivalence & Schrödinger Eigenvalues
-  -Δ_{S^{d-1}} ϕ_n = E_n ϕ_n  |  L_x ↔ L_θ ↔ H_λ u_n = N_n^2 u_n,  N_n = n + λ,  N_n^2 = E_n + λ^2
+  -Δ_{S^{d-1}} ϕ_n = E_n ϕ_n  |  L_x ↔ L_θ ↔ H_λ u_n = N_n^2 u_n,  N_n = n + λ  |  Dual Recurrence Conversion: a_n, b_n ⟷ α_n
         │
         ▼
   Layer IV. Jacobi Spectral Operator & Unitary Matrix Realization
-  (M_x f)(x) = x f(x),  U M_x U^{-1} = J = J^*,  ||J|| = 1,  α_n = 1/2 - λ(λ-1)/(4n^2) + O(n^{-3})
+  (M_x f)(x) = x f(x),  U M_x U^{-1} = J = J^*,  ||J|| = 1,  α_n = 1/2 + O(n^{-2}) as n → ∞
         │
         ▼
   Layer V. Two-Endpoint Boundary Coordinates
@@ -34,7 +34,7 @@ This repository implements a mathematically closed, VIII-Layer unified architect
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, Q16.16, LNS)
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x], RatCert, Fraction Recurrence)
-  ├── VII-C: Scalable Residue Number System (RNS / CRT with A-Priori Magnitude Bounds)
+  ├── VII-C: Scalable Residue Number System (RNS / CRT with Certificate C_CRT = A_denom ∧ B_num/den ∧ (2UV < M))
   ├── VII-D1: Finite-Field Polynomial Arithmetic (F_p, A_ϕ(p, n), Rational Reduction ρ_p)
   ├── VII-D2: Number Theoretic Transform Acceleration Primitive (NTT: L_conv ≤ L_NTT | (p-1) → fast conv)
   └── VII-E: Golub-Welsch Spectral Matrix Truncation (J_m = tridiag(α_0, ..., α_{m-2}))
@@ -79,11 +79,11 @@ $$R(Q)_n \cong \operatorname{Sym}^n(\mathbb{C}^d) / q \operatorname{Sym}^{n-2}(\
 
 ### Modular & RNS/CRT Admissibility Certificates
 - **Polynomial Certificate $\mathcal{A}_C(p)$:** Requires prime $p > \max(2, N_{\max})$, $p \nmid b$, and $p \nmid d$.
-- **Normalized Spherical Certificate $\mathcal{A}_\phi(p, n)$:** Requires $\mathcal{A}_C(p) \land (p \nmid u_n v_n)$ where $C_n^{(\lambda)}(1) = u_n/v_n$ ($\gcd(u_n, v_n) = 1$).
+- **Normalized Spherical Certificate $\mathcal{A}_\phi(p, n)$:** Requires $\mathcal{A}_C(p) \land (p \nmid v_n) \land (u_n \not\equiv 0 \pmod p)$ where $C_n^{(\lambda)}(1) = u_n/v_n$ ($\gcd(u_n, v_n) = 1$).
 - **Conditional Exactness Chain:** $\mathcal{C}_A^{\text{exact}} \implies \varepsilon_A^{\text{certified}} = \varepsilon_A^{\text{forward}} = 0$.
 
 ### Layer VIII Verification Taxonomy & Invariants
-- **Error Taxonomy:** Distinguishes $R_{\text{structural}}$ (equation residuals), $E_{\text{forward}}$ ($|\hat{\phi}-\phi|$), $\kappa$ (conditioning), and $E_{\text{backend}}$ (discrepancies).
+- **Error Taxonomy:** Distinguishes $R_{\text{structural}}$ (equation residuals), $E_{\text{forward}}$ ($|\hat{\phi}-\phi|$), $\kappa$ (conditioning), and $E_{\text{backend}}$ (discrepancies). Four truth classes: `ALGEBRAIC_EXACT`, `ARITHMETIC_EXACT`, `ANALYTIC_CERTIFIED`, `NUMERICAL_APPROX`.
 - **Scale-Invariant & Operator Residuals:**
   - Recurrence ($n \ge 1$): $\widehat{R}_{\text{rec}}(n, x) = \frac{|x \hat{\phi}_n - a_n \hat{\phi}_{n+1} - b_n \hat{\phi}_{n-1}|}{|x \hat{\phi}_n| + |a_n \hat{\phi}_{n+1}| + |b_n \hat{\phi}_{n-1}| + \tau_M}$.
   - Interior ODE ($-1 < x < 1$): $\widehat{R}_{\text{ODE}}(x) = \frac{|(1-x^2)\hat{\phi}'' - (2\lambda+1)x\hat{\phi}' + E_n\hat{\phi}|}{|1-x^2||\hat{\phi}''| + |(2\lambda+1)x||\hat{\phi}'| + E_n|\hat{\phi}| + \tau_M}$.
