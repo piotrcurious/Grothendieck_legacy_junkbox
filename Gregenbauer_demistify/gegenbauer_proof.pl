@@ -214,6 +214,10 @@ assert_derivative_anchor(N, Lambda, ExpectedPrime) :-
     integer(N), N >= 1,
     ExpectedPrime is (N * (N + 2.0 * Lambda)) / (2.0 * Lambda + 1.0).
 
+assert_south_derivative_anchor(N, Lambda, ExpectedSouthPrime) :-
+    integer(N), N >= 1,
+    ExpectedSouthPrime is ((-1.0)^(N - 1) * N * (N + 2.0 * Lambda)) / (2.0 * Lambda + 1.0).
+
 assert_ode_second_derivative(N, Lambda, X, Tol) :-
     integer(N), N >= 2,
     gegenbauer_val(N, Lambda, X, Y),
@@ -282,7 +286,8 @@ test(normalized_recurrence_verification) :-
     assert_normalized_recurrence(10, 1.5, -0.3, 1e-10).
 
 test(derivative_anchor_identity) :-
-    assert_derivative_anchor(10, 1.5, 32.5).
+    assert_derivative_anchor(10, 1.5, 32.5),
+    assert_south_derivative_anchor(10, 1.5, -32.5).
 
 test(exact_rational_evaluation) :-
     % C_5^(3/2)(1/2) = -147/256
