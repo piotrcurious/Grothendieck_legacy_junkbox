@@ -104,12 +104,27 @@ gegenbauer_rational_loop(K, N, Lambda, X, Ck1, Ck0, Val) :-
 
 % --- 3c. Modular Ring Arithmetic Z/Mod Z ---
 
-gegenbauer_val_modular(0, _Lambda, _X, _Mod, 1) :- !.
-gegenbauer_val_modular(1, Lambda, X, Mod, Val) :- !, Val is (2 * Lambda * X) mod Mod.
+gegenbauer_val_modular(0, _Lambda, _X, Mod, 1) :- !, integer(Mod), Mod > 2.
+gegenbauer_val_modular(1, Lambda, X, Mod, Val) :-
+    !, integer(Mod), Mod > 2,
+    (   rational(Lambda, A, B) -> 1 =:= gcd(B, Mod), BInv is pow(B, Mod - 2) mod Mod, LamMod is (A * BInv) mod Mod
+    ;   LamMod is integer(Lambda) mod Mod
+    ),
+    (   rational(X, C, D) -> 1 =:= gcd(D, Mod), DInv is pow(D, Mod - 2) mod Mod, XMod is (C * DInv) mod Mod
+    ;   XMod is integer(X) mod Mod
+    ),
+    Val is (2 * LamMod * XMod) mod Mod.
 gegenbauer_val_modular(N, Lambda, X, Mod, Val) :-
     integer(N), N >= 2,
+    integer(Mod), Mod > max(2, N),
+    (   rational(Lambda, A, B) -> 1 =:= gcd(B, Mod), BInv is pow(B, Mod - 2) mod Mod, LamMod is (A * BInv) mod Mod
+    ;   LamMod is integer(Lambda) mod Mod
+    ),
+    (   rational(X, C, D) -> 1 =:= gcd(D, Mod), DInv is pow(D, Mod - 2) mod Mod, XMod is (C * DInv) mod Mod
+    ;   XMod is integer(X) mod Mod
+    ),
     C0 is 1 mod Mod,
-    C1 is (2 * Lambda * X) mod Mod,
+    C1 is (2 * LamMod * XMod) mod Mod,
     gegenbauer_modular_loop(2, N, Lambda, X, Mod, C1, C0, Val).
 
 gegenbauer_modular_loop(K, N, _Lambda, _X, _Mod, Ck1, _Ck0, Val) :-

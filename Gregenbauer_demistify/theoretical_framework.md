@@ -109,15 +109,20 @@ Two-overlap composite uniform expansion:
 $$F_{\text{comp}} = F_{\text{north}}(z_+) + F_{\text{south}}(z_-) + F_{\text{interior}}(N, \theta) - F_{+,\text{overlap}}(z_+) - F_{-,\text{overlap}}(z_-),$$
 where $\phi_n(\theta) = F_{\text{comp}}^{(K)}(n, \theta, \lambda) + R_K(n, \theta, \lambda)$.
 
-### Candidate Asymptotic Uniform Envelope & Adaptive Solver Interface
-The asymptotic remainder $R_K$ satisfies a candidate uniform error envelope across $[0, \pi]$:
-$$|R_K(N, \theta, \lambda)| \le B_K(N, \theta, \lambda) = C_{\lambda, K} N^{-K} \left( \frac{1}{\sin\theta} + \frac{1}{(N\theta)^2} + \frac{1}{(N(\pi-\theta))^2} \right),$$
-where $C_{\lambda, K} > 0$ depends on parameter $\lambda$ and asymptotic order $K$.
+### Domain-Specific Candidate Envelopes & Adaptive Solver Interface
+To prevent endpoint divergence at $\theta = 0, \pi$ where $1/\sin\theta \to \infty$ while $\phi_n(0) = 1$, the asymptotic remainder $R_K$ (for $N^{-1}$ truncation order $K$ where $F^{(K)} = \sum_{j=0}^{K-1} N^{-j} F_j$) is evaluated using domain-specific candidate envelopes:
 
-For solver optimization across representations $\mathcal{M} = \{\text{rec}, \text{Bessel}_+, \text{Bessel}_-, \text{WKB}, \text{comp}\}$, adaptive execution selects:
-$$M^* = \arg\min_{M \in \mathcal{M}} \widehat{E}_M(N, \theta, \lambda, \text{precision}),$$
-where total estimated error decomposes into truncation, arithmetic, and conditioning components:
-$$\widehat{E}_M = \widehat{E}_M^{\text{trunc}} + \widehat{E}_M^{\text{arith}} + \widehat{E}_M^{\text{cond}}.$$
+1. **Interior Domain Envelope ($\mathcal{D}_{\text{int}}(\delta) = \{\theta : \delta \le \theta \le \pi - \delta\}$):**
+   $$B_{K, \text{int}}(N, \theta, \lambda) = \frac{C_{\lambda, K} N^{-K}}{\sin\theta}.$$
+2. **North / South Endpoint Envelopes ($z_+ = N\theta \le Z_+, z_- = N(\pi-\theta) \le Z_-$):**
+   $$B_{K, +}(N, z_+, \lambda) = C_{\lambda, K}^+ N^{-K} J_{\lambda-1/2}(z_+), \qquad B_{K, -}(N, z_-, \lambda) = C_{\lambda, K}^- N^{-K} J_{\lambda-1/2}(z_-).$$
+3. **Global Envelope:**
+   $$B_K^{\text{global}}(N, \theta, \lambda) = \begin{cases} B_{K, +}(N, z_+, \lambda), & z_+ \le Z_+, \\ B_{K, -}(N, z_-, \lambda), & z_- \le Z_-, \\ B_{K, \text{int}}(N, \theta, \lambda), & \theta \in \mathcal{D}_{\text{int}}(\delta). \end{cases}$$
+
+Overlaps are defined on $\mathcal{O}_+ = \mathcal{R}_{\text{north}} \cap \mathcal{R}_{\text{int}}$ and $\mathcal{O}_- = \mathcal{R}_{\text{south}} \cap \mathcal{R}_{\text{int}}$.
+
+For solver optimization across representations $\mathcal{M} = \{\text{rec}, \text{Bessel}_+, \text{Bessel}_-, \text{WKB}, \text{comp}\}$, adaptive execution selects $M^* = \arg\min_{M \in \mathcal{M}} \widehat{E}_M$, where total estimated error decomposes as:
+$$\widehat{E}_M = \widehat{E}_M^{\text{trunc}} + \widehat{E}_M^{\text{arith}} + \widehat{E}_M^{\text{cond}} + \widehat{E}_M^{\text{model}}.$$
 
 ---
 
@@ -145,20 +150,20 @@ For rational parameters $\lambda = a/b \in \mathbb{Q}$ and evaluation points $x 
 ### VII-C. Scalable Residue Number System (RNS / CRT) Sub-Backend
 Hardware unsigned integer overflow (e.g. in `uint32` or `uint64`) corresponds to exact modular ring projection $\mathbb{Z} \to \mathbb{Z}/2^b \mathbb{Z}$.
 1. **Admissibility & Modular Recurrence:** Evaluated over pairwise coprime moduli $m_1, \dots, m_k$. For rational parameter $\lambda = a/b$ and rational point $x = c/d$, recurrence step admissibility requires:
-   $$\gcd(m_i, b \cdot d \cdot n) = 1 \quad \text{for all } n \le N_{\max}.$$
-   For prime moduli $p_i$, this simplifies to $p_i > N_{\max}$, $p_i \nmid b$, and $p_i \nmid d$.
+   $$\gcd\left( m_i, b \cdot d \cdot \operatorname{lcm}(1, \dots, N_{\max}) \right) = 1.$$
+   For prime moduli $p_i$, this simplifies to $p_i > \max(2, N_{\max})$, $p_i \nmid b$, and $p_i \nmid d$.
 2. **Bounded Rational / Integer CRT Reconstruction:** For $M = \prod_{i=1}^k m_i$, exact integer values $X \in \mathbb{Z}$ are uniquely reconstructed via Chinese Remainder Theorem:
    $$X \equiv \sum_{i=1}^k r_i M_i (M_i^{-1} \bmod m_i) \pmod M, \qquad M_i = \frac{M}{m_i},$$
-   provided an a-priori magnitude bound $|X| < M/2$ is satisfied. For rational values $X = u/v$, exact rational reconstruction recovers $u/v$ from $X \bmod M$ using extended Euclidean algorithm subject to sufficient bound $|u| < U, 0 < v < V$ with $2UV < M$ (e.g., $U = V = \sqrt{M/2}$).
+   provided an a-priori magnitude bound $|X| < M/2$ is satisfied. For rational values $X = u/v$, exact rational reconstruction recovers canonical reduced $u/v$ ($\gcd(u,v)=1$) from $X \bmod M$ using extended Euclidean algorithm subject to $|u| < U, 0 < v < V$ with $2UV < M$.
 
 ### VII-D. Finite-Field & NTT Specializations
 1. **Number Theoretic Transform (NTT):** Over finite prime fields $\mathbb{F}_p$ where $L_{\text{NTT}} \mid (p-1)$ (using $L_{\text{NTT}}$ to avoid collision with $N = n+\lambda$), primitive $L_{\text{NTT}}$-th roots of unity $\omega_{L_{\text{NTT}}} \in \mathbb{F}_p$ replace complex exponentials.
-2. **Characteristic $p$ Admissibility Condition:** For recurrence-based characteristic-$p$ evaluation up to degree $N_{\max}$ with $\lambda = a/b$ and $x = c/d$, standard Gegenbauer evaluation requires:
-   $$p > N_{\max}, \qquad p \nmid b, \qquad p \nmid d.$$
-   This condition prevents division-by-zero during modular division and avoids characteristic 2 degeneration ($2 \equiv 0 \pmod 2$).
+2. **Characteristic $p$ Admissibility Certificates:**
+   - **Polynomial Certificate $\mathcal{A}_C(p)$:** $p > \max(2, N_{\max}), p \nmid b, p \nmid d$.
+   - **Normalized Spherical Certificate $\mathcal{A}_\phi(p)$:** $\mathcal{A}_C(p) \land \left( p \nmid \prod_{n=0}^{N_{\max}} C_n^{(\lambda)}(1) \right)$.
 
 ### VII-E. Golub-Welsch Spectral Matrix Truncation
-For Gauss-Gegenbauer quadrature calculations, the symmetric tridiagonal Jacobi matrix operator $J$ is truncated to its leading $m \times m$ principal truncation $J^{(m)} = J|_{\operatorname{span}\{e_0, \dots, e_{m-1}\}}$. Its eigenvalues $\sigma(J^{(m)}) = \{x_1, \dots, x_m\}$ yield the quadrature nodes.
+For Gauss-Gegenbauer quadrature calculations, the symmetric tridiagonal Jacobi matrix operator $J$ is truncated via orthogonal projection $P_m$ to its leading $m \times m$ principal truncation $J^{(m)} = P_m J P_m |_{\operatorname{span}\{e_0, \dots, e_{m-1}\}}$. Its eigenvalues $\sigma(J^{(m)}) = \{x_1, \dots, x_m\}$ yield quadrature nodes $x_k$, and weights are $w_k = \mu_0 |(v_k)_1|^2$ using normalized eigenvector $v_k$ of $J^{(m)}$.
 
 ---
 
@@ -181,4 +186,4 @@ $$E_{A,B}(x) = |\hat{\phi}_n^{(A)}(x) - \hat{\phi}_n^{(B)}(x)|.$$
 Key certified verification pairs:
 1. $E_{\text{rational}, \text{float64}}$: Exact rational vs standard double-precision recurrence.
 2. $E_{\text{RNS}, \text{mpmath}}$: Bounded CRT reconstructed integer/rational vs 100+ bit mpmath oracle.
-3. $E_{\text{finitefield}, \text{symbolic}}$: Commutative reduction test verifying $\operatorname{reduce}_p(\phi_n^{\mathbb{Q}}(x)) \equiv \phi_n^{\mathbb{F}_p}(x_p) \pmod p$, provided $p \nmid \text{denominator data}$.
+3. $E_{\text{finitefield}, \text{symbolic}}$: Commutative reduction test verifying $\operatorname{reduce}_p(\phi_n^{\mathbb{Q}}(x)) \equiv \phi_n^{\mathbb{F}_p}(x_p) \pmod p$, provided $p \nmid \operatorname{den}(\lambda) \operatorname{den}(x) C_n^{(\lambda)}(1)$.
