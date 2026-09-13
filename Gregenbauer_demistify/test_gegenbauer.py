@@ -102,6 +102,51 @@ def test_prolog_formal_proof():
 
 # --- 2. INDEPENDENT ANCHOR TESTS & DERIVATIVES ---
 
+def test_global_parity_and_boundedness():
+    """
+    Verifies global invariants:
+      1. Parity symmetry: phi_n(-x) = (-1)^n * phi_n(x)
+      2. Boundedness: |phi_n(x)| <= 1 for all x in [-1, 1].
+    """
+    n_values = [0, 1, 2, 5, 10]
+    x_grid = np.linspace(-1.0, 1.0, 50)
+    lambda_val = 1.5
+
+    for n in n_values:
+        phi_pos = normalized_phi_recurrence(n, lambda_val, x_grid)
+        phi_neg = normalized_phi_recurrence(n, lambda_val, -x_grid)
+        expected_neg = ((-1.0) ** n) * phi_pos
+        np.testing.assert_allclose(phi_neg, expected_neg, rtol=1e-12, atol=1e-13)
+        assert np.all(np.abs(phi_pos) <= 1.0 + 1e-12)
+
+
+def test_dual_recurrence_conversion_square():
+    """
+    Verifies exact commutative conversion square alpha_n = a_n * (h_n / h_{n+1}).
+    """
+    from Gregenbauer_demistify.algebraic_geometry_combinatorics import dual_recurrence_conversion
+    n = 5
+    lambda_val = 1.5
+
+    a_n, b_n = normalized_jacobi_coefficients(n, lambda_val)
+
+    # h_n = 1 / ||phi_n|| where ||phi_n||^2 = ||C_n||^2 / (C_n(1))^2
+    norm_phi_n = math.sqrt(orthogonality_norm(n, lambda_val)) / c_n_1_val(n, lambda_val)
+    norm_phi_np1 = math.sqrt(orthogonality_norm(n + 1, lambda_val)) / c_n_1_val(n + 1, lambda_val)
+    norm_phi_nm1 = math.sqrt(orthogonality_norm(n - 1, lambda_val)) / c_n_1_val(n - 1, lambda_val)
+
+    h_n = 1.0 / norm_phi_n
+    h_np1 = 1.0 / norm_phi_np1
+    h_nm1 = 1.0 / norm_phi_nm1
+
+    alpha_n_calc, alpha_nm1_calc = dual_recurrence_conversion(a_n, b_n, h_n, h_np1, h_nm1)
+    alpha_n_exact = orthonormal_jacobi_coefficients(n, lambda_val)
+    alpha_nm1_exact = orthonormal_jacobi_coefficients(n - 1, lambda_val)
+
+    assert np.isclose(alpha_n_calc, alpha_n_exact, rtol=1e-10)
+    assert np.isclose(alpha_nm1_calc, alpha_nm1_exact, rtol=1e-10)
+
+
 def test_s2_anchor_against_independent_legendre():
     """
     S^2 Anchor (d=3, lambda=0.5): Verifies normalized_phi_recurrence against

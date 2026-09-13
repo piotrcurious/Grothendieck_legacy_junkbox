@@ -232,6 +232,18 @@ def normalized_jacobi_coefficients(n: int, lambda_val: Union[float, Fraction], e
         return a_n, b_n
 
 
+def dual_recurrence_conversion(a_n: float, b_n: float, h_n: float, h_np1: float, h_nm1: float) -> Tuple[float, float]:
+    """
+    Computes exact commutative conversion square between polynomial-normalized recurrence (a_n, b_n)
+    and orthonormal Jacobi recurrence (alpha_n, alpha_{n-1}) via norm weights h_n = ||phi_n||^{-1}:
+      alpha_n = a_n * (h_n / h_{n+1})
+      alpha_{n-1} = b_n * (h_n / h_{n-1})
+    """
+    alpha_n = a_n * (h_n / h_np1)
+    alpha_nm1 = b_n * (h_n / h_nm1)
+    return alpha_n, alpha_nm1
+
+
 def orthonormal_jacobi_coefficients(n: int, lambda_val: float) -> float:
     """
     Computes symmetric subdiagonal coefficient alpha_n for self-adjoint Jacobi matrix J = J^*:
