@@ -28,19 +28,20 @@ This repository implements a mathematically closed, VIII-Layer unified architect
         │
         ▼
   Layer VI. Composite Matched Asymptotic Framework & Candidate Envelopes
-  F_comp = F_north + F_south + F_interior - F_{+,overlap} - F_{-,overlap},  B_K^best = min_{M} B_{K,M}
+  F_comp = F_north + F_south + F_interior - F_{+,overlap} - F_{-,overlap},  F_{±O}^{(K)} = Match^{(K)}(F_ep, F_int),  B_K^best = min_{M} B_{K,M}
         │
         ▼
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, Q16.16, LNS)
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x], RatCert, Fraction Recurrence)
   ├── VII-C: Scalable Residue Number System (RNS / CRT with A-Priori Magnitude Bounds)
-  ├── VII-D: Finite-Field & NTT Specializations (F_p, Primitive Roots ω_{L_NTT}, A_ϕ(p, n))
+  ├── VII-D1: Finite-Field Polynomial Arithmetic (F_p, A_ϕ(p, n), Rational Reduction ρ_p)
+  ├── VII-D2: Number Theoretic Transform Acceleration (NTT, Primitive Roots ω_{L_NTT}, L_NTT | (p-1))
   └── VII-E: Golub-Welsch Spectral Matrix Truncation (J_m = tridiag(α_0, ..., α_{m-2}))
         │
         ▼
   Layer VIII. Verification Invariants, Error Taxonomy & Certification Layer
-  Taxonomy (R_structural, E_forward, κ, E_backend) ↔ Exact Anchors ϕ_n^{(k)}(±1) ↔ Cross-Backend E_{A,B}^R / C_{A,B}^{(p)}
+  Taxonomy (R_structural, E_forward, κ, E_backend) ↔ Exact Anchors ϕ_n^{(k)}(±1) ↔ Spectral Residual R_J ↔ Cross-Backend E_{A,B}^R / C_{A,B}^{(p)}
 ```
 
 ---
@@ -79,14 +80,15 @@ $$R(Q)_n \cong \operatorname{Sym}^n(\mathbb{C}^d) / q \operatorname{Sym}^{n-2}(\
 ### Modular & RNS/CRT Admissibility Certificates
 - **Polynomial Certificate $\mathcal{A}_C(p)$:** Requires prime $p > \max(2, N_{\max})$, $p \nmid b$, and $p \nmid d$.
 - **Normalized Spherical Certificate $\mathcal{A}_\phi(p, n)$:** Requires $\mathcal{A}_C(p) \land (p \nmid u_n v_n)$ where $C_n^{(\lambda)}(1) = u_n/v_n$ ($\gcd(u_n, v_n) = 1$).
-- **Conditional Exactness Chain:** $\mathcal{A}_{\text{rec}}(m_i) \land \mathcal{A}_{\text{norm}}(m_i) \land \mathcal{A}_{\text{CRT}}(m_i) \implies \varepsilon_A^{\text{arithmetic}} = \varepsilon_A^{\text{forward}} = 0$.
+- **Conditional Exactness Chain:** $\mathcal{A}_{\text{rec}}(m_i) \land \mathcal{A}_{\text{norm}}(m_i) \land \mathcal{A}_{\text{CRT}}(m_i) \implies \varepsilon_A^{\text{certified}} = \varepsilon_A^{\text{forward}} = 0 \iff \mathcal{C}_A^{\text{exact}}$.
 
 ### Layer VIII Verification Taxonomy & Invariants
 - **Error Taxonomy:** Distinguishes $R_{\text{structural}}$ (equation residuals), $E_{\text{forward}}$ ($|\hat{\phi}-\phi|$), $\kappa$ (conditioning), and $E_{\text{backend}}$ (discrepancies).
-- **Scale-Invariant Residuals:**
+- **Scale-Invariant & Operator Residuals:**
   - Recurrence ($n \ge 1$): $\widehat{R}_{\text{rec}}(n, x) = \frac{|x \hat{\phi}_n - a_n \hat{\phi}_{n+1} - b_n \hat{\phi}_{n-1}|}{|x \hat{\phi}_n| + |a_n \hat{\phi}_{n+1}| + |b_n \hat{\phi}_{n-1}| + \tau_M}$.
   - Interior ODE ($-1 < x < 1$): $\widehat{R}_{\text{ODE}}(x) = \frac{|(1-x^2)\hat{\phi}'' - (2\lambda+1)x\hat{\phi}' + E_n\hat{\phi}|}{|1-x^2||\hat{\phi}''| + |(2\lambda+1)x||\hat{\phi}'| + E_n|\hat{\phi}| + \tau_M}$.
   - Interior Schrödinger ($0 < \theta < \pi$): $\widehat{R}_{\text{Schr}}(\theta) = \frac{|-\hat{u}'' + \lambda(\lambda-1)\csc^2\theta \, \hat{u} - N_n^2 \hat{u}|}{|\hat{u}''| + |\lambda(\lambda-1)\csc^2\theta \, \hat{u}| + N_n^2 |\hat{u}| + \tau_M}$.
+  - Jacobi Spectral Eigenpair Residual: $R_J(v, x) = \|J_m v - x v\|$.
 - **High-Order Endpoint Derivative Formulas:** $\phi_n^{(k)}(1) = \frac{2^k (\lambda)_k C_{n-k}^{(\lambda+k)}(1)}{C_n^{(\lambda)}(1)}$, $\phi_n^{(k)}(-1) = (-1)^{n-k} \phi_n^{(k)}(1)$, and $\phi_n^{(k)} \equiv 0$ for $k > n$.
 - **Gauss-Gegenbauer Moment Invariants:** $\sum_{k=1}^m w_k x_k^j = \int_{-1}^1 x^j (1-x^2)^{\lambda-1/2} dx = \begin{cases} 0, & j \text{ is odd}, \\ B(r+1/2, \lambda+1/2), & j = 2r \text{ is even}. \end{cases}$
 
