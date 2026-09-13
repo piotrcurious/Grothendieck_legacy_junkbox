@@ -116,7 +116,8 @@ gegenbauer_modular_loop(K, N, _Lambda, _X, _Mod, Ck1, _Ck0, Val) :-
     K > N, !, Val = Ck1.
 gegenbauer_modular_loop(K, N, Lambda, X, Mod, Ck1, Ck0, Val) :-
     K =< N,
-    % Invert K modulo Mod via Fermat / Euclid:
+    % Require gcd(K, Mod) == 1 for modular inverse:
+    1 =:= gcd(K, Mod),
     KInv is pow(K, Mod - 2) mod Mod,
     Term1 is (2 * (K + Lambda - 1) * X * Ck1) mod Mod,
     Term2 is ((K + 2 * Lambda - 2) * Ck0) mod Mod,

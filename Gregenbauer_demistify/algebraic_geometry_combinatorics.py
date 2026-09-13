@@ -283,7 +283,7 @@ schubert_intersection_coefficients = normalized_gegenbauer_2f1_coefficients
 
 def exact_rational_gegenbauer(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction]) -> Fraction:
     """
-    Evaluates Gegenbauer polynomial C_n^(lambda)(x) exactly in the field extension Q(lambda, x)
+    Evaluates Gegenbauer polynomial C_n^(lambda)(x) exactly in Q[lambda, x]
     using the three-term recurrence (bypassing Gamma, factorials, and floating-point errors).
 
     C_0^(lambda)(x) = 1
@@ -315,7 +315,7 @@ def exact_rational_gegenbauer(n: int, lambda_val: Union[int, Fraction], x: Union
 
 def exact_rational_gegenbauer_derivative(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction]) -> Fraction:
     """
-    Computes exact first derivative d/dx C_n^(lambda)(x) = 2 * lambda * C_{n-1}^(lambda + 1)(x) over Q(lambda, x).
+    Computes exact first derivative d/dx C_n^(lambda)(x) = 2 * lambda * C_{n-1}^(lambda + 1)(x) in Q[lambda, x].
     """
     if n < 0:
         raise ValueError("Degree n must be non-negative integer")
@@ -329,7 +329,7 @@ def exact_rational_gegenbauer_derivative(n: int, lambda_val: Union[int, Fraction
 
 def exact_rational_gegenbauer_second_derivative(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction]) -> Fraction:
     """
-    Computes exact second derivative d^2/dx^2 C_n^(lambda)(x) over Q(lambda, x):
+    Computes exact second derivative d^2/dx^2 C_n^(lambda)(x) in Q[lambda, x]:
       - For x != +-1: uses ODE substitution y'' = ((2*lambda + 1)*x*y' - n*(n + 2*lambda)*y) / (1 - x^2)
       - For x = +-1 or general: shifted formula 4 * lambda * (lambda + 1) * C_{n-2}^(lambda + 2)(x)
     """
@@ -352,12 +352,13 @@ def exact_rational_gegenbauer_second_derivative(n: int, lambda_val: Union[int, F
 def modular_gegenbauer_recurrence(n: int, lambda_val: int, x: int, mod: int) -> int:
     """
     Evaluates Gegenbauer polynomial C_n^(lambda)(x) in the modular ring Z/mod Z
-    using cyclic wrapping arithmetic (hardware overflow simulation).
+    using unsigned cyclic wrapping arithmetic (hardware overflow simulation).
+    Requires mod > 2 (characteristic p > 2) and gcd(k, mod) == 1 for all k in [2, n].
     """
     if n < 0:
         raise ValueError("n must be non-negative integer")
-    if mod <= 1:
-        raise ValueError("modulus must be > 1")
+    if mod <= 2:
+        raise ValueError("Modulus must be > 2 for standard Gegenbauer recurrence (p > 2)")
 
     lam = lambda_val % mod
     x_mod = x % mod
@@ -371,6 +372,8 @@ def modular_gegenbauer_recurrence(n: int, lambda_val: int, x: int, mod: int) -> 
     c_curr = (2 * lam * x_mod) % mod
 
     for k in range(2, n + 1):
+        if math.gcd(k, mod) != 1:
+            raise ValueError(f"gcd(k={k}, mod={mod}) != 1: modular division unavailable")
         k_inv = pow(k, -1, mod)
         term1 = (2 * (k + lam - 1) * x_mod * c_curr) % mod
         term2 = ((k + 2 * lam - 2) * c_prev) % mod
@@ -383,8 +386,9 @@ def modular_gegenbauer_recurrence(n: int, lambda_val: int, x: int, mod: int) -> 
 def rns_crt_gegenbauer_eval(n: int, lambda_val: int, x: int, moduli: List[int]) -> int:
     """
     Evaluates high-degree integer Gegenbauer polynomial C_n^(lambda)(x) using
-    Residue Number System (RNS) over pairwise coprime moduli and reconstructs
-    the exact full-precision integer via Chinese Remainder Theorem (CRT).
+    Residue Number System (RNS) over pairwise coprime word-size moduli and reconstructs
+    the exact full-precision integer via Chinese Remainder Theorem (CRT), subject to
+    a-priori magnitude bound |X| < M / 2 where M = prod(moduli).
     """
     residues = []
     for m in moduli:
@@ -413,8 +417,10 @@ def gauss_gegenbauer_quadrature(n: int, lambda_val: float) -> Tuple[np.ndarray, 
     """
     Computes Gauss-Gegenbauer quadrature nodes x_k and weights w_k using Golub-Welsch
     spectral decomposition of the symmetric tridiagonal Jacobi matrix J_n.
+    Golub-Welsch isolates the algebraic spectral data (x_k, v_{k,1}^2) from the global
+    transcendental scalar normalization mu_0 = sqrt(pi) * gamma(lambda + 0.5) / gamma(lambda + 1.0).
+    Avoids direct endpoint evaluation at x = +-1, reducing endpoint singularity exposure.
     Weight function: w(x) = (1-x^2)^(lambda - 1/2) over [-1, 1].
-    Total integral weight norm mu_0 = sqrt(pi) * gamma(lambda + 0.5) / gamma(lambda + 1.0).
     """
     if n <= 0:
         raise ValueError("Number of quadrature nodes n must be > 0")
