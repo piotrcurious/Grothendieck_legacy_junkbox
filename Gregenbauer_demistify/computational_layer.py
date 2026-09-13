@@ -14,6 +14,7 @@ Features:
 - Domain-aware validity classification without artificial endpoint clipping.
 - Hard optimization constraints raising ValueError when constraints are infeasible.
 - Multi-percentile mixed error metrics (max, median, 95th percentile, RMS).
+- Backend-dependent regularization floor policy tau_M = max(tau_abs, tau_rel * S_M).
 """
 
 from dataclasses import dataclass
@@ -51,10 +52,17 @@ def cross_backend_error(backend_a_vals: np.ndarray, backend_b_vals: np.ndarray) 
     return float(np.nanmax(np.abs(np.asarray(backend_a_vals) - np.asarray(backend_b_vals))))
 
 
+def get_backend_tau(tau_abs: float = 1e-14, tau_rel: float = 1e-14, scale: float = 1.0) -> float:
+    """
+    Computes backend-dependent regularization floor tau_M = max(tau_abs, tau_rel * S_M).
+    """
+    return float(max(tau_abs, tau_rel * scale))
+
+
 def scale_invariant_schrodinger_residual(u_val: float, u_second_val: float, theta: float, n: int, lambda_val: float, tau: float = 1e-14) -> float:
     """
     Computes Layer VIII Normalized Scale-Invariant Schrödinger Residual R_Schr(theta).
-    Formula: |-u'' + lambda*(lambda-1)*csc^2(theta)*u - (n+lambda)^2*u| / (|u''| + |lambda*(lambda-1)*csc^2(theta)*u| + (n+lambda)^2*|u| + tau)
+    Formula: |-u'' + lambda*(lambda-1)*csc^2(theta)*u - (n+lambda)^2*u| / (|u''| + |lambda*(lambda-1)*csc^2(theta)*u| + (n+lambda)^2*|u| + tau_M)
     """
     k = n + lambda_val
     sing = lambda_val * (lambda_val - 1.0) / (np.sin(theta) ** 2)
@@ -66,7 +74,7 @@ def scale_invariant_schrodinger_residual(u_val: float, u_second_val: float, thet
 def scale_invariant_recurrence_residual(phi_n: float, phi_np1: float, phi_nm1: float, x: float, n: int, lambda_val: float, tau: float = 1e-14) -> float:
     """
     Computes Layer VIII Normalized Scale-Invariant Recurrence Residual R_rec(n, x) for n >= 1.
-    Formula: |x*phi_n - a_n*phi_{n+1} - b_n*phi_{n-1}| / (|x*phi_n| + |a_n*phi_{n+1}| + |b_n*phi_{n-1}| + tau)
+    Formula: |x*phi_n - a_n*phi_{n+1} - b_n*phi_{n-1}| / (|x*phi_n| + |a_n*phi_{n+1}| + |b_n*phi_{n-1}| + tau_M)
     """
     if n < 1:
         raise ValueError("Scale-invariant recurrence residual R_rec(n, x) is defined for n >= 1 (initial conditions phi_0=1, phi_1=x)")
