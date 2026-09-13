@@ -19,6 +19,7 @@ Features:
 
 from dataclasses import dataclass
 from enum import Enum
+import math
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -32,11 +33,39 @@ except ImportError:
     HAS_MPMATH = False
 
 try:
-    from algebraic_geometry_combinatorics import QuadricQuotientPolynomial, normalized_jacobi_coefficients, normalized_gegenbauer_2f1_coefficients, modular_gegenbauer_recurrence, rns_crt_gegenbauer_eval
-    from gegenbauer_asymptotics import normalized_phi_recurrence, endpoint_bessel_leading, south_pole_bessel_leading, interior_wkb_approx, composite_matched_approx, c_n_1_val
+    from algebraic_geometry_combinatorics import (
+        QuadricQuotientPolynomial,
+        normalized_jacobi_coefficients,
+        orthonormal_jacobi_coefficients,
+        normalized_gegenbauer_2f1_coefficients,
+        modular_gegenbauer_recurrence,
+        rns_crt_gegenbauer_eval,
+    )
+    from gegenbauer_asymptotics import (
+        normalized_phi_recurrence,
+        endpoint_bessel_leading,
+        south_pole_bessel_leading,
+        interior_wkb_approx,
+        composite_matched_approx,
+        c_n_1_val,
+    )
 except ModuleNotFoundError:
-    from Gregenbauer_demistify.algebraic_geometry_combinatorics import QuadricQuotientPolynomial, normalized_jacobi_coefficients, normalized_gegenbauer_2f1_coefficients, modular_gegenbauer_recurrence, rns_crt_gegenbauer_eval
-    from Gregenbauer_demistify.gegenbauer_asymptotics import normalized_phi_recurrence, endpoint_bessel_leading, south_pole_bessel_leading, interior_wkb_approx, composite_matched_approx, c_n_1_val
+    from Gregenbauer_demistify.algebraic_geometry_combinatorics import (
+        QuadricQuotientPolynomial,
+        normalized_jacobi_coefficients,
+        orthonormal_jacobi_coefficients,
+        normalized_gegenbauer_2f1_coefficients,
+        modular_gegenbauer_recurrence,
+        rns_crt_gegenbauer_eval,
+    )
+    from Gregenbauer_demistify.gegenbauer_asymptotics import (
+        normalized_phi_recurrence,
+        endpoint_bessel_leading,
+        south_pole_bessel_leading,
+        interior_wkb_approx,
+        composite_matched_approx,
+        c_n_1_val,
+    )
 
 
 def mixed_error(approx: np.ndarray, ref: np.ndarray, atol: float = 1e-14, rtol: float = 1e-10) -> np.ndarray:
@@ -69,7 +98,6 @@ def jacobi_eigenpair_residual(nodes: np.ndarray, eigenvectors: np.ndarray, lambd
     m = len(nodes)
     if m <= 0:
         return 0.0
-    from algebraic_geometry_combinatorics import orthonormal_jacobi_coefficients
     subdiag = np.zeros(m - 1, dtype=np.float64)
     for k in range(m - 1):
         subdiag[k] = orthonormal_jacobi_coefficients(k, lambda_val)
@@ -98,7 +126,8 @@ def scale_invariant_schrodinger_residual(u_val: float, u_second_val: float, thet
     Formula: |-u'' + lambda*(lambda-1)*csc^2(theta)*u - (n+lambda)^2*u| / (|u''| + |lambda*(lambda-1)*csc^2(theta)*u| + (n+lambda)^2*|u| + tau_M)
     """
     k = n + lambda_val
-    sing = lambda_val * (lambda_val - 1.0) / (np.sin(theta) ** 2)
+    sin_theta = math.sin(theta)
+    sing = lambda_val * (lambda_val - 1.0) / (sin_theta * sin_theta)
     num = abs(-u_second_val + sing * u_val - (k ** 2) * u_val)
     den = abs(u_second_val) + abs(sing * u_val) + (k ** 2) * abs(u_val) + tau
     return float(num / den)
@@ -306,26 +335,17 @@ class GegenbauerComputationalSolver:
         Quotient Ring Harmonic Zonal Polynomial Projection:
         Evaluates degree-n spherical zonal polynomial phi_n(z_1) = _2F_1(-n, n+2*lambda; lambda+0.5; (1-z_1)/2)
         modulo q = sum(z_i^2) in R(Q).
+        Vectorized Horner's method evaluation over input arrays.
         """
-        if 2 * self.lambda_val + 2 < 3:
-            d = 3
-        else:
-            d = int(round(2 * self.lambda_val + 2))
-
         coeffs = normalized_gegenbauer_2f1_coefficients(self.n, self.lambda_val)
 
         def _q_eval(x_in):
             x_q = np.asarray(x_in, dtype=np.float64)
-            out = np.zeros_like(x_q)
-            for i, xi in enumerate(x_q):
-                rem_sq = max(0.0, 1.0 - xi**2) / max(1, d - 1)
-                pt = [xi] + [np.sqrt(rem_sq)] * (d - 1)
-
-                z1 = pt[0]
-                t = (1.0 - z1) / 2.0
-                val = sum(c * (t**k) for k, c in enumerate(coeffs))
-                out[i] = val
-            return out
+            t = (1.0 - x_q) / 2.0
+            val = np.zeros_like(x_q)
+            for c in reversed(coeffs):
+                val = val * t + c
+            return val
 
         return self._execute_backend(_q_eval, x)
 
