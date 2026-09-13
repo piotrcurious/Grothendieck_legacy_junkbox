@@ -185,7 +185,9 @@ assert_dim_v_n_identity(AmbientD, N, DimVn, C_n_1) :-
     Expected_C_n_1 is (Lambda / (N + Lambda)) * DimVn,
     gegenbauer_val(N, Lambda, 1.0, Computed_C_n_1),
     Diff is abs(Computed_C_n_1 - Expected_C_n_1),
-    Diff < 1e-10.
+    Diff < 1e-10,
+    Diff_Cn1 is abs(Computed_C_n_1 - C_n_1),
+    Diff_Cn1 < 1e-10.
 
 assert_normalized_recurrence(N, Lambda, X, Tol) :-
     integer(N), N >= 1,
@@ -207,7 +209,7 @@ assert_derivative_anchor(N, Lambda, ExpectedPrime) :-
 
 assert_south_derivative_anchor(N, Lambda, ExpectedSouthPrime) :-
     integer(N), N >= 1,
-    ExpectedSouthPrime is ((-1.0)^(N - 1) * N * (N + 2.0 * Lambda)) / (2.0 * Lambda + 1.0).
+    ExpectedSouthPrime is (((-1)^(N - 1)) * N * (N + 2.0 * Lambda)) / (2.0 * Lambda + 1.0).
 
 assert_ode_second_derivative(N, Lambda, X, Tol) :-
     integer(N), N >= 2,
@@ -294,7 +296,7 @@ test(modular_congruence_rns) :-
 test(s2_s3_s4_exact_anchors) :-
     N = 10, Theta = 0.5, X is cos(Theta),
     % S^2 (d=3, Lambda=0.5): Legendre P_10(0.5)
-    normalized_phi_val(N, 0.5, 0.5, _ValS2),
+    normalized_phi_val(N, 0.5, X, _ValS2),
     % S^3 (d=4, Lambda=1.0): sin(11*0.5) / (11*sin(0.5))
     normalized_phi_val(N, 1.0, X, ValS3),
     ExactS3 is sin((N + 1) * Theta) / ((N + 1) * sin(Theta)),
