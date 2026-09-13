@@ -1,42 +1,46 @@
-# Gegenbauer Demystified: Unified Algebraic, Geometric, and Numerical Pipeline
+# VIII-Layer Unified Computational Framework for Gegenbauer Polynomials and Spherical Harmonics on $SO(d)/SO(d-1)$
 
-This module implements a compressed algebraic-geometric representation theory and operational computational solver for Gegenbauer polynomials $C_n^{(\lambda)}(x)$ and normalized zonal spherical functions $\phi_n(x)$ on the symmetric space $S^{d-1} \cong SO(d)/SO(d-1)$ ($\lambda = \frac{d-2}{2}$).
+This repository implements a mathematically closed, VIII-Layer unified architectural framework and computational solver for Gegenbauer polynomials $C_n^{(\lambda)}(x)$ and normalized zonal spherical functions $\phi_n(x)$ on the symmetric space $S^{d-1} \cong SO(d)/SO(d-1)$ ($\lambda = \frac{d-2}{2}, d \ge 3$).
 
 ---
 
-## 1. Overview & Computational Pipeline
-
-By stripping away redundant physical vocabulary, the theory is compressed into two essential layers:
-1. **Algebraic Geometry Layer:** Representation spaces $V_n$ are realized as graded components $R(Q)_n$ of the projective quadric coordinate ring $R(Q) = \mathbb{C}[z_1, \dots, z_d]/(q(z))$, with dimensions governed directly by its Hilbert series $H_{R(Q)}(t) = \frac{1-t^2}{(1-t)^d}$.
-2. **Computational Asymptotics Layer:** Numerical evaluation is structured around three exact differential equations and a normalized scalar recurrence operator $M_x$ on $R(Q)$, governing four operational regimes on the $(n, \theta)$-plane.
+## 1. VIII-Layer Architectural Pipeline
 
 ```
-  A. Geometry
-  SO(d)/SO(d-1), Q^{d-2} ⊂ ℙ^{d-1}
+  Layer I. Representation Geometry & Fischer Decomposition
+  SO(d)/SO(d-1), Sym^n = ℋ_n ⊕ q Sym^{n-2}, Q^{d-2} ⊂ ℙ^{d-1}, R(Q)_n ≅ ℋ_n(ℂ^d)
         │
         ▼
-  B. Exact Algebra
-  R(Q) = ℂ[z]/(q), V_n = R(Q)_n, H_{R(Q)}(t) = (1-t^2)/(1-t)^d
+  Layer II. Spherical Fixed Line, Rank-One Projector & Bi-K-Invariance
+  v_n ∈ V_n^K, ||v_n|| = 1  ⟹  P_K = P_n = v_n ⊗ v_n^*  ⟹  ϕ_n(g) = Tr(P_n π_n(g)) ∈ C^∞(K\G/K) ≅ C^∞([-1, 1])
         │
         ▼
-  C. Exact Radial Equations
-  Compact Radial / Half-Density / Tangent-Limit
+  Layer III. Exact Operator Equivalence & Schrödinger Eigenvalues
+  -Δ_{S^{d-1}} ϕ_n = E_n ϕ_n  |  L_x ↔ L_θ ↔ H_λ u_n = N_n^2 u_n,  N_n^2 = E_n + λ^2
         │
         ▼
-  D. Exact Normalized Recurrence
-  M_x: ϕ_n ↦ x ϕ_n, ϕ_{n+1} = [(2(n+λ))/(n+2λ)] x ϕ_n - [n/(n+2λ)] ϕ_{n-1}
+  Layer IV. Jacobi Spectral Operator & Unitary Matrix Realization
+  (M_x f)(x) = x f(x),  U M_x U^{-1} = J = J^*,  ||J|| = 1,  α_n = 1/2 - λ(λ-1)/(4n^2) + O(n^{-3})
         │
         ▼
-  E. Singular Scaling
-  N = n + λ, z = N θ
+  Layer V. Two-Endpoint Boundary Coordinates
+  N = n + λ,  z_+ = N θ,  z_- = N (π - θ)
         │
         ▼
-  F. Numerical Regimes
-  Endpoint / Overlap / Interior / Direct Recurrence
+  Layer VI. Composite Matched Asymptotic Framework & Candidate Envelopes
+  F_comp = F_north + F_south + F_interior - F_{+,overlap} - F_{-,overlap},  B_K^best = min_{M} B_{K,M}
         │
         ▼
-  G. Validation
-  Quotient-Algebra Remainder ↔ Scalar Recurrence ↔ Bessel Boundary Layer ↔ Exact Anchors
+  Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
+  ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, Q16.16, LNS)
+  ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x], RatCert, Fraction Recurrence)
+  ├── VII-C: Scalable Residue Number System (RNS / CRT with A-Priori Magnitude Bounds)
+  ├── VII-D: Finite-Field & NTT Specializations (F_p, Primitive Roots ω_{L_NTT}, p > max(2, N_max))
+  └── VII-E: Golub-Welsch Spectral Matrix Truncation (J_m = tridiag(α_0, ..., α_{m-2}))
+        │
+        ▼
+  Layer VIII. Verification Invariants, Error Taxonomy & Certification Layer
+  Taxonomy (R_structural, E_forward, κ, E_backend) ↔ Exact Anchors ϕ_n^{(k)}(±1) ↔ Cross-Backend E_{A,B}^R / C_{A,B}^{(p)}
 ```
 
 ---
@@ -47,67 +51,57 @@ By stripping away redundant physical vocabulary, the theory is compressed into t
 Gregenbauer_demistify/
 ├── README.md                              # Main documentation (this file)
 ├── repair_plan.md                         # 13-point architectural repair plan
+├── 1_repair.md                            # 17-point layer refinement plan
+├── 2_repair.md                            # 22-point audit repair plan
+├── 3_repair.md                            # Executive repair & layer specification
+├── REPAIR_AUDIT.md                        # Full 52-point audit verification report
 ├── theoretical_framework.md              # Complete manuscript & mathematical proofs
 ├── 1.md                                   # Executive summary & core pipeline formulas
 ├── gegenbauer_proof.pl                   # Formal assertion-based SWI-Prolog knowledgebase
-├── algebraic_geometry_combinatorics.py   # Quotient algebra R(Q), normal form, Hilbert series
+├── algebraic_geometry_combinatorics.py   # Quotient algebra R(Q), exact Q[λ,x], RNS/CRT, Golub-Welsch
 ├── gegenbauer_asymptotics.py             # Scaled recurrence, WKB, Bessel, phase map classifier
-├── computational_layer.py                # Pareto optimization solver across bases and precisions
-└── test_gegenbauer.py                    # Pytest test suite (14 unit tests & Prolog bridge)
+├── computational_layer.py                # Pareto optimization solver across bases, capability certs, and precisions
+└── test_gegenbauer.py                    # Pytest test suite (30 unit tests & Prolog bridge)
 ```
 
 ---
 
-## 3. Key Mathematical Formulations
+## 3. Key Mathematical Formulations & Certificates
 
-### Quadric Quotient Algebra & Hilbert Series
-The degree-$n$ representation space $V_n \cong \mathcal{H}_n(\mathbb{R}^d)$ corresponds to degree-$n$ graded pieces of $R(Q) = \mathbb{C}[z_1, \dots, z_d]/(q)$ where $q = \sum_{i=1}^d z_i^2$:
-$$R(Q)_n \cong \operatorname{Sym}^n(\mathbb{C}^d) / q \operatorname{Sym}^{n-2}(\mathbb{C}^d) \cong V_n.$$
+### Quadric Quotient Algebra & Homogeneous Coordinate Ring
+The degree-$n$ representation space $V_n \cong \mathcal{H}_n(\mathbb{R}^d)$ corresponds to degree-$n$ graded pieces of the homogeneous coordinate ring $R(Q) = \mathbb{C}[z_1, \dots, z_d]/(q)$ where $q = \sum_{i=1}^d z_i^2$:
+$$R(Q)_n \cong \operatorname{Sym}^n(\mathbb{C}^d) / q \operatorname{Sym}^{n-2}(\mathbb{C}^d) \cong V_n, \qquad H_{R(Q)}(t) = \frac{1 - t^2}{(1 - t)^d} \implies \dim V_n = \binom{n+d-1}{d-1} - \binom{n+d-3}{d-1}.$$
 
-Dimension growth is extracted directly from the Hilbert series:
-$$H_{R(Q)}(t) = \frac{1 - t^2}{(1 - t)^d} \implies \dim V_n = \binom{n+d-1}{d-1} - \binom{n+d-3}{d-1}.$$
+### Exact Rational Algebra $\mathbb{Q}[\lambda, x]$ vs. Jacobi Spectral Path $\overline{\mathbb{Q}}$
+- **Exact Polynomial Path:** Evaluates $C_n^{(\lambda)}(x) \in \mathbb{Q}$ using three-term recurrence over reduced fraction inputs $\operatorname{RatCert} = (a, b, c, d, N_{\max})$ where $\lambda = a/b, x = c/d$.
+- **Jacobi Spectral Path:** Evaluates $J_m = \operatorname{tridiag}(\alpha_0, \dots, \alpha_{m-2}) \in \mathbb{R}^{m \times m}$ operating in algebraic extensions $\overline{\mathbb{Q}}$ due to $\alpha_n = \frac{1}{2}\sqrt{\frac{(n+1)(n+2\lambda)}{(n+\lambda)(n+\lambda+1)}} = \frac{1}{2} - \frac{\lambda(\lambda-1)}{4n^2} + O(n^{-3})$.
 
-Normalization functional identity:
-$$C_n^{(\lambda)}(1) = \frac{\lambda}{n + \lambda} \dim V_n.$$
+### Modular & RNS/CRT Admissibility Certificates
+- **Polynomial Certificate $\mathcal{A}_C(p)$:** Requires prime $p > \max(2, N_{\max})$, $p \nmid b$, and $p \nmid d$.
+- **Normalized Spherical Certificate $\mathcal{A}_\phi(p, n)$:** Requires $\mathcal{A}_C(p) \land (p \nmid C_n^{(\lambda)}(1))$.
+- **Conditional Exactness Chain:** $\mathcal{A}_{\text{rec}}(m_i) \land \mathcal{A}_{\text{norm}}(m_i) \land \mathcal{A}_{\text{CRT}}(m_i) \implies \varepsilon_A^{\text{arithmetic}} = \varepsilon_A^{\text{forward}} = 0$.
 
-### Three Exact Backbone Equations
-1. **Compact Radial Equation:** $\phi'' + 2\lambda \cot\theta \, \phi' + n(n+2\lambda)\phi = 0$.
-2. **Half-Density Equation ($u_n = (\sin\theta)^\lambda \phi_n$):** $-u'' + \lambda(\lambda-1)\csc^2\theta \, u = N^2 u$, where $N = n + \lambda$.
-3. **Tangent-Limit Equation ($\theta = z/N$):** $\Phi'' + \frac{2\lambda}{z}\Phi' + \Phi = 0 \implies \Phi(z) = \mathcal{J}_{\lambda-1/2}(z)$.
-
-### Normalized Recurrence Operator $M_x$
-The degree-shifting multiplication operator $M_x \phi_n = x \phi_n$ satisfies:
-$$M_x \phi_n = a_n \phi_{n+1} + b_n \phi_{n-1}, \qquad a_n = \frac{n + 2\lambda}{2(n + \lambda)}, \quad b_n = \frac{n}{2(n + \lambda)}, \quad a_n + b_n = 1.$$
-
-Production Scaled Recurrence:
-$$\phi_{n+1}(x) = \frac{2(n + \lambda)}{n + 2\lambda} x \phi_n(x) - \frac{n}{n + 2\lambda} \phi_{n-1}(x).$$
-
----
-
-## 4. Operational Phase Diagram & Pareto Solver
-
-The computational layer models 6 algebraic geometry expression permutations on the Computational Cost (FLOPs) vs. Relative Numerical Error plane:
-1. **Normalized Three-Term Recurrence $\phi_n(x)$**
-2. **Quotient Ring Normal Form Polynomial Remainder**
-3. **Hypergeometric $_2F_1$ Series Expansion**
-4. **Interior WKB / Weyl Semiclassical Wave**
-5. **Mehler-Heine Bessel Boundary-Layer Kernel**
-6. **Composite Matched Asymptotic Expansion**
-
-Numerical contexts support IEEE Binary Base 2, Decimal Base 10, Fixed-Point Q16.16, Logarithmic Number Systems (LNS), and precisions (`float32`, `float64`, `float128`, `mpmath`).
+### Layer VIII Verification Taxonomy & Invariants
+- **Error Taxonomy:** Distinguishes $R_{\text{structural}}$ (equation residuals), $E_{\text{forward}}$ ($|\hat{\phi}-\phi|$), $\kappa$ (conditioning), and $E_{\text{backend}}$ (discrepancies).
+- **Scale-Invariant Residuals:**
+  - Recurrence ($n \ge 1$): $\widehat{R}_{\text{rec}}(n, x) = \frac{|x \hat{\phi}_n - a_n \hat{\phi}_{n+1} - b_n \hat{\phi}_{n-1}|}{|x \hat{\phi}_n| + |a_n \hat{\phi}_{n+1}| + |b_n \hat{\phi}_{n-1}| + \tau}$.
+  - Interior ODE ($-1 < x < 1$): $\widehat{R}_{\text{ODE}}(x) = \frac{|(1-x^2)\hat{\phi}'' - (2\lambda+1)x\hat{\phi}' + E_n\hat{\phi}|}{|1-x^2||\hat{\phi}''| + |(2\lambda+1)x||\hat{\phi}'| + E_n|\hat{\phi}| + \tau}$.
+  - Interior Schrödinger ($0 < \theta < \pi$): $\widehat{R}_{\text{Schr}}(\theta) = \frac{|-\hat{u}'' + \lambda(\lambda-1)\csc^2\theta \, \hat{u} - N_n^2 \hat{u}|}{|\hat{u}''| + |\lambda(\lambda-1)\csc^2\theta \, \hat{u}| + N_n^2 |\hat{u}| + \tau}$.
+- **High-Order Endpoint Derivative Formulas:** $\phi_n^{(k)}(1) = \frac{2^k (\lambda)_k C_{n-k}^{(\lambda+k)}(1)}{C_n^{(\lambda)}(1)}$, $\phi_n^{(k)}(-1) = (-1)^{n-k} \phi_n^{(k)}(1)$, and $\phi_n^{(k)} \equiv 0$ for $k > n$.
+- **Gauss-Gegenbauer Moment Invariants:** $\sum_{k=1}^m w_k x_k^j = \int_{-1}^1 x^j (1-x^2)^{\lambda-1/2} dx = \begin{cases} 0, & j \text{ is odd}, \\ B(r+1/2, \lambda+1/2), & j = 2r \text{ is even}. \end{cases}$
 
 ---
 
-## 5. Running Tests and Formal Proofs
+## 4. Running Tests and Formal Proofs
 
 ### SWI-Prolog Formal Proof Verification
-To verify the assertion-based logical proofs in SWI-Prolog:
+To verify assertion-based logical proofs in SWI-Prolog:
 ```bash
 swipl -g "run_all_proofs" -t halt Gregenbauer_demistify/gegenbauer_proof.pl
 ```
 
 ### Python Unit Test Suite
-To run the 14 pytest unit tests covering Prolog assertions, quotient ring normal forms, Hilbert series growth, exact test anchors ($S^2, S^3, S^4$), phase diagram map selection, and the Pareto solver:
+To run the 30 pytest unit tests covering Prolog assertions, quotient ring normal forms, Hilbert series growth, exact test anchors ($S^2, S^3, S^4$), phase diagram map selection, high-precision reference convergence ($p_{\text{ref}} \ge 384$ bits), exact rational bit-lengths, RNS/CRT integer recovery, and Pareto optimization solver:
 ```bash
 PYTHONPATH=. pytest -v Gregenbauer_demistify/test_gegenbauer.py
 ```
