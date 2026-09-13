@@ -43,6 +43,14 @@ def mixed_error(approx: np.ndarray, ref: np.ndarray, atol: float = 1e-14, rtol: 
     return np.abs(approx - ref) / (atol + rtol * np.abs(ref))
 
 
+def cross_backend_error(backend_a_vals: np.ndarray, backend_b_vals: np.ndarray) -> float:
+    """
+    Computes Layer VIII Cross-Backend Error Metric E_{A,B} = max |val_A - val_B|
+    between independent execution backends A and B.
+    """
+    return float(np.nanmax(np.abs(np.asarray(backend_a_vals) - np.asarray(backend_b_vals))))
+
+
 def high_precision_reference(n: int, lambda_val: float, x: np.ndarray, dps: int = 100) -> np.ndarray:
     """
     Computes high-precision ground truth reference for zonal function phi_n(x) using mpmath at dps digits.

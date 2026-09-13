@@ -2,7 +2,7 @@
 
 ## Abstract
 
-This document presents a mathematically closed VIII-Layer architectural framework for Gegenbauer polynomials $C_n^{(\lambda)}(x)$ and normalized zone spherical functions $\phi_n(x)$ on the real sphere $S^{d-1} \cong SO(d)/SO(d-1)$, where parameter $\lambda = \frac{d-2}{2}$ ($d \ge 3$). The framework establishes formal operator morphisms connecting representation geometry, quotient algebras, exact differential operators, self-adjoint Jacobi spectral matrices, two-endpoint singular asymptotics, and high-precision numerical solvers.
+This document presents a mathematically closed VIII-Layer architectural framework for Gegenbauer polynomials $C_n^{(\lambda)}(x)$ and normalized zone spherical functions $\phi_n(x)$ on the real sphere $S^{d-1} \cong SO(d)/SO(d-1)$, where parameter $\lambda = \frac{d-2}{2}$ ($d \ge 3$). The framework establishes formal operator morphisms connecting representation geometry, quotient algebras, exact differential operators, self-adjoint Jacobi spectral matrices, two-endpoint singular asymptotics, multi-backend numerical execution (including exact rational, RNS/CRT, and finite-field sub-backends), and high-precision verification invariants.
 
 ---
 
@@ -33,11 +33,14 @@ This document presents a mathematically closed VIII-Layer architectural framewor
   F_comp = F_north + F_south + F_interior - F_{+,overlap} - F_{-,overlap},  |R_K| ≤ B_K(N, θ, λ)
         │
         ▼
-  Layer VII. Numerical Execution & Backend Layer
-  Recurrence ↔ Uniform Bessel ↔ Interior WKB  |  FLOAT32 / FLOAT64 / MPMATH / Q16.16 / LNS
+  Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
+  ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, Q16.16, LNS)
+  ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x], Exact Fraction Recurrence)
+  ├── VII-C: Scalable Residue Number System (RNS / CRT with A-Priori Magnitude Bounds)
+  └── VII-D: Finite-Field & NTT Specializations (F_q, Primitive Roots ω_N, p > 2)
         │
         ▼
-  Layer VIII. Verification Invariants, Derivatives & Scale-Invariant Residuals
+  Layer VIII. Verification Invariants, Derivatives & Cross-Backend Certification
   Exact Families (S^2, S^3) ↔ Derivatives ϕ_n^{(k)}(x) ↔ Normalized Residuals (R_rec, R_ODE, R_Schr)
 ```
 
@@ -104,60 +107,70 @@ $$z_+ = N \theta, \qquad z_- = N(\pi - \theta), \qquad N = n + \lambda.$$
 
 Two-overlap composite uniform expansion:
 $$F_{\text{comp}} = F_{\text{north}}(z_+) + F_{\text{south}}(z_-) + F_{\text{interior}}(N, \theta) - F_{+,\text{overlap}}(z_+) - F_{-,\text{overlap}}(z_-),$$
-where $\phi_n(\theta) = F_{\text{comp}}^{(K)}(n, \theta, \lambda) + R_K(n, \theta, \lambda)$ with error bound $|R_K| \le B_K(N, \theta, \lambda)$.
+where $\phi_n(\theta) = F_{\text{comp}}^{(K)}(n, \theta, \lambda) + R_K(n, \theta, \lambda)$.
+
+### Explicit Asymptotic Uniform Error Bound
+The asymptotic remainder $R_K$ satisfies the explicit uniform error bound across $[0, \pi]$:
+$$|R_K(N, \theta, \lambda)| \le B_K(N, \theta, \lambda) = C_\lambda \left( \frac{1}{N \sin\theta} + \frac{1}{(N\theta)^2} + \frac{1}{(N(\pi-\theta))^2} \right),$$
+where $C_\lambda > 0$ is a constant depending strictly on parameter $\lambda$. Adaptive method selection chooses the representation minimizing $B_M(N, \theta, \lambda)$:
+$$M^* = \arg\min_M B_M(N, \theta, \lambda).$$
 
 ---
 
-## 7. Layer VII & VIII: Numerical Backends & Structural Residuals
+## 7. Layer VII: Modular & Multi-Backend Arithmetic Execution Layer
 
-### Exact Derivatives of Endpoint-Normalized Functions
-$$\phi_n^{(k)}(x) = \frac{d^k}{dx^k} \phi_n(x) = \frac{2^k (\lambda)_k}{C_n^{(\lambda)}(1)} C_{n-k}^{(\lambda+k)}(x) \quad (k \le n), \qquad \phi_n^{(k)}(x) \equiv 0 \quad (k > n).$$
+Layer VII implements diverse arithmetic realizations of Gegenbauer polynomials $C_n^{(\lambda)}(x) \in \mathbb{Q}[\lambda, x]$ and zonal functions $\phi_n(x)$ across distinct numerical backends:
 
-### Scale-Invariant Dimensionless Residuals & Anchors
-- **Endpoint Anchors:** $\phi_n(1) = 1$, $\phi_n(-1) = (-1)^n$.
-- **Exact Derivative Anchors:** $\phi_n'(1) = \frac{n(n + 2\lambda)}{2\lambda + 1}$, $\phi_n'(-1) = (-1)^{n-1} \frac{n(n + 2\lambda)}{2\lambda + 1}$.
+### VII-A. Floating-Point & Fixed-Point Hardware Execution
+Supports `FLOAT32`, `FLOAT64`, `LONGDOUBLE`, `Q16.16` fixed-point, and Logarithmic Number Systems (`LNS`).
+
+### VII-B. Exact Rational Symbolic Algebra Sub-Backend ($\mathbb{Q}[\lambda, x]$)
+For rational parameters $\lambda = a/b \in \mathbb{Q}$ and evaluation points $x \in \mathbb{Q}$, $C_n^{(\lambda)}(x) \in \mathbb{Q}$ for all $n \ge 0$. Exact rational arithmetic eliminates floating-point rounding errors subject to exact rational arithmetic semantics.
+1. **Three-Term Polynomial Recurrence:**
+   $$C_0^{(\lambda)}(x) = 1, \qquad C_1^{(\lambda)}(x) = 2\lambda x, \qquad n C_n^{(\lambda)}(x) = 2(n+\lambda-1)x C_{n-1}^{(\lambda)}(x) - (n+2\lambda-2) C_{n-2}^{(\lambda)}(x).$$
+   Note: The unnormalized polynomial basis operates in $\mathbb{Q}$, whereas the orthonormal Jacobi realization $J$ requires square roots and operates in an algebraic extension $\overline{\mathbb{Q}}$.
+2. **Fraction Bit-Length Tracking:** Denominator and numerator growth is tracked via the growth metric:
+   $$B_{\text{bits}}(n) = \max\{ \operatorname{bitlen}(\operatorname{num}(C_n)), \operatorname{bitlen}(\operatorname{den}(C_n)) \}.$$
+3. **Differential Derivative Generation:**
+   $$\frac{d}{dx} C_n^{(\lambda)}(x) = 2\lambda C_{n-1}^{(\lambda+1)}(x), \qquad y'' = \frac{(2\lambda+1)x y' - n(n+2\lambda)y}{1-x^2}.$$
+4. **Golub-Welsch Spectral Quadrature:**
+   Golub-Welsch spectral decomposition isolates the algebraic spectral data $(x_k, v_{k,1}^2)$ (where $x_k$ are the eigenvalues of symmetric Jacobi matrix $J_n$) from the global transcendental scalar normalization:
+   $$\mu_0 = \int_{-1}^1 (1-x^2)^{\lambda-1/2} dx = \frac{\sqrt{\pi}\,\Gamma(\lambda+1/2)}{\Gamma(\lambda+1)}.$$
+   Gauss-Gegenbauer quadrature $\int_{-1}^1 f(x)(1-x^2)^{\lambda-1/2} dx \approx \sum_{k=1}^n w_k f(x_k)$ (with $w_k = \mu_0 v_{k,1}^2$) avoids direct endpoint evaluation at $x = \pm 1$, reducing endpoint singularity exposure.
+
+### VII-C. Scalable Residue Number System (RNS / CRT) Sub-Backend
+Hardware unsigned integer overflow (e.g. in `uint32` or `uint64`) corresponds to exact modular ring projection $\mathbb{Z} \to \mathbb{Z}/2^b \mathbb{Z}$.
+1. **Admissibility & Modular Recurrence:** Evaluated over pairwise coprime moduli $m_1, \dots, m_k$. For rational parameter $\lambda = a/b$, recurrence step admissibility requires:
+   $$\gcd(m_i, b \cdot n) = 1 \quad \text{for all } n \le N_{\max}.$$
+   For prime moduli $p_i$, this simplifies to $p_i > N_{\max}$ and $p_i \nmid b$.
+2. **Bounded Rational / Integer CRT Reconstruction:** For $M = \prod_{i=1}^k m_i$, exact integer values $X \in \mathbb{Z}$ are uniquely reconstructed via Chinese Remainder Theorem:
+   $$X \equiv \sum_{i=1}^k r_i M_i (M_i^{-1} \bmod m_i) \pmod M, \qquad M_i = \frac{M}{m_i},$$
+   provided an a-priori magnitude bound $|X| < M/2$ is satisfied. For rational values $X = u/v$, exact rational reconstruction recovers $u/v$ from $X \bmod M$ using extended Euclidean algorithm subject to $|u|, v < \sqrt{M/2}$.
+
+### VII-D. Finite-Field & NTT Specializations
+1. **Number Theoretic Transform (NTT):** Over finite prime fields $\mathbb{F}_p$ where $N \mid (p-1)$, primitive $N$-th roots of unity $\omega_N \in \mathbb{F}_p$ replace complex exponentials for exact polynomial transforms.
+2. **Characteristic $p$ Admissibility Condition:** For recurrence-based characteristic-$p$ evaluation up to degree $N_{\max}$ with $\lambda = a/b$, standard Gegenbauer evaluation requires:
+   $$p > N_{\max} \quad \text{and} \quad p \nmid b.$$
+   This condition prevents division-by-zero during modular division and avoids characteristic 2 degeneration ($2 \equiv 0 \pmod 2$).
+
+---
+
+## 8. Layer VIII: Verification Invariants & Cross-Backend Certification Layer
+
+Layer VIII provides formal verification and cross-backend error certification comparing results across independent arithmetic realizations:
+
+### VIII-A. Structural Residual Invariants
+- **Recurrence Residual:** $R_{\text{rec}}(n, x) = |x \hat{\phi}_n - a_n \hat{\phi}_{n+1} - b_n \hat{\phi}_{n-1}|$.
 - **Normalized ODE Residual:**
   $$\widehat{R}_{\text{ODE}}(x) = \frac{|(1-x^2)\hat{\phi}'' - (2\lambda+1)x\hat{\phi}' + E_n\hat{\phi}|}{|1-x^2||\hat{\phi}''| + |(2\lambda+1)x||\hat{\phi}'| + E_n|\hat{\phi}| + \tau} \approx 0.$$
+- **Schrödinger Residual:** $R_{\text{Schr}}(\theta) = |-\hat{u}'' + \lambda(\lambda-1)\csc^2\theta \, \hat{u} - (n+\lambda)^2 \hat{u}|$.
+- **Endpoint Anchors:** $R_+ = |\hat{\phi}_n(1) - 1|$, $R_- = |\hat{\phi}_n(-1) - (-1)^n|$.
+- **Derivative Anchors:** $R_{+,k} = |\hat{\phi}_n^{(k)}(1) - \phi_n^{(k)}(1)|$ where $\phi_n'(1) = \frac{n(n+2\lambda)}{2\lambda+1}$.
 
----
-
-## 8. Layer IX: Field Extensions $\mathbb{Q}(\lambda, x)$, Algebraic Recurrences & Quadratures
-
-### Field Extension & Numerical Stability over $\mathbb{Q}$
-The algebraic and differential properties of Gegenbauer polynomials allow replacing transcendent function evaluations ($\Gamma(x)$, fractional powers, hypergeometric series) with operations strictly within the field extension $L = \mathbb{Q}(\lambda, x)$.
-
-1. **Three-Term Rational Recurrence (Gamma & Factorial Elimination):**
-   $$C_0^{(\lambda)}(x) = 1, \qquad C_1^{(\lambda)}(x) = 2\lambda x,$$
-   $$n C_n^{(\lambda)}(x) = 2(n+\lambda-1)x C_{n-1}^{(\lambda)}(x) - (n+2\lambda-2) C_{n-2}^{(\lambda)}(x).$$
-   For rational parameter $\lambda \in \mathbb{Q}$ and rational evaluation point $x \in \mathbb{Q}$, $C_n^{(\lambda)}(x) \in \mathbb{Q}$ for all $n \in \mathbb{N}_0$, eliminating floating-point rounding error $\epsilon$ completely in CAS.
-
-2. **Differential Generation of Derivatives:**
-   - **First Derivative:** Shifted parameter algebraic identity:
-     $$\frac{d}{dx} C_n^{(\lambda)}(x) = 2\lambda C_{n-1}^{(\lambda+1)}(x).$$
-   - **Second Derivative:** Direct ODE substitution bypassing higher differentiation instabilities:
-     $$y'' = \frac{(2\lambda+1)x y' - n(n+2\lambda)y}{1-x^2}.$$
-
-3. **Gauss-Gegenbauer Quadrature via Golub-Welsch Spectral Decomposition:**
-   Integration against weight $w(x) = (1-x^2)^{\lambda-1/2}$ over $[-1, 1]$ is evaluated without transcendent weight evaluations via algebraic nodes $x_k$ and weights $w_k$:
-   $$\int_{-1}^1 f(x)(1-x^2)^{\lambda-1/2} dx \approx \sum_{k=1}^n w_k f(x_k),$$
-   where $x_k$ are the eigenvalues of the symmetric tridiagonal Jacobi matrix $J_n$ (with subdiagonal $\alpha_k$), and weights are $w_k = \mu_0 v_{k,1}^2$ (where $\mu_0 = \int_{-1}^1 (1-x^2)^{\lambda-1/2} dx = \frac{\sqrt{\pi}\,\Gamma(\lambda+1/2)}{\Gamma(\lambda+1)}$ and $v_{k,1}$ is the first component of the normalized $k$-th eigenvector). Real-time evaluation requires evaluating only $f(x_k)$, avoiding singular boundary issues.
-
----
-
-## 9. Layer X: Cyclic Arithmetic, Residue Number Systems (RNS/CRT) & Modular Field Extensions
-
-### Cyclic Wrapping Representation Geometry ($\mathbb{Z}/2^b \mathbb{Z}$)
-Hardware overflow (e.g. in `uint32` or `uint64`) is mathematically interpreted as a projection into a cyclic residue ring $\mathbb{Z}/2^b \mathbb{Z}$ rather than numerical breakdown.
-
-1. **Residue Number System (RNS) & Chinese Remainder Theorem (CRT):**
-   For exact evaluation of high-degree integer/rational Gegenbauer polynomial expressions $C_n^{(\lambda)}(x)$ exceeding 64-bit bounds, evaluation is mapped onto a set of pairwise coprime word-size moduli $m_1, m_2, \dots, m_k$ (e.g. primes $p_i < 2^{32}$):
-   $$r_i = C_n^{(\lambda)}(x) \pmod{m_i} \quad (i = 1, \dots, k).$$
-   By CRT, the unique exact integer value $X = C_n^{(\lambda)}(x) \pmod M$ (where $M = \prod m_i$) is reconstructed via:
-   $$X = \sum_{i=1}^k r_i M_i (M_i^{-1} \bmod m_i) \pmod M, \qquad M_i = \frac{M}{m_i}.$$
-   This yields infinite-precision exact integer evaluations using native $O(1)$ hardware clock integer operations without floating-point rounding or big-integer allocation overhead.
-
-2. **Number Theoretic Transform (NTT):**
-   Polynomial multiplication and Gegenbauer series expansions over cyclic finite fields $\mathbb{F}_q = \mathbb{Z}/q\mathbb{Z}$ use primitive $N$-th roots of unity $\omega_N \in \mathbb{F}_q$, replacing complex roots of unity $e^{2\pi i / N}$ with exact integer modular powers.
-
-3. **Galois Field Extensions $\mathbb{F}_{2^n} \cong \mathbb{F}_2[x]/(p(x))$:**
-   Bit-level hardware register wrapping (XOR addition without carry) enables evaluating discrete Gegenbauer recurrences over characteristic-2 Galois fields, mapping bitvector states to cyclic algebraic varieties.
+### VIII-B. Cross-Backend Error Certification ($E_{A,B}$)
+Measures absolute and relative discrepancies between independent execution backends $A$ and $B$:
+$$E_{A,B}(x) = |\hat{\phi}_n^{(A)}(x) - \hat{\phi}_n^{(B)}(x)|.$$
+Key certified verification pairs:
+1. $E_{\text{rational}, \text{float64}}$: Exact rational vs standard double-precision recurrence.
+2. $E_{\text{RNS}, \text{mpmath}}$: Bounded CRT reconstructed integer/rational vs 100+ bit mpmath oracle.
+3. $E_{\text{finitefield}, \text{symbolic}}$: Modular ring congruence check $\hat{\phi}_n \pmod p \equiv \phi_n^{\text{exact}} \pmod p$.
