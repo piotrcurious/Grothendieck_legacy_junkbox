@@ -196,8 +196,8 @@ Layer VIII explicitly distinguishes four error concepts (noting that $R_{\text{s
 - **Endpoint Anchors & Normalization Residual:** $R_+ = |\hat{\phi}_n(1) - 1|$, $R_- = |\hat{\phi}_n(-1) - (-1)^n|$, $R_{\text{norm}} = |C_n^{(\lambda)}(1)\hat{\phi}_n(x) - \hat{C}_n^{(\lambda)}(x)|$.
 - **Exact High-Order Endpoint Derivative Formulas:** Total domain $k \in \mathbb{N}_0$ with $\phi_n^{(k)} \equiv 0$ for $k > n$:
   $$\phi_n^{(k)}(1) = \frac{2^k (\lambda)_k C_{n-k}^{(\lambda+k)}(1)}{C_n^{(\lambda)}(1)} \quad (0 \le k \le n), \qquad \phi_n^{(k)}(-1) = (-1)^{n-k} \phi_n^{(k)}(1), \qquad R_{\pm, k} = |\hat{\phi}_n^{(k)}(\pm 1) - \phi_n^{(k)}(\pm 1)|.$$
-- **Gauss-Gegenbauer Quadrature Moment Invariant:** $m$-point Gauss quadrature exactness certified against closed-form beta moments:
-  $$\sum_{k=1}^m w_k x_k^j = \int_{-1}^1 x^j (1-x^2)^{\lambda-1/2} dx \quad (0 \le j \le 2m-1), \quad \int_{-1}^1 x^{2r}(1-x^2)^{\lambda-1/2}dx = B\left(r+\frac{1}{2}, \lambda+\frac{1}{2}\right).$$
+- **Gauss-Gegenbauer Quadrature Moment Invariants:** $m$-point Gauss quadrature exactness certified against closed-form moments ($0 \le j \le 2m-1$):
+  $$\sum_{k=1}^m w_k x_k^j = \int_{-1}^1 x^j (1-x^2)^{\lambda-1/2} dx = \begin{cases} 0, & j \text{ is odd}, \\ B\left(r+\frac{1}{2}, \lambda+\frac{1}{2}\right), & j = 2r \text{ is even}. \end{cases}$$
 
 ### VIII-C. Cross-Backend Error Certification ($E_{A,B}$) & Commutative Reduction
 Layer VIII-C is structured into two distinct verification parts:
