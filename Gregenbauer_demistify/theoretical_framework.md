@@ -109,11 +109,15 @@ Two-overlap composite uniform expansion:
 $$F_{\text{comp}} = F_{\text{north}}(z_+) + F_{\text{south}}(z_-) + F_{\text{interior}}(N, \theta) - F_{+,\text{overlap}}(z_+) - F_{-,\text{overlap}}(z_-),$$
 where $\phi_n(\theta) = F_{\text{comp}}^{(K)}(n, \theta, \lambda) + R_K(n, \theta, \lambda)$.
 
-### Explicit Asymptotic Uniform Error Bound
-The asymptotic remainder $R_K$ satisfies the explicit uniform error bound across $[0, \pi]$:
-$$|R_K(N, \theta, \lambda)| \le B_K(N, \theta, \lambda) = C_\lambda \left( \frac{1}{N \sin\theta} + \frac{1}{(N\theta)^2} + \frac{1}{(N(\pi-\theta))^2} \right),$$
-where $C_\lambda > 0$ is a constant depending strictly on parameter $\lambda$. Adaptive method selection chooses the representation minimizing $B_M(N, \theta, \lambda)$:
-$$M^* = \arg\min_M B_M(N, \theta, \lambda).$$
+### Candidate Asymptotic Uniform Envelope & Adaptive Solver Interface
+The asymptotic remainder $R_K$ satisfies a candidate uniform error envelope across $[0, \pi]$:
+$$|R_K(N, \theta, \lambda)| \le B_K(N, \theta, \lambda) = C_{\lambda, K} N^{-K} \left( \frac{1}{\sin\theta} + \frac{1}{(N\theta)^2} + \frac{1}{(N(\pi-\theta))^2} \right),$$
+where $C_{\lambda, K} > 0$ depends on parameter $\lambda$ and asymptotic order $K$.
+
+For solver optimization across representations $\mathcal{M} = \{\text{rec}, \text{Bessel}_+, \text{Bessel}_-, \text{WKB}, \text{comp}\}$, adaptive execution selects:
+$$M^* = \arg\min_{M \in \mathcal{M}} \widehat{E}_M(N, \theta, \lambda, \text{precision}),$$
+where total estimated error decomposes into truncation, arithmetic, and conditioning components:
+$$\widehat{E}_M = \widehat{E}_M^{\text{trunc}} + \widehat{E}_M^{\text{arith}} + \widehat{E}_M^{\text{cond}}.$$
 
 ---
 
@@ -140,18 +144,21 @@ For rational parameters $\lambda = a/b \in \mathbb{Q}$ and evaluation points $x 
 
 ### VII-C. Scalable Residue Number System (RNS / CRT) Sub-Backend
 Hardware unsigned integer overflow (e.g. in `uint32` or `uint64`) corresponds to exact modular ring projection $\mathbb{Z} \to \mathbb{Z}/2^b \mathbb{Z}$.
-1. **Admissibility & Modular Recurrence:** Evaluated over pairwise coprime moduli $m_1, \dots, m_k$. For rational parameter $\lambda = a/b$, recurrence step admissibility requires:
-   $$\gcd(m_i, b \cdot n) = 1 \quad \text{for all } n \le N_{\max}.$$
-   For prime moduli $p_i$, this simplifies to $p_i > N_{\max}$ and $p_i \nmid b$.
+1. **Admissibility & Modular Recurrence:** Evaluated over pairwise coprime moduli $m_1, \dots, m_k$. For rational parameter $\lambda = a/b$ and rational point $x = c/d$, recurrence step admissibility requires:
+   $$\gcd(m_i, b \cdot d \cdot n) = 1 \quad \text{for all } n \le N_{\max}.$$
+   For prime moduli $p_i$, this simplifies to $p_i > N_{\max}$, $p_i \nmid b$, and $p_i \nmid d$.
 2. **Bounded Rational / Integer CRT Reconstruction:** For $M = \prod_{i=1}^k m_i$, exact integer values $X \in \mathbb{Z}$ are uniquely reconstructed via Chinese Remainder Theorem:
    $$X \equiv \sum_{i=1}^k r_i M_i (M_i^{-1} \bmod m_i) \pmod M, \qquad M_i = \frac{M}{m_i},$$
-   provided an a-priori magnitude bound $|X| < M/2$ is satisfied. For rational values $X = u/v$, exact rational reconstruction recovers $u/v$ from $X \bmod M$ using extended Euclidean algorithm subject to $|u|, v < \sqrt{M/2}$.
+   provided an a-priori magnitude bound $|X| < M/2$ is satisfied. For rational values $X = u/v$, exact rational reconstruction recovers $u/v$ from $X \bmod M$ using extended Euclidean algorithm subject to sufficient bound $|u| < U, 0 < v < V$ with $2UV < M$ (e.g., $U = V = \sqrt{M/2}$).
 
 ### VII-D. Finite-Field & NTT Specializations
-1. **Number Theoretic Transform (NTT):** Over finite prime fields $\mathbb{F}_p$ where $N \mid (p-1)$, primitive $N$-th roots of unity $\omega_N \in \mathbb{F}_p$ replace complex exponentials for exact polynomial transforms.
-2. **Characteristic $p$ Admissibility Condition:** For recurrence-based characteristic-$p$ evaluation up to degree $N_{\max}$ with $\lambda = a/b$, standard Gegenbauer evaluation requires:
-   $$p > N_{\max} \quad \text{and} \quad p \nmid b.$$
+1. **Number Theoretic Transform (NTT):** Over finite prime fields $\mathbb{F}_p$ where $L_{\text{NTT}} \mid (p-1)$ (using $L_{\text{NTT}}$ to avoid collision with $N = n+\lambda$), primitive $L_{\text{NTT}}$-th roots of unity $\omega_{L_{\text{NTT}}} \in \mathbb{F}_p$ replace complex exponentials.
+2. **Characteristic $p$ Admissibility Condition:** For recurrence-based characteristic-$p$ evaluation up to degree $N_{\max}$ with $\lambda = a/b$ and $x = c/d$, standard Gegenbauer evaluation requires:
+   $$p > N_{\max}, \qquad p \nmid b, \qquad p \nmid d.$$
    This condition prevents division-by-zero during modular division and avoids characteristic 2 degeneration ($2 \equiv 0 \pmod 2$).
+
+### VII-E. Golub-Welsch Spectral Matrix Truncation
+For Gauss-Gegenbauer quadrature calculations, the symmetric tridiagonal Jacobi matrix operator $J$ is truncated to its leading $m \times m$ principal truncation $J^{(m)} = J|_{\operatorname{span}\{e_0, \dots, e_{m-1}\}}$. Its eigenvalues $\sigma(J^{(m)}) = \{x_1, \dots, x_m\}$ yield the quadrature nodes.
 
 ---
 
@@ -159,18 +166,19 @@ Hardware unsigned integer overflow (e.g. in `uint32` or `uint64`) corresponds to
 
 Layer VIII provides formal verification and cross-backend error certification comparing results across independent arithmetic realizations:
 
-### VIII-A. Structural Residual Invariants
-- **Recurrence Residual:** $R_{\text{rec}}(n, x) = |x \hat{\phi}_n - a_n \hat{\phi}_{n+1} - b_n \hat{\phi}_{n-1}|$.
+### VIII-A. Scale-Invariant Structural Residual Invariants
+- **Normalized Recurrence Residual:** $\widehat{R}_{\text{rec}}(n, x) = \frac{|x \hat{\phi}_n - a_n \hat{\phi}_{n+1} - b_n \hat{\phi}_{n-1}|}{|x \hat{\phi}_n| + |a_n \hat{\phi}_{n+1}| + |b_n \hat{\phi}_{n-1}| + \tau}$.
 - **Normalized ODE Residual:**
   $$\widehat{R}_{\text{ODE}}(x) = \frac{|(1-x^2)\hat{\phi}'' - (2\lambda+1)x\hat{\phi}' + E_n\hat{\phi}|}{|1-x^2||\hat{\phi}''| + |(2\lambda+1)x||\hat{\phi}'| + E_n|\hat{\phi}| + \tau} \approx 0.$$
-- **Schrödinger Residual:** $R_{\text{Schr}}(\theta) = |-\hat{u}'' + \lambda(\lambda-1)\csc^2\theta \, \hat{u} - (n+\lambda)^2 \hat{u}|$.
+- **Normalized Schrödinger Residual:** $\widehat{R}_{\text{Schr}}(\theta) = \frac{|-\hat{u}'' + \lambda(\lambda-1)\csc^2\theta \, \hat{u} - N_n^2 \hat{u}|}{|\hat{u}''| + |\lambda(\lambda-1)\csc^2\theta \, \hat{u}| + N_n^2 |\hat{u}| + \tau}$.
 - **Endpoint Anchors:** $R_+ = |\hat{\phi}_n(1) - 1|$, $R_- = |\hat{\phi}_n(-1) - (-1)^n|$.
-- **Derivative Anchors:** $R_{+,k} = |\hat{\phi}_n^{(k)}(1) - \phi_n^{(k)}(1)|$ where $\phi_n'(1) = \frac{n(n+2\lambda)}{2\lambda+1}$.
+- **Exact High-Order Endpoint Derivative Formula:**
+  $$\phi_n^{(k)}(1) = \frac{2^k (\lambda)_k C_{n-k}^{(\lambda+k)}(1)}{C_n^{(\lambda)}(1)}, \qquad R_{+,k} = |\hat{\phi}_n^{(k)}(1) - \phi_n^{(k)}(1)|.$$
 
-### VIII-B. Cross-Backend Error Certification ($E_{A,B}$)
+### VIII-B. Cross-Backend Error Certification ($E_{A,B}$) & Commutative Reduction
 Measures absolute and relative discrepancies between independent execution backends $A$ and $B$:
 $$E_{A,B}(x) = |\hat{\phi}_n^{(A)}(x) - \hat{\phi}_n^{(B)}(x)|.$$
 Key certified verification pairs:
 1. $E_{\text{rational}, \text{float64}}$: Exact rational vs standard double-precision recurrence.
 2. $E_{\text{RNS}, \text{mpmath}}$: Bounded CRT reconstructed integer/rational vs 100+ bit mpmath oracle.
-3. $E_{\text{finitefield}, \text{symbolic}}$: Modular ring congruence check $\hat{\phi}_n \pmod p \equiv \phi_n^{\text{exact}} \pmod p$.
+3. $E_{\text{finitefield}, \text{symbolic}}$: Commutative reduction test verifying $\operatorname{reduce}_p(\phi_n^{\mathbb{Q}}(x)) \equiv \phi_n^{\mathbb{F}_p}(x_p) \pmod p$, provided $p \nmid \text{denominator data}$.

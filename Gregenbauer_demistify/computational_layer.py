@@ -51,6 +51,18 @@ def cross_backend_error(backend_a_vals: np.ndarray, backend_b_vals: np.ndarray) 
     return float(np.nanmax(np.abs(np.asarray(backend_a_vals) - np.asarray(backend_b_vals))))
 
 
+def scale_invariant_schrodinger_residual(u_val: float, u_second_val: float, theta: float, n: int, lambda_val: float, tau: float = 1e-14) -> float:
+    """
+    Computes Layer VIII Normalized Scale-Invariant Schrödinger Residual R_Schr(theta).
+    Formula: |-u'' + lambda*(lambda-1)*csc^2(theta)*u - (n+lambda)^2*u| / (|u''| + |lambda*(lambda-1)*csc^2(theta)*u| + (n+lambda)^2*|u| + tau)
+    """
+    k = n + lambda_val
+    sing = lambda_val * (lambda_val - 1.0) / (np.sin(theta) ** 2)
+    num = abs(-u_second_val + sing * u_val - (k ** 2) * u_val)
+    den = abs(u_second_val) + abs(sing * u_val) + (k ** 2) * abs(u_val) + tau
+    return float(num / den)
+
+
 def high_precision_reference(n: int, lambda_val: float, x: np.ndarray, dps: int = 100) -> np.ndarray:
     """
     Computes high-precision ground truth reference for zonal function phi_n(x) using mpmath at dps digits.
