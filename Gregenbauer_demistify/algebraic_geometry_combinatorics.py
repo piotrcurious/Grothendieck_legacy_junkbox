@@ -360,12 +360,13 @@ def exact_rational_bit_length(n: int, lambda_val: Union[int, Fraction], x: Union
     return num_bits, den_bits
 
 
-def modular_gegenbauer_recurrence(n: int, lambda_val: Union[int, Fraction], x: int, mod: int) -> int:
+def modular_gegenbauer_recurrence(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], mod: int) -> int:
     """
     Evaluates Gegenbauer polynomial C_n^(lambda)(x) in the modular ring Z/mod Z
     using unsigned cyclic wrapping arithmetic (hardware overflow simulation).
-    Admissibility requirement: mod > n (or gcd(k, mod) == 1 for all k in [2, n])
-    and if lambda = a/b, gcd(b, mod) == 1 (mod > 2, p > n, p \nmid b).
+    Admissibility requirement: mod > n (or gcd(k, mod) == 1 for all k in [2, n]),
+    if lambda = a/b then gcd(b, mod) == 1, and if x = c/d then gcd(d, mod) == 1
+    (mod > 2, p > n, p \nmid b, p \nmid d).
     """
     if n < 0:
         raise ValueError("n must be non-negative integer")
@@ -381,7 +382,14 @@ def modular_gegenbauer_recurrence(n: int, lambda_val: Union[int, Fraction], x: i
     else:
         lam = int(lambda_val) % mod
 
-    x_mod = x % mod
+    if isinstance(x, Fraction):
+        c, d = x.numerator, x.denominator
+        if math.gcd(d, mod) != 1:
+            raise ValueError(f"gcd(den(x)={d}, mod={mod}) != 1: x denominator not invertible mod {mod}")
+        d_inv = pow(d, -1, mod)
+        x_mod = (c * d_inv) % mod
+    else:
+        x_mod = int(x) % mod
 
     if n == 0:
         return 1 % mod
@@ -403,7 +411,7 @@ def modular_gegenbauer_recurrence(n: int, lambda_val: Union[int, Fraction], x: i
     return c_curr
 
 
-def rns_crt_gegenbauer_eval(n: int, lambda_val: int, x: int, moduli: List[int]) -> int:
+def rns_crt_gegenbauer_eval(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], moduli: List[int]) -> int:
     """
     Evaluates high-degree integer Gegenbauer polynomial C_n^(lambda)(x) using
     Residue Number System (RNS) over pairwise coprime word-size moduli and reconstructs

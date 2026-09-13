@@ -125,8 +125,15 @@ gegenbauer_modular_loop(K, N, Lambda, X, Mod, Ck1, Ck0, Val) :-
         LamMod is (A * BInv) mod Mod
     ;   LamMod is integer(Lambda) mod Mod
     ),
+    % For rational X = C/D, require gcd(D, Mod) == 1
+    (   rational(X, C, D)
+    ->  1 =:= gcd(D, Mod),
+        DInv is pow(D, Mod - 2) mod Mod,
+        XMod is (C * DInv) mod Mod
+    ;   XMod is integer(X) mod Mod
+    ),
     KInv is pow(K, Mod - 2) mod Mod,
-    Term1 is (2 * (K + LamMod - 1) * X * Ck1) mod Mod,
+    Term1 is (2 * (K + LamMod - 1) * XMod * Ck1) mod Mod,
     Term2 is ((K + 2 * LamMod - 2) * Ck0) mod Mod,
     Ck2 is (((Term1 - Term2) mod Mod + Mod) * KInv) mod Mod,
     K1 is K + 1,
