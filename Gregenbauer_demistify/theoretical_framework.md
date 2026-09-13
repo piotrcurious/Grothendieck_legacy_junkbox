@@ -38,7 +38,7 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x] ──symbolic rec──> C_n ──eval──> Q ──CRT/RNS──> integer residues)
   ├── VII-C: Scalable Residue Number System (RNS / CRT Certificate C_CRT = A_denom ∧ B_num/den ∧ (2UV < M) ∧ gcd(u,v)=1)
   ├── VII-D1: Finite-Field Polynomial Arithmetic (F_p, A_ϕ^sufficient(p, n), Rational Reduction ρ_p)
-  ├── VII-D2: Number Theoretic Transform Acceleration Primitive (NTT: L_conv = a+b-1 ≤ L_NTT | (p-1) → fast conv)
+  ├── VII-D2: Number Theoretic Transform Acceleration Primitive (NTT: L_conv = L_1+L_2-1 ≤ L_NTT | (p-1) → fast conv)
   └── VII-E: Golub-Welsch Spectral Matrix Truncation (J_m = tridiag(α_0, ..., α_{m-2}), R_J^abs, R_J_hat)
         │
         ▼
@@ -134,7 +134,7 @@ $$z_+ = N_n \theta, \qquad z_- = N_n (\pi - \theta), \qquad N_n = n + \lambda.$$
 
 ### Composite Matched Asymptotic Framework & Formal Certificate Types
 Layer VI distinguishes formal asymptotic overlap matching certificates $\mathsf{MatchCert}_K$ from rigorous analytic remainder certificates $\mathsf{RemCert}_K$ and composite certificates $\mathsf{CompCert}_K$:
-$$\boxed{\mathsf{MatchCert}_K \centernot\implies \mathsf{RemCert}_K.}$$
+$$\boxed{\mathsf{MatchCert}_K \not\implies \mathsf{RemCert}_K.}$$
 
 For truncation order $K$ ($F^{(K)} = \sum_{j=0}^{K-1} N_n^{-j} F_j$), overlap approximants $F_{+O}^{(K)}$ and $F_{-O}^{(K)}$ are defined by coefficient-wise common asymptotic re-expansion modulo $O(N_n^{-K})$ in the corresponding overlap scaling (e.g. $\theta = z_+ / N_n, z_+ \to \infty, \theta \to 0$ for North overlap):
 $$\boxed{F_{\pm O}^{(K)} = \operatorname{Match}^{(K)}\left( F_{\text{endpoint}}^{(K)}, F_{\text{interior}}^{(K)} \right) = \text{coefficient-wise common re-expansion modulo } O(N_n^{-K}),}$$
@@ -180,7 +180,7 @@ Supports `FLOAT32`, `FLOAT64`, `LONGDOUBLE`, `Q16.16` fixed-point (with range/qu
    $$C_0^{(\lambda)}(x) = 1, \qquad C_1^{(\lambda)}(x) = 2\lambda x, \qquad n C_n^{(\lambda)}(x) = 2(n+\lambda-1)x C_{n-1}^{(\lambda)}(x) - (n+2\lambda-2) C_{n-2}^{(\lambda)}(x).$$
 4. **Fraction Bit-Length Tracking:** Denominator and numerator growth is tracked via separate metrics $B_{\text{bits}}^{(C)}(n)$ and $B_{\text{bits}}^{(\phi)}(n)$:
    $$B_{\text{bits}}^{(C)}(n) = \max\{ \operatorname{bitlen}(\operatorname{num}(C_n)), \operatorname{bitlen}(\operatorname{den}(C_n)) \}, \qquad B_{\text{bits}}^{(\phi)}(n) = \max\{ \operatorname{bitlen}(\operatorname{num}(\phi_n)), \operatorname{bitlen}(\operatorname{den}(\phi_n)) \}.$$
-5. **Differential Derivative Generation (Interior $-1 < x < 1$):**
+5. **Derivatives & Differential Equation (Interior $-1 < x < 1$):**
    $$\frac{d}{dx} C_n^{(\lambda)}(x) = 2\lambda C_{n-1}^{(\lambda+1)}(x), \qquad y'' = \frac{(2\lambda+1)x y' - n(n+2\lambda)y}{1-x^2} \qquad (-1 < x < 1).$$
 6. **Golub-Welsch Spectral Quadrature:**
    Golub-Welsch spectral decomposition isolates the algebraic spectral data $(x_k, v_{k,1}^2)$ (where $x_k \in \sigma(J_m) = \{x_1, \dots, x_m\}$ are the eigenvalues of symmetric $m \times m$ Jacobi truncation $J_m$) from the global transcendental scalar normalization:
@@ -188,7 +188,7 @@ Supports `FLOAT32`, `FLOAT64`, `LONGDOUBLE`, `Q16.16` fixed-point (with range/qu
    Gauss-Gegenbauer $m$-point quadrature $\int_{-1}^1 f(x)(1-x^2)^{\lambda-1/2} dx \approx \sum_{k=1}^m w_k f(x_k)$ (with $w_k = \mu_0 v_{k,1}^2$) avoids direct endpoint evaluation at $x = \pm 1$, reducing endpoint singularity exposure. Reserving $n$ for Gegenbauer degree and $m$ for quadrature order.
 
 ### VII-C. Scalable Residue Number System (RNS / CRT) Sub-Backend
-Single binary unsigned hardware wrap channels ($\texttt{uint}_b \simeq \mathbb{Z}/2^b \mathbb{Z}$) are distinguished from multi-modulus prime/coprime RNS systems ($\prod \mathbb{Z}/m_i \mathbb{Z}$).
+Single binary unsigned hardware wrap channels ($\texttt{uint}_b \simeq \mathbb{Z}/2^b \mathbb{Z}$) are distinguished from multi-modulus prime/coprime RNS systems ($\prod \mathbb{Z}/m_i \mathbb{Z}$). Here $N_{\max}$ is formally defined as the maximum evaluated polynomial degree $n$ within the system execution.
 1. **Admissibility & Modular Recurrence:** Evaluated over pairwise coprime moduli $m_1, \dots, m_k$. For rational parameter $\lambda = a/b$ and rational point $x = c/d$, recurrence step admissibility requires:
    $$\gcd\left( m_i, b \cdot d \cdot \operatorname{lcm}(1, \dots, N_{\max}) \right) = 1.$$
    For prime moduli $p_i$, this simplifies to $p_i > \max(2, N_{\max})$, $p_i \nmid b$, and $p_i \nmid d$.
@@ -204,8 +204,8 @@ Conceptually separates finite-field polynomial arithmetic from NTT transform acc
    Define the rational localization reduction map $\rho_p : \mathbb{Z}_{(p)} \to \mathbb{F}_p$. Then $\rho_p(C_n^{(\lambda)}(1)) = u_n v_n^{-1} \in \mathbb{F}_p^\times$, field parameters $\lambda_p = a b^{-1} \in \mathbb{F}_p$, point $x_p = c d^{-1} \in \mathbb{F}_p$, and normalized zonal evaluation:
    $$\boxed{\phi_{n,p}(x_p) = \rho_p(C_n^{(\lambda)}(x)) \left( u_n v_n^{-1} \right)^{-1} \in \mathbb{F}_p.}$$
 2. **Number Theoretic Transform (NTT) Fast Convolution Acceleration Primitive:**
-   Over finite prime fields $\mathbb{F}_p$ where desired linear convolution length $L_{\text{conv}} = a + b - 1$ satisfies $L_{\text{conv}} \le L_{\text{NTT}} \mid (p-1)$ and $\operatorname{ord}_p(\omega) = L_{\text{NTT}}$, primitive $L_{\text{NTT}}$-th roots of unity $\omega \in \mathbb{F}_p$ provide fast polynomial coefficient-domain multiplication:
-   $$\boxed{\text{NTT} : L_{\text{conv}} = a + b - 1 \le L_{\text{NTT}} \mid (p-1) \implies \text{coefficient-domain fast convolution.}}$$
+   Over finite prime fields $\mathbb{F}_p$ where desired linear convolution length $L_{\text{conv}} = L_1 + L_2 - 1$ satisfies $L_{\text{conv}} \le L_{\text{NTT}} \mid (p-1)$ and $\operatorname{ord}_p(\omega) = L_{\text{NTT}}$, primitive $L_{\text{NTT}}$-th roots of unity $\omega \in \mathbb{F}_p$ provide fast polynomial coefficient-domain multiplication:
+   $$\boxed{\text{NTT} : L_{\text{conv}} = L_1 + L_2 - 1 \le L_{\text{NTT}} \mid (p-1) \implies \text{coefficient-domain fast convolution.}}$$
 
 ### VII-E. Golub-Welsch Spectral Matrix Truncation
 For Gauss-Gegenbauer quadrature calculations, the symmetric tridiagonal Jacobi matrix operator $J$ is truncated via orthogonal projection $P_m$ to its leading $m \times m$ principal truncation $J_m = \operatorname{tridiag}(\alpha_0, \dots, \alpha_{m-2}) = P_m J P_m |_{\operatorname{span}\{e_0, \dots, e_{m-1}\}} \in \mathbb{R}^{m\times m}$. Its eigenvalues $\sigma(J_m) = \{x_1, \dots, x_m\} \subset (-1, 1)$ yield quadrature nodes $x_k$, and weights are $w_k = \mu_0 |(v_k)_1|^2$ using normalized eigenvector $v_k$ of $J_m$.
@@ -220,15 +220,15 @@ Layer VIII provides formal verification and cross-backend error certification co
 Layer VIII explicitly distinguishes four truth/exactness classes:
 $$\boxed{\texttt{ALGEBRAIC\_EXACT} \quad \text{(symbolic identity)}}$$
 $$\boxed{\texttt{ARITHMETIC\_EXACT} \quad \text{(exact rational / RNS reconstruction)}}$$
-$$\boxed{\texttt{ANALYTIC\_CERTIFIED} \quad \text{(proved asymptotic bounds)}}}$$
+$$\boxed{\texttt{ANALYTIC\_CERTIFIED} \quad \text{(proved asymptotic bounds)}}$$
 $$\boxed{\texttt{NUMERICAL\_APPROX} \quad \text{(floating-point residual diagnostics)}}$$
 
 Verification status is represented as a product certification tuple $\mathsf{Status} = (\mathsf{Algebraic}, \mathsf{Arithmetic}, \mathsf{Analytic}, \mathsf{Numerical})$. Note:
-$$\boxed{\texttt{NUMERICAL\_APPROX} \centernot\implies \texttt{ANALYTIC\_CERTIFIED}, \qquad R_{\text{structural}} = 0 \centernot\implies \texttt{ARITHMETIC\_EXACT}.}$$
+$$\boxed{\texttt{NUMERICAL\_APPROX} \not\implies \texttt{ANALYTIC\_CERTIFIED}, \qquad R_{\text{structural}} = 0 \not\implies \texttt{ARITHMETIC\_EXACT}.}$$
 
 Layer VIII explicitly distinguishes four error concepts:
 1. **Structural Residual ($R_{\text{structural}}$):** Normalized equation residual (e.g. $\widehat{R}_{\text{rec}}, \widehat{R}_{\text{ODE}}, \widehat{R}_{\text{Schr}}, R_J^{\text{abs}}, \widehat{R}_J$).
-2. **Forward Error ($E_{\text{forward}}$):** Discrepancy $|\hat{\phi} - \phi|$ from exact ground truth. Note: $R_{\text{structural}} = 0 \centernot\implies E_{\text{forward}} = 0$ and $E_{\text{backend}} \approx 0 \centernot\implies E_{\text{forward}} = 0$.
+2. **Forward Error ($E_{\text{forward}}$):** Discrepancy $|\hat{\phi} - \phi|$ from exact ground truth. Note: $R_{\text{structural}} = 0 \not\implies E_{\text{forward}} = 0$ and $E_{\text{backend}} \approx 0 \not\implies E_{\text{forward}} = 0$.
 3. **Conditioning ($\kappa$):** Problem sensitivity under perturbation.
 4. **Backend Discrepancy ($E_{\text{backend}}$):** Cross-implementation error $E_{A,B} = |\hat{\phi}^{(A)} - \hat{\phi}^{(B)}|$.
 
@@ -244,11 +244,11 @@ where $S_M \in \{S_M^{\text{rec}}, S_M^{\text{ODE}}, S_M^{\text{Schr}}, S_J\}$ i
 
 - **Normalized Recurrence Residual:** $\widehat{R}_{\text{rec}}(n, x) = \frac{|x \hat{\phi}_n - a_n \hat{\phi}_{n+1} - b_n \hat{\phi}_{n-1}|}{|x \hat{\phi}_n| + |a_n \hat{\phi}_{n+1}| + |b_n \hat{\phi}_{n-1}| + \tau_M}$ defined for $n \ge 1$ (with initial conditions $\phi_0 = 1, \phi_1 = x$).
 - **Normalized ODE Residual:** Defined for interior $x \in (-1, 1)$ to avoid endpoint $1-x^2=0$ cancellation:
-  $$\widehat{R}_{\text{ODE}}(x) = \frac{|(1-x^2)\hat{\phi}'' - (2\lambda+1)x\hat{\phi}' + E_n\hat{\phi}|}{|1-x^2||\hat{\phi}''| + |(2\lambda+1)x||\hat{\phi}'| + E_n|\hat{\phi}| + \tau_M} \approx 0.$$
+  $$\widehat{R}_{\text{ODE}}(x) = \frac{|(1-x^2)\hat{\phi}'' - (2\lambda+1)x\hat{\phi}' + E_n\hat{\phi}|}{|1-x^2||\hat{\phi}''| + |(2\lambda+1)x||\hat{\phi}'| + E_n|\hat{\phi}| + \tau_M}.$$
 - **Normalized Schrödinger Residual:** Defined for interior $\theta \in (0, \pi)$ to avoid $\csc^2\theta$ endpoint singularity:
   $$\widehat{R}_{\text{Schr}}(\theta) = \frac{|-\hat{u}'' + \lambda(\lambda-1)\csc^2\theta \, \hat{u} - N_n^2 \hat{u}|}{|\hat{u}''| + |\lambda(\lambda-1)\csc^2\theta \, \hat{u}| + N_n^2 |\hat{u}| + \tau_M}.$$
-- **Jacobi Matrix Spectral Eigenpair Residuals:** Absolute and normalized verification residuals for Golub-Welsch spectral backend:
-  $$\boxed{R_J^{\text{abs}}(v, x) = \|J_m v - x v\|, \qquad \widehat{R}_J(v, x) = \frac{\|J_m \hat{v} - \hat{x} \hat{v}\|}{\|J_m \hat{v}\| + |\hat{x}| \|\hat{v}\| + \tau_J}.}$$
+- **Jacobi Matrix Spectral Eigenpair Residuals:** Absolute and normalized verification residuals for Golub-Welsch spectral backend using eigenvalue $x_k$:
+  $$\boxed{R_J^{\text{abs}}(v, x_k) = \|J_m v - x_k v\|, \qquad \widehat{R}_J(v, x_k) = \frac{\|J_m \hat{v} - \hat{x}_k \hat{v}\|}{\|J_m \hat{v}\| + |\hat{x}_k| \|\hat{v}\| + \tau_J}.}$$
 - **Endpoint Anchors & Normalization Residual:** $R_+ = |\hat{\phi}_n(1) - 1|$, $R_- = |\hat{\phi}_n(-1) - (-1)^n|$, $R_{\text{norm}} = |C_n^{(\lambda)}(1)\hat{\phi}_n(x) - \hat{C}_n^{(\lambda)}(x)|$.
 - **Exact High-Order Endpoint Derivative Formulas:** Total domain $k \in \mathbb{N}_0$ with $\phi_n^{(k)} \equiv 0$ for $k > n$:
   $$\phi_n^{(k)}(1) = \frac{2^k (\lambda)_k C_{n-k}^{(\lambda+k)}(1)}{C_n^{(\lambda)}(1)} \quad (0 \le k \le n), \qquad \phi_n^{(k)}(-1) = (-1)^{n-k} \phi_n^{(k)}(1), \qquad R_{\pm, k} = |\hat{\phi}_n^{(k)}(\pm 1) - \phi_n^{(k)}(\pm 1)|.$$

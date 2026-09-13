@@ -8,15 +8,15 @@ This repository implements a mathematically closed, VIII-Layer unified architect
 
 ```
   Layer I. Representation Geometry & Fischer Decomposition
-  G = SO(d), K = SO(d-1), Sym^n = ℋ_n ⊕ q Sym^{n-2}, Q^{d-2} ⊂ ℙ^{d-1}, R(Q)_n ≅ ℋ_n(ℂ^d), ℋ_n(ℝ^d) ──→ 𝒴_n(S^{d-1})
+  G = SO(d), K = SO(d-1), Sym^n = ℋ_n ⊕ q Sym^{n-2}, Q^{d-2} ⊂ ℙ^{d-1}, R(Q)_n ≅ ℋ_n(ℂ^d), Res_S: ℋ_n(ℂ^d) ──∼──→ 𝒴_n^ℂ(S^{d-1})
         │
         ▼
   Layer II. Spherical Fixed Line, Rank-One Projector & Bi-K-Invariance
-  v_n ∈ V_n^K, ||v_n|| = 1  ⟹  P_{K,n} = v_n ⊗ v_n^*  ⟹  ϕ_n is K-bi-invariant, radial representative ϕ_n(x) ∈ C^∞([-1, 1]), x = cos θ, |ϕ_n(x)| ≤ 1
+  v_n ∈ V_n^K, ||v_n|| = 1  ⟹  P_K = P_n = v_n ⊗ v_n^*  ⟹  ϕ_n is K-bi-invariant, radial representative ϕ_n(x) ∈ C^∞([-1, 1]), x = cos θ, |ϕ_n(x)| ≤ 1
         │
         ▼
   Layer III. Exact Operator Equivalence & Schrödinger Eigenvalues
-  -Δ_{S^{d-1}} ϕ_n = E_n ϕ_n  |  L_x ↔ L_θ ↔ H_λ u_n = N_n^2 u_n,  N_n = n + λ  |  Dual Recurrence Conversion: a_n, b_n ⟷ α_n
+  -Δ_{S^{d-1}} ϕ_n = E_n ϕ_n  |  L_x ↔ L_θ ↔ H_λ u_n = N_n^2 u_n,  N_n = n + λ  |  Dual Recurrences a_n, b_n ⟷ α_n
         │
         ▼
   Layer IV. Jacobi Spectral Operator & Unitary Matrix Realization
@@ -34,9 +34,9 @@ This repository implements a mathematically closed, VIII-Layer unified architect
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, Q16.16, LNS)
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x], RatCert, Fraction Recurrence)
-  ├── VII-C: Scalable Residue Number System (RNS / CRT with Certificate C_CRT = A_denom ∧ B_num/den ∧ (2UV < M))
+  ├── VII-C: Scalable Residue Number System (RNS / CRT Certificate C_CRT = A_denom ∧ B_num/den ∧ (2UV < M))
   ├── VII-D1: Finite-Field Polynomial Arithmetic (F_p, A_ϕ(p, n), Rational Reduction ρ_p)
-  ├── VII-D2: Number Theoretic Transform Acceleration Primitive (NTT: L_conv ≤ L_NTT | (p-1) → fast conv)
+  ├── VII-D2: Number Theoretic Transform Acceleration Primitive (NTT: L_conv = L_1+L_2-1 ≤ L_NTT | (p-1) → fast conv)
   └── VII-E: Golub-Welsch Spectral Matrix Truncation (J_m = tridiag(α_0, ..., α_{m-2}))
         │
         ▼
@@ -78,7 +78,7 @@ $$R(Q)_n \cong \operatorname{Sym}^n(\mathbb{C}^d) / q \operatorname{Sym}^{n-2}(\
 - **Jacobi Spectral Path:** Evaluates $J_m = \operatorname{tridiag}(\alpha_0, \dots, \alpha_{m-2}) \in \mathbb{R}^{m \times m}$ operating in algebraic extensions $\overline{\mathbb{Q}}$ due to $\alpha_n = \frac{1}{2}\sqrt{\frac{(n+1)(n+2\lambda)}{(n+\lambda)(n+\lambda+1)}} = \frac{1}{2} - \frac{\lambda(\lambda-1)}{4n^2} + O(n^{-3})$.
 
 ### Modular & RNS/CRT Admissibility Certificates
-- **Polynomial Certificate $\mathcal{A}_C(p)$:** Requires prime $p > \max(2, N_{\max})$, $p \nmid b$, and $p \nmid d$.
+- **Polynomial Certificate $\mathcal{A}_C(p)$:** Requires prime $p > \max(2, N_{\max})$, $p \nmid b$, and $p \nmid d$. Maximum degree $N_{\max}$ is defined as the maximum evaluated polynomial degree $n$.
 - **Normalized Spherical Certificate $\mathcal{A}_\phi(p, n)$:** Requires $\mathcal{A}_C(p) \land (p \nmid v_n) \land (u_n \not\equiv 0 \pmod p)$ where $C_n^{(\lambda)}(1) = u_n/v_n$ ($\gcd(u_n, v_n) = 1$).
 - **Conditional Exactness Chain:** $\mathcal{C}_A^{\text{exact}} \implies \varepsilon_A^{\text{certified}} = \varepsilon_A^{\text{forward}} = 0$.
 
@@ -88,7 +88,7 @@ $$R(Q)_n \cong \operatorname{Sym}^n(\mathbb{C}^d) / q \operatorname{Sym}^{n-2}(\
   - Recurrence ($n \ge 1$): $\widehat{R}_{\text{rec}}(n, x) = \frac{|x \hat{\phi}_n - a_n \hat{\phi}_{n+1} - b_n \hat{\phi}_{n-1}|}{|x \hat{\phi}_n| + |a_n \hat{\phi}_{n+1}| + |b_n \hat{\phi}_{n-1}| + \tau_M}$.
   - Interior ODE ($-1 < x < 1$): $\widehat{R}_{\text{ODE}}(x) = \frac{|(1-x^2)\hat{\phi}'' - (2\lambda+1)x\hat{\phi}' + E_n\hat{\phi}|}{|1-x^2||\hat{\phi}''| + |(2\lambda+1)x||\hat{\phi}'| + E_n|\hat{\phi}| + \tau_M}$.
   - Interior Schrödinger ($0 < \theta < \pi$): $\widehat{R}_{\text{Schr}}(\theta) = \frac{|-\hat{u}'' + \lambda(\lambda-1)\csc^2\theta \, \hat{u} - N_n^2 \hat{u}|}{|\hat{u}''| + |\lambda(\lambda-1)\csc^2\theta \, \hat{u}| + N_n^2 |\hat{u}| + \tau_M}$.
-  - Jacobi Spectral Eigenpair Residuals: $R_J^{\text{abs}}(v, x) = \|J_m v - x v\|$ and $\widehat{R}_J(v, x) = \frac{\|J_m \hat{v} - \hat{x}\hat{v}\|}{\|J_m \hat{v}\| + |\hat{x}|\|\hat{v}\| + \tau_J}$.
+  - Jacobi Spectral Eigenpair Residuals: $R_J^{\text{abs}}(v, x_k) = \|J_m v - x_k v\|$ and $\widehat{R}_J(v, x_k) = \frac{\|J_m \hat{v} - \hat{x}_k \hat{v}\|}{\|J_m \hat{v}\| + |\hat{x}_k|\|\hat{v}\| + \tau_J}$.
 - **High-Order Endpoint Derivative Formulas:** $\phi_n^{(k)}(1) = \frac{2^k (\lambda)_k C_{n-k}^{(\lambda+k)}(1)}{C_n^{(\lambda)}(1)}$, $\phi_n^{(k)}(-1) = (-1)^{n-k} \phi_n^{(k)}(1)$, and $\phi_n^{(k)} \equiv 0$ for $k > n$.
 - **Gauss-Gegenbauer Weight Normalization & Moment Invariants:** $\sum_{k=1}^m w_k = \mu_0 = B(1/2, \lambda+1/2)$, $\sum_{k=1}^m w_k x_k^j = \int_{-1}^1 x^j (1-x^2)^{\lambda-1/2} dx = \begin{cases} 0, & j \text{ is odd}, \\ B(r+1/2, \lambda+1/2), & j = 2r \text{ is even}. \end{cases}$
 
