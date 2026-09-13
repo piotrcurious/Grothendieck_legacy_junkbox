@@ -36,7 +36,7 @@ This repository implements a mathematically closed, VIII-Layer unified architect
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x], RatCert, Fraction Recurrence)
   ├── VII-C: Scalable Residue Number System (RNS / CRT with A-Priori Magnitude Bounds)
   ├── VII-D1: Finite-Field Polynomial Arithmetic (F_p, A_ϕ(p, n), Rational Reduction ρ_p)
-  ├── VII-D2: Number Theoretic Transform Acceleration Primitive (NTT: coeff mult → fast convolution)
+  ├── VII-D2: Number Theoretic Transform Acceleration Primitive (NTT: L_conv ≤ L_NTT | (p-1) → fast conv)
   └── VII-E: Golub-Welsch Spectral Matrix Truncation (J_m = tridiag(α_0, ..., α_{m-2}))
         │
         ▼
@@ -74,7 +74,7 @@ The degree-$n$ representation space $V_n \cong \mathcal{H}_n(\mathbb{R}^d)$ corr
 $$R(Q)_n \cong \operatorname{Sym}^n(\mathbb{C}^d) / q \operatorname{Sym}^{n-2}(\mathbb{C}^d) \cong V_n, \qquad H_{R(Q)}(t) = \frac{1 - t^2}{(1 - t)^d} \implies \dim V_n = \binom{n+d-1}{d-1} - \binom{n+d-3}{d-1}.$$
 
 ### Exact Rational Algebra $\mathbb{Q}[\lambda, x]$ vs. Jacobi Spectral Path $\overline{\mathbb{Q}}$
-- **Exact Polynomial Path:** Evaluates $C_n^{(\lambda)}(x) \in \mathbb{Q}$ using three-term recurrence over reduced fraction inputs $\operatorname{RatCert} = (a, b, c, d, N_{\max})$ where $\lambda = a/b, x = c/d$.
+- **Exact Polynomial Path:** Evaluates $C_n^{(\lambda)}(x) \in \mathbb{Q}$ using three-term recurrence over reduced fraction inputs $\mathcal{A}_{\text{rat}} = \operatorname{RatCert} \land (\gcd(a,b)=\gcd(c,d)=1) \land (b,d>0) \land (C_n^{(\lambda)}(1) \neq 0)$ where $\lambda = a/b, x = c/d$.
 - **Jacobi Spectral Path:** Evaluates $J_m = \operatorname{tridiag}(\alpha_0, \dots, \alpha_{m-2}) \in \mathbb{R}^{m \times m}$ operating in algebraic extensions $\overline{\mathbb{Q}}$ due to $\alpha_n = \frac{1}{2}\sqrt{\frac{(n+1)(n+2\lambda)}{(n+\lambda)(n+\lambda+1)}} = \frac{1}{2} - \frac{\lambda(\lambda-1)}{4n^2} + O(n^{-3})$.
 
 ### Modular & RNS/CRT Admissibility Certificates

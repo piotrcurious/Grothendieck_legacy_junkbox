@@ -30,7 +30,7 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
         │
         ▼
   Layer VI. Two-Overlap Composite Uniform Asymptotic Expansion
-  F_comp = F_north + F_south + F_interior - F_{+,overlap} - F_{-,overlap},  Match^{(K)} ⟹ overlap consistency,  |R_comp| ≤ B_{K,comp}
+  F_comp = F_north + F_south + F_interior - F_{+,overlap} - F_{-,overlap},  Match^{(K)} = coeff-wise re-expansion mod O(N_n^{-K}),  |R_comp| ≤ B_{K,comp}
         │
         ▼
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
@@ -38,7 +38,7 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   ├── VII-B: Exact Rational Symbolic Algebra (Symbolic Q[λ, x], Rational Eval λ, x ∈ Q, Exact Recurrence)
   ├── VII-C: Scalable Residue Number System (RNS / CRT with A-Priori Magnitude Bounds)
   ├── VII-D1: Finite-Field Polynomial Arithmetic (F_p, A_ϕ(p, n), Rational Reduction ρ_p)
-  ├── VII-D2: Number Theoretic Transform Acceleration (NTT: coefficient multiplication → fast convolution)
+  ├── VII-D2: Number Theoretic Transform Acceleration (NTT: coeff mult → fast convolution, L_conv ≤ L_NTT | (p-1))
   └── VII-E: Golub-Welsch Spectral Matrix Truncation (J_m = tridiag(α_0, ..., α_{m-2}), R_J^abs, R_J_hat)
         │
         ▼
@@ -110,8 +110,8 @@ Define 3D phase space $(n, \theta, \lambda)$ boundary coordinates using unified 
 $$z_+ = N_n \theta, \qquad z_- = N_n (\pi - \theta), \qquad N_n = n + \lambda.$$
 
 ### Composite Matched Asymptotic Framework & Rigorous Overlap Contract
-For truncation order $K$ ($F^{(K)} = \sum_{j=0}^{K-1} N_n^{-j} F_j$), overlap approximants $F_{+O}^{(K)}$ and $F_{-O}^{(K)}$ are defined by common asymptotic re-expansion modulo $O(N_n^{-K})$ in the corresponding overlap scaling:
-$$\boxed{F_{\pm O}^{(K)} = \operatorname{Match}^{(K)}\left( F_{\text{endpoint}}^{(K)}, F_{\text{interior}}^{(K)} \right) = \text{common re-expansion modulo } O(N_n^{-K}),}$$
+For truncation order $K$ ($F^{(K)} = \sum_{j=0}^{K-1} N_n^{-j} F_j$), overlap approximants $F_{+O}^{(K)}$ and $F_{-O}^{(K)}$ are defined by coefficient-wise common asymptotic re-expansion modulo $O(N_n^{-K})$ in the corresponding overlap scaling (e.g. $\theta = z_+ / N_n, z_+ \to \infty, \theta \to 0$ for North overlap):
+$$\boxed{F_{\pm O}^{(K)} = \operatorname{Match}^{(K)}\left( F_{\text{endpoint}}^{(K)}, F_{\text{interior}}^{(K)} \right) = \text{coefficient-wise common re-expansion modulo } O(N_n^{-K}),}$$
 preserving $F_{\text{endpoint}}^{(K)} - F_{\pm O}^{(K)} = O(N_n^{-K})$ and $F_{\text{interior}}^{(K)} - F_{\pm O}^{(K)} = O(N_n^{-K})$ in the overlap scaling.
 
 $\operatorname{Match}^{(K)}$ establishes formal **overlap consistency**, whereas proving $|R_{K, M}| \le B_{K, M}$ requires an independent asymptotic remainder theorem.
@@ -183,8 +183,8 @@ Conceptually separates finite-field polynomial arithmetic from NTT transform acc
    Define the rational localization reduction map $\rho_p : \mathbb{Z}_{(p)} \to \mathbb{F}_p$. Then $\rho_p(C_n^{(\lambda)}(1)) = u_n v_n^{-1} \in \mathbb{F}_p^\times$, field parameters $\lambda_p = a b^{-1} \in \mathbb{F}_p$, point $x_p = c d^{-1} \in \mathbb{F}_p$, and normalized zonal evaluation:
    $$\boxed{\phi_{n,p}(x_p) = \rho_p(C_n^{(\lambda)}(x)) \left( u_n v_n^{-1} \right)^{-1} \in \mathbb{F}_p.}$$
 2. **Number Theoretic Transform (NTT) Fast Convolution Acceleration Primitive:**
-   Over finite prime fields $\mathbb{F}_p$ where $L_{\text{NTT}} \mid (p-1)$ (using $L_{\text{NTT}}$ to avoid collision with $N_n = n+\lambda$), primitive $L_{\text{NTT}}$-th roots of unity $\omega_{L_{\text{NTT}}} \in \mathbb{F}_p$ provide fast polynomial coefficient-domain multiplication:
-   $$\boxed{\text{NTT} : \text{coefficient-domain multiplication} \longrightarrow \text{fast convolution.}}$$
+   Over finite prime fields $\mathbb{F}_p$ where desired convolution size $L_{\text{conv}}$ satisfies $L_{\text{conv}} \le L_{\text{NTT}} \mid (p-1)$ (using $L_{\text{NTT}}$ to avoid collision with $N_n = n+\lambda$), primitive $L_{\text{NTT}}$-th roots of unity $\omega_{L_{\text{NTT}}} \in \mathbb{F}_p$ provide fast polynomial coefficient-domain multiplication:
+   $$\boxed{\text{NTT} : L_{\text{conv}} \le L_{\text{NTT}} \mid (p-1) \implies \text{coefficient-domain fast convolution.}}$$
 
 ### VII-E. Golub-Welsch Spectral Matrix Truncation
 For Gauss-Gegenbauer quadrature calculations, the symmetric tridiagonal Jacobi matrix operator $J$ is truncated via orthogonal projection $P_m$ to its leading $m \times m$ principal truncation $J_m = \operatorname{tridiag}(\alpha_0, \dots, \alpha_{m-2}) = P_m J P_m |_{\operatorname{span}\{e_0, \dots, e_{m-1}\}} \in \mathbb{R}^{m\times m}$. Its eigenvalues $\sigma(J_m) = \{x_1, \dots, x_m\}$ yield quadrature nodes $x_k$, and weights are $w_k = \mu_0 |(v_k)_1|^2$ using normalized eigenvector $v_k$ of $J_m$.
@@ -204,7 +204,7 @@ Layer VIII explicitly distinguishes four error concepts:
 
 Zero arithmetic forward error $\varepsilon_A^{\text{certified}} = 0$ is guaranteed by full implementation correctness certificates:
 $$\boxed{\mathcal{C}_A^{\text{exact}} \implies \varepsilon_A^{\text{certified}} = 0,}$$
-where backend-specific exactness certificates incorporate implementation correctness invariants $\mathcal{I}_{\text{impl}}$:
+where backend-specific exactness certificates incorporate exact rational certificate $\mathcal{A}_{\text{rat}} = \operatorname{RatCert}(\lambda, x, N_{\max}) \land (\gcd(a,b)=\gcd(c,d)=1) \land (b,d>0) \land (C_n^{(\lambda)}(1) \neq 0)$ and implementation correctness invariants $\mathcal{I}_{\text{impl}}$:
 $$\boxed{\mathcal{C}_{\text{rat}}^{\text{exact}} = \mathcal{A}_{\text{rat}} \land \mathcal{I}_{\text{impl}}, \qquad \mathcal{C}_{\text{RNS}}^{\text{exact}} = \mathcal{A}_{\text{rec}} \land \mathcal{A}_{\text{norm}} \land \mathcal{A}_{\text{CRT}} \land \mathcal{I}_{\text{impl}}.}$$
 
 ### VIII-B. Scale-Invariant Structural Residual Invariants & Residual-Specific Floors
