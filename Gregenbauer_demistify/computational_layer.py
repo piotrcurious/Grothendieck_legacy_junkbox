@@ -469,7 +469,7 @@ class GegenbauerComputationalSolver:
             pareto_candidates = list(metrics.values())
 
         if max_error_tol is not None:
-            filtered = [m for m in pareto_candidates if m.max_mixed_error <= max_error_tol]
+            filtered = [m for m in pareto_candidates if m.max_mixed_error <= max_error_tol and m.max_residual <= max_error_tol]
             if not filtered:
                 raise ValueError(f"No algebraic permutation satisfies max_error_tol={max_error_tol}")
             pareto_candidates = filtered
