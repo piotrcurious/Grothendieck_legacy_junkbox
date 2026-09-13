@@ -18,7 +18,7 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
         │
         ▼
   Layer III. Exact Operator Equivalence & Schrödinger Eigenvalues
-  -Δ_{S^{d-1}} ϕ_n = E_n ϕ_n  |  L_x ↔ L_θ ↔ H_λ u_n = N_n^2 u_n,  N_n^2 = E_n + λ^2
+  -Δ_{S^{d-1}} ϕ_n = E_n ϕ_n  |  L_x ↔ L_θ ↔ H_λ u_n = N_n^2 u_n,  N_n = n + λ,  N_n^2 = E_n + λ^2
         │
         ▼
   Layer IV. Jacobi Spectral Operator & Unitary Matrix Realization
@@ -26,11 +26,11 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
         │
         ▼
   Layer V. Two-Endpoint Boundary Coordinates
-  N = n + λ,  z_+ = N θ,  z_- = N (π - θ)
+  N_n = n + λ,  z_+ = N_n θ,  z_- = N_n (π - θ)
         │
         ▼
   Layer VI. Two-Overlap Composite Uniform Asymptotic Expansion
-  F_comp = F_north + F_south + F_interior - F_{+,overlap} - F_{-,overlap},  Match^{(K)} = re-expansion mod O(N^{-K}),  |R_comp| ≤ B_{K,comp}
+  F_comp = F_north + F_south + F_interior - F_{+,overlap} - F_{-,overlap},  Match^{(K)} ⟹ overlap consistency,  |R_comp| ≤ B_{K,comp}
         │
         ▼
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
@@ -86,7 +86,7 @@ $$-\Delta_{S^{d-1}} \phi_n = E_n \phi_n, \qquad E_n = n(n + 2\lambda).$$
 Equivalence across three operator representations:
 1. **Algebraic Differential Operator $L_x$:** $(1 - x^2) \phi'' - (2\lambda + 1)x \phi' + E_n \phi = 0$.
 2. **Compact Radial Operator $L_\theta$:** $\phi'' + 2\lambda \cot\theta \, \phi' + E_n \phi = 0$.
-3. **Sturm-Liouville Hamiltonian $H_\lambda$:** $-u_n'' + \lambda(\lambda - 1)\csc^2\theta \, u_n = N_n^2 u_n$, where $u_n = (\sin\theta)^\lambda \phi_n$ and $N_n^2 = (n + \lambda)^2 = E_n + \lambda^2$.
+3. **Sturm-Liouville Hamiltonian $H_\lambda$:** $-u_n'' + \lambda(\lambda - 1)\csc^2\theta \, u_n = N_n^2 u_n$, where $u_n = (\sin\theta)^\lambda \phi_n$ and $N_n := n + \lambda$, so $N_n^2 = E_n + \lambda^2$.
 
 ### Mandatory Canonical Verification Families
 - **$\lambda = 1/2$ (Sphere $S^2$):** $\phi_n(x) = P_n(x)$ (Legendre polynomials).
@@ -106,30 +106,32 @@ Matrix invariants: $J = J^*, \|J\| = 1, \sigma(J) = [-1, 1]$. Sanity check for $
 
 ## 6. Layer V & VI: Singular Scaling & Two-Overlap Uniform Asymptotics
 
-Define 3D phase space $(n, \theta, \lambda)$ boundary coordinates:
-$$z_+ = N \theta, \qquad z_- = N(\pi - \theta), \qquad N = n + \lambda.$$
+Define 3D phase space $(n, \theta, \lambda)$ boundary coordinates using unified singular scale $N_n := n + \lambda$:
+$$z_+ = N_n \theta, \qquad z_- = N_n (\pi - \theta), \qquad N_n = n + \lambda.$$
 
 ### Composite Matched Asymptotic Framework & Rigorous Overlap Contract
-For truncation order $K$ ($F^{(K)} = \sum_{j=0}^{K-1} N^{-j} F_j$), overlap approximants $F_{+O}^{(K)}$ and $F_{-O}^{(K)}$ are defined by common asymptotic re-expansion modulo $O(N^{-K})$ in the corresponding overlap scaling:
-$$\boxed{F_{\pm O}^{(K)} = \operatorname{Match}^{(K)}\left( F_{\text{endpoint}}^{(K)}, F_{\text{interior}}^{(K)} \right) = \text{common re-expansion modulo } O(N^{-K}),}$$
-preserving $F_{\text{endpoint}}^{(K)} - F_{\pm O}^{(K)} = O(N^{-K})$ and $F_{\text{interior}}^{(K)} - F_{\pm O}^{(K)} = O(N^{-K})$ in the overlap scaling.
+For truncation order $K$ ($F^{(K)} = \sum_{j=0}^{K-1} N_n^{-j} F_j$), overlap approximants $F_{+O}^{(K)}$ and $F_{-O}^{(K)}$ are defined by common asymptotic re-expansion modulo $O(N_n^{-K})$ in the corresponding overlap scaling:
+$$\boxed{F_{\pm O}^{(K)} = \operatorname{Match}^{(K)}\left( F_{\text{endpoint}}^{(K)}, F_{\text{interior}}^{(K)} \right) = \text{common re-expansion modulo } O(N_n^{-K}),}$$
+preserving $F_{\text{endpoint}}^{(K)} - F_{\pm O}^{(K)} = O(N_n^{-K})$ and $F_{\text{interior}}^{(K)} - F_{\pm O}^{(K)} = O(N_n^{-K})$ in the overlap scaling.
+
+$\operatorname{Match}^{(K)}$ establishes formal **overlap consistency**, whereas proving $|R_{K, M}| \le B_{K, M}$ requires an independent asymptotic remainder theorem.
 
 For each branch $M \in \{N, S, I, +O, -O\}$, branch remainder is defined by $R_M = \phi - F_M^{(K)}$. The composite uniform expansion is:
-$$F_{\text{comp}}^{(K)} = F_{\text{north}}^{(K)}(z_+) + F_{\text{south}}^{(K)}(z_-) + F_{\text{interior}}^{(K)}(N, \theta) - F_{+,\text{overlap}}^{(K)}(z_+) - F_{-,\text{overlap}}^{(K)}(z_-),$$
+$$F_{\text{comp}}^{(K)} = F_{\text{north}}^{(K)}(z_+) + F_{\text{south}}^{(K)}(z_-) + F_{\text{interior}}^{(K)}(N_n, \theta) - F_{+,\text{overlap}}^{(K)}(z_+) - F_{-,\text{overlap}}^{(K)}(z_-),$$
 and composite remainder $R_{\text{comp}} = \phi - F_{\text{comp}}^{(K)} = R_N + R_S + R_I - R_{+O} - R_{-O}$ satisfies:
 $$\boxed{|R_{\text{comp}}| \le B_{K, \text{comp}} \le B_{K, N} + B_{K, S} + B_{K, I} + B_{K, +O} + B_{K, -O},}$$
-where $|R_{K, M}| \le B_{K, M}(N, \theta, \lambda)$ provides local branch certificates.
+where $|R_{K, M}| \le B_{K, M}(N_n, \theta, \lambda)$ provides local branch certificates.
 
 1. **Interior Domain Envelope ($\mathcal{D}_{\text{int}}(\delta) = \{\theta : \delta \le \theta \le \pi - \delta\}$):**
-   $$|R_{K, \text{int}}| \le B_{K, \text{int}}(N, \theta, \lambda) \le \frac{C_{\lambda, K} N^{-K}}{\sin\delta},$$
+   $$|R_{K, \text{int}}| \le B_{K, \text{int}}(N_n, \theta, \lambda) \le \frac{C_{\lambda, K} N_n^{-K}}{\sin\delta},$$
    where $C_{\lambda, K}$ is a candidate theorem-level constant to be derived/certified.
-2. **North / South Endpoint Envelopes ($z_+ = N\theta \le Z_+, z_- = N(\pi-\theta) \le Z_-$):**
+2. **North / South Endpoint Envelopes ($z_+ = N_n\theta \le Z_+, z_- = N_n(\pi-\theta) \le Z_-$):**
    Nonnegative majorant envelopes bounding the full omitted asymptotic series:
-   $$|R_{K, \pm}| \le B_{K, \pm}, \qquad B_{K, +}(N, z_+, \lambda) = N^{-K} C_{\lambda, K}^+ A_{K, \lambda}^+(z_+; N), \qquad B_{K, -}(N, z_-, \lambda) = N^{-K} C_{\lambda, K}^- A_{K, \lambda}^-(z_-; N),$$
-   where $A_{K, \lambda}^\pm(z; N) \ge 0$ is a nonnegative majorant (avoiding zeroes at Bessel oscillating nodes).
+   $$|R_{K, \pm}| \le B_{K, \pm}, \qquad B_{K, +}(N_n, z_+, \lambda) = N_n^{-K} C_{\lambda, K}^+ A_{K, \lambda}^+(z_+; N_n), \qquad B_{K, -}(N_n, z_-, \lambda) = N_n^{-K} C_{\lambda, K}^- A_{K, \lambda}^-(z_-; N_n),$$
+   where $A_{K, \lambda}^\pm(z; N_n) \ge 0$ is a nonnegative majorant (avoiding zeroes at Bessel oscillating nodes).
 3. **Coverage Partition & Global Envelope:**
-   Domain coverage requirement: $\mathcal{D}_+ \cup \mathcal{D}_- \cup \mathcal{D}_I = [0, \pi]$ where $\mathcal{D}_+ = \{\theta : z_+ \le Z_+\}$, $\mathcal{D}_- = \{\theta : z_- \le Z_-\}$, and $\mathcal{D}_I = \{\theta : \delta \le \theta \le \pi - \delta\}$ with $N\delta \le Z_+, Z_-$ and disjoint endpoint regions $Z_+ + Z_- < \pi N$. Branch-ordering ambiguity in overlaps is resolved via envelope minimization over valid representations $\mathcal{M}_{\text{valid}}(N, \theta, \lambda) = \{M : \mathcal{C}_M \text{ is valid at } (N, \theta, \lambda)\}$:
-   $$B_K^{\text{best}}(N, \theta, \lambda) = \min_{M \in \mathcal{M}_{\text{valid}}} B_{K, M}(N, \theta, \lambda).$$
+   Domain coverage requirement: $\mathcal{D}_+ \cup \mathcal{D}_- \cup \mathcal{D}_I = [0, \pi]$ where $\mathcal{D}_+ = \{\theta : z_+ \le Z_+\}$, $\mathcal{D}_- = \{\theta : z_- \le Z_-\}$, and $\mathcal{D}_I = \{\theta : \delta \le \theta \le \pi - \delta\}$ with $N_n\delta \le Z_+, Z_-$ and disjoint endpoint regions $Z_+ + Z_- < \pi N_n$. Branch-ordering ambiguity in overlaps is resolved via envelope minimization over valid representations $\mathcal{M}_{\text{valid}}(N_n, \theta, \lambda) = \{M : \mathcal{C}_M \text{ is valid at } (N_n, \theta, \lambda)\}$:
+   $$B_K^{\text{best}}(N_n, \theta, \lambda) = \min_{M \in \mathcal{M}_{\text{valid}}} B_{K, M}(N_n, \theta, \lambda).$$
 
 4. **Backend Capability Certificates $\mathcal{C}_M$:**
    Each execution backend $M \in \mathcal{M}$ provides a capability certificate tuple $\mathcal{C}_M = (\mathcal{D}_M, \mathcal{P}_M, \mathcal{E}_M, \mathcal{R}_M)$ specifying valid domain $\mathcal{D}_M$, parameter admissibility $\mathcal{P}_M$, error model $\mathcal{E}_M$, and residual checkers $\mathcal{R}_M$.
@@ -181,7 +183,7 @@ Conceptually separates finite-field polynomial arithmetic from NTT transform acc
    Define the rational localization reduction map $\rho_p : \mathbb{Z}_{(p)} \to \mathbb{F}_p$. Then $\rho_p(C_n^{(\lambda)}(1)) = u_n v_n^{-1} \in \mathbb{F}_p^\times$, field parameters $\lambda_p = a b^{-1} \in \mathbb{F}_p$, point $x_p = c d^{-1} \in \mathbb{F}_p$, and normalized zonal evaluation:
    $$\boxed{\phi_{n,p}(x_p) = \rho_p(C_n^{(\lambda)}(x)) \left( u_n v_n^{-1} \right)^{-1} \in \mathbb{F}_p.}$$
 2. **Number Theoretic Transform (NTT) Fast Convolution Acceleration Primitive:**
-   Over finite prime fields $\mathbb{F}_p$ where $L_{\text{NTT}} \mid (p-1)$ (using $L_{\text{NTT}}$ to avoid collision with $N = n+\lambda$), primitive $L_{\text{NTT}}$-th roots of unity $\omega_{L_{\text{NTT}}} \in \mathbb{F}_p$ provide fast polynomial coefficient-domain multiplication:
+   Over finite prime fields $\mathbb{F}_p$ where $L_{\text{NTT}} \mid (p-1)$ (using $L_{\text{NTT}}$ to avoid collision with $N_n = n+\lambda$), primitive $L_{\text{NTT}}$-th roots of unity $\omega_{L_{\text{NTT}}} \in \mathbb{F}_p$ provide fast polynomial coefficient-domain multiplication:
    $$\boxed{\text{NTT} : \text{coefficient-domain multiplication} \longrightarrow \text{fast convolution.}}$$
 
 ### VII-E. Golub-Welsch Spectral Matrix Truncation
@@ -200,15 +202,15 @@ Layer VIII explicitly distinguishes four error concepts:
 3. **Conditioning ($\kappa$):** Problem sensitivity under perturbation.
 4. **Backend Discrepancy ($E_{\text{backend}}$):** Cross-implementation error $E_{A,B} = |\hat{\phi}^{(A)} - \hat{\phi}^{(B)}|$.
 
-Zero arithmetic forward error $\varepsilon_A^{\text{certified}} = 0$ is guaranteed by full correctness certificates:
+Zero arithmetic forward error $\varepsilon_A^{\text{certified}} = 0$ is guaranteed by full implementation correctness certificates:
 $$\boxed{\mathcal{C}_A^{\text{exact}} \implies \varepsilon_A^{\text{certified}} = 0,}$$
-where backend-specific exactness certificates are defined by:
-$$\boxed{\mathcal{C}_{\text{rat}}^{\text{exact}} = \mathcal{A}_{\text{rat}} \land \mathcal{I}_{\text{algorithm}}, \qquad \mathcal{C}_{\text{RNS}}^{\text{exact}} = \mathcal{A}_{\text{rec}} \land \mathcal{A}_{\text{norm}} \land \mathcal{A}_{\text{CRT}} \land \mathcal{I}_{\text{algorithm}}.}$$
+where backend-specific exactness certificates incorporate implementation correctness invariants $\mathcal{I}_{\text{impl}}$:
+$$\boxed{\mathcal{C}_{\text{rat}}^{\text{exact}} = \mathcal{A}_{\text{rat}} \land \mathcal{I}_{\text{impl}}, \qquad \mathcal{C}_{\text{RNS}}^{\text{exact}} = \mathcal{A}_{\text{rec}} \land \mathcal{A}_{\text{norm}} \land \mathcal{A}_{\text{CRT}} \land \mathcal{I}_{\text{impl}}.}$$
 
 ### VIII-B. Scale-Invariant Structural Residual Invariants & Residual-Specific Floors
 To ensure comparable residual evaluations across independent backends and distinct residual types, the regularization floor is explicitly backend-dependent and residual-scale aware:
 $$\boxed{\tau_M \ge 0, \qquad \tau_M = \max(\tau_{\text{abs}}, \tau_{\text{rel}} S_M),}$$
-where $S_M \in \{S_M^{\text{rec}}, S_M^{\text{ODE}}, S_M^{\text{Schr}}, S_M^J\}$ is the characteristic magnitude scale factor for representation backend $M$ and specific equation type.
+where $S_M \in \{S_M^{\text{rec}}, S_M^{\text{ODE}}, S_M^{\text{Schr}}, S_J\}$ is the characteristic magnitude scale factor for representation backend $M$ and specific equation type (with $\tau_J = \max(\tau_{\text{abs}}, \tau_{\text{rel}} S_J)$).
 
 - **Normalized Recurrence Residual:** $\widehat{R}_{\text{rec}}(n, x) = \frac{|x \hat{\phi}_n - a_n \hat{\phi}_{n+1} - b_n \hat{\phi}_{n-1}|}{|x \hat{\phi}_n| + |a_n \hat{\phi}_{n+1}| + |b_n \hat{\phi}_{n-1}| + \tau_M}$ defined for $n \ge 1$ (with initial conditions $\phi_0 = 1, \phi_1 = x$).
 - **Normalized ODE Residual:** Defined for interior $x \in (-1, 1)$ to avoid endpoint $1-x^2=0$ cancellation:
