@@ -65,8 +65,10 @@ def gegenbauer_derivative(n: int, lambda_val: float, x: np.ndarray, k: int = 1) 
 def normalized_phi_derivative(n: int, lambda_val: float, x: np.ndarray, k: int = 1) -> np.ndarray:
     """
     Computes exact k-th derivative of normalized zonal function phi_n(x) = C_n^(lambda)(x) / C_n^(lambda)(1):
-      phi_n^{(k)}(x) = 2^k * (lambda)_k / C_n^(lambda)(1) * C_{n-k}^(lambda+k)(x)   (k <= n)
-      phi_n^{(k)}(x) = 0                                                           (k > n)
+      phi_n^{(k)}(x) = A_{n,k} * phi_{n-k}^(lambda+k)(x)   (k <= n)
+      phi_n^{(k)}(x) = 0                                  (k > n)
+    where scale factor A_{n,k} = 2^k * (lambda)_k * C_{n-k}^(lambda+k)(1) / C_n^(lambda)(1) is
+    computed stably in the log-gamma domain to prevent IEEE-754 overflow/NaN for large n or lambda.
     """
     x_arr = np.asarray(x, dtype=np.float64)
     if k < 0:
@@ -76,8 +78,13 @@ def normalized_phi_derivative(n: int, lambda_val: float, x: np.ndarray, k: int =
     if k > n:
         return np.zeros_like(x_arr)
 
-    c1 = c_n_1_val(n, lambda_val)
-    return gegenbauer_derivative(n, lambda_val, x_arr, k=k) / c1
+    # Log-domain computation of scale factor A_{n,k}
+    # log A_{n,k} = k*ln(2) + log_poch(lambda, k) + log_c_n_1(n-k, lambda+k) - log_c_n_1(n, lambda)
+    log_poch = gammaln(lambda_val + k) - gammaln(lambda_val)
+    log_a_nk = k * np.log(2.0) + log_poch + log_c_n_1(n - k, lambda_val + k) - log_c_n_1(n, lambda_val)
+    a_nk = float(np.exp(log_a_nk))
+
+    return a_nk * normalized_phi_recurrence(n - k, lambda_val + k, x_arr)
 
 
 def normalized_phi_recurrence(n: int, lambda_val: float, x: np.ndarray) -> np.ndarray:
@@ -135,13 +142,15 @@ def verify_orthogonality_integral_theta(n: int, m: int, lambda_val: float) -> fl
     """
     Numerically computes the L2 orthogonality integral in theta-space without fractional singularities:
       I_{nm} = int_0^pi C_n^(lambda)(cos(theta)) C_m^(lambda)(cos(theta)) (sin(theta))^(2*lambda) d_theta
+    Subinterval limit is dynamically set to handle high-frequency oscillations.
     """
     def integrand(theta):
         w = (np.sin(theta)) ** (2.0 * lambda_val)
         x = np.cos(theta)
         return eval_gegenbauer(n, lambda_val, x) * eval_gegenbauer(m, lambda_val, x) * w
 
-    val, _err = quad(integrand, 0.0, np.pi, limit=100)
+    limit_sub = max(200, (n + m) * 2)
+    val, _err = quad(integrand, 0.0, np.pi, limit=limit_sub)
     return float(val)
 
 
@@ -216,30 +225,38 @@ def composite_matched_approx(n: int, lambda_val: float, theta: np.ndarray) -> np
     Combines North pole Bessel layer (z_0 = K*theta), South pole Bessel layer (z_pi = K*(pi-theta)),
     and Interior WKB wave, subtracting both North and South overlap matching terms.
     Evaluates stable limits at endpoints: phi_n(0) = 1.0 and phi_n(pi) = (-1)^n.
+    Vectorized over input array.
     """
     theta_arr = np.asarray(theta, dtype=np.float64)
     out = np.zeros_like(theta_arr)
 
-    for i, th in enumerate(theta_arr):
-        if th <= 1e-14:
-            out[i] = 1.0
-        elif th >= np.pi - 1e-14:
-            out[i] = (-1.0) ** n
-        else:
-            K = n + lambda_val
-            z0 = K * th
-            z_pi = K * (np.pi - th)
-            nu = lambda_val - 0.5
+    mask_north = (theta_arr <= 1e-14)
+    mask_south = (theta_arr >= np.pi - 1e-14)
+    mask_interior = ~(mask_north | mask_south)
 
-            bessel_north = normalized_bessel_kernel(nu, np.array([z0]))[0]
-            bessel_south = ((-1.0) ** n) * normalized_bessel_kernel(nu, np.array([z_pi]))[0]
-            wkb_val = interior_wkb_approx(n, lambda_val, np.array([th]))[0]
+    out[mask_north] = 1.0
+    out[mask_south] = (-1.0) ** n
 
-            # Matching terms for North and South overlaps
-            match_north = (2.0 ** nu) * gamma(nu + 1.0) * (z0 ** (-nu)) * np.sqrt(2.0 / (np.pi * z0)) * np.cos(z0 - lambda_val * np.pi / 2.0)
-            match_south = ((-1.0) ** n) * (2.0 ** nu) * gamma(nu + 1.0) * (z_pi ** (-nu)) * np.sqrt(2.0 / (np.pi * z_pi)) * np.cos(z_pi - lambda_val * np.pi / 2.0)
+    if np.any(mask_interior):
+        th_int = theta_arr[mask_interior]
+        K = n + lambda_val
+        z0 = K * th_int
+        z_pi = K * (np.pi - th_int)
+        nu = lambda_val - 0.5
 
-            out[i] = bessel_north + bessel_south + wkb_val - match_north - match_south
+        bessel_north = normalized_bessel_kernel(nu, z0)
+        bessel_south = ((-1.0) ** n) * normalized_bessel_kernel(nu, z_pi)
+        wkb_val = interior_wkb_approx(n, lambda_val, th_int)
+
+        # Enforce lower bound clip on z0 and z_pi to prevent singular division/negative power overflow
+        z0_safe = np.maximum(z0, 1e-10)
+        z_pi_safe = np.maximum(z_pi, 1e-10)
+
+        # Matching terms for North and South overlaps
+        match_north = (2.0 ** nu) * gamma(nu + 1.0) * (z0_safe ** (-nu)) * np.sqrt(2.0 / (np.pi * z0_safe)) * np.cos(z0_safe - lambda_val * np.pi / 2.0)
+        match_south = ((-1.0) ** n) * (2.0 ** nu) * gamma(nu + 1.0) * (z_pi_safe ** (-nu)) * np.sqrt(2.0 / (np.pi * z_pi_safe)) * np.cos(z_pi_safe - lambda_val * np.pi / 2.0)
+
+        out[mask_interior] = bessel_north + bessel_south + wkb_val - match_north - match_south
 
     return out
 
