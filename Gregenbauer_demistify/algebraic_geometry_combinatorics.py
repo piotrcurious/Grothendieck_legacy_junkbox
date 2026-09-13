@@ -232,6 +232,17 @@ def normalized_jacobi_coefficients(n: int, lambda_val: Union[float, Fraction], e
         return a_n, b_n
 
 
+def phi_norm_squared(n: int, lambda_val: float) -> float:
+    """
+    Computes exact closed-form L^2 norm squared ||phi_n||_lambda^2 for normalized zonal function:
+      ||phi_n||_lambda^2 = (pi * 2^{1-2*lambda} * Gamma(n+2*lambda)) / (n! * (n+lambda) * (Gamma(lambda))^2 * [C_n^(lambda)(1)]^2).
+    """
+    num = math.pi * (2.0 ** (1.0 - 2.0 * lambda_val)) * gamma(n + 2.0 * lambda_val)
+    c1_sq = (gamma(n + 2.0 * lambda_val) / (math.factorial(n) * gamma(2.0 * lambda_val))) ** 2 if n > 0 else 1.0
+    den = math.factorial(n) * (n + lambda_val) * (gamma(lambda_val) ** 2) * c1_sq
+    return float(num / den)
+
+
 def dual_recurrence_conversion(a_n: float, b_n: float, h_n: float, h_np1: float, h_nm1: float) -> Tuple[float, float]:
     """
     Computes exact commutative conversion square between polynomial-normalized recurrence (a_n, b_n)
