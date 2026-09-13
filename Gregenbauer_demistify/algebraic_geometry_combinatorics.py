@@ -19,7 +19,6 @@ import math
 from typing import Dict, List, Tuple, Union
 
 import numpy as np
-from scipy.special import gamma
 
 Number = Union[int, Fraction, float]
 
@@ -84,11 +83,11 @@ class QuadricQuotientPolynomial:
             sub_d = self.d - 1
 
             for partition in _partitions_of_m(sub_d, m):
-                multinomial_coeff = Fraction(math.factorial(m))
+                multinomial_coeff = math.factorial(m)
                 for a_i in partition:
                     multinomial_coeff //= math.factorial(a_i)
 
-                term_coeff = coeff * sign * multinomial_coeff
+                term_coeff = coeff * sign * Fraction(multinomial_coeff)
 
                 new_exp = [b + 2 * a for b, a in zip(base_exp, partition)] + [r]
                 t = tuple(new_exp)
@@ -235,12 +234,24 @@ def normalized_jacobi_coefficients(n: int, lambda_val: Union[float, Fraction], e
 def phi_norm_squared(n: int, lambda_val: float) -> float:
     """
     Computes exact closed-form L^2 norm squared ||phi_n||_lambda^2 for normalized zonal function:
-      ||phi_n||_lambda^2 = (pi * 2^{1-2*lambda} * Gamma(n+2*lambda)) / (n! * (n+lambda) * (Gamma(lambda))^2 * [C_n^(lambda)(1)]^2).
+      ||phi_n||_lambda^2 = (pi * 2^{1-2*lambda} * n! * [Gamma(2*lambda)]^2) / ((n+lambda) * [Gamma(lambda)]^2 * Gamma(n+2*lambda)).
+    Evaluated stably in log-gamma domain to avoid factorial/gamma numerical overflow for n >= 171.
+    Uniformly valid for all n >= 0.
     """
-    num = math.pi * (2.0 ** (1.0 - 2.0 * lambda_val)) * gamma(n + 2.0 * lambda_val)
-    c1_sq = (gamma(n + 2.0 * lambda_val) / (math.factorial(n) * gamma(2.0 * lambda_val))) ** 2 if n > 0 else 1.0
-    den = math.factorial(n) * (n + lambda_val) * (gamma(lambda_val) ** 2) * c1_sq
-    return float(num / den)
+    log_num = (
+        math.log(math.pi)
+        + (1.0 - 2.0 * lambda_val) * math.log(2.0)
+        + math.lgamma(n + 1)
+        + 2.0 * math.lgamma(2.0 * lambda_val)
+    )
+    log_den = (
+        math.log(n + lambda_val)
+        + 2.0 * math.lgamma(lambda_val)
+        + math.lgamma(n + 2.0 * lambda_val)
+    )
+    log_val = log_num - log_den
+
+    return math.exp(log_val)
 
 
 def dual_recurrence_conversion(a_n: float, b_n: float, h_n: float, h_np1: float, h_nm1: float) -> Tuple[float, float]:
@@ -357,24 +368,15 @@ def exact_rational_gegenbauer_derivative(n: int, lambda_val: Union[int, Fraction
 
 def exact_rational_gegenbauer_second_derivative(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction]) -> Fraction:
     """
-    Computes exact second derivative d^2/dx^2 C_n^(lambda)(x) in Q[lambda, x]:
-      - For x != +-1: uses ODE substitution y'' = ((2*lambda + 1)*x*y' - n*(n + 2*lambda)*y) / (1 - x^2)
-      - For x = +-1 or general: shifted formula 4 * lambda * (lambda + 1) * C_{n-2}^(lambda + 2)(x)
+    Computes exact second derivative d^2/dx^2 C_n^(lambda)(x) in Q[lambda, x]
+    using universal shifted identity d^2/dx^2 C_n^(lambda)(x) = 4 * lambda * (lambda + 1) * C_{n-2}^(lambda + 2)(x).
     """
     if n < 2:
         return Fraction(0)
 
     lam = Fraction(lambda_val)
     x_frac = Fraction(x)
-
-    if x_frac**2 != 1:
-        y = exact_rational_gegenbauer(n, lam, x_frac)
-        y_prime = exact_rational_gegenbauer_derivative(n, lam, x_frac)
-        num = (2 * lam + 1) * x_frac * y_prime - n * (n + 2 * lam) * y
-        den = 1 - x_frac**2
-        return num / den
-    else:
-        return 4 * lam * (lam + 1) * exact_rational_gegenbauer(n - 2, lam + 2, x_frac)
+    return 4 * lam * (lam + 1) * exact_rational_gegenbauer(n - 2, lam + 2, x_frac)
 
 
 def exact_rational_bit_length(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction]) -> Tuple[Tuple[int, int], Tuple[int, int]]:
@@ -479,7 +481,7 @@ def gauss_gegenbauer_quadrature(m: int, lambda_val: float) -> Tuple[np.ndarray, 
     with eigenvalues sigma(J_m) = {x_1, ..., x_m}.
     Reserving n for Gegenbauer degree and m for quadrature order.
     Golub-Welsch isolates the algebraic spectral data (x_k, v_{k,1}^2) from the global
-    transcendental scalar normalization mu_0 = sqrt(pi) * gamma(lambda + 0.5) / gamma(lambda + 1.0).
+    transcendental scalar normalization mu_0 = sqrt(pi) * exp(lgamma(lambda + 0.5) - lgamma(lambda + 1.0)).
     Avoids direct endpoint evaluation at x = +-1, reducing endpoint singularity exposure.
     Weight function: w(x) = (1-x^2)^(lambda - 1/2) over [-1, 1].
     """
@@ -498,8 +500,8 @@ def gauss_gegenbauer_quadrature(m: int, lambda_val: float) -> Tuple[np.ndarray, 
     # Golub-Welsch algorithm: Eigendecomposition of symmetric tridiagonal J_m
     nodes, eigenvectors = np.linalg.eigh(J_m)
 
-    # Total integral weight norm mu_0
-    mu_0 = float(math.sqrt(math.pi) * gamma(lambda_val + 0.5) / gamma(lambda_val + 1.0))
+    # Total integral weight norm mu_0 evaluated safely in log-gamma domain
+    mu_0 = float(math.sqrt(math.pi) * math.exp(math.lgamma(lambda_val + 0.5) - math.lgamma(lambda_val + 1.0)))
 
     # Weights w_k = mu_0 * (v_{k, 0})^2 where v_{k, 0} is first component of k-th normalized eigenvector
     weights = mu_0 * (eigenvectors[0, :] ** 2)
