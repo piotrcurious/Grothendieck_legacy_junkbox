@@ -14,7 +14,7 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
         │
         ▼
   Layer II. Spherical Fixed Line, Rank-One Projector & Bi-K-Invariance
-  v_n ∈ V_n^K, ||v_n|| = 1  ⟹  P_n = v_n ⊗ v_n^*  ⟹  ϕ_n(g) = Tr(P_n π_n(g)) ∈ C^∞(K\G/K) ≅ C^∞([-1, 1])
+  v_n ∈ V_n^K, ||v_n|| = 1  ⟹  P_n = v_n ⊗ v_n^*  ⟹  ϕ_n is K-bi-invariant with radial representative ϕ_n(x) ∈ C^∞([-1, 1]), x = cos θ
         │
         ▼
   Layer III. Exact Operator Equivalence & Schrödinger Eigenvalues
@@ -37,7 +37,7 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, Q16.16, LNS)
   ├── VII-B: Exact Rational Symbolic Algebra (Symbolic Q[λ, x], Rational Eval λ, x ∈ Q, Exact Recurrence)
   ├── VII-C: Scalable Residue Number System (RNS / CRT with A-Priori Magnitude Bounds)
-  └── VII-D: Finite-Field & NTT Specializations (F_p, Primitive Roots ω_{L_NTT}, p ∤ u_n v_n)
+  └── VII-D: Finite-Field & NTT Specializations (F_p, Primitive Roots ω_{L_NTT}, A_ϕ(p, n))
         │
         ▼
   Layer VIII. Verification Invariants, Derivatives & Cross-Backend Certification
@@ -69,10 +69,9 @@ $$\binom{r}{d-1} = 0 \qquad \text{for } r < d - 1, \qquad \text{or equivalently 
 
 ## 3. Layer II: Spherical Fixed Line, Rank-One Projector & Bi-$K$-Invariance
 
-Let $P_K = \int_K \pi_n(k) dk$ project $V_n$ onto the 1-dimensional $K$-fixed subspace $V_n^K = \mathbb{C} v_n$ ($\|v_n\| = 1$). Since $\dim V_n^K = 1$, $P_K$ equals the rank-one projector $P_n = v_n \otimes v_n^* \in \operatorname{End}(V_n)$ ($P_K = P_n$). As a radial parameter space, $K \backslash G / K \cong [-1, 1]$. Trace pairing defines the zonal spherical function $\phi_n \in C^\infty(K \backslash G / K) \cong C^\infty([-1, 1])$:
-$$\phi_n(g) = \operatorname{Tr}(P_K \pi_n(g)) = \operatorname{Tr}(P_n \pi_n(g)) = \langle v_n, \pi_n(g) v_n \rangle, \qquad \phi_n(k_1 g k_2) = \phi_n(g), \qquad \phi_n(e) = 1.$$
+Let $P_K = \int_K \pi_n(k) dk$ project $V_n$ onto the 1-dimensional $K$-fixed subspace $V_n^K = \mathbb{C} v_n$ ($\|v_n\| = 1$). Since $\dim V_n^K = 1$, $P_K$ equals the rank-one projector $P_n = v_n \otimes v_n^* \in \operatorname{End}(V_n)$ ($P_K = P_n$).
 
-Radialization $gK \mapsto x = \cos\theta \in [-1, 1]$ yields:
+Trace pairing defines the zonal spherical function $\phi_n(g) = \operatorname{Tr}(P_K \pi_n(g)) = \langle v_n, \pi_n(g) v_n \rangle$. The function $\phi_n$ is $K$-bi-invariant ($\phi_n(k_1 g k_2) = \phi_n(g)$ and $\phi_n(e) = 1$), admitting a radial representative $\phi_n(x) \in C^\infty([-1, 1])$ via $x = \cos\theta$:
 $$\phi_n(x) = \frac{C_n^{(\lambda)}(x)}{C_n^{(\lambda)}(1)}.$$
 
 ---
@@ -155,8 +154,8 @@ Supports `FLOAT32`, `FLOAT64`, `LONGDOUBLE`, `Q16.16` fixed-point, and Logarithm
    $$C_0^{(\lambda)}(x) = 1, \qquad C_1^{(\lambda)}(x) = 2\lambda x, \qquad n C_n^{(\lambda)}(x) = 2(n+\lambda-1)x C_{n-1}^{(\lambda)}(x) - (n+2\lambda-2) C_{n-2}^{(\lambda)}(x).$$
 4. **Fraction Bit-Length Tracking:** Denominator and numerator growth is tracked via separate metrics $B_{\text{bits}}^{(C)}(n)$ and $B_{\text{bits}}^{(\phi)}(n)$:
    $$B_{\text{bits}}^{(C)}(n) = \max\{ \operatorname{bitlen}(\operatorname{num}(C_n)), \operatorname{bitlen}(\operatorname{den}(C_n)) \}, \qquad B_{\text{bits}}^{(\phi)}(n) = \max\{ \operatorname{bitlen}(\operatorname{num}(\phi_n)), \operatorname{bitlen}(\operatorname{den}(\phi_n)) \}.$$
-5. **Differential Derivative Generation:**
-   $$\frac{d}{dx} C_n^{(\lambda)}(x) = 2\lambda C_{n-1}^{(\lambda+1)}(x), \qquad y'' = \frac{(2\lambda+1)x y' - n(n+2\lambda)y}{1-x^2}.$$
+5. **Differential Derivative Generation (Interior $-1 < x < 1$):**
+   $$\frac{d}{dx} C_n^{(\lambda)}(x) = 2\lambda C_{n-1}^{(\lambda+1)}(x), \qquad y'' = \frac{(2\lambda+1)x y' - n(n+2\lambda)y}{1-x^2} \qquad (-1 < x < 1).$$
 6. **Golub-Welsch Spectral Quadrature:**
    Golub-Welsch spectral decomposition isolates the algebraic spectral data $(x_k, v_{k,1}^2)$ (where $x_k \in \sigma(J_m) = \{x_1, \dots, x_m\}$ are the eigenvalues of symmetric $m \times m$ Jacobi truncation $J_m$) from the global transcendental scalar normalization:
    $$\mu_0 = \int_{-1}^1 (1-x^2)^{\lambda-1/2} dx = \frac{\sqrt{\pi}\,\Gamma(\lambda+1/2)}{\Gamma(\lambda+1)}.$$
@@ -173,13 +172,11 @@ Single binary unsigned hardware wrap channels ($\texttt{uint}_b \simeq \mathbb{Z
 
 ### VII-D. Finite-Field $\mathbb{F}_p$ & NTT Specializations
 1. **Number Theoretic Transform (NTT):** Over finite prime fields $\mathbb{F}_p$ where $L_{\text{NTT}} \mid (p-1)$ (using $L_{\text{NTT}}$ to avoid collision with $N = n+\lambda$), primitive $L_{\text{NTT}}$-th roots of unity $\omega_{L_{\text{NTT}}} \in \mathbb{F}_p$ replace complex exponentials.
-2. **Characteristic $p$ Admissibility & Rational Representation:**
-   For canonical reduced fraction $C_n^{(\lambda)}(1) = \frac{u_n}{v_n}$ with $\gcd(u_n, v_n) = 1$, normalized finite-field evaluation requires:
-   $$\boxed{p \nmid u_n v_n.}$$
-   Then define field elements $\lambda_p = a b^{-1} \pmod p$, $x_p = c d^{-1} \pmod p$, and normalized zonal evaluation:
-   $$\phi_{n,p}(x_p) = C_n^{(\lambda_p)}(x_p) \left( C_n^{(\lambda_p)}(1) \right)^{-1} \pmod p.$$
-   - **Polynomial Certificate $\mathcal{A}_C(p)$:** $p > \max(2, N_{\max}), p \nmid b, p \nmid d$.
-   - **Normalized Spherical Certificate $\mathcal{A}_\phi(p, n)$:** $\mathcal{A}_C(p) \land (p \nmid u_n v_n)$.
+2. **Characteristic $p$ Admissibility & Rational Reduction:**
+   For canonical reduced fraction $C_n^{(\lambda)}(1) = \frac{u_n}{v_n}$ with $\gcd(u_n, v_n) = 1$, the normalized finite-field certificate is:
+   $$\boxed{\mathcal{A}_\phi(p, n) \iff \left( p > N_{\max} \land p \nmid b \cdot d \land p \nmid u_n v_n \right).}$$
+   Define the rational localization reduction map $\rho_p : \mathbb{Z}_{(p)} \to \mathbb{F}_p$. Then $\rho_p(C_n^{(\lambda)}(1)) = u_n v_n^{-1} \in \mathbb{F}_p^\times$, field parameters $\lambda_p = a b^{-1} \in \mathbb{F}_p$, point $x_p = c d^{-1} \in \mathbb{F}_p$, and normalized zonal evaluation:
+   $$\boxed{\phi_{n,p}(x_p) = \rho_p(C_n^{(\lambda)}(x)) \left( u_n v_n^{-1} \right)^{-1} \in \mathbb{F}_p.}$$
 
 ### VII-E. Golub-Welsch Spectral Matrix Truncation
 For Gauss-Gegenbauer quadrature calculations, the symmetric tridiagonal Jacobi matrix operator $J$ is truncated via orthogonal projection $P_m$ to its leading $m \times m$ principal truncation $J_m = \operatorname{tridiag}(\alpha_0, \dots, \alpha_{m-2}) = P_m J P_m |_{\operatorname{span}\{e_0, \dots, e_{m-1}\}} \in \mathbb{R}^{m\times m}$. Its eigenvalues $\sigma(J_m) = \{x_1, \dots, x_m\}$ yield quadrature nodes $x_k$, and weights are $w_k = \mu_0 |(v_k)_1|^2$ using normalized eigenvector $v_k$ of $J_m$.
@@ -197,10 +194,10 @@ Layer VIII explicitly distinguishes four error concepts (noting that $R_{\text{s
 3. **Conditioning ($\kappa$):** Problem sensitivity under perturbation.
 4. **Backend Discrepancy ($E_{\text{backend}}$):** Cross-implementation error $E_{A,B} = |\hat{\phi}^{(A)} - \hat{\phi}^{(B)}|$.
 
-### VIII-B. Scale-Invariant Structural Residual Invariants & Regularization Floor Policy
-To ensure comparable residual evaluations across independent backends, the regularization floor is explicitly backend-dependent:
+### VIII-B. Scale-Invariant Structural Residual Invariants & Residual-Specific Floors
+To ensure comparable residual evaluations across independent backends and distinct residual types, the regularization floor is explicitly backend-dependent and residual-scale aware:
 $$\boxed{\tau_M \ge 0, \qquad \tau_M = \max(\tau_{\text{abs}}, \tau_{\text{rel}} S_M),}$$
-where $S_M$ is the characteristic magnitude scale factor for representation backend $M$.
+where $S_M \in \{S_M^{\text{rec}}, S_M^{\text{ODE}}, S_M^{\text{Schr}}\}$ is the characteristic magnitude scale factor for representation backend $M$ and specific equation type.
 
 - **Normalized Recurrence Residual:** $\widehat{R}_{\text{rec}}(n, x) = \frac{|x \hat{\phi}_n - a_n \hat{\phi}_{n+1} - b_n \hat{\phi}_{n-1}|}{|x \hat{\phi}_n| + |a_n \hat{\phi}_{n+1}| + |b_n \hat{\phi}_{n-1}| + \tau_M}$ defined for $n \ge 1$ (with initial conditions $\phi_0 = 1, \phi_1 = x$).
 - **Normalized ODE Residual:** Defined for interior $x \in (-1, 1)$ to avoid endpoint $1-x^2=0$ cancellation:
@@ -220,8 +217,8 @@ Layer VIII-C is structured into two distinct verification parts:
    $$E_{A,B}^{\mathbb{R}}(x) = |\hat{\phi}_n^{(A)}(x) - \hat{\phi}_n^{(B)}(x)| \le \varepsilon_A^{\text{certified}} + \varepsilon_B,$$
    where $\varepsilon_A^{\text{certified}} = 0$ for exact rational/RNS output. For independently converged high-precision references (e.g. mpmath at nominal working precision $p_{\text{ref}} \ge p_{\text{target}} + p_{\text{guard}}$, e.g., $p_{\text{ref}} \ge 384$ bits for nominal $10^{-100}$ scale resolution), precision is empirically certified via convergence diagnostic $E_{\text{conv}} = |\phi_{p_2} - \phi_{p_1}| < \varepsilon_{\text{ref}}$ ($p_2 > p_1$). Rigorous forward error certification requires interval/ball arithmetic or analytic enclosures.
 2. **Finite-Field Modular Congruence Certificate ($C_{A,B}^{(p)}$):**
-   $$C_{A,B}^{(p)}(x_p) = \operatorname{reduce}_p(\phi_n^{\mathbb{Q}}(x)) - \phi_{n,p}^{\mathbb{F}_p}(x_p) \equiv 0 \pmod p,$$
-   provided $p \nmid u_n v_n$ where $C_n^{(\lambda)}(1) = u_n/v_n$ ($\gcd(u_n, v_n) = 1$) and $p \nmid b d$ for $\lambda = a/b, x = c/d$.
+   $$\boxed{C_{A,B}^{(p)}(x_p) = \rho_p(\phi_n^{\mathbb{Q}}(x)) - \phi_{n,p}^{\mathbb{F}_p}(x_p) \equiv 0 \pmod p,}$$
+   provided the finite-field normalized certificate $\mathcal{A}_\phi(p, n)$ is satisfied ($p > N_{\max}, p \nmid b d, p \nmid u_n v_n$).
 
 Key certified verification pairs:
 1. $E_{\text{rational}, \text{float64}}^{\mathbb{R}}$: Exact rational vs standard double-precision recurrence.
