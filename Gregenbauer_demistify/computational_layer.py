@@ -77,7 +77,8 @@ def scale_invariant_recurrence_residual(phi_n: float, phi_np1: float, phi_nm1: f
 
 def high_precision_reference(n: int, lambda_val: float, x: np.ndarray, dps: int = 100) -> np.ndarray:
     """
-    Computes high-precision ground truth reference for zonal function phi_n(x) using mpmath at dps digits.
+    Computes independently converged high-precision ground truth reference for zonal function phi_n(x)
+    using mpmath at dps digits (default dps=100 corresponding to p_ref >= 384 bits).
     """
     x_arr = np.asarray(x, dtype=np.float64)
     if not HAS_MPMATH:

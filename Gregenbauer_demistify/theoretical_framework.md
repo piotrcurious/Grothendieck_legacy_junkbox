@@ -140,7 +140,7 @@ Layer VII implements diverse arithmetic realizations of Gegenbauer polynomials $
 Supports `FLOAT32`, `FLOAT64`, `LONGDOUBLE`, `Q16.16` fixed-point, and Logarithmic Number Systems (`LNS`).
 
 ### VII-B. Exact Rational Symbolic Algebra Sub-Backend ($\mathbb{Q}[\lambda, x]$)
-For rational parameters $\lambda = a/b \in \mathbb{Q}$ and evaluation points $x \in \mathbb{Q}$, $C_n^{(\lambda)}(x) \in \mathbb{Q}$ for all $n \ge 0$. Exact rational arithmetic eliminates floating-point rounding errors subject to exact rational arithmetic semantics.
+For rational parameters $\lambda = a/b \in \mathbb{Q}$ and evaluation points $x = c/d \in \mathbb{Q}$ (with reduced fraction certificate $\operatorname{RatCert} = (a, b, c, d, N_{\max})$ where $\gcd(a,b)=1, \gcd(c,d)=1, b,d>0$), $C_n^{(\lambda)}(x) \in \mathbb{Q}$ for all $n \ge 0$. Exact rational arithmetic eliminates floating-point rounding errors subject to exact rational arithmetic semantics.
 1. **Three-Term Polynomial Recurrence:**
    $$C_0^{(\lambda)}(x) = 1, \qquad C_1^{(\lambda)}(x) = 2\lambda x, \qquad n C_n^{(\lambda)}(x) = 2(n+\lambda-1)x C_{n-1}^{(\lambda)}(x) - (n+2\lambda-2) C_{n-2}^{(\lambda)}(x).$$
    Note: The unnormalized polynomial basis operates in $\mathbb{Q}$, whereas the orthonormal Jacobi realization $J$ requires square roots and operates in an algebraic extension $\overline{\mathbb{Q}}$.
@@ -169,7 +169,7 @@ Hardware unsigned integer overflow (e.g. in `uint32` or `uint64`) corresponds to
    - **Normalized Spherical Certificate $\mathcal{A}_\phi(p)$:** $\mathcal{A}_C(p) \land \left( p \nmid \prod_{n=0}^{N_{\max}} C_n^{(\lambda)}(1) \right)$.
 
 ### VII-E. Golub-Welsch Spectral Matrix Truncation
-For Gauss-Gegenbauer quadrature calculations, the symmetric tridiagonal Jacobi matrix operator $J$ is truncated via orthogonal projection $P_m$ to its leading $m \times m$ principal truncation $J^{(m)} = P_m J P_m |_{\operatorname{span}\{e_0, \dots, e_{m-1}\}}$. Its eigenvalues $\sigma(J^{(m)}) = \{x_1, \dots, x_m\}$ yield quadrature nodes $x_k$, and weights are $w_k = \mu_0 |(v_k)_1|^2$ using normalized eigenvector $v_k$ of $J^{(m)}$.
+For Gauss-Gegenbauer quadrature calculations, the symmetric tridiagonal Jacobi matrix operator $J$ is truncated via orthogonal projection $P_m$ to its leading $m \times m$ principal truncation $J_m = P_m J P_m |_{\operatorname{span}\{e_0, \dots, e_{m-1}\}} \in \mathbb{R}^{m\times m}$. Its eigenvalues $\sigma(J_m) = \{x_1, \dots, x_m\}$ yield quadrature nodes $x_k$, and weights are $w_k = \mu_0 |(v_k)_1|^2$ using normalized eigenvector $v_k$ of $J_m$.
 
 ---
 
