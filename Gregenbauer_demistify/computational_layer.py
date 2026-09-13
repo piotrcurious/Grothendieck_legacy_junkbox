@@ -59,9 +59,11 @@ def get_backend_tau(tau_abs: float = 1e-14, tau_rel: float = 1e-14, scale: float
     return float(max(tau_abs, tau_rel * scale))
 
 
-def jacobi_eigenpair_residual(nodes: np.ndarray, eigenvectors: np.ndarray, lambda_val: float) -> float:
+def jacobi_eigenpair_residual(nodes: np.ndarray, eigenvectors: np.ndarray, lambda_val: float, normalized: bool = False, tau: float = 1e-14) -> float:
     """
-    Computes Layer VIII Jacobi Spectral Eigenpair Residual R_J(v, x) = ||J_m v_k - x_k v_k||_2.
+    Computes Layer VIII Jacobi Spectral Eigenpair Residual:
+      - Absolute: R_J^abs = ||J_m v_k - x_k v_k||_2
+      - Normalized: R_J_hat = ||J_m v_k - x_k v_k|| / (||J_m v_k|| + |x_k| ||v_k|| + tau)
     Verifies Golub-Welsch matrix eigendecomposition accuracy.
     """
     m = len(nodes)
@@ -77,7 +79,14 @@ def jacobi_eigenpair_residual(nodes: np.ndarray, eigenvectors: np.ndarray, lambd
     for k in range(m):
         x_k = nodes[k]
         v_k = eigenvectors[:, k]
-        res = np.linalg.norm(J_m @ v_k - x_k * v_k)
+        J_v = J_m @ v_k
+        abs_res = np.linalg.norm(J_v - x_k * v_k)
+        if normalized:
+            norm_j_v = np.linalg.norm(J_v)
+            norm_v = np.linalg.norm(v_k)
+            res = abs_res / (norm_j_v + abs(x_k) * norm_v + tau)
+        else:
+            res = abs_res
         if res > max_res:
             max_res = res
     return float(max_res)
