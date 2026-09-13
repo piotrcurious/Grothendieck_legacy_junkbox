@@ -16,7 +16,7 @@ This repository implements a mathematically closed, VIII-Layer unified architect
         │
         ▼
   Layer III. Exact Operator Equivalence & Schrödinger Eigenvalues
-  -Δ_{S^{d-1}} ϕ_n = E_n ϕ_n  |  L_x ↔ L_θ ↔ H_λ u_n = N_n^2 u_n,  N_n^2 = E_n + λ^2
+  -Δ_{S^{d-1}} ϕ_n = E_n ϕ_n  |  L_x ↔ L_θ ↔ H_λ u_n = N_n^2 u_n,  N_n = n + λ,  N_n^2 = E_n + λ^2
         │
         ▼
   Layer IV. Jacobi Spectral Operator & Unitary Matrix Realization
@@ -24,11 +24,11 @@ This repository implements a mathematically closed, VIII-Layer unified architect
         │
         ▼
   Layer V. Two-Endpoint Boundary Coordinates
-  N = n + λ,  z_+ = N θ,  z_- = N (π - θ)
+  N_n = n + λ,  z_+ = N_n θ,  z_- = N_n (π - θ)
         │
         ▼
   Layer VI. Composite Matched Asymptotic Framework & Candidate Envelopes
-  F_comp = F_north + F_south + F_interior - F_{+,overlap} - F_{-,overlap},  F_{±O}^{(K)} = Match^{(K)}(F_ep, F_int) mod O(N^{-K}),  B_K^best = min_{M} B_{K,M}
+  F_comp = F_north + F_south + F_interior - F_{+,overlap} - F_{-,overlap},  F_{±O}^{(K)} = Match^{(K)}(F_ep, F_int) mod O(N_n^{-K}),  B_K^best = min_{M} B_{K,M}
         │
         ▼
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
