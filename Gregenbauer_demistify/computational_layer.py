@@ -160,6 +160,15 @@ class AlgebraicPermutation(Enum):
 
 
 @dataclass
+class BackendCapabilityCertificate:
+    backend_id: str
+    domain_description: str
+    parameter_conditions: str
+    error_model: str
+    residual_checkers: List[str]
+
+
+@dataclass
 class SolverPerformanceMetrics:
     permutation: AlgebraicPermutation
     num_flops: int
@@ -169,6 +178,7 @@ class SolverPerformanceMetrics:
     median_mixed_error: float
     p95_mixed_error: float
     rms_mixed_error: float
+    capability_cert: Optional[BackendCapabilityCertificate] = None
     is_pareto_optimal: bool = False
 
 
