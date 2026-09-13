@@ -588,3 +588,18 @@ $$\max_\omega |H_{\rm quantized}-H_{\rm target}|$$
 Wtedy Twoja wcześniejsza teoria o $SO(d)/SO(d-1)$, kwadryce, operatorze Sturm–Liouville'a i asymptotyce przestaje być ozdobnikiem matematycznym: staje się warstwą generującą i weryfikującą FIR kernele na wielu poziomach abstrakcji.
 
 Najbardziej naturalnym następnym krokiem byłoby zdefiniowanie konkretnego algorytmu **GegenbauerFIRGenerator**: od specyfikacji low/high/band-pass, przez rozwiązanie dla $a_n$, transformację do tappów, kwantyzację, aż do C/C++ headera z pełną sprawozdaniem błędów.
+
+---
+
+## Files in this Directory
+
+- `compiler.py`: Core Gegenbauer filter compiler implementation (`GegenbauerFilterCompiler`, `FilterSpec`, `FilterResult`, `QuantizedTaps`).
+- `xrf_spectrometer_demo.py`: XRF spectrometer simulation, differential spectra generation, and lossless Gegenbauer subband stacking demo.
+- `xrf_preprocessor.py`: Reference sample calibration, Lebesgue range measure partitioning, Sturm-Liouville regularization, Red Angel characterizer, and `XRFAutoTuner`.
+- `xrf_demo_documentation.md`: Detailed documentation for XRF spectrometer demo, Red Angel anomaly, Lebesgue preprocessor, auto-tuning, and generated plots.
+- `test_filter_compiler.py`: Unit tests for compiler spec validation, QMF complementarity, quantization, and C header generation.
+- `test_xrf_demo.py`: Unit tests for XRF simulation, element spectrum generation, differential spectra, preprocessor, auto-tuner, and subband stacking.
+- `red_angel.md`: Conceptual documentation on the "Red Angel" anomaly (numerical instability & ghost spectra during unregularized differentiation).
+- `regularization.md`: Mathematical foundation of Lebesgue-based range measure regularization vs Riemann domain integration for quantized samplers.
+- `xrf_spectrometer_demo.png`: Generated 4-panel plot verifying XRF spectral response, differential spectra, subband stacking, and residual error surface.
+- `xrf_autotune_demo.png`: Generated 4-panel plot verifying reference calibration, Red Angel ghost spectrum suppression, Lebesgue measure level sets, and auto-tuning optimization curves.
