@@ -2,7 +2,7 @@
 
 ## Abstract
 
-This document presents an architecturally closed VIII-Layer framework for Gegenbauer polynomials $C_n^{(\lambda)}(x)$ and normalized zone spherical functions $\phi_n(x)$ on the real sphere $S^{d-1} \cong SO(d)/SO(d-1)$, where parameter $\lambda = \frac{d-2}{2}$ ($d \ge 3$). The framework establishes formal operator morphisms connecting representation geometry, quotient algebras, exact differential operators, self-adjoint Jacobi spectral matrices, candidate two-endpoint singular asymptotic envelopes, multi-backend numerical execution (including exact rational, RNS/CRT, and finite-field sub-backends), and high-precision verification invariants.
+This document presents an architecturally closed VIII-Layer framework for Gegenbauer polynomials $C_n^{(\lambda)}(x)$ and normalized zonal spherical functions $\phi_n(x)$ on the real sphere $S^{d-1} \cong SO(d)/SO(d-1)$, where parameter $\lambda = \frac{d-2}{2}$ ($d \ge 3$). The framework establishes formal operator morphisms connecting representation geometry, quotient algebras, exact differential operators, self-adjoint Jacobi spectral matrices, candidate two-endpoint singular asymptotic envelopes, multi-backend numerical execution (including exact rational, RNS/CRT, and finite-field sub-backends), and high-precision verification invariants.
 
 ---
 
@@ -10,7 +10,7 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
 
 ```
   Layer I. Representation Geometry & Fischer Decomposition
-  SO(d)/SO(d-1), Sym^n = ℋ_n ⊕ q Sym^{n-2}, Q^{d-2} ⊂ ℙ^{d-1}, R(Q)_n ≅ ℋ_n(ℂ^d)
+  G = SO(d), K = SO(d-1), Sym^n = ℋ_n ⊕ q Sym^{n-2}, Q^{d-2} ⊂ ℙ^{d-1}, R(Q)_n ≅ ℋ_n(ℂ^d)
         │
         ▼
   Layer II. Spherical Fixed Line, Rank-One Projector & Bi-K-Invariance
@@ -30,25 +30,25 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
         │
         ▼
   Layer VI. Two-Overlap Composite Uniform Asymptotic Expansion
-  F_comp = F_north + F_south + F_interior - F_{+,overlap} - F_{-,overlap},  |R_K| ≤ B_K(N, θ, λ)
+  F_comp = F_north + F_south + F_interior - F_{+,overlap} - F_{-,overlap},  |R_{K,M}| ≤ B_{K,M}, |R_comp| ≤ B_{K,comp}
         │
         ▼
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, Q16.16, LNS)
-  ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x], Exact Fraction Recurrence)
+  ├── VII-B: Exact Rational Symbolic Algebra (Symbolic Q[λ, x], Rational Eval λ, x ∈ Q, Exact Recurrence)
   ├── VII-C: Scalable Residue Number System (RNS / CRT with A-Priori Magnitude Bounds)
-  └── VII-D: Finite-Field & NTT Specializations (F_q, Primitive Roots ω_N, p > 2)
+  └── VII-D: Finite-Field & NTT Specializations (F_p, Primitive Roots ω_{L_NTT}, p ∤ u_n v_n)
         │
         ▼
   Layer VIII. Verification Invariants, Derivatives & Cross-Backend Certification
-  Exact Families (S^2, S^3) ↔ Derivatives ϕ_n^{(k)}(x) ↔ Normalized Residuals (R_rec, R_ODE, R_Schr)
+  Exact Families (S^2, S^3) ↔ Derivatives ϕ_n^{(k)}(x) ↔ Normalized Residuals (R_rec, R_ODE, R_Schr with τ_M)
 ```
 
 ---
 
 ## 2. Layer I: Representation Geometry & Fischer Decomposition
 
-Let $G = SO(d)$ act transitively on $S^{d-1} \subset \mathbb{R}^d$ with isotropy subgroup $H = SO(d-1)$. For ambient Euclidean dimension $d \ge 3$, the complexified null quadric $Q^{d-2} \subset \mathbb{P}^{d-1}$ is defined by:
+Let $G = SO(d)$ act transitively on $S^{d-1} \subset \mathbb{R}^d$ with isotropy subgroup $K = SO(d-1)$, so that $S^{d-1} \cong G/K$. For ambient Euclidean dimension $d \ge 3$, the complexified null quadric $Q^{d-2} \subset \mathbb{P}^{d-1}$ is defined by:
 $$Q^{d-2} = \{ [z] \in \mathbb{P}^{d-1} : q(z) = z_1^2 + \dots + z_d^2 = 0 \}.$$
 
 The coordinate ring of the projective quadric $Q^{d-2}$ is $R(Q) = \mathbb{C}[z_1, \dots, z_d] / (q)$. Via Fischer decomposition:
@@ -62,11 +62,14 @@ Their restriction to $S^{d-1}$ yields spherical harmonics $\mathscr{Y}_n(S^{d-1}
 $$\dim V_n = [t^n] \frac{1 - t^2}{(1 - t)^d} = \binom{n + d - 1}{d - 1} - \binom{n + d - 3}{d - 1} = \frac{n + \lambda}{\lambda} C_n^{(\lambda)}(1),$$
 where $C_n^{(\lambda)}(1) = \frac{(2\lambda)_n}{n!} = \binom{n + 2\lambda - 1}{n}$.
 
+To ensure uniform validity for every $n \ge 0$ (including $n=0$ and $n=1$), binomial coefficients with upper arguments smaller than the lower argument are defined by:
+$$\binom{r}{d-1} = 0 \qquad \text{for } r < d - 1, \qquad \text{or equivalently } \operatorname{Sym}^m(\mathbb{C}^d) = 0 \text{ for } m < 0.$$
+
 ---
 
 ## 3. Layer II: Spherical Fixed Line, Rank-One Projector & Bi-$K$-Invariance
 
-Let $P_K = \int_K \pi_n(k) dk$ project $V_n$ onto the 1-dimensional $K$-fixed subspace $V_n^K = \mathbb{C} v_n$ ($\|v_n\| = 1$). Since $\dim V_n^K = 1$, $P_K$ equals the rank-one projector $P_n = v_n \otimes v_n^* \in \operatorname{End}(V_n)$ ($P_K = P_n$). Trace pairing defines the zonal spherical function $\phi_n \in C^\infty(K \backslash G / K) \cong C^\infty([-1, 1])$:
+Let $P_K = \int_K \pi_n(k) dk$ project $V_n$ onto the 1-dimensional $K$-fixed subspace $V_n^K = \mathbb{C} v_n$ ($\|v_n\| = 1$). Since $\dim V_n^K = 1$, $P_K$ equals the rank-one projector $P_n = v_n \otimes v_n^* \in \operatorname{End}(V_n)$ ($P_K = P_n$). As a radial parameter space, $K \backslash G / K \cong [-1, 1]$. Trace pairing defines the zonal spherical function $\phi_n \in C^\infty(K \backslash G / K) \cong C^\infty([-1, 1])$:
 $$\phi_n(g) = \operatorname{Tr}(P_K \pi_n(g)) = \operatorname{Tr}(P_n \pi_n(g)) = \langle v_n, \pi_n(g) v_n \rangle, \qquad \phi_n(k_1 g k_2) = \phi_n(g), \qquad \phi_n(e) = 1.$$
 
 Radialization $gK \mapsto x = \cos\theta \in [-1, 1]$ yields:
@@ -107,23 +110,24 @@ $$z_+ = N \theta, \qquad z_- = N(\pi - \theta), \qquad N = n + \lambda.$$
 
 Two-overlap composite uniform expansion:
 $$F_{\text{comp}} = F_{\text{north}}(z_+) + F_{\text{south}}(z_-) + F_{\text{interior}}(N, \theta) - F_{+,\text{overlap}}(z_+) - F_{-,\text{overlap}}(z_-),$$
-where $\phi_n(\theta) = F_{\text{comp}}^{(K)}(n, \theta, \lambda) + R_K(n, \theta, \lambda)$.
+where $\phi_n(\theta) = F_{\text{comp}}^{(K)}(n, \theta, \lambda) + R_{\text{comp}}(n, \theta, \lambda)$.
 
 ### Composite Matched Asymptotic Framework & Candidate Envelopes
-The framework implements a candidate composite uniform-asymptotic solver. To prevent endpoint divergence at $\theta = 0, \pi$ where $1/\sin\theta \to \infty$ while $\phi_n(0) = 1$, the asymptotic remainder $R_K$ (for $N^{-1}$ truncation order $K$ where $F^{(K)} = \sum_{j=0}^{K-1} N^{-j} F_j$, with exact normalization anchors $\phi_n(0)=1, \phi_n(\pi)=(-1)^n$ and asymptotic normalization invariants $F_{\text{north}}^{(K)}(0) = 1 + O(N^{-K})$ and $F_{\text{south}}^{(K)}(0) = (-1)^n + O(N^{-K})$) is evaluated using domain-specific candidate envelopes:
+The framework implements a candidate composite uniform-asymptotic solver. To prevent endpoint divergence at $\theta = 0, \pi$ where $1/\sin\theta \to \infty$ while $\phi_n(0) = 1$, the asymptotic remainder $R_{K, M}$ for branch $M$ is bounded by $|R_{K, M}| \le B_{K, M}(N, \theta, \lambda)$ (for $N^{-1}$ truncation order $K$ where $F^{(K)} = \sum_{j=0}^{K-1} N^{-j} F_j$, with exact normalization anchors $\phi_n(0)=1, \phi_n(\pi)=(-1)^n$ and asymptotic normalization invariants $F_{\text{north}}^{(K)}(0) = 1 + O(N^{-K})$ and $F_{\text{south}}^{(K)}(0) = (-1)^n + O(N^{-K})$) using domain-specific candidate envelopes:
 
 1. **Interior Domain Envelope ($\mathcal{D}_{\text{int}}(\delta) = \{\theta : \delta \le \theta \le \pi - \delta\}$):**
-   $$B_{K, \text{int}}(N, \theta, \lambda) \le \frac{C_{\lambda, K} N^{-K}}{\sin\delta},$$
+   $$|R_{K, \text{int}}| \le B_{K, \text{int}}(N, \theta, \lambda) \le \frac{C_{\lambda, K} N^{-K}}{\sin\delta},$$
    where $C_{\lambda, K}$ is a candidate theorem-level constant to be derived/certified.
 2. **North / South Endpoint Envelopes ($z_+ = N\theta \le Z_+, z_- = N(\pi-\theta) \le Z_-$):**
    Nonnegative majorant envelopes bounding the full omitted asymptotic series:
-   $$B_{K, +}(N, z_+, \lambda) = N^{-K} C_{\lambda, K}^+ A_{K, \lambda}^+(z_+; N), \qquad B_{K, -}(N, z_-, \lambda) = N^{-K} C_{\lambda, K}^- A_{K, \lambda}^-(z_-; N),$$
+   $$|R_{K, \pm}| \le B_{K, \pm}, \qquad B_{K, +}(N, z_+, \lambda) = N^{-K} C_{\lambda, K}^+ A_{K, \lambda}^+(z_+; N), \qquad B_{K, -}(N, z_-, \lambda) = N^{-K} C_{\lambda, K}^- A_{K, \lambda}^-(z_-; N),$$
    where $A_{K, \lambda}^\pm(z; N) \ge 0$ is a nonnegative majorant (avoiding zeroes at Bessel oscillating nodes).
-3. **Coverage Partition & Global Envelope:**
+3. **Coverage Partition, Global Envelope & Composite Certificate:**
    Domain coverage requirement: $\mathcal{D}_+ \cup \mathcal{D}_- \cup \mathcal{D}_I = [0, \pi]$ where $\mathcal{D}_+ = \{\theta : z_+ \le Z_+\}$, $\mathcal{D}_- = \{\theta : z_- \le Z_-\}$, and $\mathcal{D}_I = \{\theta : \delta \le \theta \le \pi - \delta\}$ with $N\delta \le Z_+, Z_-$ and disjoint endpoint regions $Z_+ + Z_- < \pi N$. Branch-ordering ambiguity in overlaps is resolved via envelope minimization over valid representations $\mathcal{M}_{\text{valid}}(N, \theta, \lambda) = \{M : \mathcal{C}_M \text{ is valid at } (N, \theta, \lambda)\}$:
    $$B_K^{\text{best}}(N, \theta, \lambda) = \min_{M \in \mathcal{M}_{\text{valid}}} B_{K, M}(N, \theta, \lambda).$$
 
-Overlaps are defined on $\mathcal{O}_+ = \mathcal{R}_{\text{north}} \cap \mathcal{R}_{\text{int}}$ and $\mathcal{O}_- = \mathcal{R}_{\text{south}} \cap \mathcal{R}_{\text{int}}$. For composite remainder $R_{\text{comp}} = R_N + R_S + R_I - R_{+O} - R_{-O}$, composite error bounds assemble via triangle inequality as $B_{K, \text{comp}} \le B_{K, N} + B_{K, S} + B_{K, I} + B_{K, +O} + B_{K, -O}$.
+Overlaps are defined on $\mathcal{O}_+ = \mathcal{R}_{\text{north}} \cap \mathcal{R}_{\text{int}}$ and $\mathcal{O}_- = \mathcal{R}_{\text{south}} \cap \mathcal{R}_{\text{int}}$. For composite remainder $R_{\text{comp}} = R_N + R_S + R_I - R_{+O} - R_{-O}$, composite error bounds assemble via triangle inequality as:
+$$|R_{\text{comp}}| \le B_{K, \text{comp}} \le B_{K, N} + B_{K, S} + B_{K, I} + B_{K, +O} + B_{K, -O}.$$
 
 4. **Backend Capability Certificates $\mathcal{C}_M$:**
    Each execution backend $M \in \mathcal{M}$ provides a capability certificate tuple $\mathcal{C}_M = (\mathcal{D}_M, \mathcal{P}_M, \mathcal{E}_M, \mathcal{R}_M)$ specifying valid domain $\mathcal{D}_M$, parameter admissibility $\mathcal{P}_M$, error model $\mathcal{E}_M$, and residual checkers $\mathcal{R}_M$.
@@ -135,26 +139,28 @@ $$\widehat{E}_M = \widehat{E}_M^{\text{trunc}} + \widehat{E}_M^{\text{arith}} + 
 
 ## 7. Layer VII: Modular & Multi-Backend Arithmetic Execution Layer
 
-Layer VII implements diverse arithmetic realizations of Gegenbauer polynomials $C_n^{(\lambda)}(x) \in \mathbb{Q}[\lambda, x]$ and zonal functions $\phi_n(x)$ across distinct numerical backends:
+Layer VII implements diverse arithmetic realizations of Gegenbauer polynomials and zonal functions $\phi_n(x)$ across distinct numerical backends:
 
 ### VII-A. Floating-Point & Fixed-Point Hardware Execution
 Supports `FLOAT32`, `FLOAT64`, `LONGDOUBLE`, `Q16.16` fixed-point, and Logarithmic Number Systems (`LNS`).
 
 ### VII-B. Exact Rational Symbolic Algebra Sub-Backend ($\mathbb{Q}[\lambda, x]$)
-For rational parameters $\lambda = a/b \in \mathbb{Q}$ and evaluation points $x = c/d \in \mathbb{Q}$ (with reduced fraction certificate $\operatorname{RatCert} = (a, b, c, d, N_{\max})$ where $\gcd(a,b)=1, \gcd(c,d)=1, b,d>0$), $C_n^{(\lambda)}(x) \in \mathbb{Q}$ for all $n \ge 0$. Exact rational arithmetic eliminates floating-point rounding errors subject to exact rational arithmetic semantics.
-1. **Polynomial Path vs. Jacobi Spectral Path:**
+1. **Symbolic Polynomial Identity vs. Evaluation Theorem:**
+   - **Symbolic Polynomial Identity:** $C_n^{(\lambda)}(x) \in \mathbb{Q}[\lambda, x]$.
+   - **Evaluation Theorem:** $\lambda, x \in \mathbb{Q} \implies C_n^{(\lambda)}(x) \in \mathbb{Q}$ (with reduced fraction certificate $\operatorname{RatCert} = (a, b, c, d, N_{\max})$ where $\gcd(a,b)=1, \gcd(c,d)=1, b,d>0$). Exact rational arithmetic eliminates floating-point rounding errors subject to exact rational arithmetic semantics.
+2. **Polynomial Path vs. Jacobi Spectral Path:**
    - **Polynomial Exact Path:** $\mathbb{Q}[\lambda, x] \to \mathbb{Q} \to \text{RNS/CRT}$ (operates strictly in $\mathbb{Q}$).
    - **Jacobi Spectral Path:** $\overline{\mathbb{Q}} \to \text{Golub-Welsch}$ (operates in algebraic extension $\overline{\mathbb{Q}}$ due to $\alpha_n$ square roots).
-2. **Three-Term Polynomial Recurrence:**
+3. **Three-Term Polynomial Recurrence:**
    $$C_0^{(\lambda)}(x) = 1, \qquad C_1^{(\lambda)}(x) = 2\lambda x, \qquad n C_n^{(\lambda)}(x) = 2(n+\lambda-1)x C_{n-1}^{(\lambda)}(x) - (n+2\lambda-2) C_{n-2}^{(\lambda)}(x).$$
-3. **Fraction Bit-Length Tracking:** Denominator and numerator growth is tracked via separate metrics $B_{\text{bits}}^{(C)}(n)$ and $B_{\text{bits}}^{(\phi)}(n)$:
+4. **Fraction Bit-Length Tracking:** Denominator and numerator growth is tracked via separate metrics $B_{\text{bits}}^{(C)}(n)$ and $B_{\text{bits}}^{(\phi)}(n)$:
    $$B_{\text{bits}}^{(C)}(n) = \max\{ \operatorname{bitlen}(\operatorname{num}(C_n)), \operatorname{bitlen}(\operatorname{den}(C_n)) \}, \qquad B_{\text{bits}}^{(\phi)}(n) = \max\{ \operatorname{bitlen}(\operatorname{num}(\phi_n)), \operatorname{bitlen}(\operatorname{den}(\phi_n)) \}.$$
-3. **Differential Derivative Generation:**
+5. **Differential Derivative Generation:**
    $$\frac{d}{dx} C_n^{(\lambda)}(x) = 2\lambda C_{n-1}^{(\lambda+1)}(x), \qquad y'' = \frac{(2\lambda+1)x y' - n(n+2\lambda)y}{1-x^2}.$$
-4. **Golub-Welsch Spectral Quadrature:**
-   Golub-Welsch spectral decomposition isolates the algebraic spectral data $(x_k, v_{k,1}^2)$ (where $x_k$ are the eigenvalues of symmetric Jacobi matrix $J_n$) from the global transcendental scalar normalization:
+6. **Golub-Welsch Spectral Quadrature:**
+   Golub-Welsch spectral decomposition isolates the algebraic spectral data $(x_k, v_{k,1}^2)$ (where $x_k \in \sigma(J_m) = \{x_1, \dots, x_m\}$ are the eigenvalues of symmetric $m \times m$ Jacobi truncation $J_m$) from the global transcendental scalar normalization:
    $$\mu_0 = \int_{-1}^1 (1-x^2)^{\lambda-1/2} dx = \frac{\sqrt{\pi}\,\Gamma(\lambda+1/2)}{\Gamma(\lambda+1)}.$$
-   Gauss-Gegenbauer quadrature $\int_{-1}^1 f(x)(1-x^2)^{\lambda-1/2} dx \approx \sum_{k=1}^n w_k f(x_k)$ (with $w_k = \mu_0 v_{k,1}^2$) avoids direct endpoint evaluation at $x = \pm 1$, reducing endpoint singularity exposure.
+   Gauss-Gegenbauer $m$-point quadrature $\int_{-1}^1 f(x)(1-x^2)^{\lambda-1/2} dx \approx \sum_{k=1}^m w_k f(x_k)$ (with $w_k = \mu_0 v_{k,1}^2$) avoids direct endpoint evaluation at $x = \pm 1$, reducing endpoint singularity exposure. Reserving $n$ for Gegenbauer degree and $m$ for quadrature order.
 
 ### VII-C. Scalable Residue Number System (RNS / CRT) Sub-Backend
 Single binary unsigned hardware wrap channels ($\texttt{uint}_b \simeq \mathbb{Z}/2^b \mathbb{Z}$) are distinguished from multi-modulus prime/coprime RNS systems ($\prod \mathbb{Z}/m_i \mathbb{Z}$).
@@ -165,11 +171,15 @@ Single binary unsigned hardware wrap channels ($\texttt{uint}_b \simeq \mathbb{Z
    $$X \equiv \sum_{i=1}^k r_i M_i (M_i^{-1} \bmod m_i) \pmod M, \qquad M_i = \frac{M}{m_i},$$
    provided an a-priori magnitude bound $|X| < M/2$ is satisfied. For rational values $X = u/v$, exact rational reconstruction recovers canonical reduced $u/v$ ($\gcd(u,v)=1$) from $X \bmod M$ using extended Euclidean algorithm subject to $|u| < U, 0 < v < V$ with $2UV < M$.
 
-### VII-D. Finite-Field & NTT Specializations
+### VII-D. Finite-Field $\mathbb{F}_p$ & NTT Specializations
 1. **Number Theoretic Transform (NTT):** Over finite prime fields $\mathbb{F}_p$ where $L_{\text{NTT}} \mid (p-1)$ (using $L_{\text{NTT}}$ to avoid collision with $N = n+\lambda$), primitive $L_{\text{NTT}}$-th roots of unity $\omega_{L_{\text{NTT}}} \in \mathbb{F}_p$ replace complex exponentials.
-2. **Characteristic $p$ Admissibility Certificates:**
+2. **Characteristic $p$ Admissibility & Rational Representation:**
+   For canonical reduced fraction $C_n^{(\lambda)}(1) = \frac{u_n}{v_n}$ with $\gcd(u_n, v_n) = 1$, normalized finite-field evaluation requires:
+   $$\boxed{p \nmid u_n v_n.}$$
+   Then define field elements $\lambda_p = a b^{-1} \pmod p$, $x_p = c d^{-1} \pmod p$, and normalized zonal evaluation:
+   $$\phi_{n,p}(x_p) = C_n^{(\lambda_p)}(x_p) \left( C_n^{(\lambda_p)}(1) \right)^{-1} \pmod p.$$
    - **Polynomial Certificate $\mathcal{A}_C(p)$:** $p > \max(2, N_{\max}), p \nmid b, p \nmid d$.
-   - **Normalized Spherical Certificate $\mathcal{A}_\phi(p)$:** $\mathcal{A}_C(p) \land \left( p \nmid \prod_{n=0}^{N_{\max}} C_n^{(\lambda)}(1) \right)$.
+   - **Normalized Spherical Certificate $\mathcal{A}_\phi(p, n)$:** $\mathcal{A}_C(p) \land (p \nmid u_n v_n)$.
 
 ### VII-E. Golub-Welsch Spectral Matrix Truncation
 For Gauss-Gegenbauer quadrature calculations, the symmetric tridiagonal Jacobi matrix operator $J$ is truncated via orthogonal projection $P_m$ to its leading $m \times m$ principal truncation $J_m = \operatorname{tridiag}(\alpha_0, \dots, \alpha_{m-2}) = P_m J P_m |_{\operatorname{span}\{e_0, \dots, e_{m-1}\}} \in \mathbb{R}^{m\times m}$. Its eigenvalues $\sigma(J_m) = \{x_1, \dots, x_m\}$ yield quadrature nodes $x_k$, and weights are $w_k = \mu_0 |(v_k)_1|^2$ using normalized eigenvector $v_k$ of $J_m$.
@@ -187,12 +197,16 @@ Layer VIII explicitly distinguishes four error concepts (noting that $R_{\text{s
 3. **Conditioning ($\kappa$):** Problem sensitivity under perturbation.
 4. **Backend Discrepancy ($E_{\text{backend}}$):** Cross-implementation error $E_{A,B} = |\hat{\phi}^{(A)} - \hat{\phi}^{(B)}|$.
 
-### VIII-B. Scale-Invariant Structural Residual Invariants
-- **Normalized Recurrence Residual:** $\widehat{R}_{\text{rec}}(n, x) = \frac{|x \hat{\phi}_n - a_n \hat{\phi}_{n+1} - b_n \hat{\phi}_{n-1}|}{|x \hat{\phi}_n| + |a_n \hat{\phi}_{n+1}| + |b_n \hat{\phi}_{n-1}| + \tau}$ defined for $n \ge 1$ (with initial conditions $\phi_0 = 1, \phi_1 = x$).
+### VIII-B. Scale-Invariant Structural Residual Invariants & Regularization Floor Policy
+To ensure comparable residual evaluations across independent backends, the regularization floor is explicitly backend-dependent:
+$$\boxed{\tau_M \ge 0, \qquad \tau_M = \max(\tau_{\text{abs}}, \tau_{\text{rel}} S_M),}$$
+where $S_M$ is the characteristic magnitude scale factor for representation backend $M$.
+
+- **Normalized Recurrence Residual:** $\widehat{R}_{\text{rec}}(n, x) = \frac{|x \hat{\phi}_n - a_n \hat{\phi}_{n+1} - b_n \hat{\phi}_{n-1}|}{|x \hat{\phi}_n| + |a_n \hat{\phi}_{n+1}| + |b_n \hat{\phi}_{n-1}| + \tau_M}$ defined for $n \ge 1$ (with initial conditions $\phi_0 = 1, \phi_1 = x$).
 - **Normalized ODE Residual:** Defined for interior $x \in (-1, 1)$ to avoid endpoint $1-x^2=0$ cancellation:
-  $$\widehat{R}_{\text{ODE}}(x) = \frac{|(1-x^2)\hat{\phi}'' - (2\lambda+1)x\hat{\phi}' + E_n\hat{\phi}|}{|1-x^2||\hat{\phi}''| + |(2\lambda+1)x||\hat{\phi}'| + E_n|\hat{\phi}| + \tau} \approx 0.$$
+  $$\widehat{R}_{\text{ODE}}(x) = \frac{|(1-x^2)\hat{\phi}'' - (2\lambda+1)x\hat{\phi}' + E_n\hat{\phi}|}{|1-x^2||\hat{\phi}''| + |(2\lambda+1)x||\hat{\phi}'| + E_n|\hat{\phi}| + \tau_M} \approx 0.$$
 - **Normalized Schrödinger Residual:** Defined for interior $\theta \in (0, \pi)$ to avoid $\csc^2\theta$ endpoint singularity:
-  $$\widehat{R}_{\text{Schr}}(\theta) = \frac{|-\hat{u}'' + \lambda(\lambda-1)\csc^2\theta \, \hat{u} - N_n^2 \hat{u}|}{|\hat{u}''| + |\lambda(\lambda-1)\csc^2\theta \, \hat{u}| + N_n^2 |\hat{u}| + \tau}.$$
+  $$\widehat{R}_{\text{Schr}}(\theta) = \frac{|-\hat{u}'' + \lambda(\lambda-1)\csc^2\theta \, \hat{u} - N_n^2 \hat{u}|}{|\hat{u}''| + |\lambda(\lambda-1)\csc^2\theta \, \hat{u}| + N_n^2 |\hat{u}| + \tau_M}.$$
 - **Endpoint Anchors & Normalization Residual:** $R_+ = |\hat{\phi}_n(1) - 1|$, $R_- = |\hat{\phi}_n(-1) - (-1)^n|$, $R_{\text{norm}} = |C_n^{(\lambda)}(1)\hat{\phi}_n(x) - \hat{C}_n^{(\lambda)}(x)|$.
 - **Exact High-Order Endpoint Derivative Formulas:** Total domain $k \in \mathbb{N}_0$ with $\phi_n^{(k)} \equiv 0$ for $k > n$:
   $$\phi_n^{(k)}(1) = \frac{2^k (\lambda)_k C_{n-k}^{(\lambda+k)}(1)}{C_n^{(\lambda)}(1)} \quad (0 \le k \le n), \qquad \phi_n^{(k)}(-1) = (-1)^{n-k} \phi_n^{(k)}(1), \qquad R_{\pm, k} = |\hat{\phi}_n^{(k)}(\pm 1) - \phi_n^{(k)}(\pm 1)|.$$
@@ -203,11 +217,11 @@ Layer VIII explicitly distinguishes four error concepts (noting that $R_{\text{s
 Layer VIII-C is structured into two distinct verification parts:
 
 1. **Real-Valued Numerical Discrepancy Bounds ($E_{A,B}^{\mathbb{R}}$):**
-   $$E_{A,B}^{\mathbb{R}}(x) = |\hat{\phi}_n^{(A)}(x) - \hat{\phi}_n^{(B)}(x)| \le \varepsilon_A + \varepsilon_B,$$
-   where $\varepsilon_A = 0$ for exact rational/RNS output. For independently converged high-precision references (e.g. mpmath at nominal working precision $p_{\text{ref}} \ge p_{\text{target}} + p_{\text{guard}}$, e.g., $p_{\text{ref}} \ge 384$ bits for nominal $10^{-100}$ scale resolution), precision is empirically certified via convergence diagnostic $E_{\text{conv}} = |\phi_{p_2} - \phi_{p_1}| < \varepsilon_{\text{ref}}$ ($p_2 > p_1$). Rigorous forward error certification requires interval/ball arithmetic or analytic enclosures.
+   $$E_{A,B}^{\mathbb{R}}(x) = |\hat{\phi}_n^{(A)}(x) - \hat{\phi}_n^{(B)}(x)| \le \varepsilon_A^{\text{certified}} + \varepsilon_B,$$
+   where $\varepsilon_A^{\text{certified}} = 0$ for exact rational/RNS output. For independently converged high-precision references (e.g. mpmath at nominal working precision $p_{\text{ref}} \ge p_{\text{target}} + p_{\text{guard}}$, e.g., $p_{\text{ref}} \ge 384$ bits for nominal $10^{-100}$ scale resolution), precision is empirically certified via convergence diagnostic $E_{\text{conv}} = |\phi_{p_2} - \phi_{p_1}| < \varepsilon_{\text{ref}}$ ($p_2 > p_1$). Rigorous forward error certification requires interval/ball arithmetic or analytic enclosures.
 2. **Finite-Field Modular Congruence Certificate ($C_{A,B}^{(p)}$):**
-   $$C_{A,B}^{(p)}(x_p) = \operatorname{reduce}_p(\phi_n^{\mathbb{Q}}(x)) - \phi_n^{\mathbb{F}_p}(x_p) \equiv 0 \pmod p,$$
-   provided $p \nmid \operatorname{den}(\lambda) \operatorname{den}(x) C_n^{(\lambda)}(1)$.
+   $$C_{A,B}^{(p)}(x_p) = \operatorname{reduce}_p(\phi_n^{\mathbb{Q}}(x)) - \phi_{n,p}^{\mathbb{F}_p}(x_p) \equiv 0 \pmod p,$$
+   provided $p \nmid u_n v_n$ where $C_n^{(\lambda)}(1) = u_n/v_n$ ($\gcd(u_n, v_n) = 1$) and $p \nmid b d$ for $\lambda = a/b, x = c/d$.
 
 Key certified verification pairs:
 1. $E_{\text{rational}, \text{float64}}^{\mathbb{R}}$: Exact rational vs standard double-precision recurrence.

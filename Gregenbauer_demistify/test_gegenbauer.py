@@ -524,7 +524,7 @@ def test_gauss_gegenbauer_quadrature_precision():
     Verifies Golub-Welsch Gauss-Gegenbauer quadrature on polynomial f(x) = x^4.
     Integral int_{-1}^1 x^4 (1-x^2)^{1.5 - 0.5} dx = int_{-1}^1 x^4 (1-x^2) dx = 2 * (1/5 - 1/7) = 4/35.
     """
-    nodes, weights = gauss_gegenbauer_quadrature(n=4, lambda_val=1.5)
+    nodes, weights = gauss_gegenbauer_quadrature(m=4, lambda_val=1.5)
     integral_approx = np.sum(weights * (nodes ** 4))
     exact_integral = 4.0 / 35.0
     assert np.isclose(integral_approx, exact_integral, rtol=1e-12, atol=1e-13)

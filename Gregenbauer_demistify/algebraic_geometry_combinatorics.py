@@ -4,12 +4,14 @@ Algebraic Geometry and Combinatorics of Projective Quadrics
 This module implements exact algebraic geometry and combinatorial operations
 for Gegenbauer polynomials and complex projective quadric hypersurfaces Q_{d-2} c P^{d-1}:
 1. Hilbert Polynomial h^0(Q_{d-2}, O(n)) via Hilbert series H_{R(Q)}(t) = (1-t^2)/(1-t)^d
+   with binomial coefficient zeroing convention binom(r, d-1) = 0 for r < d-1 (or Sym^m(C^d) = 0 for m < 0).
 2. Exact Rational Quotient Ring Normal Forms: Polynomial remainder modulo q = sum(z_i^2) in C[z_1,...,z_d]/(q)
    Note: Normal form reduction convention maps z_d^2 -> -(z_1^2 + ... + z_{d-1}^2)
-3. Exact Rational Jacobi Recurrence Coefficients for Gelfand algebra multiplication M_x: phi_n -> x * phi_n
+3. Exact Rational Polynomial Path C_n^(lambda)(x) in Q[lambda, x] vs Evaluation Theorem: lambda, x in Q => C_n^(lambda)(x) in Q.
 4. Orthonormal Symmetric Jacobi Matrix Coefficients alpha_n = 1/2 * sqrt( (n+1)(n+2*lambda) / ((n+lambda)(n+lambda+1)) )
-5. Normalized Gegenbauer _2F_1 Hypergeometric Expansion Coefficients
-6. Helper lambda_for_sphere(d) = Fraction(d-2, 2)
+5. Golub-Welsch Gauss-Gegenbauer Quadrature over m x m principal truncation J_m (sigma(J_m) = {x_1, ..., x_m})
+6. Normalized Gegenbauer _2F_1 Hypergeometric Expansion Coefficients
+7. Helper lambda_for_sphere(d) = Fraction(d-2, 2)
 """
 
 from fractions import Fraction
@@ -36,12 +38,14 @@ def quadric_hilbert_series_dim(d: int, n: int) -> int:
       H_{R(Q)}(t) = (1 - t^2) / (1 - t)^d = sum_{n=0}^inf (dim R(Q)_n) t^n
 
     Formula: binom(n+d-1, d-1) - binom(n+d-3, d-1)
+    With binomial zeroing convention binom(r, d-1) = 0 for r < d-1, this formula is uniformly valid for all n >= 0.
     """
     if d < 3 or n < 0:
         raise ValueError("Ambient Euclidean dimension d must be >= 3 and degree n >= 0.")
-    if n == 0:
-        return 1
-    return math.comb(n + d - 1, d - 1) - math.comb(n + d - 3, d - 1)
+
+    term1 = math.comb(n + d - 1, d - 1) if (n + d - 1) >= (d - 1) else 0
+    term2 = math.comb(n + d - 3, d - 1) if (n + d - 3) >= (d - 1) else 0
+    return term1 - term2
 
 
 class QuadricQuotientPolynomial:
@@ -283,6 +287,8 @@ schubert_intersection_coefficients = normalized_gegenbauer_2f1_coefficients
 
 def exact_rational_gegenbauer(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction]) -> Fraction:
     """
+    Symbolic Polynomial Identity: C_n^(lambda)(x) in Q[lambda, x].
+    Evaluation Theorem: lambda, x in Q => C_n^(lambda)(x) in Q.
     Evaluates Gegenbauer polynomial C_n^(lambda)(x) exactly in Q[lambda, x]
     using the three-term recurrence (bypassing Gamma, factorials, and floating-point errors).
 
@@ -304,7 +310,6 @@ def exact_rational_gegenbauer(n: int, lambda_val: Union[int, Fraction], x: Union
     c_curr = 2 * lam * x_frac
 
     for k in range(2, n + 1):
-        # k * C_k = 2 * (k + lam - 1) * x * c_curr - (k + 2*lam - 2) * c_prev
         term1 = 2 * (k + lam - 1) * x_frac * c_curr
         term2 = (k + 2 * lam - 2) * c_prev
         c_next = (term1 - term2) / k
@@ -366,10 +371,10 @@ def exact_rational_bit_length(n: int, lambda_val: Union[int, Fraction], x: Union
 
 def modular_gegenbauer_recurrence(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], mod: int) -> int:
     """
-    Evaluates Gegenbauer polynomial C_n^(lambda)(x) in the modular ring Z/mod Z
-    using unsigned cyclic wrapping arithmetic (hardware overflow simulation).
-    Admissibility certificate A_C(mod): mod > max(2, n), mod \nmid b (for lambda = a/b),
-    and mod \nmid d (for x = c/d).
+    Evaluates Gegenbauer polynomial C_n^(lambda)(x) in the modular ring Z/mod Z.
+    Characteristic p admissibility requires p > max(2, n), p \nmid b (for lambda = a/b),
+    p \nmid d (for x = c/d), and p \nmid u_n v_n where C_n^(lambda)(1) = u_n/v_n (gcd(u_n, v_n) = 1)
+    for normalized spherical functions.
     """
     if n < 0:
         raise ValueError("n must be non-negative integer")
@@ -444,29 +449,31 @@ def rns_crt_gegenbauer_eval(n: int, lambda_val: Union[int, Fraction], x: Union[i
     return X
 
 
-def gauss_gegenbauer_quadrature(n: int, lambda_val: float) -> Tuple[np.ndarray, np.ndarray]:
+def gauss_gegenbauer_quadrature(m: int, lambda_val: float) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Computes Gauss-Gegenbauer quadrature nodes x_k and weights w_k using Golub-Welsch
-    spectral decomposition of the symmetric tridiagonal Jacobi matrix J_n.
+    Computes Gauss-Gegenbauer m-point quadrature nodes x_k and weights w_k using Golub-Welsch
+    spectral decomposition of the symmetric m x m principal truncation Jacobi matrix J_m
+    with eigenvalues sigma(J_m) = {x_1, ..., x_m}.
+    Reserving n for Gegenbauer degree and m for quadrature order.
     Golub-Welsch isolates the algebraic spectral data (x_k, v_{k,1}^2) from the global
     transcendental scalar normalization mu_0 = sqrt(pi) * gamma(lambda + 0.5) / gamma(lambda + 1.0).
     Avoids direct endpoint evaluation at x = +-1, reducing endpoint singularity exposure.
     Weight function: w(x) = (1-x^2)^(lambda - 1/2) over [-1, 1].
     """
-    if n <= 0:
-        raise ValueError("Number of quadrature nodes n must be > 0")
+    if m <= 0:
+        raise ValueError("Number of quadrature nodes m must be > 0")
     if lambda_val <= -0.5:
         raise ValueError("lambda_val must be > -0.5")
 
-    # Build symmetric tridiagonal Jacobi matrix J_n using orthonormal subdiagonal alpha_k
-    subdiag = np.zeros(n - 1, dtype=np.float64)
-    for k in range(n - 1):
+    # Build symmetric tridiagonal Jacobi matrix J_m using orthonormal subdiagonal alpha_k
+    subdiag = np.zeros(m - 1, dtype=np.float64)
+    for k in range(m - 1):
         subdiag[k] = orthonormal_jacobi_coefficients(k, lambda_val)
 
-    J = np.diag(subdiag, k=1) + np.diag(subdiag, k=-1)
+    J_m = np.diag(subdiag, k=1) + np.diag(subdiag, k=-1)
 
-    # Golub-Welsch algorithm: Eigendecomposition of symmetric tridiagonal J
-    nodes, eigenvectors = np.linalg.eigh(J)
+    # Golub-Welsch algorithm: Eigendecomposition of symmetric tridiagonal J_m
+    nodes, eigenvectors = np.linalg.eigh(J_m)
 
     # Total integral weight norm mu_0
     mu_0 = float(math.sqrt(math.pi) * gamma(lambda_val + 0.5) / gamma(lambda_val + 1.0))
