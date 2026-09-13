@@ -30,18 +30,20 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
         │
         ▼
   Layer VI. Two-Overlap Composite Uniform Asymptotic Expansion
-  F_comp = F_north + F_south + F_interior - F_{+,overlap} - F_{-,overlap},  |R_{K,M}| ≤ B_{K,M}, |R_comp| ≤ B_{K,comp}
+  F_comp = F_north + F_south + F_interior - F_{+,overlap} - F_{-,overlap},  F_{±O}^{(K)} = Match^{(K)}(F_ep^{(K)}, F_int^{(K)}),  |R_comp| ≤ B_{K,comp}
         │
         ▼
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, Q16.16, LNS)
   ├── VII-B: Exact Rational Symbolic Algebra (Symbolic Q[λ, x], Rational Eval λ, x ∈ Q, Exact Recurrence)
   ├── VII-C: Scalable Residue Number System (RNS / CRT with A-Priori Magnitude Bounds)
-  └── VII-D: Finite-Field & NTT Specializations (F_p, Primitive Roots ω_{L_NTT}, A_ϕ(p, n))
+  ├── VII-D1: Finite-Field Polynomial Arithmetic (F_p, A_ϕ(p, n), Rational Reduction ρ_p)
+  ├── VII-D2: Number Theoretic Transform Acceleration (NTT, Primitive Roots ω_{L_NTT}, L_NTT | (p-1))
+  └── VII-E: Golub-Welsch Spectral Matrix Truncation (J_m = tridiag(α_0, ..., α_{m-2}), R_J(v, x) = ||J_m v - x v||)
         │
         ▼
   Layer VIII. Verification Invariants, Derivatives & Cross-Backend Certification
-  Exact Families (S^2, S^3) ↔ Derivatives ϕ_n^{(k)}(x) ↔ Normalized Residuals (R_rec, R_ODE, R_Schr with τ_M)
+  Exact Families (S^2, S^3) ↔ Derivatives ϕ_n^{(k)}(x) ↔ Normalized Residuals (R_rec, R_ODE, R_Schr, R_J) ↔ Exactness ε_A^cert = 0 ⟺ C_A^exact
 ```
 
 ---
@@ -107,12 +109,15 @@ Matrix invariants: $J = J^*, \|J\| = 1, \sigma(J) = [-1, 1]$. Sanity check for $
 Define 3D phase space $(n, \theta, \lambda)$ boundary coordinates:
 $$z_+ = N \theta, \qquad z_- = N(\pi - \theta), \qquad N = n + \lambda.$$
 
-Two-overlap composite uniform expansion:
-$$F_{\text{comp}} = F_{\text{north}}(z_+) + F_{\text{south}}(z_-) + F_{\text{interior}}(N, \theta) - F_{+,\text{overlap}}(z_+) - F_{-,\text{overlap}}(z_-),$$
-where $\phi_n(\theta) = F_{\text{comp}}^{(K)}(n, \theta, \lambda) + R_{\text{comp}}(n, \theta, \lambda)$.
+### Composite Matched Asymptotic Framework & Rigorous Overlap Contract
+For truncation order $K$ ($F^{(K)} = \sum_{j=0}^{K-1} N^{-j} F_j$), overlap approximants $F_{+O}^{(K)}$ and $F_{-O}^{(K)}$ are defined by common asymptotic re-expansion in the corresponding overlap scaling:
+$$\boxed{F_{\pm O}^{(K)} = \operatorname{Match}^{(K)}\left( F_{\text{endpoint}}^{(K)}, F_{\text{interior}}^{(K)} \right).}$$
 
-### Composite Matched Asymptotic Framework & Candidate Envelopes
-The framework implements a candidate composite uniform-asymptotic solver. To prevent endpoint divergence at $\theta = 0, \pi$ where $1/\sin\theta \to \infty$ while $\phi_n(0) = 1$, the asymptotic remainder $R_{K, M}$ for branch $M$ is bounded by $|R_{K, M}| \le B_{K, M}(N, \theta, \lambda)$ (for $N^{-1}$ truncation order $K$ where $F^{(K)} = \sum_{j=0}^{K-1} N^{-j} F_j$, with exact normalization anchors $\phi_n(0)=1, \phi_n(\pi)=(-1)^n$ and asymptotic normalization invariants $F_{\text{north}}^{(K)}(0) = 1 + O(N^{-K})$ and $F_{\text{south}}^{(K)}(0) = (-1)^n + O(N^{-K})$) using domain-specific candidate envelopes:
+For each branch $M \in \{N, S, I, +O, -O\}$, branch remainder is defined by $R_M = \phi - F_M^{(K)}$. The composite uniform expansion is:
+$$F_{\text{comp}}^{(K)} = F_{\text{north}}^{(K)}(z_+) + F_{\text{south}}^{(K)}(z_-) + F_{\text{interior}}^{(K)}(N, \theta) - F_{+,\text{overlap}}^{(K)}(z_+) - F_{-,\text{overlap}}^{(K)}(z_-),$$
+and composite remainder $R_{\text{comp}} = \phi - F_{\text{comp}}^{(K)} = R_N + R_S + R_I - R_{+O} - R_{-O}$ satisfies:
+$$\boxed{|R_{\text{comp}}| \le B_{K, \text{comp}} \le B_{K, N} + B_{K, S} + B_{K, I} + B_{K, +O} + B_{K, -O},}$$
+where $|R_{K, M}| \le B_{K, M}(N, \theta, \lambda)$ provides local branch certificates.
 
 1. **Interior Domain Envelope ($\mathcal{D}_{\text{int}}(\delta) = \{\theta : \delta \le \theta \le \pi - \delta\}$):**
    $$|R_{K, \text{int}}| \le B_{K, \text{int}}(N, \theta, \lambda) \le \frac{C_{\lambda, K} N^{-K}}{\sin\delta},$$
@@ -121,12 +126,9 @@ The framework implements a candidate composite uniform-asymptotic solver. To pre
    Nonnegative majorant envelopes bounding the full omitted asymptotic series:
    $$|R_{K, \pm}| \le B_{K, \pm}, \qquad B_{K, +}(N, z_+, \lambda) = N^{-K} C_{\lambda, K}^+ A_{K, \lambda}^+(z_+; N), \qquad B_{K, -}(N, z_-, \lambda) = N^{-K} C_{\lambda, K}^- A_{K, \lambda}^-(z_-; N),$$
    where $A_{K, \lambda}^\pm(z; N) \ge 0$ is a nonnegative majorant (avoiding zeroes at Bessel oscillating nodes).
-3. **Coverage Partition, Global Envelope & Composite Certificate:**
+3. **Coverage Partition & Global Envelope:**
    Domain coverage requirement: $\mathcal{D}_+ \cup \mathcal{D}_- \cup \mathcal{D}_I = [0, \pi]$ where $\mathcal{D}_+ = \{\theta : z_+ \le Z_+\}$, $\mathcal{D}_- = \{\theta : z_- \le Z_-\}$, and $\mathcal{D}_I = \{\theta : \delta \le \theta \le \pi - \delta\}$ with $N\delta \le Z_+, Z_-$ and disjoint endpoint regions $Z_+ + Z_- < \pi N$. Branch-ordering ambiguity in overlaps is resolved via envelope minimization over valid representations $\mathcal{M}_{\text{valid}}(N, \theta, \lambda) = \{M : \mathcal{C}_M \text{ is valid at } (N, \theta, \lambda)\}$:
    $$B_K^{\text{best}}(N, \theta, \lambda) = \min_{M \in \mathcal{M}_{\text{valid}}} B_{K, M}(N, \theta, \lambda).$$
-
-Overlaps are defined on $\mathcal{O}_+ = \mathcal{R}_{\text{north}} \cap \mathcal{R}_{\text{int}}$ and $\mathcal{O}_- = \mathcal{R}_{\text{south}} \cap \mathcal{R}_{\text{int}}$. For composite remainder $R_{\text{comp}} = R_N + R_S + R_I - R_{+O} - R_{-O}$, composite error bounds assemble via triangle inequality as:
-$$|R_{\text{comp}}| \le B_{K, \text{comp}} \le B_{K, N} + B_{K, S} + B_{K, I} + B_{K, +O} + B_{K, -O}.$$
 
 4. **Backend Capability Certificates $\mathcal{C}_M$:**
    Each execution backend $M \in \mathcal{M}$ provides a capability certificate tuple $\mathcal{C}_M = (\mathcal{D}_M, \mathcal{P}_M, \mathcal{E}_M, \mathcal{R}_M)$ specifying valid domain $\mathcal{D}_M$, parameter admissibility $\mathcal{P}_M$, error model $\mathcal{E}_M$, and residual checkers $\mathcal{R}_M$.
@@ -170,13 +172,15 @@ Single binary unsigned hardware wrap channels ($\texttt{uint}_b \simeq \mathbb{Z
    $$X \equiv \sum_{i=1}^k r_i M_i (M_i^{-1} \bmod m_i) \pmod M, \qquad M_i = \frac{M}{m_i},$$
    provided an a-priori magnitude bound $|X| < M/2$ is satisfied. For rational values $X = u/v$, exact rational reconstruction recovers canonical reduced $u/v$ ($\gcd(u,v)=1$) from $X \bmod M$ using extended Euclidean algorithm subject to $|u| < U, 0 < v < V$ with $2UV < M$.
 
-### VII-D. Finite-Field $\mathbb{F}_p$ & NTT Specializations
-1. **Number Theoretic Transform (NTT):** Over finite prime fields $\mathbb{F}_p$ where $L_{\text{NTT}} \mid (p-1)$ (using $L_{\text{NTT}}$ to avoid collision with $N = n+\lambda$), primitive $L_{\text{NTT}}$-th roots of unity $\omega_{L_{\text{NTT}}} \in \mathbb{F}_p$ replace complex exponentials.
-2. **Characteristic $p$ Admissibility & Rational Reduction:**
+### VII-D. Finite-Field Polynomial Arithmetic & NTT Acceleration Sub-Backends
+Conceptually separates finite-field polynomial arithmetic from NTT transform acceleration:
+1. **Finite-Field Polynomial Arithmetic Sub-Backend ($\mathbb{F}_p$):**
    For canonical reduced fraction $C_n^{(\lambda)}(1) = \frac{u_n}{v_n}$ with $\gcd(u_n, v_n) = 1$, the normalized finite-field certificate is:
    $$\boxed{\mathcal{A}_\phi(p, n) \iff \left( p > N_{\max} \land p \nmid b \cdot d \land p \nmid u_n v_n \right).}$$
    Define the rational localization reduction map $\rho_p : \mathbb{Z}_{(p)} \to \mathbb{F}_p$. Then $\rho_p(C_n^{(\lambda)}(1)) = u_n v_n^{-1} \in \mathbb{F}_p^\times$, field parameters $\lambda_p = a b^{-1} \in \mathbb{F}_p$, point $x_p = c d^{-1} \in \mathbb{F}_p$, and normalized zonal evaluation:
    $$\boxed{\phi_{n,p}(x_p) = \rho_p(C_n^{(\lambda)}(x)) \left( u_n v_n^{-1} \right)^{-1} \in \mathbb{F}_p.}$$
+2. **Number Theoretic Transform (NTT) Acceleration Sub-Backend:**
+   Over finite prime fields $\mathbb{F}_p$ where $L_{\text{NTT}} \mid (p-1)$ (using $L_{\text{NTT}}$ to avoid collision with $N = n+\lambda$), primitive $L_{\text{NTT}}$-th roots of unity $\omega_{L_{\text{NTT}}} \in \mathbb{F}_p$ accelerate polynomial expansions via fast convolution.
 
 ### VII-E. Golub-Welsch Spectral Matrix Truncation
 For Gauss-Gegenbauer quadrature calculations, the symmetric tridiagonal Jacobi matrix operator $J$ is truncated via orthogonal projection $P_m$ to its leading $m \times m$ principal truncation $J_m = \operatorname{tridiag}(\alpha_0, \dots, \alpha_{m-2}) = P_m J P_m |_{\operatorname{span}\{e_0, \dots, e_{m-1}\}} \in \mathbb{R}^{m\times m}$. Its eigenvalues $\sigma(J_m) = \{x_1, \dots, x_m\}$ yield quadrature nodes $x_k$, and weights are $w_k = \mu_0 |(v_k)_1|^2$ using normalized eigenvector $v_k$ of $J_m$.
@@ -187,12 +191,15 @@ For Gauss-Gegenbauer quadrature calculations, the symmetric tridiagonal Jacobi m
 
 Layer VIII provides formal verification and cross-backend error certification comparing results across independent arithmetic realizations:
 
-### VIII-A. Formal Error Taxonomy
-Layer VIII explicitly distinguishes four error concepts (noting that $R_{\text{structural}} = 0 \centernot\implies E_{\text{forward}} = 0$ and $E_{\text{backend}} \approx 0 \centernot\implies E_{\text{forward}} = 0$):
-1. **Structural Residual ($R_{\text{structural}}$):** Normalized equation residual (e.g. $\widehat{R}_{\text{rec}}, \widehat{R}_{\text{ODE}}, \widehat{R}_{\text{Schr}}$).
-2. **Forward Error ($E_{\text{forward}}$):** Discrepancy $|\hat{\phi} - \phi|$ from exact ground truth.
+### VIII-A. Formal Error Taxonomy & Conditional Exactness Certificate
+Layer VIII explicitly distinguishes four error concepts:
+1. **Structural Residual ($R_{\text{structural}}$):** Normalized equation residual (e.g. $\widehat{R}_{\text{rec}}, \widehat{R}_{\text{ODE}}, \widehat{R}_{\text{Schr}}, R_J$).
+2. **Forward Error ($E_{\text{forward}}$):** Discrepancy $|\hat{\phi} - \phi|$ from exact ground truth. Note: $R_{\text{structural}} = 0 \centernot\implies E_{\text{forward}} = 0$ and $E_{\text{backend}} \approx 0 \centernot\implies E_{\text{forward}} = 0$.
 3. **Conditioning ($\kappa$):** Problem sensitivity under perturbation.
 4. **Backend Discrepancy ($E_{\text{backend}}$):** Cross-implementation error $E_{A,B} = |\hat{\phi}^{(A)} - \hat{\phi}^{(B)}|$.
+
+Zero arithmetic forward error $\varepsilon_A^{\text{certified}} = 0$ is formally guaranteed if and only if all exactness conditions hold:
+$$\boxed{\varepsilon_A^{\text{certified}} = 0 \iff \mathcal{C}_A^{\text{exact}} \quad \text{where } \mathcal{C}_A^{\text{exact}} \iff \mathcal{A}_{\text{rec}} \land \mathcal{A}_{\text{norm}} \land \mathcal{A}_{\text{CRT}}.}$$
 
 ### VIII-B. Scale-Invariant Structural Residual Invariants & Residual-Specific Floors
 To ensure comparable residual evaluations across independent backends and distinct residual types, the regularization floor is explicitly backend-dependent and residual-scale aware:
@@ -204,6 +211,9 @@ where $S_M \in \{S_M^{\text{rec}}, S_M^{\text{ODE}}, S_M^{\text{Schr}}\}$ is the
   $$\widehat{R}_{\text{ODE}}(x) = \frac{|(1-x^2)\hat{\phi}'' - (2\lambda+1)x\hat{\phi}' + E_n\hat{\phi}|}{|1-x^2||\hat{\phi}''| + |(2\lambda+1)x||\hat{\phi}'| + E_n|\hat{\phi}| + \tau_M} \approx 0.$$
 - **Normalized Schrödinger Residual:** Defined for interior $\theta \in (0, \pi)$ to avoid $\csc^2\theta$ endpoint singularity:
   $$\widehat{R}_{\text{Schr}}(\theta) = \frac{|-\hat{u}'' + \lambda(\lambda-1)\csc^2\theta \, \hat{u} - N_n^2 \hat{u}|}{|\hat{u}''| + |\lambda(\lambda-1)\csc^2\theta \, \hat{u}| + N_n^2 |\hat{u}| + \tau_M}.$$
+- **Jacobi Matrix Spectral Eigenpair Residual:** Direct verification residual for Golub-Welsch spectral backend:
+  $$\boxed{R_J(v, x) = \|J_m v - x v\|.}$$
+  For numerical eigenpair $(\hat{x}_k, \hat{v}_k)$ of $J_m$, $\|J_m \hat{v}_k - \hat{x}_k \hat{v}_k\| \approx 0$ provides an independent verification channel.
 - **Endpoint Anchors & Normalization Residual:** $R_+ = |\hat{\phi}_n(1) - 1|$, $R_- = |\hat{\phi}_n(-1) - (-1)^n|$, $R_{\text{norm}} = |C_n^{(\lambda)}(1)\hat{\phi}_n(x) - \hat{C}_n^{(\lambda)}(x)|$.
 - **Exact High-Order Endpoint Derivative Formulas:** Total domain $k \in \mathbb{N}_0$ with $\phi_n^{(k)} \equiv 0$ for $k > n$:
   $$\phi_n^{(k)}(1) = \frac{2^k (\lambda)_k C_{n-k}^{(\lambda+k)}(1)}{C_n^{(\lambda)}(1)} \quad (0 \le k \le n), \qquad \phi_n^{(k)}(-1) = (-1)^{n-k} \phi_n^{(k)}(1), \qquad R_{\pm, k} = |\hat{\phi}_n^{(k)}(\pm 1) - \phi_n^{(k)}(\pm 1)|.$$
@@ -215,7 +225,7 @@ Layer VIII-C is structured into two distinct verification parts:
 
 1. **Real-Valued Numerical Discrepancy Bounds ($E_{A,B}^{\mathbb{R}}$):**
    $$E_{A,B}^{\mathbb{R}}(x) = |\hat{\phi}_n^{(A)}(x) - \hat{\phi}_n^{(B)}(x)| \le \varepsilon_A^{\text{certified}} + \varepsilon_B,$$
-   where $\varepsilon_A^{\text{certified}} = 0$ for exact rational/RNS output. For independently converged high-precision references (e.g. mpmath at nominal working precision $p_{\text{ref}} \ge p_{\text{target}} + p_{\text{guard}}$, e.g., $p_{\text{ref}} \ge 384$ bits for nominal $10^{-100}$ scale resolution), precision is empirically certified via convergence diagnostic $E_{\text{conv}} = |\phi_{p_2} - \phi_{p_1}| < \varepsilon_{\text{ref}}$ ($p_2 > p_1$). Rigorous forward error certification requires interval/ball arithmetic or analytic enclosures.
+   where $\varepsilon_A^{\text{certified}} = 0$ if and only if $\mathcal{C}_A^{\text{exact}}$ holds. For independently converged high-precision references (e.g. mpmath at nominal working precision $p_{\text{ref}} \ge p_{\text{target}} + p_{\text{guard}}$, e.g., $p_{\text{ref}} \ge 384$ bits for nominal $10^{-100}$ scale resolution), precision is empirically certified via convergence diagnostic $E_{\text{conv}} = |\phi_{p_2} - \phi_{p_1}| < \varepsilon_{\text{ref}}$ ($p_2 > p_1$). Rigorous forward error certification requires interval/ball arithmetic or analytic enclosures.
 2. **Finite-Field Modular Congruence Certificate ($C_{A,B}^{(p)}$):**
    $$\boxed{C_{A,B}^{(p)}(x_p) = \rho_p(\phi_n^{\mathbb{Q}}(x)) - \phi_{n,p}^{\mathbb{F}_p}(x_p) \equiv 0 \pmod p,}$$
    provided the finite-field normalized certificate $\mathcal{A}_\phi(p, n)$ is satisfied ($p > N_{\max}, p \nmid b d, p \nmid u_n v_n$).

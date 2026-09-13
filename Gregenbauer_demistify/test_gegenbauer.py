@@ -521,13 +521,26 @@ def test_exact_rational_derivatives_and_ode_recovery():
 
 def test_gauss_gegenbauer_quadrature_precision():
     """
-    Verifies Golub-Welsch Gauss-Gegenbauer quadrature on polynomial f(x) = x^4.
+    Verifies Golub-Welsch Gauss-Gegenbauer quadrature on polynomial f(x) = x^4,
+    along with direct Layer VIII Jacobi spectral eigenpair residual R_J(v, x) = ||J_m v_k - x_k v_k||.
     Integral int_{-1}^1 x^4 (1-x^2)^{1.5 - 0.5} dx = int_{-1}^1 x^4 (1-x^2) dx = 2 * (1/5 - 1/7) = 4/35.
     """
+    from Gregenbauer_demistify.computational_layer import jacobi_eigenpair_residual
     nodes, weights = gauss_gegenbauer_quadrature(m=4, lambda_val=1.5)
     integral_approx = np.sum(weights * (nodes ** 4))
     exact_integral = 4.0 / 35.0
     assert np.isclose(integral_approx, exact_integral, rtol=1e-12, atol=1e-13)
+
+    # Verify Layer VIII Jacobi Eigenpair Residual R_J(v, x)
+    m = 4
+    lambda_val = 1.5
+    subdiag = np.zeros(m - 1, dtype=np.float64)
+    for k in range(m - 1):
+        subdiag[k] = orthonormal_jacobi_coefficients(k, lambda_val)
+    J_m = np.diag(subdiag, k=1) + np.diag(subdiag, k=-1)
+    evals, evecs = np.linalg.eigh(J_m)
+    r_j = jacobi_eigenpair_residual(evals, evecs, lambda_val)
+    assert r_j < 1e-14
 
 
 def test_modular_rns_crt_exact_recovery():

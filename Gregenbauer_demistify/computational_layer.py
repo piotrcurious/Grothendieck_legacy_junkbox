@@ -59,6 +59,30 @@ def get_backend_tau(tau_abs: float = 1e-14, tau_rel: float = 1e-14, scale: float
     return float(max(tau_abs, tau_rel * scale))
 
 
+def jacobi_eigenpair_residual(nodes: np.ndarray, eigenvectors: np.ndarray, lambda_val: float) -> float:
+    """
+    Computes Layer VIII Jacobi Spectral Eigenpair Residual R_J(v, x) = ||J_m v_k - x_k v_k||_2.
+    Verifies Golub-Welsch matrix eigendecomposition accuracy.
+    """
+    m = len(nodes)
+    if m <= 0:
+        return 0.0
+    from algebraic_geometry_combinatorics import orthonormal_jacobi_coefficients
+    subdiag = np.zeros(m - 1, dtype=np.float64)
+    for k in range(m - 1):
+        subdiag[k] = orthonormal_jacobi_coefficients(k, lambda_val)
+    J_m = np.diag(subdiag, k=1) + np.diag(subdiag, k=-1)
+
+    max_res = 0.0
+    for k in range(m):
+        x_k = nodes[k]
+        v_k = eigenvectors[:, k]
+        res = np.linalg.norm(J_m @ v_k - x_k * v_k)
+        if res > max_res:
+            max_res = res
+    return float(max_res)
+
+
 def scale_invariant_schrodinger_residual(u_val: float, u_second_val: float, theta: float, n: int, lambda_val: float, tau: float = 1e-14) -> float:
     """
     Computes Layer VIII Normalized Scale-Invariant Schrödinger Residual R_Schr(theta).
