@@ -116,11 +116,18 @@ gegenbauer_modular_loop(K, N, _Lambda, _X, _Mod, Ck1, _Ck0, Val) :-
     K > N, !, Val = Ck1.
 gegenbauer_modular_loop(K, N, Lambda, X, Mod, Ck1, Ck0, Val) :-
     K =< N,
-    % Require gcd(K, Mod) == 1 for modular inverse:
+    % Require gcd(K, Mod) == 1 for degree invertibility (Mod > N)
     1 =:= gcd(K, Mod),
+    % For rational Lambda = A/B, require gcd(B, Mod) == 1
+    (   rational(Lambda, A, B)
+    ->  1 =:= gcd(B, Mod),
+        BInv is pow(B, Mod - 2) mod Mod,
+        LamMod is (A * BInv) mod Mod
+    ;   LamMod is integer(Lambda) mod Mod
+    ),
     KInv is pow(K, Mod - 2) mod Mod,
-    Term1 is (2 * (K + Lambda - 1) * X * Ck1) mod Mod,
-    Term2 is ((K + 2 * Lambda - 2) * Ck0) mod Mod,
+    Term1 is (2 * (K + LamMod - 1) * X * Ck1) mod Mod,
+    Term2 is ((K + 2 * LamMod - 2) * Ck0) mod Mod,
     Ck2 is (((Term1 - Term2) mod Mod + Mod) * KInv) mod Mod,
     K1 is K + 1,
     gegenbauer_modular_loop(K1, N, Lambda, X, Mod, Ck2, Ck1, Val).

@@ -349,18 +349,38 @@ def exact_rational_gegenbauer_second_derivative(n: int, lambda_val: Union[int, F
         return 4 * lam * (lam + 1) * exact_rational_gegenbauer(n - 2, lam + 2, x_frac)
 
 
-def modular_gegenbauer_recurrence(n: int, lambda_val: int, x: int, mod: int) -> int:
+def exact_rational_bit_length(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction]) -> Tuple[int, int]:
+    """
+    Computes numerator and denominator bit-length B_bits(n) for exact Gegenbauer polynomial C_n^(lambda)(x).
+    Returns tuple (num_bit_len, den_bit_len).
+    """
+    val = exact_rational_gegenbauer(n, lambda_val, x)
+    num_bits = abs(val.numerator).bit_length()
+    den_bits = abs(val.denominator).bit_length()
+    return num_bits, den_bits
+
+
+def modular_gegenbauer_recurrence(n: int, lambda_val: Union[int, Fraction], x: int, mod: int) -> int:
     """
     Evaluates Gegenbauer polynomial C_n^(lambda)(x) in the modular ring Z/mod Z
     using unsigned cyclic wrapping arithmetic (hardware overflow simulation).
-    Requires mod > 2 (characteristic p > 2) and gcd(k, mod) == 1 for all k in [2, n].
+    Admissibility requirement: mod > n (or gcd(k, mod) == 1 for all k in [2, n])
+    and if lambda = a/b, gcd(b, mod) == 1 (mod > 2, p > n, p \nmid b).
     """
     if n < 0:
         raise ValueError("n must be non-negative integer")
     if mod <= 2:
         raise ValueError("Modulus must be > 2 for standard Gegenbauer recurrence (p > 2)")
 
-    lam = lambda_val % mod
+    if isinstance(lambda_val, Fraction):
+        a, b = lambda_val.numerator, lambda_val.denominator
+        if math.gcd(b, mod) != 1:
+            raise ValueError(f"gcd(den(lambda)={b}, mod={mod}) != 1: lambda denominator not invertible mod {mod}")
+        b_inv = pow(b, -1, mod)
+        lam = (a * b_inv) % mod
+    else:
+        lam = int(lambda_val) % mod
+
     x_mod = x % mod
 
     if n == 0:
@@ -373,7 +393,7 @@ def modular_gegenbauer_recurrence(n: int, lambda_val: int, x: int, mod: int) -> 
 
     for k in range(2, n + 1):
         if math.gcd(k, mod) != 1:
-            raise ValueError(f"gcd(k={k}, mod={mod}) != 1: modular division unavailable")
+            raise ValueError(f"gcd(k={k}, mod={mod}) != 1: degree k={k} not invertible mod {mod} (requires mod > n)")
         k_inv = pow(k, -1, mod)
         term1 = (2 * (k + lam - 1) * x_mod * c_curr) % mod
         term2 = ((k + 2 * lam - 2) * c_prev) % mod

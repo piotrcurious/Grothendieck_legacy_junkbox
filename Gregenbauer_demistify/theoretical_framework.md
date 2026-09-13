@@ -107,20 +107,13 @@ $$z_+ = N \theta, \qquad z_- = N(\pi - \theta), \qquad N = n + \lambda.$$
 
 Two-overlap composite uniform expansion:
 $$F_{\text{comp}} = F_{\text{north}}(z_+) + F_{\text{south}}(z_-) + F_{\text{interior}}(N, \theta) - F_{+,\text{overlap}}(z_+) - F_{-,\text{overlap}}(z_-),$$
-where $\phi_n(\theta) = F_{\text{comp}}^{(K)}(n, \theta, \lambda) + R_K(n, \theta, \lambda)$ with error bound $|R_K| \le B_K(N, \theta, \lambda)$.
+where $\phi_n(\theta) = F_{\text{comp}}^{(K)}(n, \theta, \lambda) + R_K(n, \theta, \lambda)$.
 
----
-
-## 7. Layer VII & VIII: Numerical Backends & Structural Residuals
-
-### Exact Derivatives of Endpoint-Normalized Functions
-$$\phi_n^{(k)}(x) = \frac{d^k}{dx^k} \phi_n(x) = \frac{2^k (\lambda)_k}{C_n^{(\lambda)}(1)} C_{n-k}^{(\lambda+k)}(x) \quad (k \le n), \qquad \phi_n^{(k)}(x) \equiv 0 \quad (k > n).$$
-
-### Scale-Invariant Dimensionless Residuals & Anchors
-- **Endpoint Anchors:** $\phi_n(1) = 1$, $\phi_n(-1) = (-1)^n$.
-- **Exact Derivative Anchors:** $\phi_n'(1) = \frac{n(n + 2\lambda)}{2\lambda + 1}$, $\phi_n'(-1) = (-1)^{n-1} \frac{n(n + 2\lambda)}{2\lambda + 1}$.
-- **Normalized ODE Residual:**
-  $$\widehat{R}_{\text{ODE}}(x) = \frac{|(1-x^2)\hat{\phi}'' - (2\lambda+1)x\hat{\phi}' + E_n\hat{\phi}|}{|1-x^2||\hat{\phi}''| + |(2\lambda+1)x||\hat{\phi}'| + E_n|\hat{\phi}| + \tau} \approx 0.$$
+### Explicit Asymptotic Uniform Error Bound
+The asymptotic remainder $R_K$ satisfies the explicit uniform error bound across $[0, \pi]$:
+$$|R_K(N, \theta, \lambda)| \le B_K(N, \theta, \lambda) = C_\lambda \left( \frac{1}{N \sin\theta} + \frac{1}{(N\theta)^2} + \frac{1}{(N(\pi-\theta))^2} \right),$$
+where $C_\lambda > 0$ is a constant depending strictly on parameter $\lambda$. Adaptive method selection chooses the representation minimizing $B_M(N, \theta, \lambda)$:
+$$M^* = \arg\min_M B_M(N, \theta, \lambda).$$
 
 ---
 
@@ -132,24 +125,52 @@ Layer VII implements diverse arithmetic realizations of Gegenbauer polynomials $
 Supports `FLOAT32`, `FLOAT64`, `LONGDOUBLE`, `Q16.16` fixed-point, and Logarithmic Number Systems (`LNS`).
 
 ### VII-B. Exact Rational Symbolic Algebra Sub-Backend ($\mathbb{Q}[\lambda, x]$)
-For $\lambda, x \in \mathbb{Q}$, $C_n^{(\lambda)}(x) \in \mathbb{Q}$ for all $n \ge 0$. Exact rational arithmetic eliminates floating-point rounding errors subject to exact rational arithmetic semantics.
-1. **Three-Term Recurrence:**
-   $$C_0^{(\lambda)}(x) = 1, \qquad C_1^{(\lambda)}(x) = 2\lambda x,$$
-   $$n C_n^{(\lambda)}(x) = 2(n+\lambda-1)x C_{n-1}^{(\lambda)}(x) - (n+2\lambda-2) C_{n-2}^{(\lambda)}(x).$$
-2. **Differential Derivative Generation:**
+For rational parameters $\lambda = a/b \in \mathbb{Q}$ and evaluation points $x \in \mathbb{Q}$, $C_n^{(\lambda)}(x) \in \mathbb{Q}$ for all $n \ge 0$. Exact rational arithmetic eliminates floating-point rounding errors subject to exact rational arithmetic semantics.
+1. **Three-Term Polynomial Recurrence:**
+   $$C_0^{(\lambda)}(x) = 1, \qquad C_1^{(\lambda)}(x) = 2\lambda x, \qquad n C_n^{(\lambda)}(x) = 2(n+\lambda-1)x C_{n-1}^{(\lambda)}(x) - (n+2\lambda-2) C_{n-2}^{(\lambda)}(x).$$
+   Note: The unnormalized polynomial basis operates in $\mathbb{Q}$, whereas the orthonormal Jacobi realization $J$ requires square roots and operates in an algebraic extension $\overline{\mathbb{Q}}$.
+2. **Fraction Bit-Length Tracking:** Denominator and numerator growth is tracked via the growth metric:
+   $$B_{\text{bits}}(n) = \max\{ \operatorname{bitlen}(\operatorname{num}(C_n)), \operatorname{bitlen}(\operatorname{den}(C_n)) \}.$$
+3. **Differential Derivative Generation:**
    $$\frac{d}{dx} C_n^{(\lambda)}(x) = 2\lambda C_{n-1}^{(\lambda+1)}(x), \qquad y'' = \frac{(2\lambda+1)x y' - n(n+2\lambda)y}{1-x^2}.$$
-3. **Golub-Welsch Spectral Quadrature:**
+4. **Golub-Welsch Spectral Quadrature:**
    Golub-Welsch spectral decomposition isolates the algebraic spectral data $(x_k, v_{k,1}^2)$ (where $x_k$ are the eigenvalues of symmetric Jacobi matrix $J_n$) from the global transcendental scalar normalization:
    $$\mu_0 = \int_{-1}^1 (1-x^2)^{\lambda-1/2} dx = \frac{\sqrt{\pi}\,\Gamma(\lambda+1/2)}{\Gamma(\lambda+1)}.$$
    Gauss-Gegenbauer quadrature $\int_{-1}^1 f(x)(1-x^2)^{\lambda-1/2} dx \approx \sum_{k=1}^n w_k f(x_k)$ (with $w_k = \mu_0 v_{k,1}^2$) avoids direct endpoint evaluation at $x = \pm 1$, reducing endpoint singularity exposure.
 
 ### VII-C. Scalable Residue Number System (RNS / CRT) Sub-Backend
-Hardware unsigned integer overflow (e.g., in `uint32` or `uint64`) corresponds to exact modular ring projection $\mathbb{Z} \to \mathbb{Z}/2^b \mathbb{Z}$.
-1. **Modular Recurrence:** Evaluated over pairwise coprime moduli $m_1, \dots, m_k$ provided $\gcd(n, m_i) = 1$ to allow modular inverse $n^{-1} \pmod{m_i}$.
-2. **Bounded CRT Reconstruction:** For $M = \prod_{i=1}^k m_i$, exact integer value $X$ is uniquely reconstructed via Chinese Remainder Theorem:
+Hardware unsigned integer overflow (e.g. in `uint32` or `uint64`) corresponds to exact modular ring projection $\mathbb{Z} \to \mathbb{Z}/2^b \mathbb{Z}$.
+1. **Admissibility & Modular Recurrence:** Evaluated over pairwise coprime moduli $m_1, \dots, m_k$. For rational parameter $\lambda = a/b$, recurrence step admissibility requires:
+   $$\gcd(m_i, b \cdot n) = 1 \quad \text{for all } n \le N_{\max}.$$
+   For prime moduli $p_i$, this simplifies to $p_i > N_{\max}$ and $p_i \nmid b$.
+2. **Bounded Rational / Integer CRT Reconstruction:** For $M = \prod_{i=1}^k m_i$, exact integer values $X \in \mathbb{Z}$ are uniquely reconstructed via Chinese Remainder Theorem:
    $$X \equiv \sum_{i=1}^k r_i M_i (M_i^{-1} \bmod m_i) \pmod M, \qquad M_i = \frac{M}{m_i},$$
-   provided an a-priori magnitude bound $|X| < M/2$ is satisfied. RNS provides a scalable exact finite-width representation rather than constant-time infinite precision.
+   provided an a-priori magnitude bound $|X| < M/2$ is satisfied. For rational values $X = u/v$, exact rational reconstruction recovers $u/v$ from $X \bmod M$ using extended Euclidean algorithm subject to $|u|, v < \sqrt{M/2}$.
 
 ### VII-D. Finite-Field & NTT Specializations
-1. **Number Theoretic Transform (NTT):** Over finite fields $\mathbb{F}_q$ where $N \mid (q-1)$, primitive $N$-th roots of unity $\omega_N \in \mathbb{F}_q$ replace complex exponentials for exact polynomial transforms.
-2. **Characteristic $p$ Notes:** For characteristic $p = 2$, standard Gegenbauer recurrence degenerates because $2 \equiv 0 \pmod 2$. Standard Gegenbauer backends restrict modular evaluation to primes $p > 2$ or require specialized characteristic-$p$ re-parameterization.
+1. **Number Theoretic Transform (NTT):** Over finite prime fields $\mathbb{F}_p$ where $N \mid (p-1)$, primitive $N$-th roots of unity $\omega_N \in \mathbb{F}_p$ replace complex exponentials for exact polynomial transforms.
+2. **Characteristic $p$ Admissibility Condition:** For recurrence-based characteristic-$p$ evaluation up to degree $N_{\max}$ with $\lambda = a/b$, standard Gegenbauer evaluation requires:
+   $$p > N_{\max} \quad \text{and} \quad p \nmid b.$$
+   This condition prevents division-by-zero during modular division and avoids characteristic 2 degeneration ($2 \equiv 0 \pmod 2$).
+
+---
+
+## 8. Layer VIII: Verification Invariants & Cross-Backend Certification Layer
+
+Layer VIII provides formal verification and cross-backend error certification comparing results across independent arithmetic realizations:
+
+### VIII-A. Structural Residual Invariants
+- **Recurrence Residual:** $R_{\text{rec}}(n, x) = |x \hat{\phi}_n - a_n \hat{\phi}_{n+1} - b_n \hat{\phi}_{n-1}|$.
+- **Normalized ODE Residual:**
+  $$\widehat{R}_{\text{ODE}}(x) = \frac{|(1-x^2)\hat{\phi}'' - (2\lambda+1)x\hat{\phi}' + E_n\hat{\phi}|}{|1-x^2||\hat{\phi}''| + |(2\lambda+1)x||\hat{\phi}'| + E_n|\hat{\phi}| + \tau} \approx 0.$$
+- **Schrödinger Residual:** $R_{\text{Schr}}(\theta) = |-\hat{u}'' + \lambda(\lambda-1)\csc^2\theta \, \hat{u} - (n+\lambda)^2 \hat{u}|$.
+- **Endpoint Anchors:** $R_+ = |\hat{\phi}_n(1) - 1|$, $R_- = |\hat{\phi}_n(-1) - (-1)^n|$.
+- **Derivative Anchors:** $R_{+,k} = |\hat{\phi}_n^{(k)}(1) - \phi_n^{(k)}(1)|$ where $\phi_n'(1) = \frac{n(n+2\lambda)}{2\lambda+1}$.
+
+### VIII-B. Cross-Backend Error Certification ($E_{A,B}$)
+Measures absolute and relative discrepancies between independent execution backends $A$ and $B$:
+$$E_{A,B}(x) = |\hat{\phi}_n^{(A)}(x) - \hat{\phi}_n^{(B)}(x)|.$$
+Key certified verification pairs:
+1. $E_{\text{rational}, \text{float64}}$: Exact rational vs standard double-precision recurrence.
+2. $E_{\text{RNS}, \text{mpmath}}$: Bounded CRT reconstructed integer/rational vs 100+ bit mpmath oracle.
+3. $E_{\text{finitefield}, \text{symbolic}}$: Modular ring congruence check $\hat{\phi}_n \pmod p \equiv \phi_n^{\text{exact}} \pmod p$.
