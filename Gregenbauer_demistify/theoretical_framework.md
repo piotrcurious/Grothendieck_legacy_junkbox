@@ -2,7 +2,7 @@
 
 ## Abstract
 
-This document presents a mathematically closed VIII-Layer architectural framework for Gegenbauer polynomials $C_n^{(\lambda)}(x)$ and normalized zone spherical functions $\phi_n(x)$ on the real sphere $S^{d-1} \cong SO(d)/SO(d-1)$, where parameter $\lambda = \frac{d-2}{2}$ ($d \ge 3$). The framework establishes formal operator morphisms connecting representation geometry, quotient algebras, exact differential operators, self-adjoint Jacobi spectral matrices, two-endpoint singular asymptotics, multi-backend numerical execution (including exact rational, RNS/CRT, and finite-field sub-backends), and high-precision verification invariants.
+This document presents an architecturally closed VIII-Layer framework for Gegenbauer polynomials $C_n^{(\lambda)}(x)$ and normalized zone spherical functions $\phi_n(x)$ on the real sphere $S^{d-1} \cong SO(d)/SO(d-1)$, where parameter $\lambda = \frac{d-2}{2}$ ($d \ge 3$). The framework establishes formal operator morphisms connecting representation geometry, quotient algebras, exact differential operators, self-adjoint Jacobi spectral matrices, candidate two-endpoint singular asymptotic envelopes, multi-backend numerical execution (including exact rational, RNS/CRT, and finite-field sub-backends), and high-precision verification invariants.
 
 ---
 
@@ -110,7 +110,7 @@ $$F_{\text{comp}} = F_{\text{north}}(z_+) + F_{\text{south}}(z_-) + F_{\text{int
 where $\phi_n(\theta) = F_{\text{comp}}^{(K)}(n, \theta, \lambda) + R_K(n, \theta, \lambda)$.
 
 ### Composite Matched Asymptotic Framework & Candidate Envelopes
-The framework implements a candidate composite uniform-asymptotic solver. To prevent endpoint divergence at $\theta = 0, \pi$ where $1/\sin\theta \to \infty$ while $\phi_n(0) = 1$, the asymptotic remainder $R_K$ (for $N^{-1}$ truncation order $K$ where $F^{(K)} = \sum_{j=0}^{K-1} N^{-j} F_j$, with normalization invariants $F_{\text{north}}^{(K)}(0) = 1 + O(N^{-K})$ and $F_{\text{south}}^{(K)}(0) = (-1)^n + O(N^{-K})$) is evaluated using domain-specific candidate envelopes:
+The framework implements a candidate composite uniform-asymptotic solver. To prevent endpoint divergence at $\theta = 0, \pi$ where $1/\sin\theta \to \infty$ while $\phi_n(0) = 1$, the asymptotic remainder $R_K$ (for $N^{-1}$ truncation order $K$ where $F^{(K)} = \sum_{j=0}^{K-1} N^{-j} F_j$, with exact normalization anchors $\phi_n(0)=1, \phi_n(\pi)=(-1)^n$ and asymptotic normalization invariants $F_{\text{north}}^{(K)}(0) = 1 + O(N^{-K})$ and $F_{\text{south}}^{(K)}(0) = (-1)^n + O(N^{-K})$) is evaluated using domain-specific candidate envelopes:
 
 1. **Interior Domain Envelope ($\mathcal{D}_{\text{int}}(\delta) = \{\theta : \delta \le \theta \le \pi - \delta\}$):**
    $$B_{K, \text{int}}(N, \theta, \lambda) \le \frac{C_{\lambda, K} N^{-K}}{\sin\delta},$$
@@ -120,8 +120,8 @@ The framework implements a candidate composite uniform-asymptotic solver. To pre
    $$B_{K, +}(N, z_+, \lambda) = N^{-K} C_{\lambda, K}^+ A_{K, \lambda}^+(z_+; N), \qquad B_{K, -}(N, z_-, \lambda) = N^{-K} C_{\lambda, K}^- A_{K, \lambda}^-(z_-; N),$$
    where $A_{K, \lambda}^\pm(z; N) \ge 0$ is a nonnegative majorant (avoiding zeroes at Bessel oscillating nodes).
 3. **Coverage Partition & Global Envelope:**
-   Domain coverage requirement: $\mathcal{D}_+ \cup \mathcal{D}_- \cup \mathcal{D}_I = [0, \pi]$ where $\mathcal{D}_+ = \{\theta : z_+ \le Z_+\}$, $\mathcal{D}_- = \{\theta : z_- \le Z_-\}$, and $\mathcal{D}_I = \{\theta : \delta \le \theta \le \pi - \delta\}$ with $N\delta \le Z_+, Z_-$. Branch-ordering ambiguity in overlaps is resolved via envelope minimization:
-   $$B_K^{\text{global}}(N, \theta, \lambda) = \min_{M \in \mathcal{M}_{\text{valid}}} B_{K, M}(N, \theta, \lambda).$$
+   Domain coverage requirement: $\mathcal{D}_+ \cup \mathcal{D}_- \cup \mathcal{D}_I = [0, \pi]$ where $\mathcal{D}_+ = \{\theta : z_+ \le Z_+\}$, $\mathcal{D}_- = \{\theta : z_- \le Z_-\}$, and $\mathcal{D}_I = \{\theta : \delta \le \theta \le \pi - \delta\}$ with $N\delta \le Z_+, Z_-$ and disjoint endpoint regions $Z_+ + Z_- < \pi N$. Branch-ordering ambiguity in overlaps is resolved via envelope minimization over valid representations $\mathcal{M}_{\text{valid}}(N, \theta, \lambda) = \{M : \mathcal{C}_M \text{ is valid at } (N, \theta, \lambda)\}$:
+   $$B_K^{\text{best}}(N, \theta, \lambda) = \min_{M \in \mathcal{M}_{\text{valid}}} B_{K, M}(N, \theta, \lambda).$$
 
 Overlaps are defined on $\mathcal{O}_+ = \mathcal{R}_{\text{north}} \cap \mathcal{R}_{\text{int}}$ and $\mathcal{O}_- = \mathcal{R}_{\text{south}} \cap \mathcal{R}_{\text{int}}$. For composite remainder $R_{\text{comp}} = R_N + R_S + R_I - R_{+O} - R_{-O}$, composite error bounds assemble via triangle inequality as $B_{K, \text{comp}} \le B_{K, N} + B_{K, S} + B_{K, I} + B_{K, +O} + B_{K, -O}$.
 
@@ -157,7 +157,7 @@ For rational parameters $\lambda = a/b \in \mathbb{Q}$ and evaluation points $x 
    Gauss-Gegenbauer quadrature $\int_{-1}^1 f(x)(1-x^2)^{\lambda-1/2} dx \approx \sum_{k=1}^n w_k f(x_k)$ (with $w_k = \mu_0 v_{k,1}^2$) avoids direct endpoint evaluation at $x = \pm 1$, reducing endpoint singularity exposure.
 
 ### VII-C. Scalable Residue Number System (RNS / CRT) Sub-Backend
-Hardware unsigned integer overflow (e.g. in `uint32` or `uint64`) corresponds to exact modular ring projection $\mathbb{Z} \to \mathbb{Z}/2^b \mathbb{Z}$.
+Single binary unsigned hardware wrap channels ($\texttt{uint}_b \simeq \mathbb{Z}/2^b \mathbb{Z}$) are distinguished from multi-modulus prime/coprime RNS systems ($\prod \mathbb{Z}/m_i \mathbb{Z}$).
 1. **Admissibility & Modular Recurrence:** Evaluated over pairwise coprime moduli $m_1, \dots, m_k$. For rational parameter $\lambda = a/b$ and rational point $x = c/d$, recurrence step admissibility requires:
    $$\gcd\left( m_i, b \cdot d \cdot \operatorname{lcm}(1, \dots, N_{\max}) \right) = 1.$$
    For prime moduli $p_i$, this simplifies to $p_i > \max(2, N_{\max})$, $p_i \nmid b$, and $p_i \nmid d$.
@@ -181,7 +181,7 @@ For Gauss-Gegenbauer quadrature calculations, the symmetric tridiagonal Jacobi m
 Layer VIII provides formal verification and cross-backend error certification comparing results across independent arithmetic realizations:
 
 ### VIII-A. Formal Error Taxonomy
-Layer VIII explicitly distinguishes four error concepts:
+Layer VIII explicitly distinguishes four error concepts (noting that $R_{\text{structural}} = 0 \centernot\implies E_{\text{forward}} = 0$ and $E_{\text{backend}} \approx 0 \centernot\implies E_{\text{forward}} = 0$):
 1. **Structural Residual ($R_{\text{structural}}$):** Normalized equation residual (e.g. $\widehat{R}_{\text{rec}}, \widehat{R}_{\text{ODE}}, \widehat{R}_{\text{Schr}}$).
 2. **Forward Error ($E_{\text{forward}}$):** Discrepancy $|\hat{\phi} - \phi|$ from exact ground truth.
 3. **Conditioning ($\kappa$):** Problem sensitivity under perturbation.
@@ -194,15 +194,17 @@ Layer VIII explicitly distinguishes four error concepts:
 - **Normalized Schrödinger Residual:** Defined for interior $\theta \in (0, \pi)$ to avoid $\csc^2\theta$ endpoint singularity:
   $$\widehat{R}_{\text{Schr}}(\theta) = \frac{|-\hat{u}'' + \lambda(\lambda-1)\csc^2\theta \, \hat{u} - N_n^2 \hat{u}|}{|\hat{u}''| + |\lambda(\lambda-1)\csc^2\theta \, \hat{u}| + N_n^2 |\hat{u}| + \tau}.$$
 - **Endpoint Anchors & Normalization Residual:** $R_+ = |\hat{\phi}_n(1) - 1|$, $R_- = |\hat{\phi}_n(-1) - (-1)^n|$, $R_{\text{norm}} = |C_n^{(\lambda)}(1)\hat{\phi}_n(x) - \hat{C}_n^{(\lambda)}(x)|$.
-- **Exact High-Order Endpoint Derivative Formulas:**
-  $$\phi_n^{(k)}(1) = \frac{2^k (\lambda)_k C_{n-k}^{(\lambda+k)}(1)}{C_n^{(\lambda)}(1)}, \qquad \phi_n^{(k)}(-1) = (-1)^{n-k} \phi_n^{(k)}(1), \qquad R_{\pm, k} = |\hat{\phi}_n^{(k)}(\pm 1) - \phi_n^{(k)}(\pm 1)|.$$
+- **Exact High-Order Endpoint Derivative Formulas:** Total domain $k \in \mathbb{N}_0$ with $\phi_n^{(k)} \equiv 0$ for $k > n$:
+  $$\phi_n^{(k)}(1) = \frac{2^k (\lambda)_k C_{n-k}^{(\lambda+k)}(1)}{C_n^{(\lambda)}(1)} \quad (0 \le k \le n), \qquad \phi_n^{(k)}(-1) = (-1)^{n-k} \phi_n^{(k)}(1), \qquad R_{\pm, k} = |\hat{\phi}_n^{(k)}(\pm 1) - \phi_n^{(k)}(\pm 1)|.$$
+- **Gauss-Gegenbauer Quadrature Moment Invariant:** $m$-point Gauss quadrature exactness certified against closed-form beta moments:
+  $$\sum_{k=1}^m w_k x_k^j = \int_{-1}^1 x^j (1-x^2)^{\lambda-1/2} dx \quad (0 \le j \le 2m-1), \quad \int_{-1}^1 x^{2r}(1-x^2)^{\lambda-1/2}dx = B\left(r+\frac{1}{2}, \lambda+\frac{1}{2}\right).$$
 
 ### VIII-C. Cross-Backend Error Certification ($E_{A,B}$) & Commutative Reduction
 Layer VIII-C is structured into two distinct verification parts:
 
 1. **Real-Valued Numerical Discrepancy Bounds ($E_{A,B}^{\mathbb{R}}$):**
    $$E_{A,B}^{\mathbb{R}}(x) = |\hat{\phi}_n^{(A)}(x) - \hat{\phi}_n^{(B)}(x)| \le \varepsilon_A + \varepsilon_B,$$
-   where $\varepsilon_A = 0$ for exact rational/RNS output. For high-precision reference backends (e.g. independently converged mpmath reference at working precision $p_{\text{ref}} \ge 384$ bits for nominal $10^{-100}$ scale resolution), precision is certified via convergence $\varepsilon_B = |\phi_{p_2} - \phi_{p_1}| < \varepsilon_{\text{ref}}$ ($p_2 > p_1$).
+   where $\varepsilon_A = 0$ for exact rational/RNS output. For independently converged high-precision references (e.g. mpmath at nominal working precision $p_{\text{ref}} \ge p_{\text{target}} + p_{\text{guard}}$, e.g., $p_{\text{ref}} \ge 384$ bits for nominal $10^{-100}$ scale resolution), precision is empirically certified via convergence diagnostic $E_{\text{conv}} = |\phi_{p_2} - \phi_{p_1}| < \varepsilon_{\text{ref}}$ ($p_2 > p_1$). Rigorous forward error certification requires interval/ball arithmetic or analytic enclosures.
 2. **Finite-Field Modular Congruence Certificate ($C_{A,B}^{(p)}$):**
    $$C_{A,B}^{(p)}(x_p) = \operatorname{reduce}_p(\phi_n^{\mathbb{Q}}(x)) - \phi_n^{\mathbb{F}_p}(x_p) \equiv 0 \pmod p,$$
    provided $p \nmid \operatorname{den}(\lambda) \operatorname{den}(x) C_n^{(\lambda)}(1)$.
