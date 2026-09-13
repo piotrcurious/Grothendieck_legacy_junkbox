@@ -531,7 +531,7 @@ def test_gauss_gegenbauer_quadrature_precision():
     exact_integral = 4.0 / 35.0
     assert np.isclose(integral_approx, exact_integral, rtol=1e-12, atol=1e-13)
 
-    # Verify Layer VIII Jacobi Eigenpair Residual R_J(v, x)
+    # Verify Layer VIII Jacobi Eigenpair Residuals R_J^abs and R_J_hat and Weight Normalization sum w_k = mu_0
     m = 4
     lambda_val = 1.5
     subdiag = np.zeros(m - 1, dtype=np.float64)
@@ -539,8 +539,13 @@ def test_gauss_gegenbauer_quadrature_precision():
         subdiag[k] = orthonormal_jacobi_coefficients(k, lambda_val)
     J_m = np.diag(subdiag, k=1) + np.diag(subdiag, k=-1)
     evals, evecs = np.linalg.eigh(J_m)
-    r_j = jacobi_eigenpair_residual(evals, evecs, lambda_val)
-    assert r_j < 1e-14
+    r_j_abs = jacobi_eigenpair_residual(evals, evecs, lambda_val, normalized=False)
+    r_j_hat = jacobi_eigenpair_residual(evals, evecs, lambda_val, normalized=True)
+    assert r_j_abs < 1e-14
+    assert r_j_hat < 1e-14
+
+    mu_0_expected = math.sqrt(math.pi) * gamma(lambda_val + 0.5) / gamma(lambda_val + 1.0)
+    assert np.isclose(np.sum(weights), mu_0_expected, rtol=1e-12)
 
 
 def test_modular_rns_crt_exact_recovery():
