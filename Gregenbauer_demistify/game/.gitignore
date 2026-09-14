@@ -1,0 +1,5 @@
+*.o
+eighth_layer_game
+test_game_core
+__pycache__/
+*.pyc
