@@ -3,6 +3,7 @@
 #include <cassert>
 #include "GegenbauerCore.h"
 #include "GLCanvas.h"
+#include "GameUI.h"
 
 void test_gegenbauer_core_properties() {
     std::cout << "[Test 1] Testing Gegenbauer Normalization and Derivative Anchors..." << std::endl;
@@ -85,6 +86,52 @@ void test_4_axis_certification_and_snapshot() {
     std::cout << "  -> GameState Evaluation & Router Decision [PASSED]" << std::endl;
 }
 
+void test_game_ui_cache_and_transition() {
+    std::cout << "[Test 5] Testing GameUI Cache & Transition Lifecycle..." << std::endl;
+    GameUI ui(800, 600);
+
+    // 1. Initial state check
+    assert(ui.current_valid);
+    assert(ui.target_valid);
+
+    // 2. Cache miss & update in get_or_evaluate_snapshot
+    SnapshotKey miss_key = SnapshotKey{
+        ui.state.params.d, ui.state.params.n, ui.state.params.theta,
+        ui.state.params.asymptotic_K, ui.state.params.jacobi_m,
+        ui.state.params.error_target_idx, ui.state.backend,
+        LayerType::LAYER_IV_JACOBI_CITY, ui.state.auto_router
+    };
+
+    ui.target_valid = false;
+    RepresentationSnapshot snap = ui.get_or_evaluate_snapshot(miss_key, ui.state, LayerType::LAYER_IV_JACOBI_CITY);
+    assert(ui.target_valid);
+    assert(ui.target_key == miss_key);
+    assert(snap.params.d == ui.state.params.d);
+
+    // 3. Cache hit
+    RepresentationSnapshot cached_snap = ui.get_or_evaluate_snapshot(miss_key, ui.state, LayerType::LAYER_IV_JACOBI_CITY);
+    assert(cached_snap.params.d == snap.params.d);
+
+    // 4. commit_layer_transition fallback when target_valid is false
+    ui.state.target_layer = LayerType::LAYER_III_DIFFERENTIAL_WAVE;
+    ui.target_valid = false;
+    ui.commit_layer_transition();
+    assert(ui.current_valid);
+    assert(ui.target_valid);
+    assert(ui.state.current_layer == LayerType::LAYER_III_DIFFERENTIAL_WAVE);
+
+    // 5. Direct T=1 set_transition commit
+    ui.state.target_layer = LayerType::LAYER_VI_COMPOSITE_ASYMPTOTICS;
+    ui.target_valid = false;
+    ui.set_transition(1.0);
+    assert(ui.current_valid);
+    assert(ui.target_valid);
+    assert(ui.state.current_layer == LayerType::LAYER_VI_COMPOSITE_ASYMPTOTICS);
+    assert(ui.state.transition == 1.0);
+
+    std::cout << "  -> GameUI Cache & Transition Lifecycle [PASSED]" << std::endl;
+}
+
 int main() {
     std::cout << "====================================================" << std::endl;
     std::cout << "      VIII-LAYER GAME CORE MATHEMATICAL TEST SUITE    " << std::endl;
@@ -94,9 +141,10 @@ int main() {
     test_golub_welsch_spectrum();
     test_boundary_layer_and_asymptotics();
     test_4_axis_certification_and_snapshot();
+    test_game_ui_cache_and_transition();
 
     std::cout << "====================================================" << std::endl;
-    std::cout << "       ALL MATHEMATICAL CORE TESTS PASSED (4/4)!     " << std::endl;
+    std::cout << "       ALL MATHEMATICAL CORE TESTS PASSED (5/5)!     " << std::endl;
     std::cout << "====================================================" << std::endl;
     return 0;
 }

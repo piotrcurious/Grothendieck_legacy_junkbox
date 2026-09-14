@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cassert>
 #include <array>
 
 static constexpr std::array<double, 4> kErrorTargets = { 1e-4, 1e-8, 1e-12, 1e-15 };
@@ -231,6 +232,11 @@ void GameUI::set_transition(double t) {
     cancel_layer_transition();
     state.transition = std::clamp(t, 0.0, 1.0);
     if (state.transition >= 1.0) {
+        SnapshotKey req_targ_key = SnapshotKey{state.params.d, state.params.n, state.params.theta,
+                                               state.params.asymptotic_K, state.params.jacobi_m,
+                                               state.params.error_target_idx, state.backend,
+                                               state.target_layer, state.auto_router};
+        get_or_evaluate_snapshot(req_targ_key, state, state.target_layer);
         commit_layer_transition();
     } else {
         mark_dirty_and_schedule();
@@ -242,6 +248,11 @@ void GameUI::advance_transition(double dt) {
     state.transition = std::clamp(state.transition, 0.0, 1.0);
 
     if (state.transition >= 1.0) {
+        SnapshotKey req_targ_key = SnapshotKey{state.params.d, state.params.n, state.params.theta,
+                                               state.params.asymptotic_K, state.params.jacobi_m,
+                                               state.params.error_target_idx, state.backend,
+                                               state.target_layer, state.auto_router};
+        get_or_evaluate_snapshot(req_targ_key, state, state.target_layer);
         commit_layer_transition();
     } else {
         render_snapshot = GegenbauerCore::morph_snapshots(current_snapshot, target_snapshot, state.transition);
@@ -283,6 +294,14 @@ void GameUI::cancel_layer_transition() {
 
 void GameUI::commit_layer_transition() {
     cancel_layer_transition();
+    SnapshotKey req_targ_key = SnapshotKey{state.params.d, state.params.n, state.params.theta,
+                                           state.params.asymptotic_K, state.params.jacobi_m,
+                                           state.params.error_target_idx, state.backend,
+                                           state.target_layer, state.auto_router};
+    if (!target_valid || target_key != req_targ_key) {
+        get_or_evaluate_snapshot(req_targ_key, state, state.target_layer);
+    }
+    assert(target_valid && target_key == req_targ_key);
     state.current_layer = state.target_layer;
     state.transition = 1.0;
     current_snapshot = target_snapshot;
@@ -352,7 +371,28 @@ RepresentationSnapshot GameUI::get_or_evaluate_snapshot(const SnapshotKey& key,
                                                          LayerType eval_layer) {
     if (current_valid && current_key == key) return current_snapshot;
     if (target_valid && target_key == key) return target_snapshot;
-    return core.evaluate(eval_state, eval_layer);
+
+    RepresentationSnapshot snap = core.evaluate(eval_state, eval_layer);
+
+    bool updated = false;
+    if (eval_layer == eval_state.target_layer) {
+        target_snapshot = snap;
+        target_key = key;
+        target_valid = true;
+        updated = true;
+    }
+    if (eval_layer == eval_state.current_layer) {
+        current_snapshot = snap;
+        current_key = key;
+        current_valid = true;
+        updated = true;
+    }
+    if (!updated) {
+        target_snapshot = snap;
+        target_key = key;
+        target_valid = true;
+    }
+    return snap;
 }
 
 void GameUI::publish_snapshot() {
@@ -362,11 +402,7 @@ void GameUI::publish_snapshot() {
                                            state.params.error_target_idx, state.backend,
                                            state.current_layer, state.auto_router};
 
-    if (!current_valid || current_key != req_curr_key) {
-        current_snapshot = core.evaluate(state, state.current_layer);
-        current_key = req_curr_key;
-        current_valid = true;
-    }
+    current_snapshot = get_or_evaluate_snapshot(req_curr_key, state, state.current_layer);
 
     if (state.current_layer == state.target_layer) {
         target_snapshot = current_snapshot;
@@ -378,11 +414,7 @@ void GameUI::publish_snapshot() {
                                                state.params.error_target_idx, state.backend,
                                                state.target_layer, state.auto_router};
 
-        if (!target_valid || target_key != req_targ_key) {
-            target_snapshot = core.evaluate(state, state.target_layer);
-            target_key = req_targ_key;
-            target_valid = true;
-        }
+        target_snapshot = get_or_evaluate_snapshot(req_targ_key, state, state.target_layer);
     }
 
     render_snapshot = GegenbauerCore::morph_snapshots(current_snapshot, target_snapshot, state.transition);
