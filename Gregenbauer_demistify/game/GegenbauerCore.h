@@ -9,6 +9,7 @@
 #include <iostream>
 #include <numbers>
 #include <chrono>
+#include <tuple>
 
 constexpr int kNumLayers = 8;
 constexpr int kNumBackends = 7;
@@ -114,6 +115,24 @@ struct GameState {
     double transition = 0.0; // T in [0, 1]
 };
 
+struct SnapshotKey {
+    int d = 3;
+    int n = 5;
+    double theta = 0.5;
+    int K = 1;
+    int m = 10;
+    int error_target_idx = 1;
+    BackendType backend = BackendType::FLOAT64;
+    LayerType layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
+
+    bool operator==(const SnapshotKey& o) const {
+        return d == o.d && n == o.n && std::abs(theta - o.theta) < 1e-12 &&
+               K == o.K && m == o.m && error_target_idx == o.error_target_idx &&
+               backend == o.backend && layer == o.layer;
+    }
+    bool operator!=(const SnapshotKey& o) const { return !(*this == o); }
+};
+
 struct RepresentationSnapshot {
     CoreParameters params;
     double lambda = 0.5;
@@ -157,6 +176,11 @@ struct RepresentationSnapshot {
     double backend_error = 0.0;
 
     CertificationStatus cert;
+
+    SnapshotKey make_key() const {
+        return SnapshotKey{params.d, params.n, params.theta, params.asymptotic_K,
+                           params.jacobi_m, params.error_target_idx, effective_backend, effective_layer};
+    }
 };
 
 class GegenbauerCore {
