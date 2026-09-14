@@ -8,11 +8,9 @@ void test_gegenbauer_core_properties() {
     std::cout << "[Test 1] Testing Gegenbauer Normalization and Derivative Anchors..." << std::endl;
     GegenbauerCore core(4, 10, 0.2); // d=4 -> lambda=1.0
 
-    // phi_n(1) must be 1.0 exactly
     double phi_1 = core.eval_phi(10, 1.0);
     assert(std::abs(phi_1 - 1.0) < 1e-12);
 
-    // Parity: phi_10(-x) == phi_10(x) for even degree
     double phi_pos = core.eval_phi(10, 0.4);
     double phi_neg = core.eval_phi(10, -0.4);
     assert(std::abs(phi_pos - phi_neg) < 1e-12);
@@ -34,7 +32,6 @@ void test_golub_welsch_spectrum() {
     assert(std::abs(gw.weight_sum - gw.expected_mu0) < 1e-10);
     assert(gw.eigenpair_residual < 1e-8);
 
-    // All eigenvalues must be strictly within (-1, 1)
     for (double x_k : gw.eigenvalues) {
         assert(x_k > -1.0 && x_k < 1.0);
     }
@@ -51,26 +48,36 @@ void test_boundary_layer_and_asymptotics() {
 
     std::cout << "  -> n=100, theta=0.01: exact=" << f_exact << ", north_bessel=" << f_north
               << ", composite=" << f_comp << std::endl;
-    assert(std::abs(f_comp - f_exact) < 0.03); // Asymptotic approximation O(1/N_n)
+    assert(std::abs(f_comp - f_exact) < 0.03);
     std::cout << "  -> Composite Asymptotic Error Bound [PASSED]" << std::endl;
 }
 
-void test_residuals_and_backends() {
-    std::cout << "[Test 4] Testing Multi-Backend Residual Taxonomy..." << std::endl;
+void test_4_axis_certification_and_snapshot() {
+    std::cout << "[Test 4] Testing 4-Axis Certification & Representation Snapshots..." << std::endl;
     GegenbauerCore core(3, 15, 1.2);
 
-    ResidualState res_f64 = core.compute_residuals(BackendType::FLOAT64);
-    assert(res_f64.is_certified);
-    assert(res_f64.r_rec < 1e-8);
-    assert(res_f64.r_ode < 1e-8);
+    CertificationStatus cert_f64 = core.compute_certification(BackendType::FLOAT64);
+    assert(cert_f64.numerical_valid);
+    assert(cert_f64.structural_residual < 1e-8);
 
-    ResidualState res_rat = core.compute_residuals(BackendType::EXACT_RATIONAL);
-    assert(res_rat.truth_class == TruthClass::ALGEBRAIC_EXACT);
+    CertificationStatus cert_rat = core.compute_certification(BackendType::EXACT_RATIONAL);
+    assert(cert_rat.algebraic_exact);
 
-    ResidualState res_rns = core.compute_residuals(BackendType::MODULAR_RNS);
-    assert(res_rns.truth_class == TruthClass::ARITHMETIC_EXACT);
+    CertificationStatus cert_rns = core.compute_certification(BackendType::MODULAR_RNS);
+    assert(cert_rns.arithmetic_exact);
 
-    std::cout << "  -> FLOAT64 R_rec=" << res_f64.r_rec << ", R_ODE=" << res_f64.r_ode << " [PASSED]" << std::endl;
+    // Test Representation Snapshot & Auto Router AI
+    RepresentationSnapshot snap_auto = core.get_snapshot(LayerType::LAYER_I_HARMONIC_GEOMETRY, BackendType::FLOAT64, true);
+    assert(snap_auto.auto_router);
+    assert(snap_auto.regime == RegimeType::INTERIOR_WKB);
+
+    // Endpoint North Pole routing test
+    GegenbauerCore core_north(3, 100, 0.01);
+    RepresentationSnapshot snap_north = core_north.get_snapshot(LayerType::LAYER_I_HARMONIC_GEOMETRY, BackendType::FLOAT64, true);
+    assert(snap_north.regime == RegimeType::NORTH_ENDPOINT_BESSEL);
+    assert(snap_north.layer == LayerType::LAYER_V_TWO_POLE_COORDS);
+
+    std::cout << "  -> 4-Axis Certification & Auto Router Routing [PASSED]" << std::endl;
 }
 
 int main() {
@@ -81,7 +88,7 @@ int main() {
     test_gegenbauer_core_properties();
     test_golub_welsch_spectrum();
     test_boundary_layer_and_asymptotics();
-    test_residuals_and_backends();
+    test_4_axis_certification_and_snapshot();
 
     std::cout << "====================================================" << std::endl;
     std::cout << "       ALL MATHEMATICAL CORE TESTS PASSED (4/4)!     " << std::endl;

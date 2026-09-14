@@ -8,23 +8,28 @@
 #include <algorithm>
 #include <iostream>
 
-// Truth classes matching Layer VIII taxonomy
-enum class TruthClass {
-    ALGEBRAIC_EXACT,
-    ARITHMETIC_EXACT,
-    ANALYTIC_CERTIFIED,
-    NUMERICAL_APPROX
+// Certification status matching Layer VIII taxonomy
+struct CertificationStatus {
+    bool algebraic_exact = false;
+    bool arithmetic_exact = false;
+    bool analytic_certified = false;
+    bool numerical_valid = false;
+
+    double structural_residual = 0.0;
+    double forward_error = 0.0;
+    double conditioning = 1.0;
+    double backend_discrepancy = 0.0;
 };
 
 // Arithmetic backends matching Layer VII factory
 enum class BackendType {
-    FLOAT32,
-    FLOAT64,
-    LONGDOUBLE,
-    Q16_16,
-    LNS,
-    EXACT_RATIONAL,
-    MODULAR_RNS
+    FLOAT32 = 0,
+    FLOAT64 = 1,
+    LONGDOUBLE = 2,
+    Q16_16 = 3,
+    LNS = 4,
+    EXACT_RATIONAL = 5,
+    MODULAR_RNS = 6
 };
 
 // Representation layers matching VIII-Layer framework
@@ -39,16 +44,12 @@ enum class LayerType {
     LAYER_VIII_CERTIFICATION_CHAMBER = 7
 };
 
-struct ResidualState {
-    double r_rec = 0.0;
-    double r_ode = 0.0;
-    double r_schr = 0.0;
-    double r_jacobi = 0.0;
-    double e_backend = 0.0;
-    double forward_error_est = 0.0;
-    double condition_number = 1.0;
-    bool is_certified = false;
-    TruthClass truth_class = TruthClass::NUMERICAL_APPROX;
+// Regime classification matching Layer V / VI
+enum class RegimeType {
+    NORTH_ENDPOINT_BESSEL = 0,
+    SOUTH_ENDPOINT_BESSEL = 1,
+    OVERLAP_APPROXIMATION = 2,
+    INTERIOR_WKB = 3
 };
 
 struct GolubWelschResult {
@@ -61,6 +62,40 @@ struct GolubWelschResult {
     double eigenpair_residual = 0.0;     // max ||J_m v_k - x_k v_k||
 };
 
+struct RepresentationSnapshot {
+    int d = 3;
+    int n = 5;
+    double lambda = 0.5;
+    double theta = 0.5;
+    double x = 0.87758256;
+    double N = 5.5;
+    double z_plus = 2.75;
+    double z_minus = 14.528;
+
+    RegimeType regime = RegimeType::INTERIOR_WKB;
+    std::string regime_name = "INTERIOR_WKB";
+
+    LayerType layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
+    BackendType backend = BackendType::FLOAT64;
+    std::string backend_name = "FLOAT64";
+
+    bool auto_router = false;
+    std::string router_reason = "Manual Selection";
+
+    double phi = 0.0;
+    double forward_error = 0.0;
+    double conditioning = 1.0;
+    double analytic_bound = 0.0;
+
+    double r_rec = 0.0;
+    double r_ode = 0.0;
+    double r_schr = 0.0;
+    double r_jacobi = 0.0;
+    double backend_error = 0.0;
+
+    CertificationStatus cert;
+};
+
 class GegenbauerCore {
 public:
     int d = 3;              // Dimension (>= 3)
@@ -68,10 +103,22 @@ public:
     double lambda_val = 0.5;// (d-2)/2
     double theta = 0.5;     // Angle in (0, pi)
     double x = 0.87758256;  // cos(theta)
+    BackendType current_backend = BackendType::FLOAT64;
 
     GegenbauerCore(int dimension = 3, int degree = 5, double th = 0.5);
 
     void update_parameters(int dimension, int degree, double th);
+
+    // Snapshot generator producing an immutable mathematical state snapshot
+    RepresentationSnapshot get_snapshot(LayerType layer = LayerType::LAYER_I_HARMONIC_GEOMETRY,
+                                         BackendType backend = BackendType::FLOAT64,
+                                         bool auto_route = false,
+                                         double error_tol = 1e-8) const;
+
+    // Domain regime classifier
+    RegimeType classify_regime(double th) const;
+    static std::string get_regime_name(RegimeType reg);
+    static std::string get_backend_name(BackendType bt);
 
     // Exact Gegenbauer C_n^{(lambda)}(x) via recurrence
     static double eval_gegenbauer_c(int n_deg, double lam, double x_val);
@@ -109,10 +156,10 @@ public:
     // Multi-backend simulations
     double eval_backend_phi(BackendType backend, int n_deg, double x_val) const;
 
-    // Residual taxonomy and certification
-    ResidualState compute_residuals(BackendType backend = BackendType::FLOAT64) const;
+    // Residual taxonomy & 4-axis certification
+    CertificationStatus compute_certification(BackendType backend = BackendType::FLOAT64) const;
 
-    // Helper: log gamma function
+    // Helper math functions
     static double log_gamma(double z);
     static double gamma_func(double z);
     static double beta_func(double a, double b);

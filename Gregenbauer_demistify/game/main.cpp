@@ -25,7 +25,7 @@ int run_headless_tests() {
         return 1;
     }
 
-    // Test 3: Jacobi subdiagonal alpha_0 for lambda=0.5: alpha_0 = 1/2 * sqrt(1 * 2 / (0.5 * 1.5)) = 0.577350269
+    // Test 3: Jacobi subdiagonal alpha_0 for lambda=0.5
     double alpha0 = GegenbauerCore::get_jacobi_alpha(0, 0.5);
     std::cout << "Test 3 [Jacobi Alpha_0]: alpha_0 = " << alpha0 << std::endl;
     if (std::abs(alpha0 - 1.0 / std::sqrt(3.0)) > 1e-10) {
@@ -43,11 +43,13 @@ int run_headless_tests() {
         return 1;
     }
 
-    // Test 5: Residual State & Truth Classification
-    ResidualState res = core.compute_residuals(BackendType::FLOAT64);
-    std::cout << "Test 5 [Residuals]: R_rec = " << res.r_rec << ", R_ODE = " << res.r_ode
-              << ", R_Schr = " << res.r_schr << ", Certified = " << (res.is_certified ? "YES" : "NO") << std::endl;
-    if (!res.is_certified) {
+    // Test 5: Representation Snapshot & 4-Axis Certification
+    RepresentationSnapshot snap = core.get_snapshot(LayerType::LAYER_I_HARMONIC_GEOMETRY, BackendType::FLOAT64, true);
+    std::cout << "Test 5 [Snapshot & Certification]: N = " << snap.N
+              << ", Regime = " << snap.regime_name
+              << ", ALG=" << snap.cert.algebraic_exact
+              << ", NUM=" << snap.cert.numerical_valid << std::endl;
+    if (!snap.cert.numerical_valid) {
         std::cerr << "FAILED Test 5" << std::endl;
         return 1;
     }
@@ -63,9 +65,8 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Default: Start FLTK GUI application
     Fl::scheme("gtk+");
-    GameUI ui(1100, 800);
+    GameUI ui(1100, 820);
     ui.show();
     return Fl::run();
 }
