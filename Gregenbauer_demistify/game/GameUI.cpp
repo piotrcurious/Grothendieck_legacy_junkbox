@@ -284,15 +284,16 @@ void GameUI::cancel_layer_transition() {
 void GameUI::commit_layer_transition() {
     cancel_layer_transition();
     if (!target_valid) {
-        SnapshotKey req_targ_key = SnapshotKey{state.params.d, state.params.n, state.params.theta,
-                                               state.params.asymptotic_K, state.params.jacobi_m,
-                                               state.params.error_target_idx, state.backend,
-                                               state.target_layer, state.auto_router};
-        target_snapshot = get_or_evaluate_snapshot(req_targ_key, state, state.target_layer);
+        target_snapshot = core.evaluate(state, state.target_layer);
+        target_key = SnapshotKey{state.params.d, state.params.n, state.params.theta,
+                                 state.params.asymptotic_K, state.params.jacobi_m,
+                                 state.params.error_target_idx, state.backend,
+                                 state.target_layer, state.auto_router};
+        target_valid = true;
     }
     current_snapshot = target_snapshot;
     current_key = target_key;
-    current_valid = target_valid;
+    current_valid = true;
     state.current_layer = state.target_layer;
     state.transition = 1.0;
     normalize_state(state);
