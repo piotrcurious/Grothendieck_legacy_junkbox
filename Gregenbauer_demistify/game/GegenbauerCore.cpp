@@ -61,9 +61,9 @@ std::string GegenbauerCore::get_layer_name(LayerType layer) {
     }
 }
 
-RouterDecision GegenbauerCore::solve_router_decision(const GameState& state) const {
+RouterDecision GegenbauerCore::solve_router_decision(const GameState& state, LayerType req_layer) const {
     RouterDecision dec;
-    dec.requested_layer = state.target_layer;
+    dec.requested_layer = req_layer;
     dec.requested_backend = state.backend;
 
     double lam = (state.params.d - 2.0) / 2.0;
@@ -73,7 +73,7 @@ RouterDecision GegenbauerCore::solve_router_decision(const GameState& state) con
     dec.conditioning = kappa;
 
     if (!state.auto_router) {
-        dec.effective_layer = state.target_layer;
+        dec.effective_layer = req_layer;
         dec.effective_backend = state.backend;
         dec.feasible = true;
         dec.reason = "Manual Selection: Obeying user requested layer and backend";
@@ -123,7 +123,7 @@ RouterDecision GegenbauerCore::solve_router_decision(const GameState& state) con
     return dec;
 }
 
-RepresentationSnapshot GegenbauerCore::evaluate(const GameState& state) const {
+RepresentationSnapshot GegenbauerCore::evaluate(const GameState& state, LayerType eval_layer) const {
     RepresentationSnapshot snap;
     snap.params = state.params;
     snap.params.d = std::clamp(state.params.d, 3, 20);
@@ -149,7 +149,7 @@ RepresentationSnapshot GegenbauerCore::evaluate(const GameState& state) const {
     snap.target_layer = state.target_layer;
     snap.transition = std::clamp(state.transition, 0.0, 1.0);
 
-    snap.router_decision = solve_router_decision(state);
+    snap.router_decision = solve_router_decision(state, eval_layer);
 
     snap.effective_layer = snap.router_decision.effective_layer;
     snap.effective_backend = snap.router_decision.effective_backend;

@@ -123,12 +123,14 @@ struct SnapshotKey {
     int m = 10;
     int error_target_idx = 1;
     BackendType backend = BackendType::FLOAT64;
-    LayerType layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
+    LayerType evaluation_layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
+    bool auto_router = false;
 
     bool operator==(const SnapshotKey& o) const {
         return d == o.d && n == o.n && std::abs(theta - o.theta) < 1e-12 &&
                K == o.K && m == o.m && error_target_idx == o.error_target_idx &&
-               backend == o.backend && layer == o.layer;
+               backend == o.backend && evaluation_layer == o.evaluation_layer &&
+               auto_router == o.auto_router;
     }
     bool operator!=(const SnapshotKey& o) const { return !(*this == o); }
 };
@@ -177,9 +179,9 @@ struct RepresentationSnapshot {
 
     CertificationStatus cert;
 
-    SnapshotKey make_key() const {
+    SnapshotKey make_key(LayerType eval_layer) const {
         return SnapshotKey{params.d, params.n, params.theta, params.asymptotic_K,
-                           params.jacobi_m, params.error_target_idx, effective_backend, effective_layer};
+                           params.jacobi_m, params.error_target_idx, params.error_target_idx >= 0 ? effective_backend : effective_backend, eval_layer, auto_router};
     }
 };
 
@@ -192,12 +194,14 @@ private:
 public:
     GegenbauerCore() = default;
 
-    RepresentationSnapshot evaluate(const GameState& state) const;
+    RepresentationSnapshot evaluate(const GameState& state, LayerType eval_layer) const;
+    RepresentationSnapshot evaluate(const GameState& state) const { return evaluate(state, state.target_layer); }
+
     static RepresentationSnapshot morph_snapshots(const RepresentationSnapshot& snap1,
                                                    const RepresentationSnapshot& snap2,
                                                    double t);
 
-    RouterDecision solve_router_decision(const GameState& state) const;
+    RouterDecision solve_router_decision(const GameState& state, LayerType req_layer) const;
 
     RegimeType classify_regime(int n_deg, double lam, double th) const;
     static std::string get_regime_name(RegimeType reg);
