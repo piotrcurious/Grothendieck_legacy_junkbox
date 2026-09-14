@@ -188,12 +188,15 @@ RepresentationSnapshot GegenbauerCore::morph_snapshots(const RepresentationSnaps
                                                        const RepresentationSnapshot& snap2,
                                                        double t) {
     t = std::clamp(t, 0.0, 1.0);
-    RepresentationSnapshot res = snap1;
+    double s = t * t * (3.0 - 2.0 * t);
+
+    // Select discrete metadata authoritatively from snap1 (t < 0.5) or snap2 (t >= 0.5)
+    RepresentationSnapshot res = (t < 0.5) ? snap1 : snap2;
     res.transition = t;
     res.current_layer = snap1.effective_layer;
     res.target_layer = snap2.effective_layer;
 
-    double s = t * t * (3.0 - 2.0 * t);
+    // Smooth visual blending for scalar render fields
     res.phi = (1.0 - s) * snap1.phi + s * snap2.phi;
     res.forward_error = (1.0 - s) * snap1.forward_error + s * snap2.forward_error;
     res.r_rec = (1.0 - s) * snap1.r_rec + s * snap2.r_rec;
@@ -202,14 +205,6 @@ RepresentationSnapshot GegenbauerCore::morph_snapshots(const RepresentationSnaps
     res.r_jacobi = (1.0 - s) * snap1.r_jacobi + s * snap2.r_jacobi;
     res.backend_error = (1.0 - s) * snap1.backend_error + s * snap2.backend_error;
 
-    if (t >= 0.5) {
-        res.effective_layer = snap2.effective_layer;
-        res.effective_layer_name = snap2.effective_layer_name;
-        res.effective_backend = snap2.effective_backend;
-        res.effective_backend_name = snap2.effective_backend_name;
-        res.cert = snap2.cert;
-        res.router_decision = snap2.router_decision;
-    }
     return res;
 }
 

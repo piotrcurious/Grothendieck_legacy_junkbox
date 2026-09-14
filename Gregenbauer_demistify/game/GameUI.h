@@ -67,9 +67,10 @@ public:
     ~GameUI();
 
     void show();
-    void normalize_state(GameState& st);
+    static void normalize_state(GameState& st);
     void apply_state_change(const GameState& new_state);
     void set_transition(double t);
+    void advance_transition(double dt);
     void begin_layer_transition(LayerType target);
     void cancel_layer_transition();
     void commit_layer_transition();
