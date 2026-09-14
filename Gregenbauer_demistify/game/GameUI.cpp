@@ -33,7 +33,7 @@ static constexpr std::array<LayerInfo, kNumLayers> g_layer_infos{{
 GameUI::GameUI(int width, int height)
     : is_dirty(false), is_morph_animating(false), is_updating_widgets(false) {
     main_win = std::make_unique<Fl_Double_Window>(width, height, "EIGHTH LAYER: The Harmonic Representation Engine");
-    main_win->size_range(900, 650);
+    main_win->size_range(900, 720);
 
     state.params.d = 3;
     state.params.n = 5;
@@ -203,7 +203,7 @@ void GameUI::normalize_state(GameState& st) {
     st.params.asymptotic_K = std::clamp(st.params.asymptotic_K, 1, 5);
     st.params.jacobi_m = std::clamp(st.params.jacobi_m, 4, 30);
 
-    st.params.error_target_idx = std::clamp(st.params.error_target_idx, 0, 3);
+    st.params.error_target_idx = std::clamp(st.params.error_target_idx, 0, static_cast<int>(kErrorTargets.size()) - 1);
     st.params.error_target = kErrorTargets[st.params.error_target_idx];
 
     st.transition = std::clamp(st.transition, 0.0, 1.0);
@@ -283,11 +283,18 @@ void GameUI::cancel_layer_transition() {
 
 void GameUI::commit_layer_transition() {
     cancel_layer_transition();
-    state.current_layer = state.target_layer;
-    state.transition = 1.0;
+    if (!target_valid) {
+        SnapshotKey req_targ_key = SnapshotKey{state.params.d, state.params.n, state.params.theta,
+                                               state.params.asymptotic_K, state.params.jacobi_m,
+                                               state.params.error_target_idx, state.backend,
+                                               state.target_layer, state.auto_router};
+        target_snapshot = get_or_evaluate_snapshot(req_targ_key, state, state.target_layer);
+    }
     current_snapshot = target_snapshot;
     current_key = target_key;
     current_valid = target_valid;
+    state.current_layer = state.target_layer;
+    state.transition = 1.0;
     normalize_state(state);
     sync_widgets_from_state();
     mark_dirty_and_schedule();
@@ -352,21 +359,28 @@ RepresentationSnapshot GameUI::get_or_evaluate_snapshot(const SnapshotKey& key,
                                                          LayerType eval_layer) {
     if (current_valid && current_key == key) return current_snapshot;
     if (target_valid && target_key == key) return target_snapshot;
-    return core.evaluate(eval_state, eval_layer);
+
+    RepresentationSnapshot evaluated = core.evaluate(eval_state, eval_layer);
+    if (eval_layer == eval_state.current_layer) {
+        current_snapshot = evaluated;
+        current_key = key;
+        current_valid = true;
+    } else {
+        target_snapshot = evaluated;
+        target_key = key;
+        target_valid = true;
+    }
+    return evaluated;
 }
 
 void GameUI::publish_snapshot() {
-    // Two-snapshot evaluation model with explicit evaluation layers
+    // Two-snapshot evaluation model with explicit evaluation layers and cache helper
     SnapshotKey req_curr_key = SnapshotKey{state.params.d, state.params.n, state.params.theta,
                                            state.params.asymptotic_K, state.params.jacobi_m,
                                            state.params.error_target_idx, state.backend,
                                            state.current_layer, state.auto_router};
 
-    if (!current_valid || current_key != req_curr_key) {
-        current_snapshot = core.evaluate(state, state.current_layer);
-        current_key = req_curr_key;
-        current_valid = true;
-    }
+    current_snapshot = get_or_evaluate_snapshot(req_curr_key, state, state.current_layer);
 
     if (state.current_layer == state.target_layer) {
         target_snapshot = current_snapshot;
@@ -378,11 +392,7 @@ void GameUI::publish_snapshot() {
                                                state.params.error_target_idx, state.backend,
                                                state.target_layer, state.auto_router};
 
-        if (!target_valid || target_key != req_targ_key) {
-            target_snapshot = core.evaluate(state, state.target_layer);
-            target_key = req_targ_key;
-            target_valid = true;
-        }
+        target_snapshot = get_or_evaluate_snapshot(req_targ_key, state, state.target_layer);
     }
 
     render_snapshot = GegenbauerCore::morph_snapshots(current_snapshot, target_snapshot, state.transition);
@@ -424,13 +434,15 @@ void GameUI::publish_snapshot() {
     oss << "   R_Schr=" << current_snapshot.r_schr << " | R_J=" << current_snapshot.r_jacobi << "\n";
     oss << "   Backend Discrepancy = " << current_snapshot.backend_error << "\n";
     oss << "----------------------------------------\n";
-    oss << "6. CERTIFICATION (4-AXIS):\n";
+    oss << "6. CERTIFICATION (4-AXIS) [Diagnostics: CURRENT Representation]:\n";
     oss << "   ALG: " << (current_snapshot.cert.algebraic_exact ? "[PASS]" : "[FAIL]") << " - " << current_snapshot.cert.algebraic_reason << "\n";
     oss << "   ARITH: " << (current_snapshot.cert.arithmetic_exact ? "[PASS]" : "[FAIL]") << " - " << current_snapshot.cert.arithmetic_reason << "\n";
     oss << "   ANALYTIC: " << (current_snapshot.cert.analytic_certified ? "[PASS]" : "[FAIL]") << " - " << current_snapshot.cert.analytic_reason << "\n";
     oss << "   NUMERICAL: " << (current_snapshot.cert.numerical_approx ? "[PASS]" : "[FAIL]") << " - " << current_snapshot.cert.numerical_reason << "\n";
     oss << "----------------------------------------\n";
     oss << "7. ROUTER DECISION:\n";
+    oss << "   Requested: " << GegenbauerCore::get_layer_name(state.target_layer)
+        << " | Effective: " << current_snapshot.effective_layer_name << "\n";
     oss << "   " << current_snapshot.router_decision.reason << "\n";
     oss << "========================================";
 
@@ -478,7 +490,7 @@ void GameUI::cb_slider_jacobi_m(Fl_Widget* w, void* userdata) {
 void GameUI::cb_choice_error_target(Fl_Widget* w, void* userdata) {
     GameUI* ui = static_cast<GameUI*>(userdata);
     if (ui->is_updating_widgets) return;
-    int idx = std::clamp(ui->choice_error_target->value(), 0, 3);
+    int idx = std::clamp(ui->choice_error_target->value(), 0, static_cast<int>(kErrorTargets.size()) - 1);
     GameState next_state = ui->state;
     next_state.params.error_target_idx = idx;
     next_state.params.error_target = kErrorTargets[idx];
