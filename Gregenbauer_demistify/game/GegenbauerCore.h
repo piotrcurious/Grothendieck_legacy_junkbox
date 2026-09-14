@@ -97,6 +97,7 @@ struct CoreParameters {
     int n = 5;
     double theta = 0.5;
     double error_target = 1e-8;
+    int error_target_idx = 1;
     int asymptotic_K = 1;
     int jacobi_m = 10;
 };
@@ -165,6 +166,10 @@ public:
     GegenbauerCore() = default;
 
     RepresentationSnapshot evaluate(const GameState& state) const;
+    static RepresentationSnapshot morph_snapshots(const RepresentationSnapshot& snap1,
+                                                   const RepresentationSnapshot& snap2,
+                                                   double t);
+
     RouterDecision solve_router_decision(const GameState& state) const;
 
     RegimeType classify_regime(int n_deg, double lam, double th) const;

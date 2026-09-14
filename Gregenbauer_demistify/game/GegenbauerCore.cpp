@@ -4,6 +4,8 @@
 #include <iostream>
 #include <sstream>
 #include <numbers>
+#include <algorithm>
+#include <chrono>
 
 RegimeType GegenbauerCore::classify_regime(int n_deg, double lam, double th) const {
     double N_n = n_deg + lam;
@@ -39,7 +41,7 @@ std::string GegenbauerCore::get_backend_name(BackendType bt) {
         case BackendType::LONGDOUBLE: return "LONGDOUBLE";
         case BackendType::Q16_16: return "Q16.16";
         case BackendType::LNS: return "LNS";
-        case BackendType::EXACT_RATIONAL: return "EXACT_RATIONAL";
+        case BackendType::EXACT_RATIONAL: return "EXACT_RATIONAL / SYMBOLIC";
         case BackendType::MODULAR_RNS: return "MODULAR_RNS";
         default: return "UNKNOWN";
     }
@@ -78,7 +80,6 @@ RouterDecision GegenbauerCore::solve_router_decision(const GameState& state) con
         return dec;
     }
 
-    // Candidate evaluation hierarchy for AUTO mode
     std::ostringstream rej_log;
 
     if (kappa > 1e4) {
@@ -125,8 +126,8 @@ RouterDecision GegenbauerCore::solve_router_decision(const GameState& state) con
 RepresentationSnapshot GegenbauerCore::evaluate(const GameState& state) const {
     RepresentationSnapshot snap;
     snap.params = state.params;
-    snap.params.d = std::max(3, state.params.d);
-    snap.params.n = std::max(0, state.params.n);
+    snap.params.d = std::clamp(state.params.d, 3, 20);
+    snap.params.n = std::clamp(state.params.n, 0, 500);
     snap.params.theta = std::clamp(state.params.theta, 1e-6, std::numbers::pi - 1e-6);
 
     snap.lambda = (snap.params.d - 2.0) / 2.0;
@@ -181,6 +182,35 @@ RepresentationSnapshot GegenbauerCore::evaluate(const GameState& state) const {
     snap.backend_error = snap.cert.backend_discrepancy;
 
     return snap;
+}
+
+RepresentationSnapshot GegenbauerCore::morph_snapshots(const RepresentationSnapshot& snap1,
+                                                       const RepresentationSnapshot& snap2,
+                                                       double t) {
+    t = std::clamp(t, 0.0, 1.0);
+    RepresentationSnapshot res = snap1;
+    res.transition = t;
+    res.current_layer = snap1.effective_layer;
+    res.target_layer = snap2.effective_layer;
+
+    double s = t * t * (3.0 - 2.0 * t);
+    res.phi = (1.0 - s) * snap1.phi + s * snap2.phi;
+    res.forward_error = (1.0 - s) * snap1.forward_error + s * snap2.forward_error;
+    res.r_rec = (1.0 - s) * snap1.r_rec + s * snap2.r_rec;
+    res.r_ode = (1.0 - s) * snap1.r_ode + s * snap2.r_ode;
+    res.r_schr = (1.0 - s) * snap1.r_schr + s * snap2.r_schr;
+    res.r_jacobi = (1.0 - s) * snap1.r_jacobi + s * snap2.r_jacobi;
+    res.backend_error = (1.0 - s) * snap1.backend_error + s * snap2.backend_error;
+
+    if (t >= 0.5) {
+        res.effective_layer = snap2.effective_layer;
+        res.effective_layer_name = snap2.effective_layer_name;
+        res.effective_backend = snap2.effective_backend;
+        res.effective_backend_name = snap2.effective_backend_name;
+        res.cert = snap2.cert;
+        res.router_decision = snap2.router_decision;
+    }
+    return res;
 }
 
 double GegenbauerCore::log_gamma(double z) {
@@ -477,6 +507,9 @@ double GegenbauerCore::eval_backend_phi(BackendType backend, int n_deg, double l
 
 CertificationStatus GegenbauerCore::compute_certification(int n_deg, double lam, double th, BackendType backend, double target_err) const {
     CertificationStatus cert;
+    if (!std::isfinite(target_err) || target_err <= 0.0) {
+        target_err = 1e-8;
+    }
     double x_val = std::cos(th);
 
     double r_rec = 0.0;

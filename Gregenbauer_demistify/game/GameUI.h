@@ -12,6 +12,7 @@
 #include <memory>
 #include <chrono>
 #include <algorithm>
+#include <array>
 #include "GegenbauerCore.h"
 #include "GLCanvas.h"
 
@@ -25,7 +26,10 @@ public:
     GegenbauerCore core;
     GameState state;
 
-    RepresentationSnapshot cached_snapshot;
+    // Two-snapshot morph model
+    RepresentationSnapshot current_snapshot;
+    RepresentationSnapshot target_snapshot;
+    RepresentationSnapshot render_snapshot;
 
     std::unique_ptr<Fl_Double_Window> main_win;
     GLCanvas* gl_canvas = nullptr;
@@ -64,6 +68,7 @@ public:
     void show();
     void normalize_state(GameState& st);
     void apply_state_change(const GameState& new_state);
+    void set_transition(double t);
     void begin_layer_transition(LayerType target);
     void cancel_layer_transition();
     void commit_layer_transition();
