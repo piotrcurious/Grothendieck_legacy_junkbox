@@ -51,7 +51,7 @@ GameUI::GameUI(int width, int height)
     constexpr int margin = 10;
     constexpr int ctrl_height = 220;
 
-    int canvas_h = height - ctrl_height - margin * 3;
+    int canvas_h = std::max(height - ctrl_height - margin * 3, 200);
     gl_canvas = new GLCanvas(margin, margin, width - margin * 2, canvas_h, "GL Canvas");
 
     Fl_Group* ctrl_grp = new Fl_Group(margin, canvas_h + margin * 2, width - margin * 2, ctrl_height);
@@ -235,8 +235,8 @@ void GameUI::set_transition(double t) {
 }
 
 void GameUI::advance_transition(double dt) {
-    constexpr double duration = 0.8;
-    state.transition += dt / duration;
+    state.transition += dt / kMorphDuration;
+    state.transition = std::clamp(state.transition, 0.0, 1.0);
 
     if (state.transition >= 1.0) {
         commit_layer_transition();
@@ -266,7 +266,7 @@ void GameUI::begin_layer_transition(LayerType target) {
     sync_widgets_from_state();
     is_morph_animating = true;
     last_anim_time = std::chrono::steady_clock::now();
-    Fl::add_timeout(0.016, timer_morph_cb, this);
+    Fl::add_timeout(kFrameInterval, timer_morph_cb, this);
     mark_dirty_and_schedule();
 }
 
@@ -313,7 +313,7 @@ void GameUI::sync_widgets_from_state() {
 void GameUI::mark_dirty_and_schedule() {
     is_dirty = true;
     Fl::remove_timeout(timer_update_cb, this);
-    Fl::add_timeout(0.016, timer_update_cb, this);
+    Fl::add_timeout(kFrameInterval, timer_update_cb, this);
 }
 
 void GameUI::timer_update_cb(void* userdata) {
@@ -332,68 +332,89 @@ void GameUI::timer_morph_cb(void* userdata) {
     double dt = std::chrono::duration<double>(now - ui->last_anim_time).count();
     ui->last_anim_time = now;
 
-    Fl::repeat_timeout(0.016, timer_morph_cb, ui);
     ui->advance_transition(dt);
+    if (ui->is_morph_animating) {
+        Fl::repeat_timeout(kFrameInterval, timer_morph_cb, ui);
+    }
 }
 
 void GameUI::publish_snapshot() {
-    // Two-snapshot evaluation model
+    // Two-snapshot evaluation model with SnapshotKey caching
     GameState curr_state = state;
     curr_state.target_layer = state.current_layer;
-    current_snapshot = core.evaluate(curr_state);
+
+    SnapshotKey req_curr_key = SnapshotKey{curr_state.params.d, curr_state.params.n, curr_state.params.theta,
+                                           curr_state.params.asymptotic_K, curr_state.params.jacobi_m,
+                                           curr_state.params.error_target_idx, curr_state.backend, curr_state.target_layer};
+
+    if (!current_valid || current_key != req_curr_key) {
+        current_snapshot = core.evaluate(curr_state);
+        current_key = req_curr_key;
+        current_valid = true;
+    }
 
     if (state.current_layer == state.target_layer) {
         target_snapshot = current_snapshot;
+        target_key = current_key;
+        target_valid = true;
     } else {
         GameState targ_state = state;
         targ_state.current_layer = state.target_layer;
-        target_snapshot = core.evaluate(targ_state);
+        SnapshotKey req_targ_key = SnapshotKey{targ_state.params.d, targ_state.params.n, targ_state.params.theta,
+                                               targ_state.params.asymptotic_K, targ_state.params.jacobi_m,
+                                               targ_state.params.error_target_idx, targ_state.backend, targ_state.target_layer};
+
+        if (!target_valid || target_key != req_targ_key) {
+            target_snapshot = core.evaluate(targ_state);
+            target_key = req_targ_key;
+            target_valid = true;
+        }
     }
 
     render_snapshot = GegenbauerCore::morph_snapshots(current_snapshot, target_snapshot, state.transition);
     gl_canvas->set_snapshot(render_snapshot);
 
-    // Read authoritative telemetry
-    const RepresentationSnapshot& auth_snap = (state.transition < 0.5) ? current_snapshot : target_snapshot;
-
+    // Authoritative telemetry HUD
     std::ostringstream oss;
     oss << std::scientific << std::setprecision(2);
 
     oss << "========================================\n";
-    oss << "1. STATE: d=" << auth_snap.params.d << " (\u03BB=" << auth_snap.lambda
-        << ") | n=" << auth_snap.params.n << " | N=" << auth_snap.N << "\n";
-    oss << "   \u03B8=" << std::fixed << std::setprecision(4) << auth_snap.params.theta
-        << " (x=" << auth_snap.x << ") | \u03C6_n=" << auth_snap.phi << "\n";
+    oss << "1. STATE: d=" << current_snapshot.params.d << " (\u03BB=" << current_snapshot.lambda
+        << ") | n=" << current_snapshot.params.n << " | N=" << current_snapshot.N << "\n";
+    oss << "   \u03B8=" << std::fixed << std::setprecision(4) << current_snapshot.params.theta
+        << " (x=" << current_snapshot.x << ") | \u03C6_n=" << current_snapshot.phi << "\n";
     oss << "----------------------------------------\n";
-    oss << "2. REGIME & DOMAIN VALIDITY: " << auth_snap.regime_name << "\n";
-    oss << "   z_+=" << std::fixed << std::setprecision(3) << auth_snap.z_plus
-        << " [" << (auth_snap.north_valid ? "VALID" : "OUT") << "] | "
-        << "z_-=" << auth_snap.z_minus << " [" << (auth_snap.south_valid ? "VALID" : "OUT") << "]\n";
+    oss << "2. REGIME & DOMAIN VALIDITY: " << current_snapshot.regime_name << "\n";
+    oss << "   z_+=" << std::fixed << std::setprecision(3) << current_snapshot.z_plus
+        << " [" << (current_snapshot.north_valid ? "VALID" : "OUT") << "] | "
+        << "z_-=" << current_snapshot.z_minus << " [" << (current_snapshot.south_valid ? "VALID" : "OUT") << "]\n";
     oss << "----------------------------------------\n";
     oss << "3. REPRESENTATION & BACKEND:\n";
     oss << "   Layer: " << static_cast<int>(render_snapshot.current_layer)
         << " -> " << static_cast<int>(render_snapshot.target_layer)
         << " (T=" << std::fixed << std::setprecision(2) << render_snapshot.transition << ")\n";
-    oss << "   Effective: " << auth_snap.effective_layer_name << " | " << auth_snap.effective_backend_name << "\n";
+    oss << "   Effective: [CURR] " << current_snapshot.effective_layer_name
+        << " -> [TARG] " << target_snapshot.effective_layer_name << "\n";
+    oss << "   Backend: " << current_snapshot.effective_backend_name << "\n";
     oss << "----------------------------------------\n";
     oss << "4. NUMERICS & CONDITIONING:\n";
     oss << std::scientific << std::setprecision(2);
-    oss << "   \u03BA=" << auth_snap.conditioning << " | Fwd Err=" << auth_snap.forward_error
-        << " | B_K=" << auth_snap.analytic_bound << "\n";
+    oss << "   \u03BA=" << current_snapshot.conditioning << " | Fwd Err=" << current_snapshot.forward_error
+        << " | B_K=" << current_snapshot.analytic_bound << "\n";
     oss << "----------------------------------------\n";
     oss << "5. STRUCTURAL RESIDUALS:\n";
-    oss << "   R_rec=" << auth_snap.r_rec << " | R_ODE=" << auth_snap.r_ode << "\n";
-    oss << "   R_Schr=" << auth_snap.r_schr << " | R_J=" << auth_snap.r_jacobi << "\n";
-    oss << "   Backend Discrepancy = " << auth_snap.backend_error << "\n";
+    oss << "   R_rec=" << current_snapshot.r_rec << " | R_ODE=" << current_snapshot.r_ode << "\n";
+    oss << "   R_Schr=" << current_snapshot.r_schr << " | R_J=" << current_snapshot.r_jacobi << "\n";
+    oss << "   Backend Discrepancy = " << current_snapshot.backend_error << "\n";
     oss << "----------------------------------------\n";
     oss << "6. CERTIFICATION (4-AXIS):\n";
-    oss << "   ALG: " << (auth_snap.cert.algebraic_exact ? "[PASS]" : "[FAIL]") << " - " << auth_snap.cert.algebraic_reason << "\n";
-    oss << "   ARITH: " << (auth_snap.cert.arithmetic_exact ? "[PASS]" : "[FAIL]") << " - " << auth_snap.cert.arithmetic_reason << "\n";
-    oss << "   ANALYTIC: " << (auth_snap.cert.analytic_certified ? "[PASS]" : "[FAIL]") << " - " << auth_snap.cert.analytic_reason << "\n";
-    oss << "   NUMERICAL: " << (auth_snap.cert.numerical_approx ? "[PASS]" : "[FAIL]") << " - " << auth_snap.cert.numerical_reason << "\n";
+    oss << "   ALG: " << (current_snapshot.cert.algebraic_exact ? "[PASS]" : "[FAIL]") << " - " << current_snapshot.cert.algebraic_reason << "\n";
+    oss << "   ARITH: " << (current_snapshot.cert.arithmetic_exact ? "[PASS]" : "[FAIL]") << " - " << current_snapshot.cert.arithmetic_reason << "\n";
+    oss << "   ANALYTIC: " << (current_snapshot.cert.analytic_certified ? "[PASS]" : "[FAIL]") << " - " << current_snapshot.cert.analytic_reason << "\n";
+    oss << "   NUMERICAL: " << (current_snapshot.cert.numerical_approx ? "[PASS]" : "[FAIL]") << " - " << current_snapshot.cert.numerical_reason << "\n";
     oss << "----------------------------------------\n";
     oss << "7. ROUTER DECISION:\n";
-    oss << "   " << auth_snap.router_decision.reason << "\n";
+    oss << "   " << current_snapshot.router_decision.reason << "\n";
     oss << "========================================";
 
     const std::string text = oss.str();

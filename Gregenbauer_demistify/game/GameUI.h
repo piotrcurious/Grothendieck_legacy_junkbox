@@ -17,6 +17,9 @@
 #include "GegenbauerCore.h"
 #include "GLCanvas.h"
 
+constexpr double kFrameInterval = 1.0 / 60.0;
+constexpr double kMorphDuration = 0.8;
+
 struct LayerInfo {
     const char* title;
     const char* description;
@@ -27,10 +30,15 @@ public:
     GegenbauerCore core;
     GameState state;
 
-    // Two-snapshot morph model
+    // Two-snapshot morph model & SnapshotKey caching
     RepresentationSnapshot current_snapshot;
     RepresentationSnapshot target_snapshot;
     RepresentationSnapshot render_snapshot;
+
+    SnapshotKey current_key;
+    SnapshotKey target_key;
+    bool current_valid = false;
+    bool target_valid = false;
 
     std::unique_ptr<Fl_Double_Window> main_win;
     GLCanvas* gl_canvas = nullptr;
