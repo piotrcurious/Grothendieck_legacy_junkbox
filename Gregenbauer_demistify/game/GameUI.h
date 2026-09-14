@@ -86,6 +86,10 @@ public:
     void mark_dirty_and_schedule();
     void publish_snapshot();
 
+    RepresentationSnapshot get_or_evaluate_snapshot(const SnapshotKey& key,
+                                                     const GameState& eval_state,
+                                                     LayerType eval_layer);
+
     static void timer_update_cb(void* userdata);
     static void timer_morph_cb(void* userdata);
 

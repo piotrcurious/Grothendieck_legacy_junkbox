@@ -219,6 +219,9 @@ void GameUI::normalize_state(GameState& st) {
 }
 
 void GameUI::apply_state_change(const GameState& new_state) {
+    cancel_layer_transition();
+    current_valid = false;
+    target_valid = false;
     state = new_state;
     normalize_state(state);
     mark_dirty_and_schedule();
@@ -264,10 +267,13 @@ void GameUI::begin_layer_transition(LayerType target) {
     state.transition = 0.0;
     normalize_state(state);
     sync_widgets_from_state();
+
+    // Cache fresh snapshots immediately before morph timer
+    publish_snapshot();
+
     is_morph_animating = true;
     last_anim_time = std::chrono::steady_clock::now();
     Fl::add_timeout(kFrameInterval, timer_morph_cb, this);
-    mark_dirty_and_schedule();
 }
 
 void GameUI::cancel_layer_transition() {
@@ -279,6 +285,9 @@ void GameUI::commit_layer_transition() {
     cancel_layer_transition();
     state.current_layer = state.target_layer;
     state.transition = 1.0;
+    current_snapshot = target_snapshot;
+    current_key = target_key;
+    current_valid = target_valid;
     normalize_state(state);
     sync_widgets_from_state();
     mark_dirty_and_schedule();
@@ -338,17 +347,23 @@ void GameUI::timer_morph_cb(void* userdata) {
     }
 }
 
-void GameUI::publish_snapshot() {
-    // Two-snapshot evaluation model with SnapshotKey caching
-    GameState curr_state = state;
-    curr_state.target_layer = state.current_layer;
+RepresentationSnapshot GameUI::get_or_evaluate_snapshot(const SnapshotKey& key,
+                                                         const GameState& eval_state,
+                                                         LayerType eval_layer) {
+    if (current_valid && current_key == key) return current_snapshot;
+    if (target_valid && target_key == key) return target_snapshot;
+    return core.evaluate(eval_state, eval_layer);
+}
 
-    SnapshotKey req_curr_key = SnapshotKey{curr_state.params.d, curr_state.params.n, curr_state.params.theta,
-                                           curr_state.params.asymptotic_K, curr_state.params.jacobi_m,
-                                           curr_state.params.error_target_idx, curr_state.backend, curr_state.target_layer};
+void GameUI::publish_snapshot() {
+    // Two-snapshot evaluation model with explicit evaluation layers
+    SnapshotKey req_curr_key = SnapshotKey{state.params.d, state.params.n, state.params.theta,
+                                           state.params.asymptotic_K, state.params.jacobi_m,
+                                           state.params.error_target_idx, state.backend,
+                                           state.current_layer, state.auto_router};
 
     if (!current_valid || current_key != req_curr_key) {
-        current_snapshot = core.evaluate(curr_state);
+        current_snapshot = core.evaluate(state, state.current_layer);
         current_key = req_curr_key;
         current_valid = true;
     }
@@ -358,14 +373,13 @@ void GameUI::publish_snapshot() {
         target_key = current_key;
         target_valid = true;
     } else {
-        GameState targ_state = state;
-        targ_state.current_layer = state.target_layer;
-        SnapshotKey req_targ_key = SnapshotKey{targ_state.params.d, targ_state.params.n, targ_state.params.theta,
-                                               targ_state.params.asymptotic_K, targ_state.params.jacobi_m,
-                                               targ_state.params.error_target_idx, targ_state.backend, targ_state.target_layer};
+        SnapshotKey req_targ_key = SnapshotKey{state.params.d, state.params.n, state.params.theta,
+                                               state.params.asymptotic_K, state.params.jacobi_m,
+                                               state.params.error_target_idx, state.backend,
+                                               state.target_layer, state.auto_router};
 
         if (!target_valid || target_key != req_targ_key) {
-            target_snapshot = core.evaluate(targ_state);
+            target_snapshot = core.evaluate(state, state.target_layer);
             target_key = req_targ_key;
             target_valid = true;
         }
@@ -395,8 +409,11 @@ void GameUI::publish_snapshot() {
         << " (T=" << std::fixed << std::setprecision(2) << render_snapshot.transition << ")\n";
     oss << "   Effective: [CURR] " << current_snapshot.effective_layer_name
         << " -> [TARG] " << target_snapshot.effective_layer_name << "\n";
-    oss << "   Backend: " << current_snapshot.effective_backend_name << "\n";
-    oss << "----------------------------------------\n";
+    oss << "   Backend: " << current_snapshot.effective_backend_name;
+    if (current_snapshot.effective_backend_name != target_snapshot.effective_backend_name) {
+        oss << " -> " << target_snapshot.effective_backend_name;
+    }
+    oss << "\n----------------------------------------\n";
     oss << "4. NUMERICS & CONDITIONING:\n";
     oss << std::scientific << std::setprecision(2);
     oss << "   \u03BA=" << current_snapshot.conditioning << " | Fwd Err=" << current_snapshot.forward_error
