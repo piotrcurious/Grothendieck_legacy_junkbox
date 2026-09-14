@@ -1,13 +1,14 @@
 #include "GameUI.h"
 #include <FL/Fl.H>
 #include <FL/fl_ask.H>
-#include <cstdio>
 #include <sstream>
 #include <iomanip>
 #include <numbers>
 #include <algorithm>
+#include <chrono>
+#include <array>
 
-static const LayerInfo g_layer_infos[8] = {
+static constexpr std::array<LayerInfo, 8> g_layer_infos{{
     {"Layer I: 3D Projection/Slice of S^{d-1} Hyper-Sphere",
      "Models a 3D projected slice of the (d-1)-dimensional hyper-sphere S^{d-1} with degree-n zonal harmonic wave field."},
     {"Layer II: Projector Temple & K-Fixed Ray",
@@ -24,7 +25,7 @@ static const LayerInfo g_layer_infos[8] = {
      "Evaluates Gegenbauer wave across 7 execution backends (FLOAT32 to MODULAR_RNS), displaying precision mantissa lattices and noise particles."},
     {"Layer VIII: Verification & Certification Chamber",
      "Multi-axis verification wheel classifying verification status into ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, or NUMERICAL_APPROX."}
-};
+}};
 
 GameUI::GameUI(int width, int height)
     : is_dirty(false), is_morph_animating(false), is_updating_widgets(false) {
@@ -197,6 +198,9 @@ void GameUI::normalize_state(GameState& st) {
     st.params.theta = std::clamp(st.params.theta, 0.0001, std::numbers::pi - 0.0001);
     st.params.asymptotic_K = std::clamp(st.params.asymptotic_K, 1, 5);
     st.params.jacobi_m = std::clamp(st.params.jacobi_m, 4, 30);
+    if (!std::isfinite(st.params.error_target) || st.params.error_target <= 0.0) {
+        st.params.error_target = 1e-8;
+    }
     st.transition = std::clamp(st.transition, 0.0, 1.0);
 
     int l_curr = std::clamp(static_cast<int>(st.current_layer), 0, 7);
@@ -216,7 +220,10 @@ void GameUI::apply_state_change(const GameState& new_state) {
 }
 
 void GameUI::begin_layer_transition(LayerType target) {
-    if (target == state.current_layer) {
+    int target_idx = std::clamp(static_cast<int>(target), 0, 7);
+    target = static_cast<LayerType>(target_idx);
+
+    if (target == state.current_layer && state.transition >= 1.0) {
         state.target_layer = target;
         state.transition = 1.0;
         commit_layer_transition();
@@ -240,6 +247,7 @@ void GameUI::commit_layer_transition() {
     cancel_layer_transition();
     state.current_layer = state.target_layer;
     state.transition = 1.0;
+    normalize_state(state);
     sync_widgets_from_state();
     mark_dirty_and_schedule();
 }
@@ -257,6 +265,11 @@ void GameUI::sync_widgets_from_state() {
 
     choice_layer->value(static_cast<int>(state.target_layer));
     choice_backend->value(static_cast<int>(state.backend));
+
+    if (state.params.error_target <= 1e-15) choice_error_target->value(3);
+    else if (state.params.error_target <= 1e-12) choice_error_target->value(2);
+    else if (state.params.error_target <= 1e-8) choice_error_target->value(1);
+    else choice_error_target->value(0);
 
     if (state.auto_router) {
         btn_auto_router->label("Router AI: AUTO");
@@ -299,53 +312,62 @@ void GameUI::timer_morph_cb(void* userdata) {
     } else {
         Fl::repeat_timeout(0.016, timer_morph_cb, ui);
         ui->slider_transition->value(ui->state.transition);
-        ui->cached_snapshot.transition = ui->state.transition;
-        ui->gl_canvas->set_snapshot(ui->cached_snapshot);
+        ui->render_snapshot = GegenbauerCore::morph_snapshots(ui->current_snapshot, ui->target_snapshot, ui->state.transition);
+        ui->gl_canvas->set_snapshot(ui->render_snapshot);
     }
 }
 
 void GameUI::publish_snapshot() {
-    cached_snapshot = core.evaluate(state);
-    gl_canvas->set_snapshot(cached_snapshot);
+    // Two-snapshot evaluation model
+    GameState curr_state = state;
+    curr_state.target_layer = state.current_layer;
+    current_snapshot = core.evaluate(curr_state);
+
+    GameState targ_state = state;
+    targ_state.current_layer = state.target_layer;
+    target_snapshot = core.evaluate(targ_state);
+
+    render_snapshot = GegenbauerCore::morph_snapshots(current_snapshot, target_snapshot, state.transition);
+    gl_canvas->set_snapshot(render_snapshot);
 
     std::ostringstream oss;
     oss << std::scientific << std::setprecision(2);
 
     oss << "========================================\n";
-    oss << "1. STATE: d=" << cached_snapshot.params.d << " (\u03BB=" << cached_snapshot.lambda
-        << ") | n=" << cached_snapshot.params.n << " | N=" << cached_snapshot.N << "\n";
-    oss << "   \u03B8=" << std::fixed << std::setprecision(4) << cached_snapshot.params.theta
-        << " (x=" << cached_snapshot.x << ") | \u03C6_n=" << cached_snapshot.phi << "\n";
+    oss << "1. STATE: d=" << render_snapshot.params.d << " (\u03BB=" << render_snapshot.lambda
+        << ") | n=" << render_snapshot.params.n << " | N=" << render_snapshot.N << "\n";
+    oss << "   \u03B8=" << std::fixed << std::setprecision(4) << render_snapshot.params.theta
+        << " (x=" << render_snapshot.x << ") | \u03C6_n=" << render_snapshot.phi << "\n";
     oss << "----------------------------------------\n";
-    oss << "2. REGIME & DOMAIN VALIDITY: " << cached_snapshot.regime_name << "\n";
-    oss << "   z_+=" << std::fixed << std::setprecision(3) << cached_snapshot.z_plus
-        << " [" << (cached_snapshot.north_valid ? "VALID" : "OUT") << "] | "
-        << "z_-=" << cached_snapshot.z_minus << " [" << (cached_snapshot.south_valid ? "VALID" : "OUT") << "]\n";
+    oss << "2. REGIME & DOMAIN VALIDITY: " << render_snapshot.regime_name << "\n";
+    oss << "   z_+=" << std::fixed << std::setprecision(3) << render_snapshot.z_plus
+        << " [" << (render_snapshot.north_valid ? "VALID" : "OUT") << "] | "
+        << "z_-=" << render_snapshot.z_minus << " [" << (render_snapshot.south_valid ? "VALID" : "OUT") << "]\n";
     oss << "----------------------------------------\n";
     oss << "3. REPRESENTATION & BACKEND:\n";
-    oss << "   Layer: " << static_cast<int>(cached_snapshot.current_layer)
-        << " -> " << static_cast<int>(cached_snapshot.target_layer)
-        << " (T=" << std::fixed << std::setprecision(2) << cached_snapshot.transition << ")\n";
-    oss << "   Effective: " << cached_snapshot.effective_layer_name << " | " << cached_snapshot.effective_backend_name << "\n";
+    oss << "   Layer: " << static_cast<int>(render_snapshot.current_layer)
+        << " -> " << static_cast<int>(render_snapshot.target_layer)
+        << " (T=" << std::fixed << std::setprecision(2) << render_snapshot.transition << ")\n";
+    oss << "   Effective: " << render_snapshot.effective_layer_name << " | " << render_snapshot.effective_backend_name << "\n";
     oss << "----------------------------------------\n";
     oss << "4. NUMERICS & CONDITIONING:\n";
     oss << std::scientific << std::setprecision(2);
-    oss << "   \u03BA=" << cached_snapshot.conditioning << " | Fwd Err=" << cached_snapshot.forward_error
-        << " | B_K=" << cached_snapshot.analytic_bound << "\n";
+    oss << "   \u03BA=" << render_snapshot.conditioning << " | Fwd Err=" << render_snapshot.forward_error
+        << " | B_K=" << render_snapshot.analytic_bound << "\n";
     oss << "----------------------------------------\n";
     oss << "5. STRUCTURAL RESIDUALS:\n";
-    oss << "   R_rec=" << cached_snapshot.r_rec << " | R_ODE=" << cached_snapshot.r_ode << "\n";
-    oss << "   R_Schr=" << cached_snapshot.r_schr << " | R_J=" << cached_snapshot.r_jacobi << "\n";
-    oss << "   Backend Discrepancy = " << cached_snapshot.backend_error << "\n";
+    oss << "   R_rec=" << render_snapshot.r_rec << " | R_ODE=" << render_snapshot.r_ode << "\n";
+    oss << "   R_Schr=" << render_snapshot.r_schr << " | R_J=" << render_snapshot.r_jacobi << "\n";
+    oss << "   Backend Discrepancy = " << render_snapshot.backend_error << "\n";
     oss << "----------------------------------------\n";
     oss << "6. CERTIFICATION (4-AXIS):\n";
-    oss << "   ALG: " << (cached_snapshot.cert.algebraic_exact ? "[PASS]" : "[FAIL]") << " - " << cached_snapshot.cert.algebraic_reason << "\n";
-    oss << "   ARITH: " << (cached_snapshot.cert.arithmetic_exact ? "[PASS]" : "[FAIL]") << " - " << cached_snapshot.cert.arithmetic_reason << "\n";
-    oss << "   ANALYTIC: " << (cached_snapshot.cert.analytic_certified ? "[PASS]" : "[FAIL]") << " - " << cached_snapshot.cert.analytic_reason << "\n";
-    oss << "   NUMERICAL: " << (cached_snapshot.cert.numerical_approx ? "[PASS]" : "[FAIL]") << " - " << cached_snapshot.cert.numerical_reason << "\n";
+    oss << "   ALG: " << (render_snapshot.cert.algebraic_exact ? "[PASS]" : "[FAIL]") << " - " << render_snapshot.cert.algebraic_reason << "\n";
+    oss << "   ARITH: " << (render_snapshot.cert.arithmetic_exact ? "[PASS]" : "[FAIL]") << " - " << render_snapshot.cert.arithmetic_reason << "\n";
+    oss << "   ANALYTIC: " << (render_snapshot.cert.analytic_certified ? "[PASS]" : "[FAIL]") << " - " << render_snapshot.cert.analytic_reason << "\n";
+    oss << "   NUMERICAL: " << (render_snapshot.cert.numerical_approx ? "[PASS]" : "[FAIL]") << " - " << render_snapshot.cert.numerical_reason << "\n";
     oss << "----------------------------------------\n";
     oss << "7. ROUTER DECISION:\n";
-    oss << "   " << cached_snapshot.router_decision.reason << "\n";
+    oss << "   " << render_snapshot.router_decision.reason << "\n";
     oss << "========================================";
 
     const std::string text = oss.str();
@@ -402,7 +424,9 @@ void GameUI::cb_slider_transition(Fl_Widget* w, void* userdata) {
     GameUI* ui = static_cast<GameUI*>(userdata);
     GameState next_state = ui->state;
     next_state.transition = ui->slider_transition->value();
+    ui->normalize_state(next_state);
     if (next_state.transition >= 1.0) {
+        ui->state = next_state;
         ui->commit_layer_transition();
     } else {
         ui->apply_state_change(next_state);

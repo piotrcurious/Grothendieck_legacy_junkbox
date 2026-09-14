@@ -165,6 +165,10 @@ public:
     GegenbauerCore() = default;
 
     RepresentationSnapshot evaluate(const GameState& state) const;
+    static RepresentationSnapshot morph_snapshots(const RepresentationSnapshot& snap1,
+                                                   const RepresentationSnapshot& snap2,
+                                                   double t);
+
     RouterDecision solve_router_decision(const GameState& state) const;
 
     RegimeType classify_regime(int n_deg, double lam, double th) const;
