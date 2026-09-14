@@ -16,6 +16,7 @@
 class GameUI {
 public:
     GegenbauerCore core;
+    GameState state;
 
     std::unique_ptr<Fl_Double_Window> main_win;
     GLCanvas* gl_canvas = nullptr;
@@ -33,15 +34,23 @@ public:
     Fl_Button* btn_auto_router = nullptr;
     Fl_Button* btn_info = nullptr;
 
-    // Rich Telemetry Display
+    // Structured Telemetry Display
     Fl_Text_Display* text_telemetry = nullptr;
     Fl_Text_Buffer* text_buffer = nullptr;
+
+    // Debouncing state
+    bool is_dirty = false;
+    bool is_morph_animating = false;
 
     GameUI(int width = 1100, int height = 820);
     ~GameUI();
 
     void show();
-    void on_state_changed();
+    void mark_dirty_and_schedule();
+    void publish_snapshot();
+
+    static void timer_update_cb(void* userdata);
+    static void timer_morph_cb(void* userdata);
 
     // Callbacks
     static void cb_slider_d(Fl_Widget* w, void* userdata);

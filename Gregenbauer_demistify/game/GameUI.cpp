@@ -3,16 +3,26 @@
 #include <FL/fl_ask.H>
 #include <cstdio>
 #include <sstream>
+#include <iomanip>
+#include <numbers>
 
-GameUI::GameUI(int width, int height) : core(3, 5, 0.5) {
+GameUI::GameUI(int width, int height) {
     main_win = std::make_unique<Fl_Double_Window>(width, height, "EIGHTH LAYER: The Harmonic Representation Engine");
 
-    int canvas_h = height - 260;
-    gl_canvas = new GLCanvas(10, 10, width - 20, canvas_h, "GL Canvas");
-    gl_canvas->set_core(&core);
+    state.params.d = 3;
+    state.params.n = 5;
+    state.params.theta = 0.5;
+    state.params.error_target = 1e-8;
+    state.current_layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
+    state.target_layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
+    state.backend = BackendType::FLOAT64;
+    state.auto_router = false;
+    state.transition = 0.0;
 
-    // Lower Control Panel Group
-    Fl_Group* ctrl_grp = new Fl_Group(10, canvas_h + 15, width - 20, 230);
+    int canvas_h = height - 280;
+    gl_canvas = new GLCanvas(10, 10, width - 20, canvas_h, "GL Canvas");
+
+    Fl_Group* ctrl_grp = new Fl_Group(10, canvas_h + 15, width - 20, 250);
     ctrl_grp->box(FL_FLAT_BOX);
     ctrl_grp->color(fl_rgb_color(20, 26, 36));
 
@@ -20,12 +30,12 @@ GameUI::GameUI(int width, int height) : core(3, 5, 0.5) {
     int col2_x = 390;
     int col3_x = 710;
 
-    // Column 1: Core Parameters (d, n, theta)
+    // Column 1: Core Parameters
     slider_d = new Fl_Value_Slider(col1_x, canvas_h + 25, 220, 25, "Dim (d):");
     slider_d->type(FL_HOR_SLIDER);
     slider_d->bounds(3, 20);
     slider_d->step(1);
-    slider_d->value(core.d);
+    slider_d->value(state.params.d);
     slider_d->labelcolor(FL_WHITE);
     slider_d->textcolor(FL_WHITE);
     slider_d->callback(cb_slider_d, this);
@@ -34,7 +44,7 @@ GameUI::GameUI(int width, int height) : core(3, 5, 0.5) {
     slider_n->type(FL_HOR_SLIDER);
     slider_n->bounds(0, 500);
     slider_n->step(1);
-    slider_n->value(core.n);
+    slider_n->value(state.params.n);
     slider_n->labelcolor(FL_WHITE);
     slider_n->textcolor(FL_WHITE);
     slider_n->callback(cb_slider_n, this);
@@ -43,7 +53,7 @@ GameUI::GameUI(int width, int height) : core(3, 5, 0.5) {
     slider_theta->type(FL_HOR_SLIDER);
     slider_theta->bounds(0.001, 3.1415);
     slider_theta->step(0.001);
-    slider_theta->value(core.theta);
+    slider_theta->value(state.params.theta);
     slider_theta->labelcolor(FL_WHITE);
     slider_theta->textcolor(FL_WHITE);
     slider_theta->callback(cb_slider_theta, this);
@@ -53,7 +63,7 @@ GameUI::GameUI(int width, int height) : core(3, 5, 0.5) {
     btn_auto_router->labelcolor(FL_WHITE);
     btn_auto_router->callback(cb_btn_auto_router, this);
 
-    // Column 2: Representation Layer & Morphing Controls
+    // Column 2: Layer & Backend Selections
     choice_layer = new Fl_Choice(col2_x, canvas_h + 25, 240, 25, "Layer:");
     choice_layer->add("Layer I: Harmonic Geometry (S^{d-1})");
     choice_layer->add("Layer II: Projector Temple (v_n \u2297 v_n*)");
@@ -98,24 +108,26 @@ GameUI::GameUI(int width, int height) : core(3, 5, 0.5) {
     choice_backend->labelcolor(FL_WHITE);
     choice_backend->callback(cb_choice_backend, this);
 
-    // Column 3: Rich Mathematical Telemetry Display
+    // Column 3: Structured 7-Section Telemetry Display
     text_buffer = new Fl_Text_Buffer();
-    text_telemetry = new Fl_Text_Display(col3_x, canvas_h + 20, width - col3_x - 20, 180);
+    text_telemetry = new Fl_Text_Display(col3_x, canvas_h + 15, width - col3_x - 20, 210);
     text_telemetry->buffer(text_buffer);
     text_telemetry->color(fl_rgb_color(12, 16, 24));
     text_telemetry->textcolor(fl_rgb_color(120, 240, 160));
     text_telemetry->textfont(FL_COURIER);
-    text_telemetry->textsize(12);
+    text_telemetry->textsize(11);
 
     ctrl_grp->end();
 
     main_win->end();
     main_win->resizable(gl_canvas);
 
-    on_state_changed();
+    publish_snapshot();
 }
 
 GameUI::~GameUI() {
+    Fl::remove_timeout(timer_update_cb, this);
+    Fl::remove_timeout(timer_morph_cb, this);
     delete text_buffer;
 }
 
@@ -123,109 +135,160 @@ void GameUI::show() {
     main_win->show();
 }
 
-void GameUI::on_state_changed() {
-    gl_canvas->update_snapshot();
-    const RepresentationSnapshot& snap = gl_canvas->snapshot;
+void GameUI::mark_dirty_and_schedule() {
+    is_dirty = true;
+    Fl::remove_timeout(timer_update_cb, this);
+    Fl::add_timeout(0.016, timer_update_cb, this);
+}
+
+void GameUI::timer_update_cb(void* userdata) {
+    GameUI* ui = static_cast<GameUI*>(userdata);
+    if (ui && ui->is_dirty) {
+        ui->publish_snapshot();
+        ui->is_dirty = false;
+    }
+}
+
+void GameUI::timer_morph_cb(void* userdata) {
+    GameUI* ui = static_cast<GameUI*>(userdata);
+    if (!ui || !ui->is_morph_animating) return;
+
+    ui->state.transition += 0.025;
+    if (ui->state.transition >= 1.0) {
+        ui->state.transition = 1.0;
+        ui->state.current_layer = ui->state.target_layer;
+        ui->is_morph_animating = false;
+    } else {
+        Fl::repeat_timeout(0.016, timer_morph_cb, ui);
+    }
+    ui->slider_transition->value(ui->state.transition);
+    ui->publish_snapshot();
+}
+
+void GameUI::publish_snapshot() {
+    RepresentationSnapshot snap = core.evaluate(state);
+    gl_canvas->set_snapshot(snap);
+    gl_canvas->set_game_state(state);
 
     std::ostringstream oss;
-    oss << "=== MATHEMATICAL TELEMETRY HUD ===\n";
-    oss << "[Regime]: " << snap.regime_name << "\n";
-    oss << "  d=" << snap.d << " (\u03BB=" << snap.lambda << ") | n=" << snap.n
-        << " | N=" << snap.N << "\n";
-    oss << "  z_+ = " << snap.z_plus << " | z_- = " << snap.z_minus << "\n";
-    oss << "[Conditioning & Bounds]:\n";
-    oss << "  \u03BA=" << snap.conditioning << " | Forward Err=" << snap.forward_error
+    oss << std::scientific << std::setprecision(2);
+
+    oss << "========================================\n";
+    oss << "1. STATE: d=" << snap.params.d << " (\u03BB=" << snap.lambda
+        << ") | n=" << snap.params.n << " | N=" << snap.N << "\n";
+    oss << "   \u03B8=" << std::fixed << std::setprecision(4) << snap.params.theta
+        << " (x=" << snap.x << ") | \u03C6_n=" << snap.phi << "\n";
+    oss << "----------------------------------------\n";
+    oss << "2. REGIME: " << snap.regime_name << "\n";
+    oss << "   z_+=" << std::fixed << std::setprecision(3) << snap.z_plus
+        << " [" << (snap.north_valid ? "VALID" : "OUT") << "] | "
+        << "z_-=" << snap.z_minus << " [" << (snap.south_valid ? "VALID" : "OUT") << "]\n";
+    oss << "----------------------------------------\n";
+    oss << "3. REPRESENTATION & BACKEND:\n";
+    oss << "   Layer: " << static_cast<int>(snap.current_layer)
+        << " -> " << static_cast<int>(snap.target_layer)
+        << " (T=" << std::fixed << std::setprecision(2) << snap.transition << ")\n";
+    oss << "   Backend: " << snap.backend_name << "\n";
+    oss << "----------------------------------------\n";
+    oss << "4. NUMERICS & CONDITIONING:\n";
+    oss << std::scientific << std::setprecision(2);
+    oss << "   \u03BA=" << snap.conditioning << " | Fwd Err=" << snap.forward_error
         << " | B_K=" << snap.analytic_bound << "\n";
-    oss << "[Residuals]:\n";
-    oss << "  R_rec=" << snap.r_rec << " | R_ODE=" << snap.r_ode
-        << " | R_Schr=" << snap.r_schr << "\n";
-    oss << "  Backend Discrepancy = " << snap.backend_error << "\n";
-    oss << "[Representation Router AI]:\n";
-    oss << "  " << snap.router_reason << "\n";
-    oss << "[Layer VIII Certification]:\n";
-    oss << "  ALG: " << (snap.cert.algebraic_exact ? "[\u2713]" : "[\u2717]")
-        << "  ARITH: " << (snap.cert.arithmetic_exact ? "[\u2713]" : "[\u2717]")
-        << "  ANALYTIC: " << (snap.cert.analytic_certified ? "[\u2713]" : "[\u2717]")
-        << "  NUMERICAL: " << (snap.cert.numerical_valid ? "[\u2713]" : "[\u2717]");
+    oss << "----------------------------------------\n";
+    oss << "5. STRUCTURAL RESIDUALS:\n";
+    oss << "   R_rec=" << snap.r_rec << " | R_ODE=" << snap.r_ode << "\n";
+    oss << "   R_Schr=" << snap.r_schr << " | R_J=" << snap.r_jacobi << "\n";
+    oss << "   Backend Discrepancy = " << snap.backend_error << "\n";
+    oss << "----------------------------------------\n";
+    oss << "6. CERTIFICATION (4-AXES):\n";
+    oss << "   ALG: " << (snap.cert.algebraic_exact ? "[PASS]" : "[FAIL]") << " - " << snap.cert.algebraic_reason << "\n";
+    oss << "   ARITH: " << (snap.cert.arithmetic_exact ? "[PASS]" : "[FAIL]") << " - " << snap.cert.arithmetic_reason << "\n";
+    oss << "   ANALYTIC: " << (snap.cert.analytic_certified ? "[PASS]" : "[FAIL]") << " - " << snap.cert.analytic_reason << "\n";
+    oss << "   NUMERICAL: " << (snap.cert.numerical_approx ? "[PASS]" : "[FAIL]") << " - " << snap.cert.numerical_reason << "\n";
+    oss << "----------------------------------------\n";
+    oss << "7. ROUTER DECISION:\n";
+    oss << "   " << snap.router_decision.reason << "\n";
+    oss << "========================================";
 
     text_buffer->text(oss.str().c_str());
 
-    if (gl_canvas->auto_router) {
-        choice_layer->value(static_cast<int>(snap.layer));
+    if (state.auto_router) {
+        choice_layer->value(static_cast<int>(snap.current_layer));
         choice_backend->value(static_cast<int>(snap.backend));
     }
-
-    gl_canvas->redraw();
 }
 
 void GameUI::cb_slider_d(Fl_Widget* w, void* userdata) {
     GameUI* ui = static_cast<GameUI*>(userdata);
-    ui->core.update_parameters(static_cast<int>(ui->slider_d->value()), ui->core.n, ui->core.theta);
-    ui->on_state_changed();
+    ui->state.params.d = static_cast<int>(ui->slider_d->value());
+    ui->mark_dirty_and_schedule();
 }
 
 void GameUI::cb_slider_n(Fl_Widget* w, void* userdata) {
     GameUI* ui = static_cast<GameUI*>(userdata);
-    ui->core.update_parameters(ui->core.d, static_cast<int>(ui->slider_n->value()), ui->core.theta);
-    ui->on_state_changed();
+    ui->state.params.n = static_cast<int>(ui->slider_n->value());
+    ui->mark_dirty_and_schedule();
 }
 
 void GameUI::cb_slider_theta(Fl_Widget* w, void* userdata) {
     GameUI* ui = static_cast<GameUI*>(userdata);
-    ui->core.update_parameters(ui->core.d, ui->core.n, ui->slider_theta->value());
-    ui->on_state_changed();
+    ui->state.params.theta = ui->slider_theta->value();
+    ui->mark_dirty_and_schedule();
 }
 
 void GameUI::cb_slider_transition(Fl_Widget* w, void* userdata) {
     GameUI* ui = static_cast<GameUI*>(userdata);
-    ui->gl_canvas->transition_progress = ui->slider_transition->value();
-    ui->gl_canvas->redraw();
+    ui->state.transition = ui->slider_transition->value();
+    ui->mark_dirty_and_schedule();
 }
 
 void GameUI::cb_choice_layer(Fl_Widget* w, void* userdata) {
     GameUI* ui = static_cast<GameUI*>(userdata);
-    LayerType target = static_cast<LayerType>(ui->choice_layer->value());
-    ui->gl_canvas->set_target_layer(target);
+    ui->state.target_layer = static_cast<LayerType>(ui->choice_layer->value());
+    ui->state.transition = 0.0;
     ui->slider_transition->value(0.0);
-    ui->on_state_changed();
+    ui->mark_dirty_and_schedule();
 }
 
 void GameUI::cb_choice_backend(Fl_Widget* w, void* userdata) {
     GameUI* ui = static_cast<GameUI*>(userdata);
-    ui->gl_canvas->active_backend = static_cast<BackendType>(ui->choice_backend->value());
-    ui->on_state_changed();
+    ui->state.backend = static_cast<BackendType>(ui->choice_backend->value());
+    ui->mark_dirty_and_schedule();
 }
 
 void GameUI::cb_btn_anim_morph(Fl_Widget* w, void* userdata) {
     GameUI* ui = static_cast<GameUI*>(userdata);
-    ui->gl_canvas->trigger_transition_animation();
+    ui->state.transition = 0.0;
+    ui->is_morph_animating = true;
+    Fl::remove_timeout(timer_morph_cb, ui);
+    Fl::add_timeout(0.016, timer_morph_cb, ui);
 }
 
 void GameUI::cb_btn_auto_router(Fl_Widget* w, void* userdata) {
     GameUI* ui = static_cast<GameUI*>(userdata);
-    ui->gl_canvas->auto_router = !ui->gl_canvas->auto_router;
-    if (ui->gl_canvas->auto_router) {
+    ui->state.auto_router = !ui->state.auto_router;
+    if (ui->state.auto_router) {
         ui->btn_auto_router->label("Router AI: AUTO");
         ui->btn_auto_router->color(fl_rgb_color(40, 160, 100));
     } else {
         ui->btn_auto_router->label("Router AI: MANUAL");
         ui->btn_auto_router->color(fl_rgb_color(50, 70, 90));
     }
-    ui->on_state_changed();
+    ui->mark_dirty_and_schedule();
 }
 
 void GameUI::cb_btn_info(Fl_Widget* w, void* userdata) {
     GameUI* ui = static_cast<GameUI*>(userdata);
-    int layer_idx = static_cast<int>(ui->gl_canvas->current_layer);
+    int layer_idx = static_cast<int>(ui->state.current_layer);
     const char* info_texts[] = {
-        "Layer I: Harmonic Geometry & Fischer Decomposition\n\nModels S^{d-1} spherical manifold with degree-n zonal harmonic amplitude field, nodal hypersurfaces, and metric curvature scaling with dimension d.",
+        "Layer I: 3D Projection/Slice of S^{d-1} Hyper-Sphere\n\nModels a 3D projected slice of the (d-1)-dimensional hyper-sphere S^{d-1} with degree-n zonal harmonic wave field.",
         "Layer II: Projector Temple & K-Fixed Ray\n\nVisualizes dimensionality reduction from high-dimensional representation space V_n onto the 1D K-fixed axis v_n via rank-one projector P_{K,n} = v_n \u2297 v_n*.",
         "Layer III: Differential Waves & Schr\u00F6dinger Potential\n\nDisplays Gegenbauer Sturm-Liouville radial wave equation (1-x^2)\u03C6'' - (2\u03BB+1)x \u03C6' + n(n+2\u03BB)\u03C6 = 0 and quantum potential landscape V(\u03B8) = \u03BB(\u03BB-1)csc^2(\u03B8).",
         "Layer IV: Jacobi Spectral City & Golub-Welsch Tower\n\nTridiagonal matrix operator J_m tower with subdiagonal couplings \u03B1_k and Golub-Welsch spectral lines x_k in (-1, 1).",
         "Layer V: Two-Pole Boundary Layer Coordinates\n\nDisplays North pole Bessel scaling z_+ = N_n \u03B8, South pole Bessel scaling z_- = N_n (\u03C0-\u03B8), and interior WKB wave.",
         "Layer VI: Composite Matched Asymptotics\n\nUnifies endpoint Bessel expansions and interior WKB oscillations into the two-overlap composite matched wave F_comp.",
         "Layer VII: Multi-Backend Arithmetic Factory\n\nEvaluates Gegenbauer wave across 7 execution backends (FLOAT32 to MODULAR_RNS), displaying precision mantissa lattices and noise particles.",
-        "Layer VIII: Verification & Certification Chamber\n\nMulti-axis verification wheel classifying truth into ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, or NUMERICAL_VALID."
+        "Layer VIII: Verification & Certification Chamber\n\nMulti-axis verification wheel classifying truth into ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, or NUMERICAL_APPROX."
     };
     fl_message("%s", info_texts[layer_idx]);
 }

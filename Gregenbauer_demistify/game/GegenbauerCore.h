@@ -7,13 +7,19 @@
 #include <cstdint>
 #include <algorithm>
 #include <iostream>
+#include <numbers>
 
 // Certification status matching Layer VIII taxonomy
 struct CertificationStatus {
     bool algebraic_exact = false;
     bool arithmetic_exact = false;
     bool analytic_certified = false;
-    bool numerical_valid = false;
+    bool numerical_approx = false;
+
+    std::string algebraic_reason;
+    std::string arithmetic_reason;
+    std::string analytic_reason;
+    std::string numerical_reason;
 
     double structural_residual = 0.0;
     double forward_error = 0.0;
@@ -52,6 +58,16 @@ enum class RegimeType {
     INTERIOR_WKB = 3
 };
 
+struct RouterDecision {
+    LayerType layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
+    BackendType backend = BackendType::FLOAT64;
+    double estimated_error = 0.0;
+    double conditioning = 1.0;
+    double cost = 1.0;
+    bool feasible = true;
+    std::string reason;
+};
+
 struct GolubWelschResult {
     int m = 0;
     std::vector<double> eigenvalues;      // x_k in (-1, 1)
@@ -62,11 +78,25 @@ struct GolubWelschResult {
     double eigenpair_residual = 0.0;     // max ||J_m v_k - x_k v_k||
 };
 
-struct RepresentationSnapshot {
+struct CoreParameters {
     int d = 3;
     int n = 5;
-    double lambda = 0.5;
     double theta = 0.5;
+    double error_target = 1e-8;
+};
+
+struct GameState {
+    CoreParameters params;
+    LayerType current_layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
+    LayerType target_layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
+    BackendType backend = BackendType::FLOAT64;
+    bool auto_router = false;
+    double transition = 0.0; // T in [0, 1]
+};
+
+struct RepresentationSnapshot {
+    CoreParameters params;
+    double lambda = 0.5;
     double x = 0.87758256;
     double N = 5.5;
     double z_plus = 2.75;
@@ -74,13 +104,19 @@ struct RepresentationSnapshot {
 
     RegimeType regime = RegimeType::INTERIOR_WKB;
     std::string regime_name = "INTERIOR_WKB";
+    bool north_valid = false;
+    bool interior_valid = true;
+    bool south_valid = false;
 
-    LayerType layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
+    LayerType current_layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
+    LayerType target_layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
+    double transition = 0.0;
+
     BackendType backend = BackendType::FLOAT64;
     std::string backend_name = "FLOAT64";
 
     bool auto_router = false;
-    std::string router_reason = "Manual Selection";
+    RouterDecision router_decision;
 
     double phi = 0.0;
     double forward_error = 0.0;
@@ -98,25 +134,16 @@ struct RepresentationSnapshot {
 
 class GegenbauerCore {
 public:
-    int d = 3;              // Dimension (>= 3)
-    int n = 5;              // Degree (>= 0)
-    double lambda_val = 0.5;// (d-2)/2
-    double theta = 0.5;     // Angle in (0, pi)
-    double x = 0.87758256;  // cos(theta)
-    BackendType current_backend = BackendType::FLOAT64;
+    GegenbauerCore() = default;
 
-    GegenbauerCore(int dimension = 3, int degree = 5, double th = 0.5);
+    // Evaluates GameState into an immutable RepresentationSnapshot
+    RepresentationSnapshot evaluate(const GameState& state) const;
 
-    void update_parameters(int dimension, int degree, double th);
-
-    // Snapshot generator producing an immutable mathematical state snapshot
-    RepresentationSnapshot get_snapshot(LayerType layer = LayerType::LAYER_I_HARMONIC_GEOMETRY,
-                                         BackendType backend = BackendType::FLOAT64,
-                                         bool auto_route = false,
-                                         double error_tol = 1e-8) const;
+    // Feasibility-first router optimizer
+    RouterDecision solve_router_decision(const CoreParameters& params) const;
 
     // Domain regime classifier
-    RegimeType classify_regime(double th) const;
+    RegimeType classify_regime(int n, double lambda_val, double th) const;
     static std::string get_regime_name(RegimeType reg);
     static std::string get_backend_name(BackendType bt);
 
@@ -127,37 +154,36 @@ public:
     static double eval_gegenbauer_c_at_1(int n_deg, double lam);
 
     // Normalized phi_n(x) = C_n^{(lambda)}(x) / C_n^{(lambda)}(1)
-    double eval_phi(int n_deg, double x_val) const;
-    double eval_phi() const { return eval_phi(n, x); }
+    double eval_phi(int n_deg, double lam, double x_val) const;
 
     // Derivatives phi_n'(x) and phi_n''(x)
-    double eval_phi_prime(int n_deg, double x_val) const;
-    double eval_phi_second_prime(int n_deg, double x_val) const;
+    double eval_phi_prime(int n_deg, double lam, double x_val) const;
+    double eval_phi_second_prime(int n_deg, double lam, double x_val) const;
 
     // Schrödinger wave u_n(theta) = (sin theta)^lambda * phi_n(cos theta)
-    double eval_schrodinger_u(int n_deg, double th) const;
-    double eval_potential_v(double th) const;
+    double eval_schrodinger_u(int n_deg, double lam, double th) const;
+    double eval_potential_v(double lam, double th) const;
 
     // Jacobi matrix coefficients alpha_k for k = 0 ... m-2
     static double get_jacobi_alpha(int k, double lam);
-    std::vector<double> get_jacobi_alphas(int m) const;
+    std::vector<double> get_jacobi_alphas(int m, double lam) const;
 
     // Golub-Welsch spectral tridiagonal solver for J_m
-    GolubWelschResult compute_golub_welsch(int m) const;
+    GolubWelschResult compute_golub_welsch(int m, double lam) const;
 
     // Boundary layer asymptotics
     double eval_bessel_j0(double z) const;
     double eval_bessel_j_nu(double nu, double z) const;
-    double eval_north_bessel(double th) const;
-    double eval_south_bessel(double th) const;
-    double eval_wkb_interior(double th) const;
-    double eval_composite_asymptotics(double th) const;
+    double eval_north_bessel(int n_deg, double lam, double th) const;
+    double eval_south_bessel(int n_deg, double lam, double th) const;
+    double eval_wkb_interior(int n_deg, double lam, double th) const;
+    double eval_composite_asymptotics(int n_deg, double lam, double th) const;
 
     // Multi-backend simulations
-    double eval_backend_phi(BackendType backend, int n_deg, double x_val) const;
+    double eval_backend_phi(BackendType backend, int n_deg, double lam, double x_val) const;
 
     // Residual taxonomy & 4-axis certification
-    CertificationStatus compute_certification(BackendType backend = BackendType::FLOAT64) const;
+    CertificationStatus compute_certification(int n_deg, double lam, double th, BackendType backend) const;
 
     // Helper math functions
     static double log_gamma(double z);
