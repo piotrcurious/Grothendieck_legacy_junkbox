@@ -5,7 +5,7 @@ LDFLAGS = $(shell fltk-config --use-gl --ldflags) -lGL -lGLU -lX11 -pthread
 SRCS = main.cpp GegenbauerCore.cpp GLCanvas.cpp GameUI.cpp
 OBJS = $(SRCS:.cpp=.o)
 
-TEST_SRCS = test_game_core.cpp GegenbauerCore.cpp GLCanvas.cpp
+TEST_SRCS = test_game_core.cpp GegenbauerCore.cpp GLCanvas.cpp GameUI.cpp
 TEST_OBJS = $(TEST_SRCS:.cpp=.o)
 
 TARGET = eighth_layer_game
@@ -25,7 +25,7 @@ $(TEST_TARGET): $(TEST_OBJS)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 test: $(TEST_TARGET) $(TARGET)
-	./$(TEST_TARGET)
+	xvfb-run -a ./$(TEST_TARGET) || ./$(TEST_TARGET)
 	./$(TARGET) --headless-test
 
 clean:
