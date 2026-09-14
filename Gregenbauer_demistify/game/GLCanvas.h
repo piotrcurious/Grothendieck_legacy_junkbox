@@ -9,6 +9,7 @@
 class GLCanvas : public Fl_Gl_Window {
 public:
     GegenbauerCore* core = nullptr;
+    RepresentationSnapshot snapshot;
 
     LayerType current_layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
     LayerType target_layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
@@ -17,6 +18,12 @@ public:
     double anim_speed = 0.02;
 
     BackendType active_backend = BackendType::FLOAT64;
+    bool auto_router = false;
+
+    // Visualization toggles
+    bool show_jacobi_overlay = true;
+    bool show_composite_live = true;
+    int projection_mode = 0; // 0: 3D Slice, 1: Radial Tensor, 2: Hyper-Flat
 
     // Camera state
     float rot_x = 25.0f;
@@ -32,7 +39,8 @@ public:
 
     GLCanvas(int x, int y, int w, int h, const char* label = nullptr);
 
-    void set_core(GegenbauerCore* c) { core = c; }
+    void set_core(GegenbauerCore* c) { core = c; update_snapshot(); }
+    void update_snapshot();
     void set_target_layer(LayerType target);
     void trigger_transition_animation();
 
@@ -45,9 +53,8 @@ private:
     void init_gl();
     void setup_lighting();
     void render_hud();
-    void draw_string_3d(float x, float y, float z, const char* str);
 
-    // Layer renderers
+    // Layer renderers consuming RepresentationSnapshot
     void render_layer_geometry(LayerType layer, float alpha);
 
     void render_layer_i(float alpha);

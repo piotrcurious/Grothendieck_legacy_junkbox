@@ -15,9 +15,19 @@ GLCanvas::GLCanvas(int x, int y, int w, int h, const char* label)
     mode(FL_RGB | FL_DOUBLE | FL_DEPTH);
 }
 
+void GLCanvas::update_snapshot() {
+    if (core) {
+        snapshot = core->get_snapshot(target_layer, active_backend, auto_router);
+        if (auto_router) {
+            target_layer = snapshot.layer;
+            active_backend = snapshot.backend;
+        }
+    }
+}
+
 void GLCanvas::set_target_layer(LayerType target) {
-    if (target == current_layer && transition_progress >= 1.0) return;
     target_layer = target;
+    update_snapshot();
     transition_progress = 0.0;
     is_animating = true;
     Fl::remove_timeout(anim_callback, this);
@@ -26,6 +36,7 @@ void GLCanvas::set_target_layer(LayerType target) {
 }
 
 void GLCanvas::trigger_transition_animation() {
+    update_snapshot();
     transition_progress = 0.0;
     is_animating = true;
     Fl::remove_timeout(anim_callback, this);
@@ -54,7 +65,6 @@ double GLCanvas::smoothstep(double t) {
 }
 
 void GLCanvas::get_phi_color(double val, float& r, float& g, float& b) {
-    // Map val in [-1, 1] to a blue-gray-gold color gradient
     double norm = (val + 1.0) * 0.5;
     norm = std::clamp(norm, 0.0, 1.0);
     if (norm < 0.5) {
@@ -114,7 +124,6 @@ void GLCanvas::draw() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glLoadIdentity();
 
-    // Camera transform
     glTranslatef(pan_x, pan_y, -zoom);
     glRotatef(rot_x, 1.0f, 0.0f, 0.0f);
     glRotatef(rot_y, 0.0f, 1.0f, 0.0f);
@@ -122,6 +131,7 @@ void GLCanvas::draw() {
     setup_lighting();
 
     if (!core) return;
+    update_snapshot();
 
     double s = smoothstep(transition_progress);
     float alpha_curr = static_cast<float>(1.0 - s);
@@ -130,7 +140,6 @@ void GLCanvas::draw() {
     if (current_layer == target_layer || transition_progress >= 1.0) {
         render_layer_geometry(target_layer, 1.0f);
     } else {
-        // Morphing transition blending
         render_layer_geometry(current_layer, alpha_curr);
         render_layer_geometry(target_layer, alpha_targ);
     }
@@ -188,7 +197,6 @@ void GLCanvas::render_layer_geometry(LayerType layer, float alpha) {
 // -------------------------------------------------------------
 
 void GLCanvas::render_layer_i(float alpha) {
-    // Layer I: 3D Spherical Manifold S^{d-1} with zonal harmonic wave color mapping
     int lat_steps = 40;
     int lon_steps = 60;
     float radius = 1.5f;
@@ -203,11 +211,10 @@ void GLCanvas::render_layer_i(float alpha) {
         float z1_val = std::sin(lat1);
         float r1_val = std::cos(lat1);
 
-        // Convert lat to theta in [0, pi]
         double th0 = M_PI * 0.5 - lat0;
         double th1 = M_PI * 0.5 - lat1;
-        double phi_val0 = core->eval_phi(core->n, std::cos(th0));
-        double phi_val1 = core->eval_phi(core->n, std::cos(th1));
+        double phi_val0 = core->eval_phi(snapshot.n, std::cos(th0));
+        double phi_val1 = core->eval_phi(snapshot.n, std::cos(th1));
 
         float r_c0, g_c0, b_c0, r_c1, g_c1, b_c1;
         get_phi_color(phi_val0, r_c0, g_c0, b_c0);
@@ -221,7 +228,6 @@ void GLCanvas::render_layer_i(float alpha) {
             float x1_pos = std::cos(lng) * r1_val;
             float y1_pos = std::sin(lng) * r1_val;
 
-            // Slight displacement along normal proportional to phi(theta)
             float disp0 = 1.0f + 0.15f * static_cast<float>(phi_val0);
             float disp1 = 1.0f + 0.15f * static_cast<float>(phi_val1);
 
@@ -236,7 +242,6 @@ void GLCanvas::render_layer_i(float alpha) {
         glEnd();
     }
 
-    // Nodal hypersurface rings
     glDisable(GL_LIGHTING);
     glLineWidth(2.5f);
     glColor4f(1.0f, 0.9f, 0.2f, alpha);
@@ -244,10 +249,10 @@ void GLCanvas::render_layer_i(float alpha) {
     for (int k = 0; k < th_samples; ++k) {
         double th_curr = M_PI * static_cast<double>(k) / th_samples;
         double th_next = M_PI * static_cast<double>(k + 1) / th_samples;
-        double p_c = core->eval_phi(core->n, std::cos(th_curr));
-        double p_n = core->eval_phi(core->n, std::cos(th_next));
+        double p_c = core->eval_phi(snapshot.n, std::cos(th_curr));
+        double p_n = core->eval_phi(snapshot.n, std::cos(th_next));
 
-        if (p_c * p_n <= 0.0) { // Nodal root
+        if (p_c * p_n <= 0.0) {
             double th_zero = 0.5 * (th_curr + th_next);
             float lat_z = M_PI * 0.5f - static_cast<float>(th_zero);
             float r_z = radius * std::cos(lat_z);
@@ -264,7 +269,6 @@ void GLCanvas::render_layer_i(float alpha) {
 }
 
 void GLCanvas::render_layer_ii(float alpha) {
-    // Layer II: Projector Temple – Rank-one projector P_{K,n} = v_n (x) v_n^* & K-fixed axis
     glDisable(GL_LIGHTING);
 
     // Luminous central K-fixed ray
@@ -275,7 +279,7 @@ void GLCanvas::render_layer_ii(float alpha) {
     glVertex3f(0.0f, 2.5f, 0.0f);
     glEnd();
 
-    // Ambient representation state vector cloud
+    // Rank-one projector ray v_n \otimes v_n^* cloud
     int num_particles = 120;
     glPointSize(5.0f);
     glBegin(GL_POINTS);
@@ -291,7 +295,6 @@ void GLCanvas::render_layer_ii(float alpha) {
     }
     glEnd();
 
-    // Projector rays connecting state vectors to K-fixed ray
     glLineWidth(1.2f);
     glColor4f(1.0f, 0.6f, 0.2f, alpha * 0.4f);
     glBegin(GL_LINES);
@@ -303,13 +306,11 @@ void GLCanvas::render_layer_ii(float alpha) {
         float z_p = std::sin(angle_p) * rad_p;
 
         glVertex3f(x_p, y_p, z_p);
-        glVertex3f(0.0f, y_p, 0.0f); // Projection onto v_n axis
+        glVertex3f(0.0f, y_p, 0.0f);
     }
     glEnd();
 
-    // Active state vector v_n at current theta
-    double current_phi = core->eval_phi();
-    float v_y = static_cast<float>(current_phi) * 2.0f;
+    float v_y = static_cast<float>(snapshot.phi) * 2.0f;
     glColor4f(1.0f, 1.0f, 0.3f, alpha);
     glPointSize(10.0f);
     glBegin(GL_POINTS);
@@ -318,14 +319,13 @@ void GLCanvas::render_layer_ii(float alpha) {
 }
 
 void GLCanvas::render_layer_iii(float alpha) {
-    // Layer III: Differential Waves & Schrödinger Potential Landscape V(theta)
     glDisable(GL_LIGHTING);
 
     int samples = 200;
     float x_start = -2.2f;
     float x_end = 2.2f;
 
-    // Potential wall surface V(theta) = lambda(lambda-1) csc^2(theta)
+    // Potential wall surface V(theta)
     glLineWidth(2.5f);
     glColor4f(1.0f, 0.3f, 0.3f, alpha * 0.8f);
     glBegin(GL_LINE_STRIP);
@@ -344,7 +344,7 @@ void GLCanvas::render_layer_iii(float alpha) {
     glBegin(GL_LINE_STRIP);
     for (int i = 0; i <= samples; ++i) {
         double th_val = 0.005 + (M_PI - 0.01) * (static_cast<double>(i) / samples);
-        double u_val = core->eval_schrodinger_u(core->n, th_val);
+        double u_val = core->eval_schrodinger_u(snapshot.n, th_val);
         float pos_x = x_start + (x_end - x_start) * (static_cast<float>(i) / samples);
         float pos_y = static_cast<float>(u_val * 1.5);
         glVertex3f(pos_x, pos_y, 0.2f);
@@ -352,8 +352,7 @@ void GLCanvas::render_layer_iii(float alpha) {
     glEnd();
 
     // Energy baseline N_n^2
-    double N_n = core->n + core->lambda_val;
-    float e_y = std::min(2.8f, static_cast<float>(N_n * 0.1));
+    float e_y = std::min(2.8f, static_cast<float>(snapshot.N * 0.1));
     glLineWidth(1.5f);
     glColor4f(0.4f, 0.8f, 1.0f, alpha * 0.5f);
     glBegin(GL_LINES);
@@ -363,48 +362,41 @@ void GLCanvas::render_layer_iii(float alpha) {
 }
 
 void GLCanvas::render_layer_iv(float alpha) {
-    // Layer IV: Jacobi Spectral City & Golub-Welsch Eigenvector Tower
     glEnable(GL_LIGHTING);
 
-    int m_nodes = std::min(15, core->n + 3);
+    int m_nodes = std::min(15, snapshot.n + 3);
     GolubWelschResult gw = core->compute_golub_welsch(m_nodes);
     float spacing = 0.35f;
     float start_x = -0.5f * (m_nodes - 1) * spacing;
 
     for (int k = 0; k < m_nodes; ++k) {
         float pos_x = start_x + k * spacing;
-        double alpha_k = (k < m_nodes - 1) ? GegenbauerCore::get_jacobi_alpha(k, core->lambda_val) : 0.0;
+        double alpha_k = (k < m_nodes - 1) ? GegenbauerCore::get_jacobi_alpha(k, snapshot.lambda) : 0.0;
 
-        // Node tower pillar
         float tower_height = 0.5f + static_cast<float>(alpha_k) * 2.0f;
         glColor4f(0.3f, 0.7f, 0.9f, alpha * 0.8f);
 
         glPushMatrix();
         glTranslatef(pos_x, tower_height * 0.5f - 1.0f, 0.0f);
         glScalef(0.12f, tower_height, 0.12f);
-        // Box pillar
         glBegin(GL_QUADS);
-        // Front
         glNormal3f(0, 0, 1); glVertex3f(-1, -1, 1); glVertex3f(1, -1, 1); glVertex3f(1, 1, 1); glVertex3f(-1, 1, 1);
-        // Back
         glNormal3f(0, 0, -1); glVertex3f(-1, -1, -1); glVertex3f(-1, 1, -1); glVertex3f(1, 1, -1); glVertex3f(1, -1, -1);
         glEnd();
         glPopMatrix();
 
-        // Subdiagonal coupling beam alpha_k between nodes k and k+1
         if (k < m_nodes - 1) {
             glDisable(GL_LIGHTING);
             glLineWidth(3.0f * static_cast<float>(alpha_k * 2.0));
             glColor4f(1.0f, 0.8f, 0.2f, alpha);
             glBegin(GL_LINES);
             glVertex3f(pos_x, tower_height - 1.0f, 0.0f);
-            glVertex3f(pos_x + spacing, (0.5f + static_cast<float>(GegenbauerCore::get_jacobi_alpha(k + 1, core->lambda_val)) * 2.0f) - 1.0f, 0.0f);
+            glVertex3f(pos_x + spacing, (0.5f + static_cast<float>(GegenbauerCore::get_jacobi_alpha(k + 1, snapshot.lambda)) * 2.0f) - 1.0f, 0.0f);
             glEnd();
             glEnable(GL_LIGHTING);
         }
     }
 
-    // Spectral eigenvalue lines x_k in (-1, 1)
     glDisable(GL_LIGHTING);
     glLineWidth(2.0f);
     for (int k = 0; k < m_nodes; ++k) {
@@ -419,13 +411,12 @@ void GLCanvas::render_layer_iv(float alpha) {
 }
 
 void GLCanvas::render_layer_v(float alpha) {
-    // Layer V: Two-Pole Boundary Coordinates (North z_+, WKB theta, South z_-)
     glDisable(GL_LIGHTING);
 
     int samples = 100;
     float w = 1.3f;
 
-    // 1. Left Viewport: North Pole Bessel Scaling z_+ = N_n * theta
+    // 1. North Pole
     glLineWidth(2.5f);
     glColor4f(0.2f, 0.9f, 1.0f, alpha);
     glBegin(GL_LINE_STRIP);
@@ -438,7 +429,7 @@ void GLCanvas::render_layer_v(float alpha) {
     }
     glEnd();
 
-    // 2. Center Viewport: Interior WKB Wave
+    // 2. Center WKB
     glColor4f(0.4f, 1.0f, 0.5f, alpha);
     glBegin(GL_LINE_STRIP);
     for (int i = 0; i <= samples; ++i) {
@@ -450,7 +441,7 @@ void GLCanvas::render_layer_v(float alpha) {
     }
     glEnd();
 
-    // 3. Right Viewport: South Pole Bessel Scaling z_- = N_n * (pi - theta)
+    // 3. South Pole
     glColor4f(1.0f, 0.7f, 0.2f, alpha);
     glBegin(GL_LINE_STRIP);
     for (int i = 0; i <= samples; ++i) {
@@ -462,7 +453,6 @@ void GLCanvas::render_layer_v(float alpha) {
     }
     glEnd();
 
-    // Viewport bounding frames
     glLineWidth(1.0f);
     glColor4f(0.6f, 0.6f, 0.7f, alpha * 0.4f);
     float box_xs[] = { -2.2f, -0.65f, 0.9f };
@@ -477,32 +467,28 @@ void GLCanvas::render_layer_v(float alpha) {
 }
 
 void GLCanvas::render_layer_vi(float alpha) {
-    // Layer VI: Composite Matched Asymptotics & Overlap Territories
     glDisable(GL_LIGHTING);
 
     int samples = 200;
     float x_start = -2.2f;
     float x_end = 2.2f;
 
-    // Translucent coverage domain masks (North, Interior, South)
+    // Domain masks
     glBegin(GL_QUADS);
-    // North domain D_+
     glColor4f(0.2f, 0.6f, 1.0f, alpha * 0.15f);
     glVertex3f(x_start, -1.8f, -0.1f); glVertex3f(x_start + 1.2f, -1.8f, -0.1f);
     glVertex3f(x_start + 1.2f, 1.8f, -0.1f); glVertex3f(x_start, 1.8f, -0.1f);
 
-    // Overlap zone D_+ \cap D_I
     glColor4f(0.8f, 0.4f, 1.0f, alpha * 0.25f);
     glVertex3f(x_start + 0.9f, -1.8f, -0.05f); glVertex3f(x_start + 1.5f, -1.8f, -0.05f);
     glVertex3f(x_start + 1.5f, 1.8f, -0.05f); glVertex3f(x_start + 0.9f, 1.8f, -0.05f);
 
-    // South domain D_-
     glColor4f(1.0f, 0.6f, 0.2f, alpha * 0.15f);
     glVertex3f(x_end - 1.2f, -1.8f, -0.1f); glVertex3f(x_end, -1.8f, -0.1f);
     glVertex3f(x_end, 1.8f, -0.1f); glVertex3f(x_end - 1.2f, 1.8f, -0.1f);
     glEnd();
 
-    // Composite matched asymptotic wave F_comp(theta)
+    // Composite matched wave F_comp(theta)
     glLineWidth(3.5f);
     glColor4f(1.0f, 1.0f, 0.3f, alpha);
     glBegin(GL_LINE_STRIP);
@@ -514,10 +500,24 @@ void GLCanvas::render_layer_vi(float alpha) {
         glVertex3f(pos_x, pos_y, 0.1f);
     }
     glEnd();
+
+    // Exact curve comparison
+    if (show_composite_live) {
+        glLineWidth(1.5f);
+        glColor4f(0.2f, 1.0f, 0.8f, alpha * 0.7f);
+        glBegin(GL_LINE_STRIP);
+        for (int i = 0; i <= samples; ++i) {
+            double th_val = 0.001 + (M_PI - 0.002) * (static_cast<double>(i) / samples);
+            double f_exact = core->eval_phi(snapshot.n, std::cos(th_val));
+            float pos_x = x_start + (x_end - x_start) * (static_cast<float>(i) / samples);
+            float pos_y = static_cast<float>(f_exact * 1.5);
+            glVertex3f(pos_x, pos_y, 0.12f);
+        }
+        glEnd();
+    }
 }
 
 void GLCanvas::render_layer_vii(float alpha) {
-    // Layer VII: Multi-Backend Arithmetic Factory (7 execution tracks)
     glDisable(GL_LIGHTING);
 
     const char* backend_names[] = {
@@ -529,16 +529,15 @@ void GLCanvas::render_layer_vii(float alpha) {
 
     for (int i = 0; i < 7; ++i) {
         BackendType bt = static_cast<BackendType>(i);
-        (void)backend_names; // Explicit mark
-        double backend_phi = core->eval_backend_phi(bt, core->n, core->x);
+        (void)backend_names;
+        double backend_phi = core->eval_backend_phi(bt, snapshot.n, snapshot.x);
         double exact_phi = core->eval_phi();
         double err = std::abs(backend_phi - exact_phi);
 
         float ty = start_y - i * track_height;
 
-        // Track baseline
         glLineWidth(2.0f);
-        if (bt == active_backend) {
+        if (bt == snapshot.backend) {
             glColor4f(0.3f, 1.0f, 0.4f, alpha);
         } else {
             glColor4f(0.5f, 0.6f, 0.8f, alpha * 0.5f);
@@ -549,7 +548,6 @@ void GLCanvas::render_layer_vii(float alpha) {
         glVertex3f(2.2f, ty, 0.0f);
         glEnd();
 
-        // Noise particles for floating/fixed-point error
         if (err > 1e-12) {
             int num_noise = std::min(20, static_cast<int>(err * 1e6) + 2);
             glPointSize(4.0f);
@@ -566,12 +564,9 @@ void GLCanvas::render_layer_vii(float alpha) {
 }
 
 void GLCanvas::render_layer_viii(float alpha) {
-    // Layer VIII: Verification & Certification Chamber (4-Axis Wheel & Residual Gauges)
     glDisable(GL_LIGHTING);
 
-    ResidualState res = core->compute_residuals(active_backend);
-
-    // 4-Axis Verification Wheel (Algebraic, Arithmetic, Analytic, Numerical)
+    // 4-Axis Verification Wheel
     float radius = 1.4f;
     glLineWidth(3.0f);
     glColor4f(0.3f, 0.8f, 1.0f, alpha * 0.7f);
@@ -582,22 +577,26 @@ void GLCanvas::render_layer_viii(float alpha) {
     }
     glEnd();
 
-    // 4 Orthogonal Axes
+    // 4 Independent Axes
     glLineWidth(2.0f);
-    glColor4f(0.8f, 0.8f, 0.9f, alpha * 0.5f);
-    glBegin(GL_LINES);
     // Axis 1: Algebraic
-    glVertex3f(-radius, 0.0f, 0.0f); glVertex3f(radius, 0.0f, 0.0f);
-    // Axis 2: Arithmetic
-    glVertex3f(0.0f, -radius, 0.0f); glVertex3f(0.0f, radius, 0.0f);
-    // Axis 3: Analytic
-    glVertex3f(-radius * 0.7f, -radius * 0.7f, 0.0f); glVertex3f(radius * 0.7f, radius * 0.7f, 0.0f);
-    // Axis 4: Numerical
-    glVertex3f(-radius * 0.7f, radius * 0.7f, 0.0f); glVertex3f(radius * 0.7f, -radius * 0.7f, 0.0f);
-    glEnd();
+    glColor4f(snapshot.cert.algebraic_exact ? 0.2f : 0.8f, snapshot.cert.algebraic_exact ? 1.0f : 0.3f, 0.3f, alpha);
+    glBegin(GL_LINES); glVertex3f(-radius, 0.0f, 0.0f); glVertex3f(radius, 0.0f, 0.0f); glEnd();
 
-    // Glowing Certification Badge if certified
-    if (res.is_certified) {
+    // Axis 2: Arithmetic
+    glColor4f(snapshot.cert.arithmetic_exact ? 0.2f : 0.8f, snapshot.cert.arithmetic_exact ? 1.0f : 0.3f, 0.3f, alpha);
+    glBegin(GL_LINES); glVertex3f(0.0f, -radius, 0.0f); glVertex3f(0.0f, radius, 0.0f); glEnd();
+
+    // Axis 3: Analytic
+    glColor4f(snapshot.cert.analytic_certified ? 0.2f : 0.8f, snapshot.cert.analytic_certified ? 1.0f : 0.3f, 0.3f, alpha);
+    glBegin(GL_LINES); glVertex3f(-radius * 0.7f, -radius * 0.7f, 0.0f); glVertex3f(radius * 0.7f, radius * 0.7f, 0.0f); glEnd();
+
+    // Axis 4: Numerical
+    glColor4f(snapshot.cert.numerical_valid ? 0.2f : 0.8f, snapshot.cert.numerical_valid ? 1.0f : 0.3f, 0.3f, alpha);
+    glBegin(GL_LINES); glVertex3f(-radius * 0.7f, radius * 0.7f, 0.0f); glVertex3f(radius * 0.7f, -radius * 0.7f, 0.0f); glEnd();
+
+    // Luminous Certification Badge if valid
+    if (snapshot.cert.algebraic_exact || snapshot.cert.arithmetic_exact || snapshot.cert.analytic_certified) {
         glLineWidth(4.0f);
         glColor4f(0.2f, 1.0f, 0.4f, alpha);
         glBegin(GL_LINE_LOOP);
@@ -610,7 +609,6 @@ void GLCanvas::render_layer_viii(float alpha) {
 }
 
 void GLCanvas::render_hud() {
-    // Render 2D HUD text over GL viewport
     glMatrixMode(GL_PROJECTION);
     glPushMatrix();
     glLoadIdentity();
@@ -625,14 +623,14 @@ void GLCanvas::render_hud() {
 
     char buf[256];
     const char* layer_names[] = {
-        "Layer I: Harmonic Geometry (S^{d-1})",
-        "Layer II: Projector Temple (v_n (x) v_n^*)",
-        "Layer III: Differential & Schrodinger Wave",
-        "Layer IV: Jacobi Spectral City (J_m)",
-        "Layer V: Two-Pole Boundary Coordinates (z_+, z_-)",
-        "Layer VI: Composite Matched Asymptotics",
-        "Layer VII: Multi-Backend Arithmetic Factory",
-        "Layer VIII: Certification Chamber"
+        "Layer I: Harmonic Geometry & Fischer Decomposition",
+        "Layer II: Projector Temple & K-Fixed Ray v_n \\otimes v_n^*",
+        "Layer III: Differential & Schrodinger Wave Equations",
+        "Layer IV: Jacobi Spectral City & Golub-Welsch Tower J_m",
+        "Layer V: Two-Pole Boundary Layer Coordinates (z_+, z_-)",
+        "Layer VI: Composite Matched Asymptotics F_comp",
+        "Layer VII: Multi-Backend Arithmetic Execution Factory",
+        "Layer VIII: Verification & Certification Chamber"
     };
 
     glColor3f(0.9f, 0.95f, 1.0f);
@@ -647,10 +645,11 @@ void GLCanvas::render_hud() {
         gl_draw(buf, 15, h() - 45);
     }
 
-    // Parameters overlay
     glColor3f(0.7f, 0.85f, 0.95f);
-    std::snprintf(buf, sizeof(buf), "d=%d (lambda=%.1f)  n=%d  theta=%.4f (x=%.4f)  phi_n(x)=%.6f",
-                  core->d, core->lambda_val, core->n, core->theta, core->x, core->eval_phi());
+    std::snprintf(buf, sizeof(buf),
+                  "d=%d (\\lambda=%.1f)  n=%d  \\theta=%.4f (x=%.4f)  N=%.1f  z_+=%.3f  z_-=%.3f  [Regime: %s]",
+                  snapshot.d, snapshot.lambda, snapshot.n, snapshot.theta, snapshot.x,
+                  snapshot.N, snapshot.z_plus, snapshot.z_minus, snapshot.regime_name.c_str());
     gl_font(FL_HELVETICA, 12);
     gl_draw(buf, 15, 20);
 

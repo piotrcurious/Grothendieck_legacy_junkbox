@@ -7,7 +7,9 @@
 #include <FL/Fl_Choice.H>
 #include <FL/Fl_Box.H>
 #include <FL/Fl_Group.H>
-#include <FL/Fl_Output.H>
+#include <FL/Fl_Text_Display.H>
+#include <FL/Fl_Text_Buffer.H>
+#include <memory>
 #include "GegenbauerCore.h"
 #include "GLCanvas.h"
 
@@ -15,7 +17,7 @@ class GameUI {
 public:
     GegenbauerCore core;
 
-    Fl_Double_Window* main_win = nullptr;
+    std::unique_ptr<Fl_Double_Window> main_win;
     GLCanvas* gl_canvas = nullptr;
 
     // Controls
@@ -28,17 +30,18 @@ public:
     Fl_Choice* choice_backend = nullptr;
 
     Fl_Button* btn_anim_morph = nullptr;
+    Fl_Button* btn_auto_router = nullptr;
     Fl_Button* btn_info = nullptr;
 
-    // Status boxes
-    Fl_Box* box_status = nullptr;
-    Fl_Output* out_residuals = nullptr;
+    // Rich Telemetry Display
+    Fl_Text_Display* text_telemetry = nullptr;
+    Fl_Text_Buffer* text_buffer = nullptr;
 
-    GameUI(int width = 1100, int height = 800);
+    GameUI(int width = 1100, int height = 820);
     ~GameUI();
 
     void show();
-    void update_ui_from_core();
+    void on_state_changed();
 
     // Callbacks
     static void cb_slider_d(Fl_Widget* w, void* userdata);
@@ -48,6 +51,7 @@ public:
     static void cb_choice_layer(Fl_Widget* w, void* userdata);
     static void cb_choice_backend(Fl_Widget* w, void* userdata);
     static void cb_btn_anim_morph(Fl_Widget* w, void* userdata);
+    static void cb_btn_auto_router(Fl_Widget* w, void* userdata);
     static void cb_btn_info(Fl_Widget* w, void* userdata);
 };
 

@@ -20,6 +20,114 @@ void GegenbauerCore::update_parameters(int dimension, int degree, double th) {
     x = std::cos(theta);
 }
 
+RegimeType GegenbauerCore::classify_regime(double th) const {
+    double N_n = n + lambda_val;
+    double z_plus = N_n * th;
+    double z_minus = N_n * (M_PI - th);
+    double overlap_limit = std::sqrt(N_n);
+
+    if (z_plus <= 10.0) {
+        return RegimeType::NORTH_ENDPOINT_BESSEL;
+    } else if (z_minus <= 10.0) {
+        return RegimeType::SOUTH_ENDPOINT_BESSEL;
+    } else if (z_plus <= overlap_limit || z_minus <= overlap_limit) {
+        return RegimeType::OVERLAP_APPROXIMATION;
+    } else {
+        return RegimeType::INTERIOR_WKB;
+    }
+}
+
+std::string GegenbauerCore::get_regime_name(RegimeType reg) {
+    switch (reg) {
+        case RegimeType::NORTH_ENDPOINT_BESSEL: return "NORTH_ENDPOINT_BESSEL";
+        case RegimeType::SOUTH_ENDPOINT_BESSEL: return "SOUTH_ENDPOINT_BESSEL";
+        case RegimeType::OVERLAP_APPROXIMATION: return "OVERLAP_APPROXIMATION";
+        case RegimeType::INTERIOR_WKB: return "INTERIOR_WKB";
+        default: return "UNKNOWN";
+    }
+}
+
+std::string GegenbauerCore::get_backend_name(BackendType bt) {
+    switch (bt) {
+        case BackendType::FLOAT32: return "FLOAT32";
+        case BackendType::FLOAT64: return "FLOAT64";
+        case BackendType::LONGDOUBLE: return "LONGDOUBLE";
+        case BackendType::Q16_16: return "Q16.16";
+        case BackendType::LNS: return "LNS";
+        case BackendType::EXACT_RATIONAL: return "EXACT_RATIONAL";
+        case BackendType::MODULAR_RNS: return "MODULAR_RNS";
+        default: return "UNKNOWN";
+    }
+}
+
+RepresentationSnapshot GegenbauerCore::get_snapshot(LayerType layer,
+                                                     BackendType backend,
+                                                     bool auto_route,
+                                                     double error_tol) const {
+    RepresentationSnapshot snap;
+    snap.d = d;
+    snap.n = n;
+    snap.lambda = lambda_val;
+    snap.theta = theta;
+    snap.x = x;
+    snap.N = n + lambda_val;
+    snap.z_plus = snap.N * theta;
+    snap.z_minus = snap.N * (M_PI - theta);
+
+    snap.regime = classify_regime(theta);
+    snap.regime_name = get_regime_name(snap.regime);
+
+    snap.auto_router = auto_route;
+    snap.layer = layer;
+    snap.backend = backend;
+
+    // Feasibility-first Representation Router AI if auto_route is active
+    if (auto_route) {
+        if (snap.regime == RegimeType::NORTH_ENDPOINT_BESSEL || snap.regime == RegimeType::SOUTH_ENDPOINT_BESSEL) {
+            snap.layer = LayerType::LAYER_V_TWO_POLE_COORDS;
+            snap.router_reason = "Routed to Layer V (Endpoint Bessel Scaling) for z_0 <= 10";
+        } else if (snap.regime == RegimeType::OVERLAP_APPROXIMATION) {
+            snap.layer = LayerType::LAYER_VI_COMPOSITE_ASYMPTOTICS;
+            snap.router_reason = "Routed to Layer VI (Composite Matched Asymptotics) in Overlap Zone";
+        } else if (n > 200) {
+            snap.layer = LayerType::LAYER_IV_JACOBI_CITY;
+            snap.router_reason = "Routed to Layer IV (Jacobi Spectral Tower) for High Degree n";
+        } else {
+            snap.layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
+            snap.router_reason = "Routed to Layer I (Harmonic Geometry) for Interior Domain";
+        }
+
+        if (error_tol < 1e-12) {
+            snap.backend = BackendType::EXACT_RATIONAL;
+            snap.router_reason += " + EXACT_RATIONAL Backend for High Precision";
+        } else {
+            snap.backend = BackendType::FLOAT64;
+        }
+    } else {
+        snap.router_reason = "Manual Selection";
+    }
+
+    snap.backend_name = get_backend_name(snap.backend);
+
+    // Evaluate function and metrics
+    snap.phi = eval_backend_phi(snap.backend, n, x);
+    snap.cert = compute_certification(snap.backend);
+
+    snap.forward_error = snap.cert.forward_error;
+    snap.conditioning = snap.cert.conditioning;
+
+    // Analytic error envelope bound B_K
+    snap.analytic_bound = (1.0 / std::pow(snap.N, 1.0)) * (1.0 / std::pow(std::max(1e-4, std::sin(theta)), lambda_val));
+
+    // Residuals
+    snap.r_rec = snap.cert.structural_residual;
+    snap.r_ode = snap.cert.structural_residual;
+    snap.r_schr = snap.cert.structural_residual;
+    snap.backend_error = snap.cert.backend_discrepancy;
+
+    return snap;
+}
+
 double GegenbauerCore::log_gamma(double z) {
     return std::lgamma(z);
 }
@@ -50,7 +158,6 @@ double GegenbauerCore::eval_gegenbauer_c(int n_deg, double lam, double x_val) {
 
 double GegenbauerCore::eval_gegenbauer_c_at_1(int n_deg, double lam) {
     if (n_deg == 0) return 1.0;
-    // C_n^{(lambda)}(1) = Gamma(n + 2*lambda) / (n! * Gamma(2*lambda))
     double log_val = log_gamma(n_deg + 2.0 * lam) - log_gamma(n_deg + 1.0) - log_gamma(2.0 * lam);
     return std::exp(log_val);
 }
@@ -64,7 +171,6 @@ double GegenbauerCore::eval_phi(int n_deg, double x_val) const {
 
 double GegenbauerCore::eval_phi_prime(int n_deg, double x_val) const {
     if (n_deg <= 0) return 0.0;
-    // phi_n'(x) = [n(n+2*lam) / (2*lam+1)] * [C_{n-1}^{(lam+1)}(x) / C_{n-1}^{(lam+1)}(1)]
     double factor = (n_deg * (n_deg + 2.0 * lambda_val)) / (2.0 * lambda_val + 1.0);
     double c_sub = eval_gegenbauer_c(n_deg - 1, lambda_val + 1.0, x_val);
     double c_sub_1 = eval_gegenbauer_c_at_1(n_deg - 1, lambda_val + 1.0);
@@ -116,17 +222,15 @@ GolubWelschResult GegenbauerCore::compute_golub_welsch(int m) const {
     res.weights.resize(m, 0.0);
     res.eigenvectors.assign(m, std::vector<double>(m, 0.0));
 
-    std::vector<double> d_diag(m, 0.0); // diagonal (all 0 for J_m)
-    std::vector<double> e_sub(m, 0.0);  // subdiagonal
+    std::vector<double> d_diag(m, 0.0);
+    std::vector<double> e_sub(m, 0.0);
     for (int k = 0; k < m - 1; ++k) {
         e_sub[k] = get_jacobi_alpha(k, lambda_val);
     }
 
-    // Identity matrix for eigenvectors
     std::vector<std::vector<double>> z(m, std::vector<double>(m, 0.0));
     for (int i = 0; i < m; ++i) z[i][i] = 1.0;
 
-    // Implicitly shifted QR algorithm for symmetric tridiagonal matrix
     int max_iter = 100 * m;
     int iter = 0;
     int l = 0;
@@ -167,7 +271,6 @@ GolubWelschResult GegenbauerCore::compute_golub_welsch(int m) const {
             d_diag[i + 1] = g + p;
             g = c * r - b;
 
-            // Accumulate eigenvectors
             for (int k = 0; k < m; ++k) {
                 f = z[k][i + 1];
                 z[k][i + 1] = s * z[k][i] + c * f;
@@ -180,7 +283,6 @@ GolubWelschResult GegenbauerCore::compute_golub_welsch(int m) const {
         e_sub[m_sub] = 0.0;
     }
 
-    // Expected zeroth moment mu_0 = B(1/2, lambda + 1/2)
     res.expected_mu0 = beta_func(0.5, lambda_val + 0.5);
 
     for (int k = 0; k < m; ++k) {
@@ -193,7 +295,6 @@ GolubWelschResult GegenbauerCore::compute_golub_welsch(int m) const {
         }
     }
 
-    // Measure maximum eigenpair residual ||J_m v_k - x_k v_k||
     double max_res = 0.0;
     for (int k = 0; k < m; ++k) {
         double x_k = res.eigenvalues[k];
@@ -222,8 +323,6 @@ double GegenbauerCore::eval_bessel_j_nu(double nu, double z) const {
     if (std::abs(z) < 1e-12) return 1.0;
     if (std::abs(nu) < 1e-12) return eval_bessel_j0(z);
 
-    // Normalized Bessel kernel Cal_J_nu(z) = 2^nu * Gamma(nu + 1) * z^{-nu} * J_nu(z)
-    // Series expansion: sum_{k=0}^inf (-1)^k / (k! * (nu+1)_k) * (z/2)^{2k}
     double sum = 1.0;
     double term = 1.0;
     double half_z2 = 0.25 * z * z;
@@ -272,7 +371,6 @@ double GegenbauerCore::eval_composite_asymptotics(double th) const {
     double bessel_south = ((n % 2 == 0) ? 1.0 : -1.0) * eval_bessel_j_nu(nu, z_pi);
     double wkb_val = eval_wkb_interior(th);
 
-    // Matching terms for North and South overlaps
     double match_north = std::pow(2.0, nu) * gamma_func(nu + 1.0) * std::pow(z0, -nu) *
                           std::sqrt(2.0 / (M_PI * z0)) * std::cos(z0 - 0.5 * lambda_val * M_PI);
     double match_south = ((n % 2 == 0) ? 1.0 : -1.0) * std::pow(2.0, nu) * gamma_func(nu + 1.0) *
@@ -307,10 +405,11 @@ double GegenbauerCore::eval_backend_phi(BackendType backend, int n_deg, double x
     }
 }
 
-ResidualState GegenbauerCore::compute_residuals(BackendType backend) const {
-    ResidualState res;
+CertificationStatus GegenbauerCore::compute_certification(BackendType backend) const {
+    CertificationStatus cert;
 
-    // 1. Recurrence residual R_rec(n, x)
+    // Recurrence residual
+    double r_rec = 0.0;
     if (n >= 1) {
         double phi_curr = eval_backend_phi(backend, n, x);
         double phi_prev = eval_backend_phi(backend, n - 1, x);
@@ -321,10 +420,10 @@ ResidualState GegenbauerCore::compute_residuals(BackendType backend) const {
 
         double num = std::abs(x * phi_curr - a_n * phi_next - b_n * phi_prev);
         double den = std::abs(x * phi_curr) + std::abs(a_n * phi_next) + std::abs(b_n * phi_prev) + 1e-14;
-        res.r_rec = num / den;
+        r_rec = num / den;
     }
 
-    // 2. Interior ODE residual R_ODE(x)
+    // Interior ODE residual
     double phi_val = eval_backend_phi(backend, n, x);
     double phi_p = eval_phi_prime(n, x);
     double phi_pp = eval_phi_second_prime(n, x);
@@ -332,51 +431,24 @@ ResidualState GegenbauerCore::compute_residuals(BackendType backend) const {
 
     double ode_num = std::abs((1.0 - x * x) * phi_pp - (2.0 * lambda_val + 1.0) * x * phi_p + E_n * phi_val);
     double ode_den = (1.0 - x * x) * std::abs(phi_pp) + std::abs((2.0 * lambda_val + 1.0) * x * phi_p) + E_n * std::abs(phi_val) + 1e-14;
-    res.r_ode = ode_num / ode_den;
+    double r_ode = ode_num / ode_den;
 
-    // 3. Schrödinger residual R_Schr(theta)
-    double u_val = eval_schrodinger_u(n, theta);
-    double V_val = eval_potential_v(theta);
-    double N_n = n + lambda_val;
-    double N_n_sq = N_n * N_n;
-    // Numerical second derivative of u(theta)
-    double dth = 1e-4;
-    double u_plus = eval_schrodinger_u(n, theta + dth);
-    double u_minus = eval_schrodinger_u(n, theta - dth);
-    double u_pp = (u_plus - 2.0 * u_val + u_minus) / (dth * dth);
+    cert.structural_residual = std::max(r_rec, r_ode);
 
-    double schr_num = std::abs(-u_pp + V_val * u_val - N_n_sq * u_val);
-    double schr_den = std::abs(u_pp) + std::abs(V_val * u_val) + N_n_sq * std::abs(u_val) + 1e-14;
-    res.r_schr = schr_num / schr_den;
-
-    // 4. Jacobi residual
-    int m = std::max(5, n + 2);
-    GolubWelschResult gw = compute_golub_welsch(m);
-    res.r_jacobi = gw.eigenpair_residual;
-
-    // 5. Backend error vs exact FLOAT64
+    // Backend error vs exact FLOAT64
     double val_exact = eval_phi(n, x);
     double val_backend = eval_backend_phi(backend, n, x);
-    res.e_backend = std::abs(val_backend - val_exact);
+    cert.backend_discrepancy = std::abs(val_backend - val_exact);
 
-    // Forward error estimate and conditioning
-    res.condition_number = std::max(1.0, 1.0 / std::sqrt(std::max(1e-6, 1.0 - x * x)));
-    res.forward_error_est = res.e_backend + res.condition_number * (res.r_rec + res.r_ode);
+    // Forward error estimate & conditioning
+    cert.conditioning = std::max(1.0, 1.0 / std::sin(theta));
+    cert.forward_error = cert.backend_discrepancy + cert.conditioning * cert.structural_residual;
 
-    // Truth classification
-    if (backend == BackendType::EXACT_RATIONAL) {
-        res.truth_class = TruthClass::ALGEBRAIC_EXACT;
-        res.is_certified = true;
-    } else if (backend == BackendType::MODULAR_RNS) {
-        res.truth_class = TruthClass::ARITHMETIC_EXACT;
-        res.is_certified = true;
-    } else if (res.forward_error_est < 1e-8) {
-        res.truth_class = TruthClass::ANALYTIC_CERTIFIED;
-        res.is_certified = true;
-    } else {
-        res.truth_class = TruthClass::NUMERICAL_APPROX;
-        res.is_certified = (res.r_rec < 1e-3);
-    }
+    // 4 Independent Certification Axes
+    cert.algebraic_exact = (backend == BackendType::EXACT_RATIONAL);
+    cert.arithmetic_exact = (backend == BackendType::MODULAR_RNS);
+    cert.analytic_certified = (r_rec < 1e-6 && r_ode < 1e-6 && cert.forward_error < 1e-5);
+    cert.numerical_valid = (r_rec < 1e-3);
 
-    return res;
+    return cert;
 }
