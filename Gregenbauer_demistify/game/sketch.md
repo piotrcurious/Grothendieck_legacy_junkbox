@@ -1,1285 +1,330 @@
-Yes. The framework is unusually well suited to a game because it already contains the ingredients of a simulation engine, a geometric world, a spectral system, multiple computational realities, and a verification system. The important design choice is not to make a game that merely draws Gegenbauer curves, but one in which the player must switch representations of the same mathematical object to solve problems.
+# EIGHTH LAYER: The Harmonic Representation Engine
 
-Game concept: THE EIGHTH LAYER
-
-A geometric/spectral exploration puzzle in which mathematics is simultaneously the world, the physics, and the debugging system.
-
-The player is operating an experimental machine called a Representation Engine. Its job is to navigate and manipulate an apparently impossible space whose geometry changes when viewed through different representations.
-
-The fundamental object is
-
-\[
-\phi_n(\theta)
-=
-\frac{C_n^{(\lambda)}(\cos\theta)}
-{C_n^{(\lambda)}(1)},
-\qquad
-\lambda=\frac{d-2}{2}.
-\]
-
-But the player never sees this only as a formula.
-
-The same object appears as:
-
-harmonic geometry → projector → differential wave → Jacobi matrix → endpoint wave → asymptotic approximation → arithmetic computation → certificate
-
-and the game allows the player to move between those descriptions.
-
+*A FLTK/OpenGL Interactive Visual & Mathematical Exploration Engine for Gegenbauer Polynomials and Spherical Harmonics on $SO(d)/SO(d-1)$*
 
 ---
 
-1. Core gameplay idea
+## 1. Executive Vision & Core Philosophy
 
-The central mechanic is:
+**THE EIGHTH LAYER** is an interactive mathematical visualization application and representation laboratory built upon the VIII-Layer unified computational framework for Gegenbauer polynomials $C_n^{(\lambda)}(x)$ and normalized zonal spherical functions $\phi_n(x)$ on the symmetric space $S^{d-1} \cong SO(d)/SO(d-1)$ ($\lambda = \frac{d-2}{2}, d \ge 3$).
 
-> Every mathematical representation is a different game world.
-
-
-
-Suppose the player is asked to locate a resonance at
+Unlike standard educational software that displays static 2D function curves, **THE EIGHTH LAYER** models a single underlying mathematical entity—the normalized zonal spherical wave $\phi_n(\theta)$—simultaneously across eight distinct structural representations:
 
 \[
-(d,n,\theta)=(7,184,0.037).
+\phi_n(\theta) = \frac{C_n^{(\lambda)}(\cos\theta)}{C_n^{(\lambda)}(1)}, \qquad \lambda = \frac{d-2}{2}, \quad N_n = n + \lambda.
 \]
 
-There are several ways to solve it.
+### Key Shift: Representation Quality & Morphing Transitions over Gamification
+The primary focus of the application is **representation fidelity** and **continuous, smooth transitions** between representation layers. Rather than focusing on score counters or rigid game levels, the engine empowers the user to observe, manipulate, and morph the exact same mathematical state through eight visual, structural, and numerical lenses.
 
-The player could:
-
-evaluate the polynomial directly;
-
-walk through the representation geometry;
-
-diagonalize a Jacobi matrix;
-
-use the north-endpoint Bessel representation;
-
-use the interior WKB representation;
-
-use exact rational arithmetic;
-
-use an RNS backend;
-
-compare two implementations;
-
-obtain a certificate.
-
-
-The game scores the player not just on whether they obtain the correct number, but on whether they use a feasible representation.
-
-So your Layer VIII optimizer becomes an actual gameplay system.
-
+As the user smoothly transitions between layers via an interpolation progress parameter $T \in [0, 1]$, the rendered 3D/2D geometry, color fields, coordinate axes, and numerical telemetry smoothly morph to reveal how representation geometry, linear operators, boundary layer asymptotics, and arithmetic backends are topologically and algebraically interconnected.
 
 ---
 
-2. The world is the eight-layer pipeline
+## 2. Architectural Pipeline & Layer Representation Catalog
 
-The game world has eight nested regions.
+The framework structures the mathematical world into eight nested representation layers:
 
-THE EIGHTH LAYER
-
-                 ┌───────────────────┐
-                 │ VIII  CERTIFICATE │
-                 └─────────▲─────────┘
-                           │
-                 ┌─────────┴─────────┐
-                 │ VII   ARITHMETIC  │
-                 └─────────▲─────────┘
-                           │
-                 ┌─────────┴─────────┐
-                 │ VI   COMPOSITE    │
-                 └─────────▲─────────┘
-                           │
-                 ┌─────────┴─────────┐
-                 │ V   ENDPOINTS     │
-                 └─────────▲─────────┘
-                           │
-                 ┌─────────┴─────────┐
-                 │ IV   JACOBI       │
-                 └─────────▲─────────┘
-                           │
-                 ┌─────────┴─────────┐
-                 │ III   OPERATORS   │
-                 └─────────▲─────────┘
-                           │
-                 ┌─────────┴─────────┐
-                 │ II    PROJECTOR   │
-                 └─────────▲─────────┘
-                           │
-                 ┌─────────┴─────────┐
-                 │ I     GEOMETRY    │
-                 └───────────────────┘
-
-But these are not eight menus.
-
-They are eight modes of physical interaction.
-
+```
+                 ┌───────────────────────────────────────┐
+                 │ VIII  CERTIFICATION CHAMBER           │
+                 └──────────────────▲────────────────────┘
+                                    │
+                 ┌──────────────────┴────────────────────┐
+                 │ VII   ARITHMETIC EXECUTION FACTORY    │
+                 └──────────────────▲────────────────────┘
+                                    │
+                 ┌──────────────────┴────────────────────┐
+                 │ VI    COMPOSITE MATCHED ASYMPTOTICS   │
+                 └──────────────────▲────────────────────┘
+                                    │
+                 ┌──────────────────┴────────────────────┐
+                 │ V     TWO-POLE BOUNDARY COORDINATES   │
+                 └──────────────────▲────────────────────┘
+                                    │
+                 ┌──────────────────┴────────────────────┐
+                 │ IV    JACOBI SPECTRAL CITY            │
+                 └──────────────────▲────────────────────┘
+                                    │
+                 ┌──────────────────┴────────────────────┐
+                 │ III   DIFFERENTIAL & SCHRÖDINGER WAVE │
+                 └──────────────────▲────────────────────┘
+                                    │
+                 ┌──────────────────┴────────────────────┐
+                 │ II    PROJECTOR TEMPLE & FIXED RAY    │
+                 └──────────────────▲────────────────────┘
+                                    │
+                 ┌──────────────────┴────────────────────┐
+                 │ I     HARMONIC GEOMETRY & MANIFOLD    │
+                 └───────────────────────────────────────┘
+```
 
 ---
 
-3. Layer I — The Harmonic World
+### Layer I — Harmonic Geometry & Fischer Decomposition
 
-This is the main exploration environment.
-
-The player sees a sphere
-
-\[
-S^{d-1}.
-\]
-
-For \(d=3\), this is an ordinary sphere.
-
-For larger \(d\), the game uses a visual projection: the player sees a 3D slice whose appearance changes as the hidden dimensions are activated.
-
-The player encounters harmonic structures rather than conventional terrain:
-
-nodal surfaces;
-
-maxima;
-
-minima;
-
-symmetry planes;
-
-degeneracy structures;
-
-harmonic "organisms".
-
-
-The degree \(n\) controls spatial complexity.
-
-Low \(n\):
-
-smooth
-      /\     /\
-     /  \___/  \
-
-High \(n\):
-
-/\_/\/\_/\_/\/\_/\_/\/\_/\
-
-The important thing is that these are not decorative waves.
-
-They are generated by the actual Gegenbauer evaluator.
-
-Changing
-
-\[
-d
-\]
-
-changes
-
-\[
-\lambda=\frac{d-2}{2}
-\]
-
-and therefore changes the entire geometry.
-
-So the player can literally change the dimension of the universe.
-
+* **Mathematical Object:** The $(d-1)$-dimensional sphere $S^{d-1} \subset \mathbb{R}^d$ and the homogeneous coordinate ring quotient $R(Q)_n \cong \operatorname{Sym}^n(\mathbb{C}^d) / q \operatorname{Sym}^{n-2}(\mathbb{C}^d) \cong \mathcal{H}_n(\mathbb{R}^d)$.
+* **Visual Representation:**
+  * Interactive 3D spherical manifold slice representing $S^{d-1}$ (for $d=3$, an ordinary 2-sphere; for $d > 3$, a 3D projected hyper-spherical slice whose metric visual curvature scales with dimension $d$).
+  * Dynamic zonal harmonic amplitude field mapped across the sphere: $f(\theta) = \phi_n(\theta)$.
+  * Color-coded nodal hypersurfaces ($x \in [-1, 1]$ where $\phi_n(x) = 0$), positive crests, and negative troughs.
+  * Spatial tessellation density driven by polynomial degree $n$.
+* **Representation Invariants:**
+  * Global dimension formula: $\dim V_n = \binom{n+d-1}{d-1} - \binom{n+d-3}{d-1}$.
+  * Boundedness: $|\phi_n(x)| \le 1$ with $\phi_n(1) = 1$.
+  * Parity symmetry: $\phi_n(-x) = (-1)^n \phi_n(x)$.
 
 ---
 
-4. Layer II — The Projector Temple
+### Layer II — Projector Temple & $K$-Invariant Fixed Ray
 
-Eventually the player discovers that the entire harmonic field can be represented by a much smaller object:
-
-\[
-P_{K,n}=v_n\otimes v_n^*.
-\]
-
-This becomes a gameplay revelation.
-
-Instead of exploring the entire representation space, the player discovers that the relevant information is concentrated on a one-dimensional fixed line.
-
-Visually:
-
-FULL REPRESENTATION SPACE
-
-        huge cloud
-     · · · · · · · ·
-   · · · · · · · · · ·
-  · · · · [ v_n ] · · ·
-   · · · · · · · · · ·
-     · · · · · · · ·
-
-                  ↓
-
-             K-fixed line
-
-                 │
-                 │ v_n
-                 │
-
-The player learns to rotate a complicated representation until it aligns with \(v_n\).
-
-A successful alignment collapses a huge state space into the scalar quantity
-
-\[
-\phi_n(g)=\langle v_n,\pi_n(g)v_n\rangle.
-\]
-
-This can become one of the game's central puzzles:
-
-> Find the invariant quantity hidden inside a huge representation.
-
-
-
+* **Mathematical Object:** The rank-one spherical projector $P_{K,n} = v_n \otimes v_n^*$ onto the one-dimensional $K$-invariant subspace $V_n^K \subset V_n$ where $K = SO(d-1)$.
+* **Visual Representation:**
+  * Dimensionality reduction visualization: The high-dimensional representation space $V_n$ is drawn as an ambient vector cloud.
+  * A luminous central axis represents the $K$-fixed ray $v_n$.
+  * Arbitrary representation vectors are projected orthogonally onto $v_n$ via the projector $P_{K,n}$.
+  * The scalar bi-$K$-invariant function is recovered as the matrix element $\phi_n(g) = \langle v_n, \pi_n(g) v_n \rangle$.
+* **Representation Invariants:**
+  * Idempotency: $P_{K,n}^2 = P_{K,n}$.
+  * Norm preservation: $\|v_n\| = 1$.
+  * Bi-$K$-invariance: $P_{K,n}(k_1 g k_2) = P_{K,n}(g)$ for all $k_1, k_2 \in K$.
 
 ---
 
-5. Layer III — The Differential Dungeon
+### Layer III — Differential Waves & Schrödinger Potential Landscape
 
-Here the game transforms the same object into a wave equation.
-
-The player enters a one-dimensional radial world:
-
-\[
-x=\cos\theta.
-\]
-
-The environment obeys
-
-\[
-(1-x^2)\phi''-(2\lambda+1)x\phi'
-+n(n+2\lambda)\phi=0.
-\]
-
-But the player does not type equations.
-
-The equations become physics.
-
-For example:
-
-violating the ODE causes the environment to distort;
-
-eigenvalue mismatch produces instability;
-
-incorrect boundary conditions produce explosions;
-
-symmetry violations cause mirrored geometry to separate.
-
-
-The Schrödinger transformation produces an even more visually interesting world:
-
-\[
--u''+
-\lambda(\lambda-1)\csc^2\theta\,u
-=
-N^2u.
-\]
-
-Now the player sees a quantum-like potential:
-
-\[
-V(\theta)=\lambda(\lambda-1)\csc^2\theta.
-\]
-
-The endpoints become enormous potential walls for certain \(\lambda\).
-
-The player can literally walk through the effective potential landscape.
-
+* **Mathematical Object:** The Gegenbauer Sturm-Liouville differential operator $L_x$ and the unitarily equivalent Liouville-Green Schrödinger operator $H_\lambda$:
+  \[
+  L_x \phi_n = n(n+2\lambda)\phi_n, \qquad (1-x^2)\phi_n'' - (2\lambda+1)x\phi_n' + n(n+2\lambda)\phi_n = 0,
+  \]
+  \[
+  H_\lambda u_n = N_n^2 u_n, \qquad -u_n''(\theta) + V(\theta) u_n(\theta) = N_n^2 u_n(\theta),
+  \]
+  where $u_n(\theta) = (\sin\theta)^\lambda \phi_n(\cos\theta)$ and $V(\theta) = \lambda(\lambda-1)\csc^2\theta$.
+* **Visual Representation:**
+  * Dual-panel 3D/2D curve rendering:
+    1. **Radial ODE View:** Direct plot of $\phi_n(x)$ on $x \in [-1, 1]$ with derivative vectors $\phi_n'(x)$ and second-derivative curvature arcs.
+    2. **Schrödinger View:** The wave $u_n(\theta)$ oscillating inside the quantum potential landscape $V(\theta)$.
+  * Singular potential walls: Visual energy barriers blowing up at $\theta \to 0^+$ and $\theta \to \pi^-$ for $\lambda > 0$.
+  * Total eigenvalue energy level $N_n^2 = (n+\lambda)^2$ drawn as a horizontal resonance baseline across the potential well.
+* **Representation Invariants:**
+  * Structural differential residual: $\widehat{R}_{\text{ODE}}(x) = 0$ and $\widehat{R}_{\text{Schr}}(\theta) = 0$.
+  * Energy eigenvalue: $E_n = n(n+2\lambda) = N_n^2 - \lambda^2$.
 
 ---
 
-6. Layer IV — The Jacobi City
+### Layer IV — Jacobi Spectral City & Golub-Welsch Tower
 
-This is probably the most visually striking layer.
-
-The infinite-dimensional multiplication operator
-
-\[
-M_x
-\]
-
-becomes the tridiagonal Jacobi matrix
-
-\[
-J=
-\begin{pmatrix}
-0&\alpha_0&0&0&\cdots\\
-\alpha_0&0&\alpha_1&0&\cdots\\
-0&\alpha_1&0&\alpha_2&\cdots\\
-\vdots&&\ddots&\ddots
-\end{pmatrix}.
-\]
-
-In the game, this becomes a giant vertical city.
-
-Each degree \(n\) is a room/floor.
-
-Edges between floors have strengths
-
-\[
-\alpha_n.
-\]
-
-The player controls a quantum-like particle moving through the chain.
-
-n=8
-              ○
-             / \
-            /   \
-         α7/     \
-          ○       ○
-         / \     /
-      α6/   \   /
-       ○     ○
-        \   /
-       α5\ /
-          ○
-
-A spectral eigenvector becomes a standing resonance in the city.
-
-The eigenvalues
-
-\[
-x_k\in(-1,1)
-\]
-
-become observable frequencies.
-
-That means Golub–Welsch is no longer an abstract numerical routine.
-
-It becomes the game's resonance scanner.
-
+* **Mathematical Object:** The infinite tridiagonal Jacobi operator $M_x \mapsto J$ and its principal $m \times m$ truncation $J_m$:
+  \[
+  J_m = \begin{pmatrix} 0 & \alpha_0 & 0 & \dots & 0 \\ \alpha_0 & 0 & \alpha_1 & \dots & 0 \\ 0 & \alpha_1 & 0 & \ddots & 0 \\ \vdots & \vdots & \ddots & \ddots & \alpha_{m-2} \\ 0 & 0 & 0 & \alpha_{m-2} & 0 \end{pmatrix}, \qquad \alpha_k = \frac{1}{2}\sqrt{\frac{(k+1)(k+2\lambda)}{(k+\lambda)(k+\lambda+1)}}.
+  \]
+* **Visual Representation:**
+  * A 3D tridiagonal node city: Vertical towers representing polynomial degrees $k = 0, 1, \dots, m-1$.
+  * Luminous inter-floor edges representing subdiagonal couplings $\alpha_k$, whose visual width and intensity scale with $\alpha_k \to 1/2$.
+  * Golub-Welsch spectral scanner: Real-time diagonalized eigenvalues $x_k \in (-1, 1)$ shown as spectral frequency lines, with eigenvector components $|v_{k,1}|^2$ represented as vertical spectral pillar weights.
+  * Standing eigenvector wave animation along the node city.
+* **Representation Invariants:**
+  * Operator norm bound: $\|J_m\| < 1$, $\sigma(J_m) \subset (-1, 1)$.
+  * Asymptotic limit: $\lim_{k\to\infty} \alpha_k = 1/2$.
+  * Weight sum normalization (zeroth moment): $\sum_{k=1}^m w_k = \mu_0 = B(1/2, \lambda+1/2)$.
 
 ---
 
-7. Layer V — The Two Poles
+### Layer V — Two-Pole Boundary Layer Coordinates
 
-Now we introduce perhaps the best gameplay mechanic in the entire framework.
-
-The sphere has two singularly important regions:
-
-\[
-z_+=N\theta
-\]
-
-and
-
-\[
-z_-=N(\pi-\theta).
-\]
-
-The player carries a device that reports:
-
-NORTH COORDINATE       INTERIOR COORDINATE       SOUTH COORDINATE
-
-     z+                         θ                       z-
-     │                          │                       │
-     ▼                          ▼                       ▼
-  Bessel zone              WKB zone                Bessel zone
-
-The player learns that a location can be represented differently depending on where they are.
-
-Near the north pole:
-
-\[
-z_+\ll N
-\]
-
-and the Bessel approximation becomes useful.
-
-Near the south pole:
-
-\[
-z_-\ll N.
-\]
-
-In the middle, the interior approximation becomes preferable.
-
-Thus the player must constantly answer:
-
-> Which coordinate system is computationally cheap and trustworthy here?
-
-
-
-That is much more interesting than simply displaying an approximation.
-
+* **Mathematical Object:** North and South pole boundary layer scaling coordinates:
+  \[
+  N_n = n + \lambda, \qquad z_+ = N_n \theta \quad (\text{North Pole}), \qquad z_- = N_n (\pi - \theta) \quad (\text{South Pole}).
+  \]
+  Near the poles ($z_\pm = O(1)$), the normalized function converges to normalized Bessel boundary layers:
+  \[
+  \phi_n(\theta) \approx 2^\lambda \Gamma(\lambda+1) \frac{J_\lambda(z_+)}{z_+^\lambda}.
+  \]
+* **Visual Representation:**
+  * Multi-viewport coordinate zoom:
+    * **North Pole View ($z_+$):** Zoomed-in boundary layer at $\theta \to 0$, rendering the Bessel function $J_\lambda(z_+)/z_+^\lambda$.
+    * **Interior WKB View ($\theta$):** Mid-domain oscillatory wave representation.
+    * **South Pole View ($z_-$):** Zoomed-in boundary layer at $\theta \to \pi$.
+  * Dynamic coordinate HUD displaying active scaling variables $z_+, \theta, z_-$, local conditioning $\kappa(\theta)$, and boundary layer radius indicators.
+* **Representation Invariants:**
+  * Boundary derivative anchors: $\phi_n'(1) = \frac{n(n+2\lambda)}{2(\lambda+1)}$, $\phi_n'(-1) = (-1)^{n-1} \phi_n'(1)$.
+  * Bessel scaling limit as $N_n \to \infty$ at fixed $z_\pm$.
 
 ---
 
-8. Layer VI — The Asymptotic Borderlands
+### Layer VI — Composite Matched Asymptotic Borderlands
 
-This becomes the game's fog-of-war system.
-
-Different computational approximations cover different territories.
-
-For example:
-
-θ = 0                                              θ = π
-
-|---- NORTH ----|====== INTERIOR ======|---- SOUTH ----|
-
-       Bessel              WKB               Bessel
-
-But they overlap.
-
-The player sees the overlap regions as translucent zones.
-
-The overlap itself becomes an object the player can inspect.
-
-For example:
-
-NORTH
-                │
-        ┌───────┼────────┐
-        │       │        │
-        │       │        │
-        │ overlap        │
-        │       │        │
-        └───────┼────────┘
-                │
-             INTERIOR
-
-The player can ask the machine to construct
-
-\[
-F_{\rm comp}
-=
-F_N+F_S+F_I-F_{+O}-F_{-O}.
-\]
-
-Then the overlap boundaries visibly disappear.
-
-That would be an excellent visual demonstration of matched asymptotics.
-
+* **Mathematical Object:** Two-overlap composite matched asymptotic expansion $F_{\text{comp}}(\theta)$ unifying endpoint Bessel expansions and interior WKB oscillations:
+  \[
+  F_{\text{comp}}(\theta) = F_{\text{north}}(\theta) + F_{\text{south}}(\theta) + F_{\text{interior}}(\theta) - F_{+,\text{overlap}}(\theta) - F_{-,\text{overlap}}(\theta).
+  \]
+* **Visual Representation:**
+  * Overlapping territory visualization:
+    * Translucent colored masks indicating domain coverage for North Bessel zone $\mathcal{D}_+$, Interior WKB zone $\mathcal{D}_I$, and South Bessel zone $\mathcal{D}_-$.
+    * Overlap regions $\mathcal{D}_+ \cap \mathcal{D}_I$ and $\mathcal{D}_- \cap \mathcal{D}_I$ highlighted as translucent interference zones.
+  * Matched boundary cross-fade: Inspecting individual asymptotic terms vs. the seamless composite wave $F_{\text{comp}}(\theta)$.
+  * Asymptotic candidate error envelopes $B_{K,+}, B_{K,\text{int}}, B_{K,-}$ rendered as translucent error bounds surrounding the wave.
+* **Representation Invariants:**
+  * Uniform error bound: $\| \phi_n - F_{\text{comp}} \|_\infty = O(N_n^{-K})$.
+  * Seamless overlap matching identity in matching zones.
 
 ---
 
-9. A very important gameplay mechanic: bad asymptotics
+### Layer VII — Multi-Backend Arithmetic Execution Factory
 
-The game should deliberately make it possible to choose a mathematically inappropriate representation.
-
-For example, the player could attempt to use an interior WKB approximation extremely close to
-
-\[
-\theta=0.
-\]
-
-The screen would show something like:
-
-REPRESENTATION: INTERIOR WKB
-
-conditioning:      POOR
-endpoint distance: 0.00031
-estimated error:   3.7e-2
-certificate:       FAILED
-
-The approximation visibly begins to drift from the exact solution.
-
-The player then switches to the north Bessel backend:
-
-REPRESENTATION: NORTH BESSEL
-
-conditioning:      GOOD
-estimated error:   2.4e-9
-certificate:       VALID
-
-The correct wave snaps back into place.
-
-This directly demonstrates the philosophy behind your feasibility-first optimizer.
-
+* **Mathematical Object:** Parallel execution backends evaluating the Gegenbauer recurrence across distinct numerical domains:
+  1. `FLOAT32` (Single precision IEEE 754)
+  2. `FLOAT64` (Double precision IEEE 754)
+  3. `LONGDOUBLE` (Extended precision IEEE 754 / 80-bit x87)
+  4. `Q16.16` (Fixed-point arithmetic with 16 fractional bits)
+  5. `LNS` (Logarithmic Number System log-domain arithmetic)
+  6. `EXACT_RATIONAL` ($\mathbb{Q}[\lambda, x]$ symbolic fraction recurrence)
+  7. `MODULAR_RNS` (Residue Number System over coprimes $(p_1, \dots, p_k)$ with CRT reconstruction)
+* **Visual Representation:**
+  * Parallel arithmetic pipeline streams: 7 side-by-side processing tracks displaying current numerical state, machine epsilon noise, and bit representation.
+  * Bit truncation lattice: Visual rendering of floating-point mantissa bits vs. exact rational integer bit-length $B_{\text{bits}}^{(\phi)}(n)$.
+  * Noise particle streams: Quantization noise particles emitted by low-precision backends (`FLOAT32`, `Q16.16`) compared against zero-noise reference streams (`EXACT_RATIONAL`, `MODULAR_RNS`).
+* **Representation Invariants:**
+  * Exact rational identity over $\mathbb{Q}[\lambda, x]$.
+  * RNS CRT admissibility condition: $(2UV < M)$ with $\gcd(u, v) = 1$.
 
 ---
 
-10. Layer VII — The Arithmetic Factory
+### Layer VIII — Verification & Certification Chamber
 
-This can become a genuinely game-like resource system.
-
-Different computational backends are represented as machines:
-
-COMPUTATION FACTORY
-
- ┌───────────┐
- │ FLOAT32   │ cheap / noisy
- └───────────┘
-
- ┌───────────┐
- │ FLOAT64   │ balanced
- └───────────┘
-
- ┌───────────┐
- │ FIXED      │ deterministic / limited range
- └───────────┘
-
- ┌───────────┐
- │ RATIONAL   │ exact / expensive
- └───────────┘
-
- ┌───────────┐
- │ RNS / CRT  │ exact-ish scalable arithmetic
- └───────────┘
-
- ┌───────────┐
- │ FINITE     │ modular verification
- │ FIELD      │
- └───────────┘
-
- ┌───────────┐
- │ NTT        │ fast convolution engine
- └───────────┘
-
-Each machine has actual performance characteristics.
-
-For example:
-
-Backend	Cost	Precision	Range	Certification
-
-FLOAT32	very low	low	moderate	numerical
-FLOAT64	low	high	high	numerical
-Q16.16	very low	fixed	limited	arithmetic model
-Rational	high	exact	huge cost	arithmetic exact
-RNS	medium	exact reconstruction	configurable	arithmetic exact
-\(\mathbb F_p\)	very low	modular	finite	congruence
-mpmath	very high	configurable	huge	empirical
-
-
-The player has a computational energy budget.
-
-Therefore:
-
-> Exactness is a resource.
-
-
-
-That makes arithmetic architecture a genuine game mechanic.
-
+* **Mathematical Object:** The multi-axis verification taxonomy and certificate matrix $\mathcal{C}_M = (\mathcal{D}_M, \mathcal{P}_M, E_M^{\text{arith}}, E_M^{\text{cond}}, B_M^{\text{analytic}}, \mathcal{I}_M, \mathcal{T}_M)$ classifying truth into four categories:
+  * `ALGEBRAIC_EXACT`: Certified zero error via symbolic/algebraic identities.
+  * `ARITHMETIC_EXACT`: Certified zero error via RNS/CRT integer recovery.
+  * `ANALYTIC_CERTIFIED`: Rigorous asymptotic error envelope bounds.
+  * `NUMERICAL_APPROX`: Floating-point evaluation with empirical residual bounds.
+* **Visual Representation:**
+  * A 3D Certification Wheel / Chamber Tensor: 4 orthogonal verification axes (Algebraic, Arithmetic, Analytic, Numerical).
+  * Real-time residual gauges:
+    * Recurrence Residual $\widehat{R}_{\text{rec}}$
+    * Differential Residual $\widehat{R}_{\text{ODE}}$
+    * Schrödinger Residual $\widehat{R}_{\text{Schr}}$
+    * Jacobi Eigenpair Residual $\widehat{R}_J$
+    * Cross-Backend Discrepancy $E_{A,B}$
+  * Certificate Tensor Collapse: When all active residuals fall below tolerance $\epsilon_{\text{target}}$, the chamber emits a glowing unified Verification Certificate Badge.
+* **Representation Invariants:**
+  * Master computational contract: $\mathcal{C}_M^{\text{valid}} \implies |F - \widehat{F}_M| \le B_M^{\text{analytic}} + E_M^{\text{arith}} + E_M^{\text{cond}}$.
 
 ---
 
-11. Layer VIII — The Certification Chamber
+## 3. Continuous Layer Transition Mechanics
 
-This should be the game's equivalent of a boss room.
+The engine's defining feature is **smooth mathematical morphing** between representation layers.
 
-The machine never simply says:
+### Transition Parameter & Global Interpolation State
+Let $L_A$ be the origin layer and $L_B$ be the destination layer. The user controls a global transition parameter:
+\[
+T \in [0.0, 1.0], \qquad \text{where } T=0 \implies L_A, \quad T=1 \implies L_B.
+\]
 
-> "Correct."
+A smooth smoothstep interpolation function $S(T) = 3T^2 - 2T^3$ (or quintic $6T^5 - 15T^4 + 10T^3$) drives vertex positions, camera matrices, color fields, and shader parameters.
 
+```
+       Layer A                         Morphing Zone                        Layer B
+ (e.g. 3D Sphere)                    (0.0 < T < 1.0)                   (e.g. 1D Wave)
+ ┌───────────────┐               ┌────────────────────┐               ┌───────────────┐
+ │ S^{d-1}       │  ───────────> │ Vertex Interpolate │  ───────────> │ u_n(θ) Wave   │
+ │ Geometry      │   S(T) blend  │ Metric Deformation │   S(T) blend  │ & Potential V │
+ └───────────────┘               └────────────────────┘               └───────────────┘
+```
 
+### Morphing Algorithms between Adjacent & Non-Adjacent Layers
 
-It says:
+1. **Layer I $\to$ Layer II (Sphere $\to$ Projector Ray):**
+   * Vertices on $S^{d-1}$ smoothly contract along non-$K$-fixed directions:
+     \[
+     \mathbf{P}(T) = (1 - S(T)) \mathbf{P}_{S^{d-1}} + S(T) \langle \mathbf{P}_{S^{d-1}}, \mathbf{v}_n \rangle \mathbf{v}_n.
+     \]
+   * The 3D sphere collapses into a single luminous 1D vector ray $v_n$, while ambient representation space dims.
 
-CERTIFICATION STATUS
+2. **Layer II $\to$ Layer III (Projector Ray $\to$ Differential Wave & Potential):**
+   * The 1D $K$-invariant ray $v_n$ unrolls horizontally along coordinate $x = \cos\theta \in [-1, 1]$.
+   * A 3D potential surface rises from the ground plane as $S(T) \cdot \lambda(\lambda-1)\csc^2\theta$, while the scalar projection magnitude morphs into the oscillating wave $u_n(\theta)$.
 
-ALGEBRAIC         ✓
-ARITHMETIC        ✓
-ANALYTIC          ?
-NUMERICAL         ✓
+3. **Layer III $\to$ Layer IV (Differential Wave $\to$ Jacobi Spectral City):**
+   * Continuous wave curve $u_n(\theta)$ discretizes into $m$ vertical nodal pillars at $k = 0, 1, \dots, m-1$.
+   * Inter-pillar potential field contracts into discrete coupling beams with thickness and brightness proportional to $\alpha_k = \frac{1}{2}\sqrt{\frac{(k+1)(k+2\lambda)}{(k+\lambda)(k+\lambda+1)}}$.
+   * Continuous wave oscillations transition into standing eigenvector node pulses across the city.
 
-STRUCTURAL ERROR  3.2e-14
-FORWARD ERROR     < 8.1e-13
-CONDITION NUMBER  4.7e2
-BACKEND Δ         2.1e-14
+4. **Layer IV $\to$ Layer V (Jacobi City $\to$ Two-Pole Boundary Coordinates):**
+   * Tridiagonal nodes stretch horizontally and split into two endpoint viewports.
+   * Left viewport morphs into North pole Bessel scaling coordinate $z_+ = N_n \theta$; right viewport morphs into South pole Bessel scaling $z_- = N_n (\pi - \theta)$.
+   * Discrete Jacobi eigenvalues morph into continuous Bessel curve limits $J_\lambda(z_+)/z_+^\lambda$.
 
-The player must satisfy a particular certificate.
+5. **Layer V $\to$ Layer VI (Boundary Coordinates $\to$ Composite Matched Asymptotics):**
+   * Endpoint viewports merge back into a single domain $\theta \in [0, \pi]$.
+   * Translucent domain masks ($\mathcal{D}_+, \mathcal{D}_I, \mathcal{D}_-$) expand to show overlap matching zones.
+   * Individual Bessel and WKB curves cross-fade smoothly into the unified composite wave $F_{\text{comp}}(\theta)$.
 
-For example:
+6. **Layer VI $\to$ Layer VII (Composite Asymptotics $\to$ Arithmetic Execution Factory):**
+   * Smooth composite wave surface splits into 7 parallel horizontal execution tracks representing `FLOAT32`, `FLOAT64`, `LONGDOUBLE`, `Q16.16`, `LNS`, `EXACT_RATIONAL`, and `MODULAR_RNS`.
+   * Precision degradation particles and mantissa bit lattices fade in over the wave surface.
 
-Mission
-
-> Determine whether \(\phi_{87}^{(3)}(x)\) is trustworthy at \(x=0.9991\).
-
-
-
-The naive FLOAT64 computation may satisfy the recurrence residual but have poor forward conditioning.
-
-The player must discover that:
-
-structural residual ≈ 0
-
-does not imply
-
-forward error ≈ 0.
-
-That becomes an actual puzzle.
-
+7. **Layer VII $\to$ Layer VIII (Arithmetic Factory $\to$ Certification Chamber):**
+   * Parallel execution tracks curve radially into a 4-axis 3D Certification Wheel.
+   * Rounding noise particles condense into 5 numeric residual gauges ($\widehat{R}_{\text{rec}}, \widehat{R}_{\text{ODE}}, \widehat{R}_{\text{Schr}}, \widehat{R}_J, E_{A,B}$).
+   * When residuals satisfy tolerance, the wheel locks into a glowing Verification Certificate Badge.
 
 ---
 
-12. Enemies should represent numerical failure modes
+## 4. FLTK & OpenGL Technical Architecture
 
-Rather than generic monsters, use failures of computation.
+The application is implemented in C++20 using **FLTK (Fast Light Tool Kit)** for native windowing/GUI controls and **OpenGL** for hardware-accelerated 3D/2D rendering.
 
-Cancellation
+### Class Architecture
 
-Two enormous numbers nearly cancel.
+```
+  ┌────────────────────────────────────────────────────────┐
+  │                        GameUI                          │
+  │   (Fl_Double_Window, Controls Panel, HUD, Status Bar)  │
+  └───────────────────────────┬────────────────────────────┘
+                              │
+                              ▼
+  ┌────────────────────────────────────────────────────────┐
+  │                       GLCanvas                         │
+  │     (Fl_Gl_Window, 3D Camera, Renderers, Morph Engine) │
+  └─────────────┬────────────────────────────┬─────────────┘
+                │                            │
+                ▼                            ▼
+  ┌──────────────────────────┐  ┌──────────────────────────┐
+  │     GegenbauerCore       │  │    LayerRenderers        │
+  │ (Recurrence, Jacobi,     │  │ (Sphere, Ray, Wave,      │
+  │  Bessel, WKB, Backends,  │  │  Jacobi, Asymptotics,    │
+  │  Residuals, Certificates)│  │  Factory, CertChamber)   │
+  └──────────────────────────┘  └──────────────────────────┘
+```
 
-Visually:
+### Module Breakdown
 
-████████████████████
-                -
-███████████████████▉
-                    ↓
-                   tiny
+1. `GegenbauerCore.h / .cpp`:
+   * High-precision mathematical evaluation engine.
+   * Calculates normalized $\phi_n(\cos\theta)$, derivatives $\phi_n'$, Schrödinger wave $u_n(\theta)$, Jacobi coefficients $\alpha_k$, Golub-Welsch eigenvalues/eigenvectors, Bessel asymptotics $J_\lambda(z_\pm)$, WKB asymptotics, composite wave $F_{\text{comp}}$, multi-backend simulations (`FLOAT32` to `MODULAR_RNS`), and residual taxonomy.
 
-A "Cancellation Beast" appears when the player chooses a numerically unstable formulation.
+2. `GLCanvas.h / .cpp`:
+   * OpenGL rendering widget derived from `Fl_Gl_Window`.
+   * Handles 3D camera projection (orbit, pan, zoom), lighting, material properties, depth buffer management, coordinate grids, text overlays, and layer morphing interpolation engine.
 
+3. `GameUI.h / .cpp`:
+   * FLTK GUI wrapper creating a responsive multi-panel layout.
+   * Includes control sliders ($d \in [3, 20]$, $n \in [0, 500]$, $\theta \in [0.0001, \pi-0.0001]$), Layer selection tabs (Layers I–VIII), transition speed & progress sliders, backend selector dropdown, real-time residual monitors, and interactive help panel.
 
----
-
-Overflow
-
-The polynomial recurrence generates values exceeding the available dynamic range.
-
-The environment literally blows apart.
-
-
----
-
-Underflow
-
-The wave disappears into numerical zero.
-
-
----
-
-Wrong branch
-
-The asymptotic branch remains locally plausible but globally incorrect.
-
-
----
-
-Ill-conditioning
-
-A tiny perturbation creates a huge positional displacement.
-
-The player learns experimentally what
-
-\[
-\kappa
-\]
-
-means.
-
+4. `main.cpp`:
+   * Entry point initializing FLTK, parsing command-line parameters (e.g. `--headless-test` or custom dimensions), setting up theme styling, and launching event loop.
 
 ---
 
-False certificate
-
-The most interesting enemy.
-
-The recurrence residual is essentially zero, but the computed answer is wrong.
-
-This demonstrates your distinction:
-
-\[
-R_{\text{structural}}=0
-\not\Rightarrow
-E_{\text{forward}}=0.
-\]
-
-
----
-
-13. One particularly strong mechanic: "same object, different universes"
-
-The player can press a key:
-
-TAB — CHANGE REPRESENTATION
-
-The world freezes.
-
-Then the same mathematical state appears in another form.
-
-For example:
-
-Geometry view
-
-sphere
- ↓
-harmonic mode n=120
- ↓
-node at θ=0.0173
-
-Differential view
-
-ODE
- ↓
-E = 120(120+2λ)
- ↓
-radial wave
-
-Jacobi view
-
-J_m
- ↓
-eigenvector
- ↓
-x_k
-
-Arithmetic view
-
-FLOAT64
- ↓
-RNS
- ↓
-CRT reconstruction
-
-Certificate view
-
-ALGEBRAIC ✓
-ARITHMETIC ✓
-ANALYTIC ✓
-NUMERICAL ✓
-
-All five scenes refer to the exact same state.
-
-This would make the game an unusually effective demonstration of the framework.
-
-
----
-
-14. The "dimension machine"
-
-A particularly nice mechanic is allowing the player to change \(d\).
-
-For example:
-
-\[
-d=3 \Rightarrow \lambda=\frac12
-\]
-
-gives Legendre polynomials.
-
-The player sees the familiar spherical world.
-
-Then:
-
-\[
-d=4 \Rightarrow \lambda=1.
-\]
-
-Now
-
-\[
-\phi_n(\theta)
-=
-\frac{\sin((n+1)\theta)}
-{(n+1)\sin\theta}.
-\]
-
-The game world changes dramatically.
-
-Then try
-
-\[
-d=10,\qquad \lambda=4.
-\]
-
-The endpoint potential changes:
-
-\[
-\lambda(\lambda-1)\csc^2\theta
-=
-12\csc^2\theta.
-\]
-
-The same degree \(n\) now produces a radically different radial structure.
-
-Thus the player experiences:
-
-> \(d\) is not merely a parameter. It changes the computational universe.
-
-
-
-
----
-
-15. The game could have "representation bosses"
-
-Instead of standard bosses:
-
-Boss I — The Quotient
-
-The player must discover that many group elements correspond to the same double coset.
-
-Boss II — The Oscillator
-
-A high-\(n\) harmonic has thousands of oscillations.
-
-Boss III — The Endpoint
-
-The interior representation catastrophically fails near a pole.
-
-Boss IV — The Spectral Tower
-
-The player must reconstruct a signal from a Jacobi matrix.
-
-Boss V — The CRT Colossus
-
-An exact rational number is too large for ordinary arithmetic and must be reconstructed from residues.
-
-Final Boss — The False Certificate
-
-Every local numerical test looks good while the global result is wrong.
-
-The player has to combine independent verification axes.
-
-
----
-
-16. The actual game objective
-
-I'd make the overarching objective something like:
-
-> Build a machine capable of determining the value of an unknown spherical mode under severe computational constraints.
-
-
-
-Each level gives increasingly hostile conditions.
-
-Level 1
-
-\[
-\lambda=\frac12,\quad n=7.
-\]
-
-Straight recurrence is fine.
-
-Level 2
-
-\[
-\lambda=1,\quad n=500.
-\]
-
-Jacobi representation becomes attractive.
-
-Level 3
-
-\[
-n=10^5,\quad \theta\ll1.
-\]
-
-Endpoint asymptotics become necessary.
-
-Level 4
-
-Huge rational parameters.
-
-RNS/CRT becomes necessary.
-
-Level 5
-
-Finite-field verification is required.
-
-Level 6
-
-The correct solution requires choosing among competing representations.
-
-Level 7
-
-The player has to build a composite certificate.
-
-
----
-
-17. The most interesting mechanic: representation routing
-
-This is where your framework could become much more than an educational visualization.
-
-The player receives:
-
-\[
-(d,n,\theta,\epsilon_{\rm target})
-\]
-
-and the engine generates candidate representations
-
-\[
-\mathcal M=
-\{
-\text{recurrence},
-\text{Jacobi},
-\text{Bessel},
-\text{WKB},
-\text{rational},
-\text{RNS},
-\text{finite field},
-\ldots
-\}.
-\]
-
-Each candidate gets:
-
-\[
-(\text{domain},
-\text{error},
-\text{conditioning},
-\text{cost},
-\text{certificate}).
-\]
-
-The game then solves
-
-\[
-M^*=
-\arg\min_{M\in\mathcal M_{\rm admissible}}
-\operatorname{Cost}(M).
-\]
-
-That algorithm becomes the player's navigation AI.
-
-And the player can override it.
-
-So there are two possible styles:
-
-Engineer
-
-> Trust the optimizer.
-
-
-
-Mathematician
-
-> Inspect why the optimizer chose this representation.
-
-
-
-
----
-
-18. The UI
-
-I would avoid a conventional game HUD.
-
-Instead:
-
-┌────────────────────────────────────────────┐
-│ EIGHTH LAYER                               │
-├────────────────────────────────────────────┤
-│                                            │
-│              [3D HARMONIC WORLD]           │
-│                                            │
-│                                            │
-├───────────────┬────────────────────────────┤
-│ STATE         │ CERTIFICATE                │
-│ d = 6         │ ALGEBRAIC       ✓         │
-│ λ = 2         │ ARITHMETIC      ✓         │
-│ n = 371       │ ANALYTIC        ?         │
-│ θ = .00421    │ NUMERICAL       ✓         │
-│ N = 373       │                            │
-├───────────────┼────────────────────────────┤
-│ BACKEND       │ ERROR                      │
-│ Bessel        │ 2.4e-11                   │
-│ WKB           │ 7.1e-5                    │
-│ Jacobi        │ 3.9e-12                   │
-│ RNS           │ exact                      │
-└───────────────┴────────────────────────────┘
-
-The game would therefore look closer to a combination of:
-
-Outer Wilds + Zachtronics + scientific visualization + spectral laboratory
-
-than a conventional math game.
-
-
----
-
-19. A very nice visual trick
-
-The player's avatar itself can be represented differently.
-
-In the geometry layer:
-
-> a point on the sphere.
-
-
-
-In the representation layer:
-
-> a vector \(v_n\).
-
-
-
-In the differential layer:
-
-> a wavefunction \(u_n(\theta)\).
-
-
-
-In the Jacobi layer:
-
-> a vector of coefficients.
-
-
-
-In the arithmetic layer:
-
-> a residue vector
-
-
-
-\[
-(r_1,\ldots,r_k).
-\]
-
-In the certification layer:
-
-> a certificate graph.
-
-
-
-So the player's identity is mathematically transformed along with the world.
-
-
----
-
-20. What makes this genuinely demonstrate your framework
-
-Most educational games would simply put a Gegenbauer curve on the screen.
-
-This one would actually demonstrate the architectural claims:
-
-Framework concept	Game realization
-
-\(SO(d)/SO(d-1)\)	navigable geometry
-Fischer decomposition	representation compression puzzle
-\(K\)-fixed line	dimensionality reduction
-\(\phi_n\)	observable scalar field
-differential equation	physical dynamics
-Schrödinger transformation	potential landscape
-Jacobi matrix	spectral city
-eigenvalues	resonances
-Bessel scaling	north/south navigation
-WKB	interior navigation
-matched asymptotics	overlapping territories
-exact rational	expensive exact machine
-RNS/CRT	distributed residue computation
-finite fields	modular verification
-NTT	acceleration machine
-Golub–Welsch	spectral scanner
-conditioning	environmental instability
-residuals	damage indicators
-certificates	mission completion
-feasibility optimizer	representation-routing AI
-
-
-That is the important conceptual jump:
-
-> The player is not learning the framework by reading it. The player is operating the framework.
-
-
-
-
----
-
-21. Technical implementation
-
-For a serious prototype I would build it as a hybrid rather than putting everything directly into the game engine.
-
-GAME ENGINE
-                  Godot 4 / C++
-                       │
-                       ▼
-             ┌───────────────────┐
-             │ Visualization API │
-             └─────────┬─────────┘
-                       │
-               JSON / FlatBuffers
-                       │
-                       ▼
-        ┌─────────────────────────────┐
-        │ Mathematical Core            │
-        │                              │
-        │ Gegenbauer recurrence        │
-        │ normalized φ_n               │
-        │ Jacobi matrices              │
-        │ asymptotic branches           │
-        │ residual calculators          │
-        │ certificate engine            │
-        └──────────────┬──────────────┘
-                       │
-          ┌────────────┼────────────┐
-          ▼            ▼            ▼
-       float64       exact Q       RNS/CRT
-          │            │            │
-          └────────────┼────────────┘
-                       ▼
-                 verifier
-
-The mathematical engine should remain independent of rendering.
-
-That has a major advantage: the exact same core can later produce
-
-the game,
-
-research visualizations,
-
-benchmarks,
-
-automated tests,
-
-interactive notebooks.
-
-
-
----
-
-22. The game could even generate its own levels
-
-This is where the framework becomes particularly powerful.
-
-Instead of manually designing puzzles, generate them from the mathematical parameter space:
-
-\[
-(d,n,\lambda,\theta,m,p,N_{\max},K,\epsilon).
-\]
-
-For example:
-
-level = {
-    "dimension": 11,
-    "degree": 18427,
-    "theta": 3.2e-5,
-    "target_error": 1e-10,
-    "allowed_backends": [
-        "float64",
-        "bessel",
-        "rns",
-        "finite_field"
-    ]
-}
-
-The generator can deliberately create situations where:
-
-recurrence is stable;
-
-recurrence is unstable;
-
-endpoint asymptotics win;
-
-Jacobi wins;
-
-exact arithmetic is necessary;
-
-two backends disagree;
-
-a structural residual is misleading;
-
-modular verification catches a bug.
-
-
-That means the game automatically scales in difficulty.
-
-
----
-
-23. The ideal first playable demo
-
-I would not begin with all \(d\).
-
-Start with
-
-\[
-d=3,\qquad\lambda=\frac12.
-\]
-
-Everything becomes visually intelligible because
-
-\[
-\phi_n(x)=P_n(x).
-\]
-
-The first demo could have exactly one mission:
-
-> Find the 117th spherical resonance at \(x=0.9997\) with error \(<10^{-10}\).
-
-
-
-The player initially sees the Legendre wave.
-
-They try recurrence.
-
-It works poorly.
-
-They inspect the endpoint coordinate:
-
-\[
-z_+=N\theta.
-\]
-
-The system recommends the north endpoint representation.
-
-They switch to it.
-
-Then the player compares:
-
-DIRECT
-error estimate: 2.8e-6
-
-BESSEL
-error estimate: 7.4e-12
-
-JACOBI
-error estimate: 2.1e-13
-
-Finally they use two independent paths and obtain:
-
-ALGEBRAIC       ✓
-ARITHMETIC      ✓
-ANALYTIC        ✓
-NUMERICAL       ✓
-
-The level ends.
-
-That single mission would already communicate most of the architecture.
-
-
----
-
-24. The deeper game idea
-
-There is also a much more philosophical possibility here.
-
-The game can treat representation choice as perception.
-
-The player eventually realizes:
-
-> There is no single privileged computational picture of the object.
-
-
-
-A sphere, a polynomial, a differential equation, a Jacobi matrix, a Bessel function, a residue vector and a certificate are all different interfaces to one mathematical object.
-
-The final level could deliberately remove the "correct" representation.
-
-The player has to construct it.
-
-That would make Layer VIII not the last layer of the game, but the point at which the player learns that the eight layers are actually one object.
-
-
----
-
-Working title
-
-My strongest title would be:
-
-EIGHTH LAYER: The Harmonic Engine
-
-Subtitle:
-
-A game about seeing the same object eight different ways.
-
-The unusually good part of your framework for this purpose is that the mathematical architecture already supplies a natural game loop:
-
-\[
-\boxed{
-\text{represent}
-\rightarrow
-\text{transform}
-\rightarrow
-\text{compute}
-\rightarrow
-\text{switch representation}
-\rightarrow
-\text{verify}
-\rightarrow
-\text{certify}
-}
-\]
-
-That loop is much richer than simply "calculate a Gegenbauer polynomial."
+## 5. Verification & Testing Strategy
+
+To ensure mathematical rigor and software stability:
+
+1. **Mathematical Core Verification:**
+   * C++ unit test suite in `game/test_game_core.cpp` cross-referencing C++ `GegenbauerCore` outputs against exact rational identities, Jacobi eigenpair residuals $\|J_m v - x_k v\|$, and derivative anchors $\phi_n'(1) = \frac{n(n+2\lambda)}{2(\lambda+1)}$.
+2. **Python Cross-Validation:**
+   * Verification against parent directory suite `Gregenbauer_demistify/test_gegenbauer.py` (32 unit tests covering $R(Q)$, WKB/Bessel asymptotics, RNS/CRT exactness, and Pareto solver).
+3. **Graphics & Morphing Stability:**
+   * Automated verification of transition interpolation bounds $T \in [0, 1]$, vertex buffer allocations, and GL context validity under headless execution.
