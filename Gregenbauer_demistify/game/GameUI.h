@@ -10,8 +10,14 @@
 #include <FL/Fl_Text_Display.H>
 #include <FL/Fl_Text_Buffer.H>
 #include <memory>
+#include <chrono>
 #include "GegenbauerCore.h"
 #include "GLCanvas.h"
+
+struct LayerInfo {
+    const char* title;
+    const char* description;
+};
 
 class GameUI {
 public:
@@ -21,13 +27,12 @@ public:
     std::unique_ptr<Fl_Double_Window> main_win;
     GLCanvas* gl_canvas = nullptr;
 
-    // Core controls
+    // Controls
     Fl_Value_Slider* slider_d = nullptr;
     Fl_Value_Slider* slider_n = nullptr;
     Fl_Value_Slider* slider_theta = nullptr; // Endpoint sensitive
     Fl_Value_Slider* slider_transition = nullptr;
 
-    // Advanced numerical controls
     Fl_Choice* choice_error_target = nullptr;
     Fl_Value_Slider* slider_asymptotic_k = nullptr;
     Fl_Value_Slider* slider_jacobi_m = nullptr;
@@ -43,15 +48,19 @@ public:
     Fl_Text_Display* text_telemetry = nullptr;
     Fl_Text_Buffer* text_buffer = nullptr;
 
-    // Scheduler and guards
+    // Flags & timing
     bool is_dirty = false;
     bool is_morph_animating = false;
     bool is_updating_widgets = false;
+    std::chrono::steady_clock::time_point last_anim_time;
 
     GameUI(int width = 1100, int height = 820);
     ~GameUI();
 
     void show();
+    void apply_state_change(const GameState& new_state);
+    void commit_layer_transition();
+    void sync_widgets_from_state();
     void mark_dirty_and_schedule();
     void publish_snapshot();
 
