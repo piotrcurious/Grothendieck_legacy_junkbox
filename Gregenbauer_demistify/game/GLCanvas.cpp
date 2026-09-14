@@ -136,14 +136,22 @@ void GLCanvas::draw() {
     setup_lighting();
 
     double t = snapshot.transition;
-    LayerFrame frame_curr = make_layer_frame(snapshot.current_layer, snapshot);
-    LayerFrame frame_targ = make_layer_frame(snapshot.target_layer, snapshot);
+    LayerType active_target_layer = snapshot.effective_layer;
 
-    if (snapshot.current_layer == snapshot.target_layer || t >= 1.0) {
-        render_layer_frame(frame_targ, snapshot);
+    if (snapshot.current_layer == active_target_layer || t >= 1.0) {
+        LayerFrame frame = make_layer_frame(active_target_layer, snapshot);
+        render_layer_frame(frame, snapshot);
     } else {
-        LayerFrame frame_interp = interpolate_layer_frame(frame_curr, frame_targ, t);
-        render_layer_frame(frame_interp, snapshot);
+        // Cross-fade rendering: render origin layer (alpha 1-s) and target layer (alpha s)
+        double s = smoothstep(t);
+        LayerFrame frame_curr = make_layer_frame(snapshot.current_layer, snapshot);
+        frame_curr.alpha = static_cast<float>(1.0 - s);
+
+        LayerFrame frame_targ = make_layer_frame(active_target_layer, snapshot);
+        frame_targ.alpha = static_cast<float>(s);
+
+        render_layer_frame(frame_curr, snapshot);
+        render_layer_frame(frame_targ, snapshot);
     }
 
     render_hud();
@@ -366,7 +374,7 @@ void GLCanvas::render_layer_iii(const LayerFrame& frame, const RepresentationSna
 void GLCanvas::render_layer_iv(const LayerFrame& frame, const RepresentationSnapshot& snap) {
     glEnable(GL_LIGHTING);
 
-    int m_nodes = std::min(15, snap.params.n + 3);
+    int m_nodes = std::min(15, snap.params.jacobi_m);
     GolubWelschResult gw = core.compute_golub_welsch(m_nodes, snap.lambda);
     float spacing = frame.tower_spacing;
     float start_x = -0.5f * (m_nodes - 1) * spacing;
@@ -399,15 +407,17 @@ void GLCanvas::render_layer_iv(const LayerFrame& frame, const RepresentationSnap
         }
     }
 
+    // Golub-Welsch eigenvalues x_k and quadrature weights w_k
     glDisable(GL_LIGHTING);
     glLineWidth(2.0f);
     for (int k = 0; k < m_nodes; ++k) {
         float x_val = static_cast<float>(gw.eigenvalues[k]);
+        float w_val = static_cast<float>(gw.weights[k]);
         float line_x = x_val * 2.0f;
-        glColor4f(0.2f, 1.0f, 0.4f, frame.alpha * 0.7f);
+        glColor4f(0.2f, 1.0f, 0.4f, frame.alpha * std::min(1.0f, w_val * 2.0f));
         glBegin(GL_LINES);
         glVertex3f(line_x, -1.8f, -0.5f);
-        glVertex3f(line_x, -1.2f, -0.5f);
+        glVertex3f(line_x, -1.8f + w_val * 1.5f, -0.5f);
         glEnd();
     }
 }
@@ -505,8 +515,9 @@ void GLCanvas::render_layer_vi(const LayerFrame& frame, const RepresentationSnap
     }
     glEnd();
 
-    // Exact reference curve overlay phi_exact(theta)
+    // Live Overlays: Exact reference curve & Analytic Error Envelope B_K
     if (show_live_overlays) {
+        // Exact reference curve
         glLineWidth(1.5f);
         glColor4f(0.2f, 1.0f, 0.8f, frame.alpha * 0.7f);
         glBegin(GL_LINE_STRIP);
@@ -516,6 +527,21 @@ void GLCanvas::render_layer_vi(const LayerFrame& frame, const RepresentationSnap
             float pos_x = x_start + (x_end - x_start) * (static_cast<float>(i) / samples);
             float pos_y = static_cast<float>(f_exact * 1.5);
             glVertex3f(pos_x, pos_y, 0.12f);
+        }
+        glEnd();
+
+        // Analytic Error Envelope B_K
+        glLineWidth(1.0f);
+        glColor4f(1.0f, 0.2f, 0.2f, frame.alpha * 0.5f);
+        glBegin(GL_LINE_STRIP);
+        for (int i = 0; i <= samples; ++i) {
+            double th_val = 0.001 + (std::numbers::pi - 0.002) * (static_cast<double>(i) / samples);
+            double f_comp = core.eval_composite_asymptotics(snap.params.n, snap.lambda, th_val);
+            double b_k = (1.0 / std::pow(snap.N, static_cast<double>(snap.params.asymptotic_K))) *
+                         (1.0 / std::pow(std::max(1e-4, std::sin(th_val)), snap.lambda));
+            float pos_x = x_start + (x_end - x_start) * (static_cast<float>(i) / samples);
+            float pos_y = static_cast<float>((f_comp + b_k) * 1.5);
+            glVertex3f(pos_x, pos_y, 0.08f);
         }
         glEnd();
     }
@@ -541,7 +567,7 @@ void GLCanvas::render_layer_vii(const LayerFrame& frame, const RepresentationSna
         float ty = start_y - i * track_height;
 
         glLineWidth(2.0f);
-        if (bt == snap.backend) {
+        if (bt == snap.effective_backend) {
             glColor4f(0.3f, 1.0f, 0.4f, frame.alpha);
         } else {
             glColor4f(0.5f, 0.6f, 0.8f, frame.alpha * 0.5f);
@@ -636,7 +662,7 @@ void GLCanvas::render_hud() {
     };
 
     glColor3f(0.9f, 0.95f, 1.0f);
-    std::snprintf(buf, sizeof(buf), "[%s]", layer_names[static_cast<int>(snapshot.current_layer)]);
+    std::snprintf(buf, sizeof(buf), "[%s]", layer_names[static_cast<int>(snapshot.effective_layer)]);
     gl_font(FL_HELVETICA_BOLD, 14);
     gl_draw(buf, 15, h() - 25);
 

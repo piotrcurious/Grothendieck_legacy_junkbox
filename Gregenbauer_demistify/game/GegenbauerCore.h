@@ -58,9 +58,22 @@ enum class RegimeType {
     INTERIOR_WKB = 3
 };
 
-struct RouterDecision {
+struct RouterCandidate {
     LayerType layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
     BackendType backend = BackendType::FLOAT64;
+    double estimated_error = 0.0;
+    double conditioning = 1.0;
+    double cost = 1.0;
+    bool feasible = true;
+    std::string rejection_reason;
+};
+
+struct RouterDecision {
+    LayerType requested_layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
+    BackendType requested_backend = BackendType::FLOAT64;
+    LayerType effective_layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
+    BackendType effective_backend = BackendType::FLOAT64;
+
     double estimated_error = 0.0;
     double conditioning = 1.0;
     double cost = 1.0;
@@ -83,6 +96,8 @@ struct CoreParameters {
     int n = 5;
     double theta = 0.5;
     double error_target = 1e-8;
+    int asymptotic_K = 1;
+    int jacobi_m = 10;
 };
 
 struct GameState {
@@ -107,13 +122,17 @@ struct RepresentationSnapshot {
     bool north_valid = false;
     bool interior_valid = true;
     bool south_valid = false;
+    bool domain_valid = true;
+    bool conditioning_ok = true;
 
     LayerType current_layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
     LayerType target_layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
     double transition = 0.0;
 
-    BackendType backend = BackendType::FLOAT64;
-    std::string backend_name = "FLOAT64";
+    LayerType effective_layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
+    BackendType effective_backend = BackendType::FLOAT64;
+    std::string effective_layer_name = "LAYER_I_HARMONIC_GEOMETRY";
+    std::string effective_backend_name = "FLOAT64";
 
     bool auto_router = false;
     RouterDecision router_decision;
@@ -122,6 +141,9 @@ struct RepresentationSnapshot {
     double forward_error = 0.0;
     double conditioning = 1.0;
     double analytic_bound = 0.0;
+    double structural_scale = 1.0;
+    double certification_floor = 1e-14;
+    double forward_error_bound = 1e-5;
 
     double r_rec = 0.0;
     double r_ode = 0.0;
@@ -133,6 +155,12 @@ struct RepresentationSnapshot {
 };
 
 class GegenbauerCore {
+private:
+    // Caching for expensive Golub-Welsch computations
+    mutable int cached_m = -1;
+    mutable double cached_lam = -1.0;
+    mutable GolubWelschResult cached_gw;
+
 public:
     GegenbauerCore() = default;
 
@@ -140,12 +168,13 @@ public:
     RepresentationSnapshot evaluate(const GameState& state) const;
 
     // Feasibility-first router optimizer
-    RouterDecision solve_router_decision(const CoreParameters& params) const;
+    RouterDecision solve_router_decision(const GameState& state) const;
 
     // Domain regime classifier
-    RegimeType classify_regime(int n, double lambda_val, double th) const;
+    RegimeType classify_regime(int n_deg, double lam, double th) const;
     static std::string get_regime_name(RegimeType reg);
     static std::string get_backend_name(BackendType bt);
+    static std::string get_layer_name(LayerType layer);
 
     // Exact Gegenbauer C_n^{(lambda)}(x) via recurrence
     static double eval_gegenbauer_c(int n_deg, double lam, double x_val);
@@ -168,7 +197,7 @@ public:
     static double get_jacobi_alpha(int k, double lam);
     std::vector<double> get_jacobi_alphas(int m, double lam) const;
 
-    // Golub-Welsch spectral tridiagonal solver for J_m
+    // Golub-Welsch spectral tridiagonal solver with caching
     GolubWelschResult compute_golub_welsch(int m, double lam) const;
 
     // Boundary layer asymptotics
@@ -183,7 +212,7 @@ public:
     double eval_backend_phi(BackendType backend, int n_deg, double lam, double x_val) const;
 
     // Residual taxonomy & 4-axis certification
-    CertificationStatus compute_certification(int n_deg, double lam, double th, BackendType backend) const;
+    CertificationStatus compute_certification(int n_deg, double lam, double th, BackendType backend, double target_err = 1e-8) const;
 
     // Helper math functions
     static double log_gamma(double z);
