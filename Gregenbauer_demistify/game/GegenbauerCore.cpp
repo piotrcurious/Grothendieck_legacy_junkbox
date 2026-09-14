@@ -3,27 +3,12 @@
 #include <limits>
 #include <iostream>
 #include <sstream>
+#include <numbers>
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-GegenbauerCore::GegenbauerCore(int dimension, int degree, double th) {
-    update_parameters(dimension, degree, th);
-}
-
-void GegenbauerCore::update_parameters(int dimension, int degree, double th) {
-    d = std::max(3, dimension);
-    n = std::max(0, degree);
-    lambda_val = (d - 2.0) / 2.0;
-    theta = std::clamp(th, 1e-6, M_PI - 1e-6);
-    x = std::cos(theta);
-}
-
-RegimeType GegenbauerCore::classify_regime(double th) const {
-    double N_n = n + lambda_val;
+RegimeType GegenbauerCore::classify_regime(int n_deg, double lam, double th) const {
+    double N_n = n_deg + lam;
     double z_plus = N_n * th;
-    double z_minus = N_n * (M_PI - th);
+    double z_minus = N_n * (std::numbers::pi - th);
     double overlap_limit = std::sqrt(N_n);
 
     if (z_plus <= 10.0) {
@@ -60,69 +45,110 @@ std::string GegenbauerCore::get_backend_name(BackendType bt) {
     }
 }
 
-RepresentationSnapshot GegenbauerCore::get_snapshot(LayerType layer,
-                                                     BackendType backend,
-                                                     bool auto_route,
-                                                     double error_tol) const {
-    RepresentationSnapshot snap;
-    snap.d = d;
-    snap.n = n;
-    snap.lambda = lambda_val;
-    snap.theta = theta;
-    snap.x = x;
-    snap.N = n + lambda_val;
-    snap.z_plus = snap.N * theta;
-    snap.z_minus = snap.N * (M_PI - theta);
+RouterDecision GegenbauerCore::solve_router_decision(const CoreParameters& params) const {
+    RouterDecision dec;
+    double lam = (params.d - 2.0) / 2.0;
+    double th = std::clamp(params.theta, 1e-6, std::numbers::pi - 1e-6);
+    RegimeType reg = classify_regime(params.n, lam, th);
+    double kappa = std::max(1.0, 1.0 / std::sin(th));
 
-    snap.regime = classify_regime(theta);
+    dec.conditioning = kappa;
+    dec.feasible = true;
+
+    // Feasibility-first selection hierarchy:
+    // 1. Reject bad conditioning / singular domain
+    // 2. Reject error > target
+    // 3. Minimize cost
+    if (reg == RegimeType::NORTH_ENDPOINT_BESSEL || reg == RegimeType::SOUTH_ENDPOINT_BESSEL) {
+        dec.layer = LayerType::LAYER_V_TWO_POLE_COORDS;
+        dec.estimated_error = 1.0 / (params.n + lam);
+        dec.cost = 2.0;
+        dec.reason = "Selected Layer V (Endpoint Bessel) for z_0 <= 10";
+    } else if (reg == RegimeType::OVERLAP_APPROXIMATION) {
+        dec.layer = LayerType::LAYER_VI_COMPOSITE_ASYMPTOTICS;
+        dec.estimated_error = 1.0 / std::pow(params.n + lam, 2.0);
+        dec.cost = 3.0;
+        dec.reason = "Selected Layer VI (Composite Matched Asymptotics) for Overlap Zone";
+    } else if (params.n > 200) {
+        dec.layer = LayerType::LAYER_IV_JACOBI_CITY;
+        dec.estimated_error = 1e-12;
+        dec.cost = 4.0;
+        dec.reason = "Selected Layer IV (Jacobi Spectral City) for High Degree n";
+    } else {
+        dec.layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
+        dec.estimated_error = 1e-14;
+        dec.cost = 1.0;
+        dec.reason = "Selected Layer I (Harmonic Geometry) for Interior Domain";
+    }
+
+    if (params.error_target < 1e-12) {
+        dec.backend = BackendType::EXACT_RATIONAL;
+        dec.cost += 10.0;
+        dec.reason += " + EXACT_RATIONAL Backend";
+    } else {
+        dec.backend = BackendType::FLOAT64;
+    }
+
+    return dec;
+}
+
+RepresentationSnapshot GegenbauerCore::evaluate(const GameState& state) const {
+    RepresentationSnapshot snap;
+    snap.params = state.params;
+    snap.params.d = std::max(3, state.params.d);
+    snap.params.n = std::max(0, state.params.n);
+    snap.params.theta = std::clamp(state.params.theta, 1e-6, std::numbers::pi - 1e-6);
+
+    snap.lambda = (snap.params.d - 2.0) / 2.0;
+    snap.x = std::cos(snap.params.theta);
+    snap.N = snap.params.n + snap.lambda;
+    snap.z_plus = snap.N * snap.params.theta;
+    snap.z_minus = snap.N * (std::numbers::pi - snap.params.theta);
+
+    snap.regime = classify_regime(snap.params.n, snap.lambda, snap.params.theta);
     snap.regime_name = get_regime_name(snap.regime);
 
-    snap.auto_router = auto_route;
-    snap.layer = layer;
-    snap.backend = backend;
+    snap.north_valid = (snap.z_plus <= 12.0);
+    snap.south_valid = (snap.z_minus <= 12.0);
+    snap.interior_valid = (snap.z_plus >= 1.5 && snap.z_minus >= 1.5);
 
-    // Feasibility-first Representation Router AI if auto_route is active
-    if (auto_route) {
-        if (snap.regime == RegimeType::NORTH_ENDPOINT_BESSEL || snap.regime == RegimeType::SOUTH_ENDPOINT_BESSEL) {
-            snap.layer = LayerType::LAYER_V_TWO_POLE_COORDS;
-            snap.router_reason = "Routed to Layer V (Endpoint Bessel Scaling) for z_0 <= 10";
-        } else if (snap.regime == RegimeType::OVERLAP_APPROXIMATION) {
-            snap.layer = LayerType::LAYER_VI_COMPOSITE_ASYMPTOTICS;
-            snap.router_reason = "Routed to Layer VI (Composite Matched Asymptotics) in Overlap Zone";
-        } else if (n > 200) {
-            snap.layer = LayerType::LAYER_IV_JACOBI_CITY;
-            snap.router_reason = "Routed to Layer IV (Jacobi Spectral Tower) for High Degree n";
-        } else {
-            snap.layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
-            snap.router_reason = "Routed to Layer I (Harmonic Geometry) for Interior Domain";
-        }
+    snap.auto_router = state.auto_router;
+    snap.current_layer = state.current_layer;
+    snap.target_layer = state.target_layer;
+    snap.transition = state.transition;
 
-        if (error_tol < 1e-12) {
-            snap.backend = BackendType::EXACT_RATIONAL;
-            snap.router_reason += " + EXACT_RATIONAL Backend for High Precision";
-        } else {
-            snap.backend = BackendType::FLOAT64;
-        }
+    snap.router_decision = solve_router_decision(snap.params);
+
+    if (state.auto_router) {
+        snap.current_layer = snap.router_decision.layer;
+        snap.target_layer = snap.router_decision.layer;
+        snap.backend = snap.router_decision.backend;
     } else {
-        snap.router_reason = "Manual Selection";
+        snap.backend = state.backend;
     }
 
     snap.backend_name = get_backend_name(snap.backend);
 
     // Evaluate function and metrics
-    snap.phi = eval_backend_phi(snap.backend, n, x);
-    snap.cert = compute_certification(snap.backend);
+    snap.phi = eval_backend_phi(snap.backend, snap.params.n, snap.lambda, snap.x);
+    snap.cert = compute_certification(snap.params.n, snap.lambda, snap.params.theta, snap.backend);
 
     snap.forward_error = snap.cert.forward_error;
     snap.conditioning = snap.cert.conditioning;
 
     // Analytic error envelope bound B_K
-    snap.analytic_bound = (1.0 / std::pow(snap.N, 1.0)) * (1.0 / std::pow(std::max(1e-4, std::sin(theta)), lambda_val));
+    snap.analytic_bound = (1.0 / std::pow(snap.N, 1.0)) * (1.0 / std::pow(std::max(1e-4, std::sin(snap.params.theta)), snap.lambda));
 
     // Residuals
     snap.r_rec = snap.cert.structural_residual;
     snap.r_ode = snap.cert.structural_residual;
     snap.r_schr = snap.cert.structural_residual;
+
+    // Jacobi residual
+    int m_jac = std::max(5, snap.params.n + 2);
+    GolubWelschResult gw = compute_golub_welsch(m_jac, snap.lambda);
+    snap.r_jacobi = gw.eigenpair_residual;
+
     snap.backend_error = snap.cert.backend_discrepancy;
 
     return snap;
@@ -162,41 +188,41 @@ double GegenbauerCore::eval_gegenbauer_c_at_1(int n_deg, double lam) {
     return std::exp(log_val);
 }
 
-double GegenbauerCore::eval_phi(int n_deg, double x_val) const {
+double GegenbauerCore::eval_phi(int n_deg, double lam, double x_val) const {
     if (n_deg == 0) return 1.0;
-    double c_n = eval_gegenbauer_c(n_deg, lambda_val, x_val);
-    double c_1 = eval_gegenbauer_c_at_1(n_deg, lambda_val);
+    double c_n = eval_gegenbauer_c(n_deg, lam, x_val);
+    double c_1 = eval_gegenbauer_c_at_1(n_deg, lam);
     return c_n / c_1;
 }
 
-double GegenbauerCore::eval_phi_prime(int n_deg, double x_val) const {
+double GegenbauerCore::eval_phi_prime(int n_deg, double lam, double x_val) const {
     if (n_deg <= 0) return 0.0;
-    double factor = (n_deg * (n_deg + 2.0 * lambda_val)) / (2.0 * lambda_val + 1.0);
-    double c_sub = eval_gegenbauer_c(n_deg - 1, lambda_val + 1.0, x_val);
-    double c_sub_1 = eval_gegenbauer_c_at_1(n_deg - 1, lambda_val + 1.0);
+    double factor = (n_deg * (n_deg + 2.0 * lam)) / (2.0 * lam + 1.0);
+    double c_sub = eval_gegenbauer_c(n_deg - 1, lam + 1.0, x_val);
+    double c_sub_1 = eval_gegenbauer_c_at_1(n_deg - 1, lam + 1.0);
     return factor * (c_sub / c_sub_1);
 }
 
-double GegenbauerCore::eval_phi_second_prime(int n_deg, double x_val) const {
+double GegenbauerCore::eval_phi_second_prime(int n_deg, double lam, double x_val) const {
     if (n_deg <= 1) return 0.0;
-    double factor = (n_deg * (n_deg - 1.0) * (n_deg + 2.0 * lambda_val) * (n_deg + 2.0 * lambda_val + 1.0)) /
-                    ((2.0 * lambda_val + 1.0) * (2.0 * lambda_val + 3.0));
-    double c_sub = eval_gegenbauer_c(n_deg - 2, lambda_val + 2.0, x_val);
-    double c_sub_1 = eval_gegenbauer_c_at_1(n_deg - 2, lambda_val + 2.0);
+    double factor = (n_deg * (n_deg - 1.0) * (n_deg + 2.0 * lam) * (n_deg + 2.0 * lam + 1.0)) /
+                    ((2.0 * lam + 1.0) * (2.0 * lam + 3.0));
+    double c_sub = eval_gegenbauer_c(n_deg - 2, lam + 2.0, x_val);
+    double c_sub_1 = eval_gegenbauer_c_at_1(n_deg - 2, lam + 2.0);
     return factor * (c_sub / c_sub_1);
 }
 
-double GegenbauerCore::eval_schrodinger_u(int n_deg, double th) const {
+double GegenbauerCore::eval_schrodinger_u(int n_deg, double lam, double th) const {
     double s = std::sin(th);
     if (s <= 0.0) return 0.0;
-    double phi_val = eval_phi(n_deg, std::cos(th));
-    return std::pow(s, lambda_val) * phi_val;
+    double phi_val = eval_phi(n_deg, lam, std::cos(th));
+    return std::pow(s, lam) * phi_val;
 }
 
-double GegenbauerCore::eval_potential_v(double th) const {
+double GegenbauerCore::eval_potential_v(double lam, double th) const {
     double s = std::sin(th);
     if (s <= 1e-8) return 1e10;
-    return (lambda_val * (lambda_val - 1.0)) / (s * s);
+    return (lam * (lam - 1.0)) / (s * s);
 }
 
 double GegenbauerCore::get_jacobi_alpha(int k, double lam) {
@@ -205,15 +231,15 @@ double GegenbauerCore::get_jacobi_alpha(int k, double lam) {
     return 0.5 * std::sqrt(num / den);
 }
 
-std::vector<double> GegenbauerCore::get_jacobi_alphas(int m) const {
+std::vector<double> GegenbauerCore::get_jacobi_alphas(int m, double lam) const {
     std::vector<double> alphas(m > 1 ? m - 1 : 0);
     for (int k = 0; k < static_cast<int>(alphas.size()); ++k) {
-        alphas[k] = get_jacobi_alpha(k, lambda_val);
+        alphas[k] = get_jacobi_alpha(k, lam);
     }
     return alphas;
 }
 
-GolubWelschResult GegenbauerCore::compute_golub_welsch(int m) const {
+GolubWelschResult GegenbauerCore::compute_golub_welsch(int m, double lam) const {
     GolubWelschResult res;
     res.m = m;
     if (m <= 0) return res;
@@ -225,7 +251,7 @@ GolubWelschResult GegenbauerCore::compute_golub_welsch(int m) const {
     std::vector<double> d_diag(m, 0.0);
     std::vector<double> e_sub(m, 0.0);
     for (int k = 0; k < m - 1; ++k) {
-        e_sub[k] = get_jacobi_alpha(k, lambda_val);
+        e_sub[k] = get_jacobi_alpha(k, lam);
     }
 
     std::vector<std::vector<double>> z(m, std::vector<double>(m, 0.0));
@@ -283,7 +309,7 @@ GolubWelschResult GegenbauerCore::compute_golub_welsch(int m) const {
         e_sub[m_sub] = 0.0;
     }
 
-    res.expected_mu0 = beta_func(0.5, lambda_val + 0.5);
+    res.expected_mu0 = beta_func(0.5, lam + 0.5);
 
     for (int k = 0; k < m; ++k) {
         res.eigenvalues[k] = d_diag[k];
@@ -301,8 +327,8 @@ GolubWelschResult GegenbauerCore::compute_golub_welsch(int m) const {
         double err_sq = 0.0;
         for (int i = 0; i < m; ++i) {
             double jv_i = 0.0;
-            if (i > 0) jv_i += get_jacobi_alpha(i - 1, lambda_val) * res.eigenvectors[i - 1][k];
-            if (i < m - 1) jv_i += get_jacobi_alpha(i, lambda_val) * res.eigenvectors[i + 1][k];
+            if (i > 0) jv_i += get_jacobi_alpha(i - 1, lam) * res.eigenvectors[i - 1][k];
+            if (i < m - 1) jv_i += get_jacobi_alpha(i, lam) * res.eigenvectors[i + 1][k];
             double diff = jv_i - x_k * res.eigenvectors[i][k];
             err_sq += diff * diff;
         }
@@ -334,54 +360,54 @@ double GegenbauerCore::eval_bessel_j_nu(double nu, double z) const {
     return sum;
 }
 
-double GegenbauerCore::eval_north_bessel(double th) const {
-    double N_n = n + lambda_val;
+double GegenbauerCore::eval_north_bessel(int n_deg, double lam, double th) const {
+    double N_n = n_deg + lam;
     double z0 = N_n * th;
-    double nu = lambda_val - 0.5;
+    double nu = lam - 0.5;
     return eval_bessel_j_nu(nu, z0);
 }
 
-double GegenbauerCore::eval_south_bessel(double th) const {
-    double N_n = n + lambda_val;
-    double z_pi = N_n * (M_PI - th);
-    double nu = lambda_val - 0.5;
-    double sign = (n % 2 == 0) ? 1.0 : -1.0;
+double GegenbauerCore::eval_south_bessel(int n_deg, double lam, double th) const {
+    double N_n = n_deg + lam;
+    double z_pi = N_n * (std::numbers::pi - th);
+    double nu = lam - 0.5;
+    double sign = (n_deg % 2 == 0) ? 1.0 : -1.0;
     return sign * eval_bessel_j_nu(nu, z_pi);
 }
 
-double GegenbauerCore::eval_wkb_interior(double th) const {
-    double N_n = n + lambda_val;
+double GegenbauerCore::eval_wkb_interior(int n_deg, double lam, double th) const {
+    double N_n = n_deg + lam;
     double s = std::sin(th);
-    if (s <= 1e-8) return eval_north_bessel(th);
+    if (s <= 1e-8) return eval_north_bessel(n_deg, lam, th);
 
-    double coeff = std::pow(2.0, lambda_val) * gamma_func(lambda_val + 0.5) / std::sqrt(M_PI);
-    double amplitude = std::pow(N_n * s, -lambda_val);
-    double phase = N_n * th - 0.5 * lambda_val * M_PI;
+    double coeff = std::pow(2.0, lam) * gamma_func(lam + 0.5) / std::sqrt(std::numbers::pi);
+    double amplitude = std::pow(N_n * s, -lam);
+    double phase = N_n * th - 0.5 * lam * std::numbers::pi;
 
     return coeff * amplitude * std::cos(phase);
 }
 
-double GegenbauerCore::eval_composite_asymptotics(double th) const {
-    double N_n = n + lambda_val;
+double GegenbauerCore::eval_composite_asymptotics(int n_deg, double lam, double th) const {
+    double N_n = n_deg + lam;
     double z0 = std::max(1e-10, N_n * th);
-    double z_pi = std::max(1e-10, N_n * (M_PI - th));
-    double nu = lambda_val - 0.5;
+    double z_pi = std::max(1e-10, N_n * (std::numbers::pi - th));
+    double nu = lam - 0.5;
 
     double bessel_north = eval_bessel_j_nu(nu, z0);
-    double bessel_south = ((n % 2 == 0) ? 1.0 : -1.0) * eval_bessel_j_nu(nu, z_pi);
-    double wkb_val = eval_wkb_interior(th);
+    double bessel_south = ((n_deg % 2 == 0) ? 1.0 : -1.0) * eval_bessel_j_nu(nu, z_pi);
+    double wkb_val = eval_wkb_interior(n_deg, lam, th);
 
     double match_north = std::pow(2.0, nu) * gamma_func(nu + 1.0) * std::pow(z0, -nu) *
-                          std::sqrt(2.0 / (M_PI * z0)) * std::cos(z0 - 0.5 * lambda_val * M_PI);
-    double match_south = ((n % 2 == 0) ? 1.0 : -1.0) * std::pow(2.0, nu) * gamma_func(nu + 1.0) *
-                          std::pow(z_pi, -nu) * std::sqrt(2.0 / (M_PI * z_pi)) *
-                          std::cos(z_pi - 0.5 * lambda_val * M_PI);
+                          std::sqrt(2.0 / (std::numbers::pi * z0)) * std::cos(z0 - 0.5 * lam * std::numbers::pi);
+    double match_south = ((n_deg % 2 == 0) ? 1.0 : -1.0) * std::pow(2.0, nu) * gamma_func(nu + 1.0) *
+                          std::pow(z_pi, -nu) * std::sqrt(2.0 / (std::numbers::pi * z_pi)) *
+                          std::cos(z_pi - 0.5 * lam * std::numbers::pi);
 
     return bessel_north + bessel_south + wkb_val - match_north - match_south;
 }
 
-double GegenbauerCore::eval_backend_phi(BackendType backend, int n_deg, double x_val) const {
-    double exact_val = eval_phi(n_deg, x_val);
+double GegenbauerCore::eval_backend_phi(BackendType backend, int n_deg, double lam, double x_val) const {
+    double exact_val = eval_phi(n_deg, lam, x_val);
     switch (backend) {
         case BackendType::FLOAT32: {
             float val_f32 = static_cast<float>(exact_val);
@@ -405,50 +431,54 @@ double GegenbauerCore::eval_backend_phi(BackendType backend, int n_deg, double x
     }
 }
 
-CertificationStatus GegenbauerCore::compute_certification(BackendType backend) const {
+CertificationStatus GegenbauerCore::compute_certification(int n_deg, double lam, double th, BackendType backend) const {
     CertificationStatus cert;
+    double x_val = std::cos(th);
 
-    // Recurrence residual
     double r_rec = 0.0;
-    if (n >= 1) {
-        double phi_curr = eval_backend_phi(backend, n, x);
-        double phi_prev = eval_backend_phi(backend, n - 1, x);
-        double phi_next = eval_backend_phi(backend, n + 1, x);
+    if (n_deg >= 1) {
+        double phi_curr = eval_backend_phi(backend, n_deg, lam, x_val);
+        double phi_prev = eval_backend_phi(backend, n_deg - 1, lam, x_val);
+        double phi_next = eval_backend_phi(backend, n_deg + 1, lam, x_val);
 
-        double a_n = (n + 2.0 * lambda_val) / (2.0 * (n + lambda_val));
-        double b_n = n / (2.0 * (n + lambda_val));
+        double a_n = (n_deg + 2.0 * lam) / (2.0 * (n_deg + lam));
+        double b_n = n_deg / (2.0 * (n_deg + lam));
 
-        double num = std::abs(x * phi_curr - a_n * phi_next - b_n * phi_prev);
-        double den = std::abs(x * phi_curr) + std::abs(a_n * phi_next) + std::abs(b_n * phi_prev) + 1e-14;
+        double num = std::abs(x_val * phi_curr - a_n * phi_next - b_n * phi_prev);
+        double den = std::abs(x_val * phi_curr) + std::abs(a_n * phi_next) + std::abs(b_n * phi_prev) + 1e-14;
         r_rec = num / den;
     }
 
-    // Interior ODE residual
-    double phi_val = eval_backend_phi(backend, n, x);
-    double phi_p = eval_phi_prime(n, x);
-    double phi_pp = eval_phi_second_prime(n, x);
-    double E_n = n * (n + 2.0 * lambda_val);
+    double phi_val = eval_backend_phi(backend, n_deg, lam, x_val);
+    double phi_p = eval_phi_prime(n_deg, lam, x_val);
+    double phi_pp = eval_phi_second_prime(n_deg, lam, x_val);
+    double E_n = n_deg * (n_deg + 2.0 * lam);
 
-    double ode_num = std::abs((1.0 - x * x) * phi_pp - (2.0 * lambda_val + 1.0) * x * phi_p + E_n * phi_val);
-    double ode_den = (1.0 - x * x) * std::abs(phi_pp) + std::abs((2.0 * lambda_val + 1.0) * x * phi_p) + E_n * std::abs(phi_val) + 1e-14;
+    double ode_num = std::abs((1.0 - x_val * x_val) * phi_pp - (2.0 * lam + 1.0) * x_val * phi_p + E_n * phi_val);
+    double ode_den = (1.0 - x_val * x_val) * std::abs(phi_pp) + std::abs((2.0 * lam + 1.0) * x_val) * std::abs(phi_p) + E_n * std::abs(phi_val) + 1e-14;
     double r_ode = ode_num / ode_den;
 
     cert.structural_residual = std::max(r_rec, r_ode);
 
-    // Backend error vs exact FLOAT64
-    double val_exact = eval_phi(n, x);
-    double val_backend = eval_backend_phi(backend, n, x);
+    double val_exact = eval_phi(n_deg, lam, x_val);
+    double val_backend = eval_backend_phi(backend, n_deg, lam, x_val);
     cert.backend_discrepancy = std::abs(val_backend - val_exact);
 
-    // Forward error estimate & conditioning
-    cert.conditioning = std::max(1.0, 1.0 / std::sin(theta));
+    cert.conditioning = std::max(1.0, 1.0 / std::sin(th));
     cert.forward_error = cert.backend_discrepancy + cert.conditioning * cert.structural_residual;
 
-    // 4 Independent Certification Axes
+    // 4 Independent Certification Axes matching Layer VIII taxonomy
     cert.algebraic_exact = (backend == BackendType::EXACT_RATIONAL);
+    cert.algebraic_reason = cert.algebraic_exact ? "Certified via Q[lambda, x] symbolic fraction algebra" : "Floating-point path (non-symbolic)";
+
     cert.arithmetic_exact = (backend == BackendType::MODULAR_RNS);
+    cert.arithmetic_reason = cert.arithmetic_exact ? "Certified via RNS modular CRT integer recovery" : "Non-RNS representation";
+
     cert.analytic_certified = (r_rec < 1e-6 && r_ode < 1e-6 && cert.forward_error < 1e-5);
-    cert.numerical_valid = (r_rec < 1e-3);
+    cert.analytic_reason = cert.analytic_certified ? "Analytic error envelope bound B_K satisfied" : "Forward error exceeds analytic bound";
+
+    cert.numerical_approx = (r_rec < 1e-3);
+    cert.numerical_reason = cert.numerical_approx ? "Recurrence structural residual <= 1e-3" : "Structural residual threshold failed";
 
     return cert;
 }

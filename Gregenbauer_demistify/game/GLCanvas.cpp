@@ -5,58 +5,11 @@
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
+#include <numbers>
 
 GLCanvas::GLCanvas(int x, int y, int w, int h, const char* label)
     : Fl_Gl_Window(x, y, w, h, label) {
     mode(FL_RGB | FL_DOUBLE | FL_DEPTH);
-}
-
-void GLCanvas::update_snapshot() {
-    if (core) {
-        snapshot = core->get_snapshot(target_layer, active_backend, auto_router);
-        if (auto_router) {
-            target_layer = snapshot.layer;
-            active_backend = snapshot.backend;
-        }
-    }
-}
-
-void GLCanvas::set_target_layer(LayerType target) {
-    target_layer = target;
-    update_snapshot();
-    transition_progress = 0.0;
-    is_animating = true;
-    Fl::remove_timeout(anim_callback, this);
-    Fl::add_timeout(1.0 / 60.0, anim_callback, this);
-    redraw();
-}
-
-void GLCanvas::trigger_transition_animation() {
-    update_snapshot();
-    transition_progress = 0.0;
-    is_animating = true;
-    Fl::remove_timeout(anim_callback, this);
-    Fl::add_timeout(1.0 / 60.0, anim_callback, this);
-    redraw();
-}
-
-void GLCanvas::anim_callback(void* userdata) {
-    GLCanvas* canvas = static_cast<GLCanvas*>(userdata);
-    if (!canvas->is_animating) return;
-
-    canvas->transition_progress += canvas->anim_speed;
-    if (canvas->transition_progress >= 1.0) {
-        canvas->transition_progress = 1.0;
-        canvas->current_layer = canvas->target_layer;
-        canvas->is_animating = false;
-    } else {
-        Fl::repeat_timeout(1.0 / 60.0, anim_callback, canvas);
-    }
-    canvas->redraw();
 }
 
 double GLCanvas::smoothstep(double t) {
@@ -78,6 +31,58 @@ void GLCanvas::get_phi_color(double val, float& r, float& g, float& b) {
         g = 0.6f * (1.0f - t) + 0.8f * t;
         b = 0.8f * (1.0f - t) + 0.2f * t;
     }
+}
+
+LayerFrame GLCanvas::make_layer_frame(LayerType layer, const RepresentationSnapshot& snap) {
+    LayerFrame frame;
+    frame.layer = layer;
+    frame.alpha = 1.0f;
+
+    switch (layer) {
+        case LayerType::LAYER_I_HARMONIC_GEOMETRY:
+            frame.geometry_scale = 1.5f;
+            frame.wave_amplitude = 0.15f;
+            break;
+        case LayerType::LAYER_II_PROJECTOR_TEMPLE:
+            frame.geometry_scale = 2.5f;
+            frame.wave_amplitude = 1.0f;
+            break;
+        case LayerType::LAYER_III_DIFFERENTIAL_WAVE:
+            frame.potential_wall_height = 2.0f;
+            frame.wave_amplitude = 1.5f;
+            break;
+        case LayerType::LAYER_IV_JACOBI_CITY:
+            frame.tower_spacing = 0.35f;
+            break;
+        case LayerType::LAYER_V_TWO_POLE_COORDS:
+            frame.geometry_scale = 1.3f;
+            break;
+        case LayerType::LAYER_VI_COMPOSITE_ASYMPTOTICS:
+            frame.wave_amplitude = 1.5f;
+            break;
+        case LayerType::LAYER_VII_ARITHMETIC_FACTORY:
+            frame.tower_spacing = 0.5f;
+            break;
+        case LayerType::LAYER_VIII_CERTIFICATION_CHAMBER:
+            frame.wheel_radius = 1.4f;
+            break;
+    }
+    return frame;
+}
+
+LayerFrame GLCanvas::interpolate_layer_frame(const LayerFrame& f1, const LayerFrame& f2, double t) {
+    double s = smoothstep(t);
+    float alpha_blend = static_cast<float>(s);
+
+    LayerFrame frame = f1;
+    frame.alpha = static_cast<float>(1.0 - s);
+    frame.geometry_scale = (1.0f - alpha_blend) * f1.geometry_scale + alpha_blend * f2.geometry_scale;
+    frame.wave_amplitude = (1.0f - alpha_blend) * f1.wave_amplitude + alpha_blend * f2.wave_amplitude;
+    frame.potential_wall_height = (1.0f - alpha_blend) * f1.potential_wall_height + alpha_blend * f2.potential_wall_height;
+    frame.tower_spacing = (1.0f - alpha_blend) * f1.tower_spacing + alpha_blend * f2.tower_spacing;
+    frame.wheel_radius = (1.0f - alpha_blend) * f1.wheel_radius + alpha_blend * f2.wheel_radius;
+
+    return frame;
 }
 
 void GLCanvas::init_gl() {
@@ -130,18 +135,15 @@ void GLCanvas::draw() {
 
     setup_lighting();
 
-    if (!core) return;
-    update_snapshot();
+    double t = snapshot.transition;
+    LayerFrame frame_curr = make_layer_frame(snapshot.current_layer, snapshot);
+    LayerFrame frame_targ = make_layer_frame(snapshot.target_layer, snapshot);
 
-    double s = smoothstep(transition_progress);
-    float alpha_curr = static_cast<float>(1.0 - s);
-    float alpha_targ = static_cast<float>(s);
-
-    if (current_layer == target_layer || transition_progress >= 1.0) {
-        render_layer_geometry(target_layer, 1.0f);
+    if (snapshot.current_layer == snapshot.target_layer || t >= 1.0) {
+        render_layer_frame(frame_targ, snapshot);
     } else {
-        render_layer_geometry(current_layer, alpha_curr);
-        render_layer_geometry(target_layer, alpha_targ);
+        LayerFrame frame_interp = interpolate_layer_frame(frame_curr, frame_targ, t);
+        render_layer_frame(frame_interp, snapshot);
     }
 
     render_hud();
@@ -179,16 +181,16 @@ int GLCanvas::handle(int event) {
     }
 }
 
-void GLCanvas::render_layer_geometry(LayerType layer, float alpha) {
-    switch (layer) {
-        case LayerType::LAYER_I_HARMONIC_GEOMETRY: render_layer_i(alpha); break;
-        case LayerType::LAYER_II_PROJECTOR_TEMPLE: render_layer_ii(alpha); break;
-        case LayerType::LAYER_III_DIFFERENTIAL_WAVE: render_layer_iii(alpha); break;
-        case LayerType::LAYER_IV_JACOBI_CITY: render_layer_iv(alpha); break;
-        case LayerType::LAYER_V_TWO_POLE_COORDS: render_layer_v(alpha); break;
-        case LayerType::LAYER_VI_COMPOSITE_ASYMPTOTICS: render_layer_vi(alpha); break;
-        case LayerType::LAYER_VII_ARITHMETIC_FACTORY: render_layer_vii(alpha); break;
-        case LayerType::LAYER_VIII_CERTIFICATION_CHAMBER: render_layer_viii(alpha); break;
+void GLCanvas::render_layer_frame(const LayerFrame& frame, const RepresentationSnapshot& snap) {
+    switch (frame.layer) {
+        case LayerType::LAYER_I_HARMONIC_GEOMETRY: render_layer_i(frame, snap); break;
+        case LayerType::LAYER_II_PROJECTOR_TEMPLE: render_layer_ii(frame, snap); break;
+        case LayerType::LAYER_III_DIFFERENTIAL_WAVE: render_layer_iii(frame, snap); break;
+        case LayerType::LAYER_IV_JACOBI_CITY: render_layer_iv(frame, snap); break;
+        case LayerType::LAYER_V_TWO_POLE_COORDS: render_layer_v(frame, snap); break;
+        case LayerType::LAYER_VI_COMPOSITE_ASYMPTOTICS: render_layer_vi(frame, snap); break;
+        case LayerType::LAYER_VII_ARITHMETIC_FACTORY: render_layer_vii(frame, snap); break;
+        case LayerType::LAYER_VIII_CERTIFICATION_CHAMBER: render_layer_viii(frame, snap); break;
     }
 }
 
@@ -196,25 +198,25 @@ void GLCanvas::render_layer_geometry(LayerType layer, float alpha) {
 // Layer Renderers
 // -------------------------------------------------------------
 
-void GLCanvas::render_layer_i(float alpha) {
+void GLCanvas::render_layer_i(const LayerFrame& frame, const RepresentationSnapshot& snap) {
     int lat_steps = 40;
     int lon_steps = 60;
-    float radius = 1.5f;
+    float radius = frame.geometry_scale;
 
     glEnable(GL_LIGHTING);
     for (int i = 0; i < lat_steps; ++i) {
-        float lat0 = M_PI * (-0.5f + static_cast<float>(i) / lat_steps);
+        float lat0 = std::numbers::pi * (-0.5f + static_cast<float>(i) / lat_steps);
         float z0_val = std::sin(lat0);
         float r0_val = std::cos(lat0);
 
-        float lat1 = M_PI * (-0.5f + static_cast<float>(i + 1) / lat_steps);
+        float lat1 = std::numbers::pi * (-0.5f + static_cast<float>(i + 1) / lat_steps);
         float z1_val = std::sin(lat1);
         float r1_val = std::cos(lat1);
 
-        double th0 = M_PI * 0.5 - lat0;
-        double th1 = M_PI * 0.5 - lat1;
-        double phi_val0 = core->eval_phi(snapshot.n, std::cos(th0));
-        double phi_val1 = core->eval_phi(snapshot.n, std::cos(th1));
+        double th0 = std::numbers::pi * 0.5 - lat0;
+        double th1 = std::numbers::pi * 0.5 - lat1;
+        double phi_val0 = core.eval_phi(snap.params.n, snap.lambda, std::cos(th0));
+        double phi_val1 = core.eval_phi(snap.params.n, snap.lambda, std::cos(th1));
 
         float r_c0, g_c0, b_c0, r_c1, g_c1, b_c1;
         get_phi_color(phi_val0, r_c0, g_c0, b_c0);
@@ -222,20 +224,20 @@ void GLCanvas::render_layer_i(float alpha) {
 
         glBegin(GL_TRIANGLE_STRIP);
         for (int j = 0; j <= lon_steps; ++j) {
-            float lng = 2.0f * M_PI * static_cast<float>(j) / lon_steps;
+            float lng = 2.0f * std::numbers::pi * static_cast<float>(j) / lon_steps;
             float x0_pos = std::cos(lng) * r0_val;
             float y0_pos = std::sin(lng) * r0_val;
             float x1_pos = std::cos(lng) * r1_val;
             float y1_pos = std::sin(lng) * r1_val;
 
-            float disp0 = 1.0f + 0.15f * static_cast<float>(phi_val0);
-            float disp1 = 1.0f + 0.15f * static_cast<float>(phi_val1);
+            float disp0 = 1.0f + frame.wave_amplitude * static_cast<float>(phi_val0);
+            float disp1 = 1.0f + frame.wave_amplitude * static_cast<float>(phi_val1);
 
-            glColor4f(r_c0, g_c0, b_c0, alpha * 0.9f);
+            glColor4f(r_c0, g_c0, b_c0, frame.alpha * 0.9f);
             glNormal3f(x0_pos, y0_pos, z0_val);
             glVertex3f(x0_pos * radius * disp0, z0_val * radius * disp0, y0_pos * radius * disp0);
 
-            glColor4f(r_c1, g_c1, b_c1, alpha * 0.9f);
+            glColor4f(r_c1, g_c1, b_c1, frame.alpha * 0.9f);
             glNormal3f(x1_pos, y1_pos, z1_val);
             glVertex3f(x1_pos * radius * disp1, z1_val * radius * disp1, y1_pos * radius * disp1);
         }
@@ -244,23 +246,23 @@ void GLCanvas::render_layer_i(float alpha) {
 
     glDisable(GL_LIGHTING);
     glLineWidth(2.5f);
-    glColor4f(1.0f, 0.9f, 0.2f, alpha);
+    glColor4f(1.0f, 0.9f, 0.2f, frame.alpha);
     int th_samples = 200;
     for (int k = 0; k < th_samples; ++k) {
-        double th_curr = M_PI * static_cast<double>(k) / th_samples;
-        double th_next = M_PI * static_cast<double>(k + 1) / th_samples;
-        double p_c = core->eval_phi(snapshot.n, std::cos(th_curr));
-        double p_n = core->eval_phi(snapshot.n, std::cos(th_next));
+        double th_curr = std::numbers::pi * static_cast<double>(k) / th_samples;
+        double th_next = std::numbers::pi * static_cast<double>(k + 1) / th_samples;
+        double p_c = core.eval_phi(snap.params.n, snap.lambda, std::cos(th_curr));
+        double p_n = core.eval_phi(snap.params.n, snap.lambda, std::cos(th_next));
 
         if (p_c * p_n <= 0.0) {
             double th_zero = 0.5 * (th_curr + th_next);
-            float lat_z = M_PI * 0.5f - static_cast<float>(th_zero);
+            float lat_z = std::numbers::pi * 0.5f - static_cast<float>(th_zero);
             float r_z = radius * std::cos(lat_z);
             float z_z = radius * std::sin(lat_z);
 
             glBegin(GL_LINE_LOOP);
             for (int j = 0; j < 60; ++j) {
-                float lng = 2.0f * M_PI * static_cast<float>(j) / 60;
+                float lng = 2.0f * std::numbers::pi * static_cast<float>(j) / 60;
                 glVertex3f(std::cos(lng) * r_z, z_z, std::sin(lng) * r_z);
             }
             glEnd();
@@ -268,18 +270,18 @@ void GLCanvas::render_layer_i(float alpha) {
     }
 }
 
-void GLCanvas::render_layer_ii(float alpha) {
+void GLCanvas::render_layer_ii(const LayerFrame& frame, const RepresentationSnapshot& snap) {
     glDisable(GL_LIGHTING);
 
-    // Luminous central K-fixed ray
+    // K-fixed ray v_n
     glLineWidth(4.0f);
-    glColor4f(0.2f, 0.9f, 1.0f, alpha);
+    glColor4f(0.2f, 0.9f, 1.0f, frame.alpha);
     glBegin(GL_LINES);
-    glVertex3f(0.0f, -2.5f, 0.0f);
-    glVertex3f(0.0f, 2.5f, 0.0f);
+    glVertex3f(0.0f, -frame.geometry_scale, 0.0f);
+    glVertex3f(0.0f, frame.geometry_scale, 0.0f);
     glEnd();
 
-    // Rank-one projector ray v_n \otimes v_n^* cloud
+    // V_n ambient representation space cloud -> rank-one projector P_{K,n} = v_n \otimes v_n*
     int num_particles = 120;
     glPointSize(5.0f);
     glBegin(GL_POINTS);
@@ -290,13 +292,13 @@ void GLCanvas::render_layer_ii(float alpha) {
         float x_p = std::cos(angle_p) * rad_p;
         float z_p = std::sin(angle_p) * rad_p;
 
-        glColor4f(0.5f, 0.4f, 0.9f, alpha * 0.6f);
+        glColor4f(0.5f, 0.4f, 0.9f, frame.alpha * 0.6f);
         glVertex3f(x_p, y_p, z_p);
     }
     glEnd();
 
     glLineWidth(1.2f);
-    glColor4f(1.0f, 0.6f, 0.2f, alpha * 0.4f);
+    glColor4f(1.0f, 0.6f, 0.2f, frame.alpha * 0.4f);
     glBegin(GL_LINES);
     for (int i = 0; i < num_particles; i += 3) {
         float angle_p = static_cast<float>(i) * 0.35f;
@@ -310,28 +312,28 @@ void GLCanvas::render_layer_ii(float alpha) {
     }
     glEnd();
 
-    float v_y = static_cast<float>(snapshot.phi) * 2.0f;
-    glColor4f(1.0f, 1.0f, 0.3f, alpha);
+    float v_y = static_cast<float>(snap.phi) * 2.0f;
+    glColor4f(1.0f, 1.0f, 0.3f, frame.alpha);
     glPointSize(10.0f);
     glBegin(GL_POINTS);
     glVertex3f(0.0f, v_y, 0.0f);
     glEnd();
 }
 
-void GLCanvas::render_layer_iii(float alpha) {
+void GLCanvas::render_layer_iii(const LayerFrame& frame, const RepresentationSnapshot& snap) {
     glDisable(GL_LIGHTING);
 
     int samples = 200;
     float x_start = -2.2f;
     float x_end = 2.2f;
 
-    // Potential wall surface V(theta)
+    // Potential wall V(theta)
     glLineWidth(2.5f);
-    glColor4f(1.0f, 0.3f, 0.3f, alpha * 0.8f);
+    glColor4f(1.0f, 0.3f, 0.3f, frame.alpha * 0.8f);
     glBegin(GL_LINE_STRIP);
     for (int i = 0; i <= samples; ++i) {
-        double th_val = 0.005 + (M_PI - 0.01) * (static_cast<double>(i) / samples);
-        double v_val = core->eval_potential_v(th_val);
+        double th_val = 0.005 + (std::numbers::pi - 0.01) * (static_cast<double>(i) / samples);
+        double v_val = core.eval_potential_v(snap.lambda, th_val);
         float pos_x = x_start + (x_end - x_start) * (static_cast<float>(i) / samples);
         float pos_y = std::min(3.0f, static_cast<float>(v_val * 0.2));
         glVertex3f(pos_x, pos_y - 1.0f, 0.0f);
@@ -340,41 +342,41 @@ void GLCanvas::render_layer_iii(float alpha) {
 
     // Schrödinger wave u_n(theta)
     glLineWidth(3.5f);
-    glColor4f(0.2f, 1.0f, 0.5f, alpha);
+    glColor4f(0.2f, 1.0f, 0.5f, frame.alpha);
     glBegin(GL_LINE_STRIP);
     for (int i = 0; i <= samples; ++i) {
-        double th_val = 0.005 + (M_PI - 0.01) * (static_cast<double>(i) / samples);
-        double u_val = core->eval_schrodinger_u(snapshot.n, th_val);
+        double th_val = 0.005 + (std::numbers::pi - 0.01) * (static_cast<double>(i) / samples);
+        double u_val = core.eval_schrodinger_u(snap.params.n, snap.lambda, th_val);
         float pos_x = x_start + (x_end - x_start) * (static_cast<float>(i) / samples);
-        float pos_y = static_cast<float>(u_val * 1.5);
+        float pos_y = static_cast<float>(u_val * frame.wave_amplitude);
         glVertex3f(pos_x, pos_y, 0.2f);
     }
     glEnd();
 
-    // Energy baseline N_n^2
-    float e_y = std::min(2.8f, static_cast<float>(snapshot.N * 0.1));
+    // Baseline N_n^2
+    float e_y = std::min(2.8f, static_cast<float>(snap.N * 0.1));
     glLineWidth(1.5f);
-    glColor4f(0.4f, 0.8f, 1.0f, alpha * 0.5f);
+    glColor4f(0.4f, 0.8f, 1.0f, frame.alpha * 0.5f);
     glBegin(GL_LINES);
     glVertex3f(x_start, e_y, 0.0f);
     glVertex3f(x_end, e_y, 0.0f);
     glEnd();
 }
 
-void GLCanvas::render_layer_iv(float alpha) {
+void GLCanvas::render_layer_iv(const LayerFrame& frame, const RepresentationSnapshot& snap) {
     glEnable(GL_LIGHTING);
 
-    int m_nodes = std::min(15, snapshot.n + 3);
-    GolubWelschResult gw = core->compute_golub_welsch(m_nodes);
-    float spacing = 0.35f;
+    int m_nodes = std::min(15, snap.params.n + 3);
+    GolubWelschResult gw = core.compute_golub_welsch(m_nodes, snap.lambda);
+    float spacing = frame.tower_spacing;
     float start_x = -0.5f * (m_nodes - 1) * spacing;
 
     for (int k = 0; k < m_nodes; ++k) {
         float pos_x = start_x + k * spacing;
-        double alpha_k = (k < m_nodes - 1) ? GegenbauerCore::get_jacobi_alpha(k, snapshot.lambda) : 0.0;
+        double alpha_k = (k < m_nodes - 1) ? GegenbauerCore::get_jacobi_alpha(k, snap.lambda) : 0.0;
 
         float tower_height = 0.5f + static_cast<float>(alpha_k) * 2.0f;
-        glColor4f(0.3f, 0.7f, 0.9f, alpha * 0.8f);
+        glColor4f(0.3f, 0.7f, 0.9f, frame.alpha * 0.8f);
 
         glPushMatrix();
         glTranslatef(pos_x, tower_height * 0.5f - 1.0f, 0.0f);
@@ -388,10 +390,10 @@ void GLCanvas::render_layer_iv(float alpha) {
         if (k < m_nodes - 1) {
             glDisable(GL_LIGHTING);
             glLineWidth(3.0f * static_cast<float>(alpha_k * 2.0));
-            glColor4f(1.0f, 0.8f, 0.2f, alpha);
+            glColor4f(1.0f, 0.8f, 0.2f, frame.alpha);
             glBegin(GL_LINES);
             glVertex3f(pos_x, tower_height - 1.0f, 0.0f);
-            glVertex3f(pos_x + spacing, (0.5f + static_cast<float>(GegenbauerCore::get_jacobi_alpha(k + 1, snapshot.lambda)) * 2.0f) - 1.0f, 0.0f);
+            glVertex3f(pos_x + spacing, (0.5f + static_cast<float>(GegenbauerCore::get_jacobi_alpha(k + 1, snap.lambda)) * 2.0f) - 1.0f, 0.0f);
             glEnd();
             glEnable(GL_LIGHTING);
         }
@@ -402,7 +404,7 @@ void GLCanvas::render_layer_iv(float alpha) {
     for (int k = 0; k < m_nodes; ++k) {
         float x_val = static_cast<float>(gw.eigenvalues[k]);
         float line_x = x_val * 2.0f;
-        glColor4f(0.2f, 1.0f, 0.4f, alpha * 0.7f);
+        glColor4f(0.2f, 1.0f, 0.4f, frame.alpha * 0.7f);
         glBegin(GL_LINES);
         glVertex3f(line_x, -1.8f, -0.5f);
         glVertex3f(line_x, -1.2f, -0.5f);
@@ -410,43 +412,45 @@ void GLCanvas::render_layer_iv(float alpha) {
     }
 }
 
-void GLCanvas::render_layer_v(float alpha) {
+void GLCanvas::render_layer_v(const LayerFrame& frame, const RepresentationSnapshot& snap) {
     glDisable(GL_LIGHTING);
 
     int samples = 100;
     float w = 1.3f;
 
-    // 1. North Pole
-    glLineWidth(2.5f);
-    glColor4f(0.2f, 0.9f, 1.0f, alpha);
+    // 1. North Pole Bessel
+    glLineWidth(snap.north_valid ? 3.0f : 1.5f);
+    glColor4f(0.2f, 0.9f, 1.0f, frame.alpha * (snap.north_valid ? 1.0f : 0.4f));
     glBegin(GL_LINE_STRIP);
     for (int i = 0; i <= samples; ++i) {
         double th_val = 0.0001 + 0.3 * (static_cast<double>(i) / samples);
-        double bessel_val = core->eval_north_bessel(th_val);
+        double bessel_val = core.eval_north_bessel(snap.params.n, snap.lambda, th_val);
         float pos_x = -2.2f + w * (static_cast<float>(i) / samples);
         float pos_y = static_cast<float>(bessel_val * 1.2);
         glVertex3f(pos_x, pos_y, 0.0f);
     }
     glEnd();
 
-    // 2. Center WKB
-    glColor4f(0.4f, 1.0f, 0.5f, alpha);
+    // 2. Interior WKB
+    glLineWidth(snap.interior_valid ? 3.0f : 1.5f);
+    glColor4f(0.4f, 1.0f, 0.5f, frame.alpha * (snap.interior_valid ? 1.0f : 0.4f));
     glBegin(GL_LINE_STRIP);
     for (int i = 0; i <= samples; ++i) {
-        double th_val = 0.3 + (M_PI - 0.6) * (static_cast<double>(i) / samples);
-        double wkb_val = core->eval_wkb_interior(th_val);
+        double th_val = 0.3 + (std::numbers::pi - 0.6) * (static_cast<double>(i) / samples);
+        double wkb_val = core.eval_wkb_interior(snap.params.n, snap.lambda, th_val);
         float pos_x = -0.65f + w * (static_cast<float>(i) / samples);
         float pos_y = static_cast<float>(wkb_val * 1.2);
         glVertex3f(pos_x, pos_y, 0.0f);
     }
     glEnd();
 
-    // 3. South Pole
-    glColor4f(1.0f, 0.7f, 0.2f, alpha);
+    // 3. South Pole Bessel
+    glLineWidth(snap.south_valid ? 3.0f : 1.5f);
+    glColor4f(1.0f, 0.7f, 0.2f, frame.alpha * (snap.south_valid ? 1.0f : 0.4f));
     glBegin(GL_LINE_STRIP);
     for (int i = 0; i <= samples; ++i) {
-        double th_val = M_PI - 0.3 + 0.3 * (static_cast<double>(i) / samples);
-        double bessel_val = core->eval_south_bessel(th_val);
+        double th_val = std::numbers::pi - 0.3 + 0.3 * (static_cast<double>(i) / samples);
+        double bessel_val = core.eval_south_bessel(snap.params.n, snap.lambda, th_val);
         float pos_x = 0.9f + w * (static_cast<float>(i) / samples);
         float pos_y = static_cast<float>(bessel_val * 1.2);
         glVertex3f(pos_x, pos_y, 0.0f);
@@ -454,7 +458,7 @@ void GLCanvas::render_layer_v(float alpha) {
     glEnd();
 
     glLineWidth(1.0f);
-    glColor4f(0.6f, 0.6f, 0.7f, alpha * 0.4f);
+    glColor4f(0.6f, 0.6f, 0.7f, frame.alpha * 0.4f);
     float box_xs[] = { -2.2f, -0.65f, 0.9f };
     for (float bx : box_xs) {
         glBegin(GL_LINE_LOOP);
@@ -466,7 +470,7 @@ void GLCanvas::render_layer_v(float alpha) {
     }
 }
 
-void GLCanvas::render_layer_vi(float alpha) {
+void GLCanvas::render_layer_vi(const LayerFrame& frame, const RepresentationSnapshot& snap) {
     glDisable(GL_LIGHTING);
 
     int samples = 200;
@@ -475,40 +479,40 @@ void GLCanvas::render_layer_vi(float alpha) {
 
     // Domain masks
     glBegin(GL_QUADS);
-    glColor4f(0.2f, 0.6f, 1.0f, alpha * 0.15f);
+    glColor4f(0.2f, 0.6f, 1.0f, frame.alpha * 0.15f);
     glVertex3f(x_start, -1.8f, -0.1f); glVertex3f(x_start + 1.2f, -1.8f, -0.1f);
     glVertex3f(x_start + 1.2f, 1.8f, -0.1f); glVertex3f(x_start, 1.8f, -0.1f);
 
-    glColor4f(0.8f, 0.4f, 1.0f, alpha * 0.25f);
+    glColor4f(0.8f, 0.4f, 1.0f, frame.alpha * 0.25f);
     glVertex3f(x_start + 0.9f, -1.8f, -0.05f); glVertex3f(x_start + 1.5f, -1.8f, -0.05f);
     glVertex3f(x_start + 1.5f, 1.8f, -0.05f); glVertex3f(x_start + 0.9f, 1.8f, -0.05f);
 
-    glColor4f(1.0f, 0.6f, 0.2f, alpha * 0.15f);
+    glColor4f(1.0f, 0.6f, 0.2f, frame.alpha * 0.15f);
     glVertex3f(x_end - 1.2f, -1.8f, -0.1f); glVertex3f(x_end, -1.8f, -0.1f);
     glVertex3f(x_end, 1.8f, -0.1f); glVertex3f(x_end - 1.2f, 1.8f, -0.1f);
     glEnd();
 
     // Composite matched wave F_comp(theta)
     glLineWidth(3.5f);
-    glColor4f(1.0f, 1.0f, 0.3f, alpha);
+    glColor4f(1.0f, 1.0f, 0.3f, frame.alpha);
     glBegin(GL_LINE_STRIP);
     for (int i = 0; i <= samples; ++i) {
-        double th_val = 0.001 + (M_PI - 0.002) * (static_cast<double>(i) / samples);
-        double f_comp = core->eval_composite_asymptotics(th_val);
+        double th_val = 0.001 + (std::numbers::pi - 0.002) * (static_cast<double>(i) / samples);
+        double f_comp = core.eval_composite_asymptotics(snap.params.n, snap.lambda, th_val);
         float pos_x = x_start + (x_end - x_start) * (static_cast<float>(i) / samples);
         float pos_y = static_cast<float>(f_comp * 1.5);
         glVertex3f(pos_x, pos_y, 0.1f);
     }
     glEnd();
 
-    // Exact curve comparison
-    if (show_composite_live) {
+    // Exact reference curve overlay phi_exact(theta)
+    if (show_live_overlays) {
         glLineWidth(1.5f);
-        glColor4f(0.2f, 1.0f, 0.8f, alpha * 0.7f);
+        glColor4f(0.2f, 1.0f, 0.8f, frame.alpha * 0.7f);
         glBegin(GL_LINE_STRIP);
         for (int i = 0; i <= samples; ++i) {
-            double th_val = 0.001 + (M_PI - 0.002) * (static_cast<double>(i) / samples);
-            double f_exact = core->eval_phi(snapshot.n, std::cos(th_val));
+            double th_val = 0.001 + (std::numbers::pi - 0.002) * (static_cast<double>(i) / samples);
+            double f_exact = core.eval_phi(snap.params.n, snap.lambda, std::cos(th_val));
             float pos_x = x_start + (x_end - x_start) * (static_cast<float>(i) / samples);
             float pos_y = static_cast<float>(f_exact * 1.5);
             glVertex3f(pos_x, pos_y, 0.12f);
@@ -517,7 +521,7 @@ void GLCanvas::render_layer_vi(float alpha) {
     }
 }
 
-void GLCanvas::render_layer_vii(float alpha) {
+void GLCanvas::render_layer_vii(const LayerFrame& frame, const RepresentationSnapshot& snap) {
     glDisable(GL_LIGHTING);
 
     const char* backend_names[] = {
@@ -530,17 +534,17 @@ void GLCanvas::render_layer_vii(float alpha) {
     for (int i = 0; i < 7; ++i) {
         BackendType bt = static_cast<BackendType>(i);
         (void)backend_names;
-        double backend_phi = core->eval_backend_phi(bt, snapshot.n, snapshot.x);
-        double exact_phi = core->eval_phi();
+        double backend_phi = core.eval_backend_phi(bt, snap.params.n, snap.lambda, snap.x);
+        double exact_phi = core.eval_phi(snap.params.n, snap.lambda, snap.x);
         double err = std::abs(backend_phi - exact_phi);
 
         float ty = start_y - i * track_height;
 
         glLineWidth(2.0f);
-        if (bt == snapshot.backend) {
-            glColor4f(0.3f, 1.0f, 0.4f, alpha);
+        if (bt == snap.backend) {
+            glColor4f(0.3f, 1.0f, 0.4f, frame.alpha);
         } else {
-            glColor4f(0.5f, 0.6f, 0.8f, alpha * 0.5f);
+            glColor4f(0.5f, 0.6f, 0.8f, frame.alpha * 0.5f);
         }
 
         glBegin(GL_LINES);
@@ -551,7 +555,7 @@ void GLCanvas::render_layer_vii(float alpha) {
         if (err > 1e-12) {
             int num_noise = std::min(20, static_cast<int>(err * 1e6) + 2);
             glPointSize(4.0f);
-            glColor4f(1.0f, 0.3f, 0.3f, alpha * 0.7f);
+            glColor4f(1.0f, 0.3f, 0.3f, frame.alpha * 0.7f);
             glBegin(GL_POINTS);
             for (int k = 0; k < num_noise; ++k) {
                 float nx = -2.0f + 4.0f * (static_cast<float>(k) / num_noise);
@@ -563,45 +567,43 @@ void GLCanvas::render_layer_vii(float alpha) {
     }
 }
 
-void GLCanvas::render_layer_viii(float alpha) {
+void GLCanvas::render_layer_viii(const LayerFrame& frame, const RepresentationSnapshot& snap) {
     glDisable(GL_LIGHTING);
 
-    // 4-Axis Verification Wheel
-    float radius = 1.4f;
+    float radius = frame.wheel_radius;
     glLineWidth(3.0f);
-    glColor4f(0.3f, 0.8f, 1.0f, alpha * 0.7f);
+    glColor4f(0.3f, 0.8f, 1.0f, frame.alpha * 0.7f);
     glBegin(GL_LINE_LOOP);
     for (int i = 0; i < 60; ++i) {
-        float ang = 2.0f * M_PI * static_cast<float>(i) / 60;
+        float ang = 2.0f * std::numbers::pi * static_cast<float>(i) / 60;
         glVertex3f(std::cos(ang) * radius, std::sin(ang) * radius, 0.0f);
     }
     glEnd();
 
-    // 4 Independent Axes
+    // 4 Independent Certification Axes
     glLineWidth(2.0f);
-    // Axis 1: Algebraic
-    glColor4f(snapshot.cert.algebraic_exact ? 0.2f : 0.8f, snapshot.cert.algebraic_exact ? 1.0f : 0.3f, 0.3f, alpha);
+    // Axis 1: Algebraic Exact
+    glColor4f(snap.cert.algebraic_exact ? 0.2f : 0.8f, snap.cert.algebraic_exact ? 1.0f : 0.3f, 0.3f, frame.alpha);
     glBegin(GL_LINES); glVertex3f(-radius, 0.0f, 0.0f); glVertex3f(radius, 0.0f, 0.0f); glEnd();
 
-    // Axis 2: Arithmetic
-    glColor4f(snapshot.cert.arithmetic_exact ? 0.2f : 0.8f, snapshot.cert.arithmetic_exact ? 1.0f : 0.3f, 0.3f, alpha);
+    // Axis 2: Arithmetic Exact
+    glColor4f(snap.cert.arithmetic_exact ? 0.2f : 0.8f, snap.cert.arithmetic_exact ? 1.0f : 0.3f, 0.3f, frame.alpha);
     glBegin(GL_LINES); glVertex3f(0.0f, -radius, 0.0f); glVertex3f(0.0f, radius, 0.0f); glEnd();
 
-    // Axis 3: Analytic
-    glColor4f(snapshot.cert.analytic_certified ? 0.2f : 0.8f, snapshot.cert.analytic_certified ? 1.0f : 0.3f, 0.3f, alpha);
+    // Axis 3: Analytic Certified
+    glColor4f(snap.cert.analytic_certified ? 0.2f : 0.8f, snap.cert.analytic_certified ? 1.0f : 0.3f, 0.3f, frame.alpha);
     glBegin(GL_LINES); glVertex3f(-radius * 0.7f, -radius * 0.7f, 0.0f); glVertex3f(radius * 0.7f, radius * 0.7f, 0.0f); glEnd();
 
-    // Axis 4: Numerical
-    glColor4f(snapshot.cert.numerical_valid ? 0.2f : 0.8f, snapshot.cert.numerical_valid ? 1.0f : 0.3f, 0.3f, alpha);
+    // Axis 4: Numerical Approx
+    glColor4f(snap.cert.numerical_approx ? 0.2f : 0.8f, snap.cert.numerical_approx ? 1.0f : 0.3f, 0.3f, frame.alpha);
     glBegin(GL_LINES); glVertex3f(-radius * 0.7f, radius * 0.7f, 0.0f); glVertex3f(radius * 0.7f, -radius * 0.7f, 0.0f); glEnd();
 
-    // Luminous Certification Badge if valid
-    if (snapshot.cert.algebraic_exact || snapshot.cert.arithmetic_exact || snapshot.cert.analytic_certified) {
+    if (snap.cert.algebraic_exact || snap.cert.arithmetic_exact || snap.cert.analytic_certified) {
         glLineWidth(4.0f);
-        glColor4f(0.2f, 1.0f, 0.4f, alpha);
+        glColor4f(0.2f, 1.0f, 0.4f, frame.alpha);
         glBegin(GL_LINE_LOOP);
         for (int i = 0; i < 8; ++i) {
-            float ang = 2.0f * M_PI * static_cast<float>(i) / 8;
+            float ang = 2.0f * std::numbers::pi * static_cast<float>(i) / 8;
             glVertex3f(std::cos(ang) * (radius * 0.5f), std::sin(ang) * (radius * 0.5f), 0.1f);
         }
         glEnd();
@@ -623,8 +625,8 @@ void GLCanvas::render_hud() {
 
     char buf[256];
     const char* layer_names[] = {
-        "Layer I: Harmonic Geometry & Fischer Decomposition",
-        "Layer II: Projector Temple & K-Fixed Ray v_n \\otimes v_n^*",
+        "Layer I: 3D Projection/Slice of S^{d-1} Hyper-Sphere",
+        "Layer II: Projector Temple & K-Fixed Ray v_n \\otimes v_n*",
         "Layer III: Differential & Schrodinger Wave Equations",
         "Layer IV: Jacobi Spectral City & Golub-Welsch Tower J_m",
         "Layer V: Two-Pole Boundary Layer Coordinates (z_+, z_-)",
@@ -634,21 +636,21 @@ void GLCanvas::render_hud() {
     };
 
     glColor3f(0.9f, 0.95f, 1.0f);
-    std::snprintf(buf, sizeof(buf), "[%s]", layer_names[static_cast<int>(current_layer)]);
+    std::snprintf(buf, sizeof(buf), "[%s]", layer_names[static_cast<int>(snapshot.current_layer)]);
     gl_font(FL_HELVETICA_BOLD, 14);
     gl_draw(buf, 15, h() - 25);
 
-    if (is_animating) {
+    if (snapshot.current_layer != snapshot.target_layer) {
         glColor3f(1.0f, 0.8f, 0.2f);
-        std::snprintf(buf, sizeof(buf), "Morphing Transition T = %.2f -> [%s]",
-                      transition_progress, layer_names[static_cast<int>(target_layer)]);
+        std::snprintf(buf, sizeof(buf), "Morphing T = %.2f -> [%s]",
+                      snapshot.transition, layer_names[static_cast<int>(snapshot.target_layer)]);
         gl_draw(buf, 15, h() - 45);
     }
 
     glColor3f(0.7f, 0.85f, 0.95f);
     std::snprintf(buf, sizeof(buf),
-                  "d=%d (\\lambda=%.1f)  n=%d  \\theta=%.4f (x=%.4f)  N=%.1f  z_+=%.3f  z_-=%.3f  [Regime: %s]",
-                  snapshot.d, snapshot.lambda, snapshot.n, snapshot.theta, snapshot.x,
+                  "d=%d (\\lambda=%.1f)  n=%d  \\theta=%.4f (x=%.4f)  N=%.1f  z_+=%.3f  z_-=%.3f  [%s]",
+                  snapshot.params.d, snapshot.lambda, snapshot.params.n, snapshot.params.theta, snapshot.x,
                   snapshot.N, snapshot.z_plus, snapshot.z_minus, snapshot.regime_name.c_str());
     gl_font(FL_HELVETICA, 12);
     gl_draw(buf, 15, 20);

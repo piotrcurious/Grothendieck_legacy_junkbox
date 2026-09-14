@@ -6,24 +6,25 @@
 #include <GL/glu.h>
 #include "GegenbauerCore.h"
 
+// LayerFrame encapsulates rendering geometry properties for smooth visual morphing
+struct LayerFrame {
+    LayerType layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
+    float geometry_scale = 1.0f;
+    float alpha = 1.0f;
+    float wave_amplitude = 1.0f;
+    float potential_wall_height = 1.0f;
+    float tower_spacing = 0.35f;
+    float wheel_radius = 1.4f;
+};
+
 class GLCanvas : public Fl_Gl_Window {
 public:
-    GegenbauerCore* core = nullptr;
+    GegenbauerCore core;
     RepresentationSnapshot snapshot;
-
-    LayerType current_layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
-    LayerType target_layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
-    double transition_progress = 0.0; // T in [0, 1]
-    bool is_animating = false;
-    double anim_speed = 0.02;
-
-    BackendType active_backend = BackendType::FLOAT64;
-    bool auto_router = false;
+    GameState state;
 
     // Visualization toggles
-    bool show_jacobi_overlay = true;
-    bool show_composite_live = true;
-    int projection_mode = 0; // 0: 3D Slice, 1: Radial Tensor, 2: Hyper-Flat
+    bool show_live_overlays = true;
 
     // Camera state
     float rot_x = 25.0f;
@@ -39,32 +40,31 @@ public:
 
     GLCanvas(int x, int y, int w, int h, const char* label = nullptr);
 
-    void set_core(GegenbauerCore* c) { core = c; update_snapshot(); }
-    void update_snapshot();
-    void set_target_layer(LayerType target);
-    void trigger_transition_animation();
+    void set_snapshot(const RepresentationSnapshot& snap) { snapshot = snap; redraw(); }
+    void set_game_state(const GameState& st) { state = st; redraw(); }
 
     void draw() override;
     int handle(int event) override;
 
-    static void anim_callback(void* userdata);
+    static LayerFrame make_layer_frame(LayerType layer, const RepresentationSnapshot& snap);
+    static LayerFrame interpolate_layer_frame(const LayerFrame& f1, const LayerFrame& f2, double t);
 
 private:
     void init_gl();
     void setup_lighting();
     void render_hud();
 
-    // Layer renderers consuming RepresentationSnapshot
-    void render_layer_geometry(LayerType layer, float alpha);
+    // Layer renderers
+    void render_layer_frame(const LayerFrame& frame, const RepresentationSnapshot& snap);
 
-    void render_layer_i(float alpha);
-    void render_layer_ii(float alpha);
-    void render_layer_iii(float alpha);
-    void render_layer_iv(float alpha);
-    void render_layer_v(float alpha);
-    void render_layer_vi(float alpha);
-    void render_layer_vii(float alpha);
-    void render_layer_viii(float alpha);
+    void render_layer_i(const LayerFrame& frame, const RepresentationSnapshot& snap);
+    void render_layer_ii(const LayerFrame& frame, const RepresentationSnapshot& snap);
+    void render_layer_iii(const LayerFrame& frame, const RepresentationSnapshot& snap);
+    void render_layer_iv(const LayerFrame& frame, const RepresentationSnapshot& snap);
+    void render_layer_v(const LayerFrame& frame, const RepresentationSnapshot& snap);
+    void render_layer_vi(const LayerFrame& frame, const RepresentationSnapshot& snap);
+    void render_layer_vii(const LayerFrame& frame, const RepresentationSnapshot& snap);
+    void render_layer_viii(const LayerFrame& frame, const RepresentationSnapshot& snap);
 
     // Helper math & color interpolation
     static void get_phi_color(double val, float& r, float& g, float& b);
