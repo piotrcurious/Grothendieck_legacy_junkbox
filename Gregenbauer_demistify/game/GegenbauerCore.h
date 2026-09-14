@@ -97,6 +97,7 @@ struct CoreParameters {
     int n = 5;
     double theta = 0.5;
     double error_target = 1e-8;
+    int error_target_idx = 1;
     int asymptotic_K = 1;
     int jacobi_m = 10;
 };

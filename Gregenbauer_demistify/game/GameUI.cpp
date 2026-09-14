@@ -36,6 +36,7 @@ GameUI::GameUI(int width, int height)
     state.params.n = 5;
     state.params.theta = 0.5;
     state.params.error_target = 1e-8;
+    state.params.error_target_idx = 1;
     state.params.asymptotic_K = 1;
     state.params.jacobi_m = 10;
     state.current_layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
@@ -118,7 +119,7 @@ GameUI::GameUI(int width, int height)
     choice_layer->add("Layer V: Two-Pole Boundary Coordinates");
     choice_layer->add("Layer VI: Composite Matched Asymptotics");
     choice_layer->add("Layer VII: Multi-Backend Arithmetic Factory");
-    choice_layer->add("Layer VIII: Certification Chamber");
+    choice_layer->add("Layer VIII: Verification & Certification Chamber");
     choice_layer->value(0);
     choice_layer->labelcolor(FL_WHITE);
     choice_layer->callback(cb_choice_layer, this);
@@ -198,9 +199,13 @@ void GameUI::normalize_state(GameState& st) {
     st.params.theta = std::clamp(st.params.theta, 0.0001, std::numbers::pi - 0.0001);
     st.params.asymptotic_K = std::clamp(st.params.asymptotic_K, 1, 5);
     st.params.jacobi_m = std::clamp(st.params.jacobi_m, 4, 30);
+
+    st.params.error_target_idx = std::clamp(st.params.error_target_idx, 0, 3);
+    double targets[] = { 1e-4, 1e-8, 1e-12, 1e-15 };
     if (!std::isfinite(st.params.error_target) || st.params.error_target <= 0.0) {
-        st.params.error_target = 1e-8;
+        st.params.error_target = targets[st.params.error_target_idx];
     }
+
     st.transition = std::clamp(st.transition, 0.0, 1.0);
 
     int l_curr = std::clamp(static_cast<int>(st.current_layer), 0, 7);
@@ -219,6 +224,15 @@ void GameUI::apply_state_change(const GameState& new_state) {
     mark_dirty_and_schedule();
 }
 
+void GameUI::set_transition(double t) {
+    state.transition = std::clamp(t, 0.0, 1.0);
+    if (state.transition >= 1.0) {
+        commit_layer_transition();
+    } else {
+        mark_dirty_and_schedule();
+    }
+}
+
 void GameUI::begin_layer_transition(LayerType target) {
     int target_idx = std::clamp(static_cast<int>(target), 0, 7);
     target = static_cast<LayerType>(target_idx);
@@ -232,6 +246,7 @@ void GameUI::begin_layer_transition(LayerType target) {
     cancel_layer_transition();
     state.target_layer = target;
     state.transition = 0.0;
+    normalize_state(state);
     is_morph_animating = true;
     last_anim_time = std::chrono::steady_clock::now();
     Fl::add_timeout(0.016, timer_morph_cb, this);
@@ -265,11 +280,7 @@ void GameUI::sync_widgets_from_state() {
 
     choice_layer->value(static_cast<int>(state.target_layer));
     choice_backend->value(static_cast<int>(state.backend));
-
-    if (state.params.error_target <= 1e-15) choice_error_target->value(3);
-    else if (state.params.error_target <= 1e-12) choice_error_target->value(2);
-    else if (state.params.error_target <= 1e-8) choice_error_target->value(1);
-    else choice_error_target->value(0);
+    choice_error_target->value(state.params.error_target_idx);
 
     if (state.auto_router) {
         btn_auto_router->label("Router AI: AUTO");
@@ -413,24 +424,18 @@ void GameUI::cb_slider_jacobi_m(Fl_Widget* w, void* userdata) {
 
 void GameUI::cb_choice_error_target(Fl_Widget* w, void* userdata) {
     GameUI* ui = static_cast<GameUI*>(userdata);
+    if (ui->is_updating_widgets) return;
     int idx = std::clamp(ui->choice_error_target->value(), 0, 3);
     double targets[] = { 1e-4, 1e-8, 1e-12, 1e-15 };
     GameState next_state = ui->state;
+    next_state.params.error_target_idx = idx;
     next_state.params.error_target = targets[idx];
     ui->apply_state_change(next_state);
 }
 
 void GameUI::cb_slider_transition(Fl_Widget* w, void* userdata) {
     GameUI* ui = static_cast<GameUI*>(userdata);
-    GameState next_state = ui->state;
-    next_state.transition = ui->slider_transition->value();
-    ui->normalize_state(next_state);
-    if (next_state.transition >= 1.0) {
-        ui->state = next_state;
-        ui->commit_layer_transition();
-    } else {
-        ui->apply_state_change(next_state);
-    }
+    ui->set_transition(ui->slider_transition->value());
 }
 
 void GameUI::cb_choice_layer(Fl_Widget* w, void* userdata) {
@@ -453,7 +458,7 @@ void GameUI::cb_choice_backend(Fl_Widget* w, void* userdata) {
 void GameUI::cb_btn_anim_morph(Fl_Widget* w, void* userdata) {
     GameUI* ui = static_cast<GameUI*>(userdata);
     if (ui->state.current_layer == ui->state.target_layer && ui->state.transition >= 1.0) {
-        return; // Terminal state guard
+        return;
     }
     ui->begin_layer_transition(ui->state.target_layer);
 }

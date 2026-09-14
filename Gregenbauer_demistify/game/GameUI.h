@@ -68,6 +68,7 @@ public:
     void show();
     void normalize_state(GameState& st);
     void apply_state_change(const GameState& new_state);
+    void set_transition(double t);
     void begin_layer_transition(LayerType target);
     void cancel_layer_transition();
     void commit_layer_transition();
