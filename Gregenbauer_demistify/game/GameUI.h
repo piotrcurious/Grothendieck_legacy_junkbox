@@ -11,6 +11,7 @@
 #include <FL/Fl_Text_Buffer.H>
 #include <memory>
 #include <chrono>
+#include <cmath>
 #include <algorithm>
 #include <array>
 #include "GegenbauerCore.h"

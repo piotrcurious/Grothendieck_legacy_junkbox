@@ -6,6 +6,7 @@
 #include <numbers>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <array>
 
 static constexpr std::array<LayerInfo, 8> g_layer_infos{{
@@ -201,10 +202,8 @@ void GameUI::normalize_state(GameState& st) {
     st.params.jacobi_m = std::clamp(st.params.jacobi_m, 4, 30);
 
     st.params.error_target_idx = std::clamp(st.params.error_target_idx, 0, 3);
-    double targets[] = { 1e-4, 1e-8, 1e-12, 1e-15 };
-    if (!std::isfinite(st.params.error_target) || st.params.error_target <= 0.0) {
-        st.params.error_target = targets[st.params.error_target_idx];
-    }
+    constexpr double targets[] = { 1e-4, 1e-8, 1e-12, 1e-15 };
+    st.params.error_target = targets[st.params.error_target_idx];
 
     st.transition = std::clamp(st.transition, 0.0, 1.0);
 
@@ -225,6 +224,7 @@ void GameUI::apply_state_change(const GameState& new_state) {
 }
 
 void GameUI::set_transition(double t) {
+    cancel_layer_transition();
     state.transition = std::clamp(t, 0.0, 1.0);
     if (state.transition >= 1.0) {
         commit_layer_transition();
@@ -237,10 +237,11 @@ void GameUI::begin_layer_transition(LayerType target) {
     int target_idx = std::clamp(static_cast<int>(target), 0, 7);
     target = static_cast<LayerType>(target_idx);
 
-    if (target == state.current_layer && state.transition >= 1.0) {
+    if (target == state.current_layer) {
+        cancel_layer_transition();
         state.target_layer = target;
         state.transition = 1.0;
-        commit_layer_transition();
+        mark_dirty_and_schedule();
         return;
     }
     cancel_layer_transition();
@@ -334,9 +335,13 @@ void GameUI::publish_snapshot() {
     curr_state.target_layer = state.current_layer;
     current_snapshot = core.evaluate(curr_state);
 
-    GameState targ_state = state;
-    targ_state.current_layer = state.target_layer;
-    target_snapshot = core.evaluate(targ_state);
+    if (state.current_layer == state.target_layer) {
+        target_snapshot = current_snapshot;
+    } else {
+        GameState targ_state = state;
+        targ_state.current_layer = state.target_layer;
+        target_snapshot = core.evaluate(targ_state);
+    }
 
     render_snapshot = GegenbauerCore::morph_snapshots(current_snapshot, target_snapshot, state.transition);
     gl_canvas->set_snapshot(render_snapshot);
