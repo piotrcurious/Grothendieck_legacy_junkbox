@@ -6,7 +6,15 @@
 #include <GL/glu.h>
 #include "GegenbauerCore.h"
 
-// LayerFrame encapsulates rendering geometry properties for smooth visual morphing
+// Standardized LayerFrame visual model for morphing transitions
+struct Marker {
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    float r = 1.0f, g = 1.0f, b = 1.0f;
+    float size = 5.0f;
+};
+
 struct LayerFrame {
     LayerType layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
     float geometry_scale = 1.0f;
@@ -15,13 +23,14 @@ struct LayerFrame {
     float potential_wall_height = 1.0f;
     float tower_spacing = 0.35f;
     float wheel_radius = 1.4f;
+
+    std::vector<Marker> markers;
 };
 
 class GLCanvas : public Fl_Gl_Window {
 public:
     GegenbauerCore core;
     RepresentationSnapshot snapshot;
-    GameState state;
 
     // Visualization toggles
     bool show_live_overlays = true;
@@ -41,7 +50,6 @@ public:
     GLCanvas(int x, int y, int w, int h, const char* label = nullptr);
 
     void set_snapshot(const RepresentationSnapshot& snap) { snapshot = snap; redraw(); }
-    void set_game_state(const GameState& st) { state = st; redraw(); }
 
     void draw() override;
     int handle(int event) override;

@@ -80,7 +80,7 @@ void test_4_axis_certification_and_snapshot() {
     state.params.theta = 0.01; // North Pole
     RepresentationSnapshot snap_auto = core.evaluate(state);
     assert(snap_auto.regime == RegimeType::NORTH_ENDPOINT_BESSEL);
-    assert(snap_auto.target_layer == LayerType::LAYER_V_TWO_POLE_COORDS);
+    assert(snap_auto.effective_layer == LayerType::LAYER_V_TWO_POLE_COORDS);
 
     std::cout << "  -> GameState Evaluation & Router Decision [PASSED]" << std::endl;
 }

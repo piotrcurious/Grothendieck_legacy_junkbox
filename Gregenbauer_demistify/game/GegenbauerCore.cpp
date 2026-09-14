@@ -45,48 +45,78 @@ std::string GegenbauerCore::get_backend_name(BackendType bt) {
     }
 }
 
-RouterDecision GegenbauerCore::solve_router_decision(const CoreParameters& params) const {
+std::string GegenbauerCore::get_layer_name(LayerType layer) {
+    switch (layer) {
+        case LayerType::LAYER_I_HARMONIC_GEOMETRY: return "Layer I (Harmonic Geometry)";
+        case LayerType::LAYER_II_PROJECTOR_TEMPLE: return "Layer II (Projector Temple)";
+        case LayerType::LAYER_III_DIFFERENTIAL_WAVE: return "Layer III (Differential Wave)";
+        case LayerType::LAYER_IV_JACOBI_CITY: return "Layer IV (Jacobi Spectral City)";
+        case LayerType::LAYER_V_TWO_POLE_COORDS: return "Layer V (Two-Pole Coordinates)";
+        case LayerType::LAYER_VI_COMPOSITE_ASYMPTOTICS: return "Layer VI (Composite Asymptotics)";
+        case LayerType::LAYER_VII_ARITHMETIC_FACTORY: return "Layer VII (Arithmetic Factory)";
+        case LayerType::LAYER_VIII_CERTIFICATION_CHAMBER: return "Layer VIII (Certification Chamber)";
+        default: return "UNKNOWN";
+    }
+}
+
+RouterDecision GegenbauerCore::solve_router_decision(const GameState& state) const {
     RouterDecision dec;
-    double lam = (params.d - 2.0) / 2.0;
-    double th = std::clamp(params.theta, 1e-6, std::numbers::pi - 1e-6);
-    RegimeType reg = classify_regime(params.n, lam, th);
+    dec.requested_layer = state.target_layer;
+    dec.requested_backend = state.backend;
+
+    double lam = (state.params.d - 2.0) / 2.0;
+    double th = std::clamp(state.params.theta, 1e-6, std::numbers::pi - 1e-6);
+    RegimeType reg = classify_regime(state.params.n, lam, th);
     double kappa = std::max(1.0, 1.0 / std::sin(th));
-
     dec.conditioning = kappa;
-    dec.feasible = true;
 
-    // Feasibility-first selection hierarchy:
-    // 1. Reject bad conditioning / singular domain
-    // 2. Reject error > target
-    // 3. Minimize cost
+    if (!state.auto_router) {
+        dec.effective_layer = state.target_layer;
+        dec.effective_backend = state.backend;
+        dec.feasible = true;
+        dec.reason = "Manual Selection: Obeying user requested layer and backend";
+        return dec;
+    }
+
+    // Candidate evaluation hierarchy for AUTO mode
+    std::ostringstream rej_log;
+
+    if (kappa > 1e4) {
+        rej_log << "candidate rejected: conditioning \u03BA=" << kappa << " > 1e4 (near singular pole); ";
+    }
+
     if (reg == RegimeType::NORTH_ENDPOINT_BESSEL || reg == RegimeType::SOUTH_ENDPOINT_BESSEL) {
-        dec.layer = LayerType::LAYER_V_TWO_POLE_COORDS;
-        dec.estimated_error = 1.0 / (params.n + lam);
+        dec.effective_layer = LayerType::LAYER_V_TWO_POLE_COORDS;
+        dec.estimated_error = 1.0 / (state.params.n + lam);
         dec.cost = 2.0;
         dec.reason = "Selected Layer V (Endpoint Bessel) for z_0 <= 10";
     } else if (reg == RegimeType::OVERLAP_APPROXIMATION) {
-        dec.layer = LayerType::LAYER_VI_COMPOSITE_ASYMPTOTICS;
-        dec.estimated_error = 1.0 / std::pow(params.n + lam, 2.0);
+        dec.effective_layer = LayerType::LAYER_VI_COMPOSITE_ASYMPTOTICS;
+        dec.estimated_error = 1.0 / std::pow(state.params.n + lam, 2.0);
         dec.cost = 3.0;
         dec.reason = "Selected Layer VI (Composite Matched Asymptotics) for Overlap Zone";
-    } else if (params.n > 200) {
-        dec.layer = LayerType::LAYER_IV_JACOBI_CITY;
+    } else if (state.params.n > 200) {
+        dec.effective_layer = LayerType::LAYER_IV_JACOBI_CITY;
         dec.estimated_error = 1e-12;
         dec.cost = 4.0;
-        dec.reason = "Selected Layer IV (Jacobi Spectral City) for High Degree n";
+        dec.reason = "Selected Layer IV (Jacobi Spectral City) for High Degree n > 200";
     } else {
-        dec.layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
+        dec.effective_layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
         dec.estimated_error = 1e-14;
         dec.cost = 1.0;
         dec.reason = "Selected Layer I (Harmonic Geometry) for Interior Domain";
     }
 
-    if (params.error_target < 1e-12) {
-        dec.backend = BackendType::EXACT_RATIONAL;
+    if (state.params.error_target < 1e-12) {
+        dec.effective_backend = BackendType::EXACT_RATIONAL;
         dec.cost += 10.0;
-        dec.reason += " + EXACT_RATIONAL Backend";
+        dec.reason += " + EXACT_RATIONAL Backend (\u03B5_target < 1e-12)";
     } else {
-        dec.backend = BackendType::FLOAT64;
+        dec.effective_backend = BackendType::FLOAT64;
+    }
+
+    if (!rej_log.str().empty()) {
+        dec.reason = rej_log.str() + " -> " + dec.reason;
     }
 
     return dec;
@@ -111,41 +141,40 @@ RepresentationSnapshot GegenbauerCore::evaluate(const GameState& state) const {
     snap.north_valid = (snap.z_plus <= 12.0);
     snap.south_valid = (snap.z_minus <= 12.0);
     snap.interior_valid = (snap.z_plus >= 1.5 && snap.z_minus >= 1.5);
+    snap.domain_valid = (snap.params.theta > 1e-5 && snap.params.theta < std::numbers::pi - 1e-5);
 
     snap.auto_router = state.auto_router;
     snap.current_layer = state.current_layer;
     snap.target_layer = state.target_layer;
-    snap.transition = state.transition;
+    snap.transition = std::clamp(state.transition, 0.0, 1.0);
 
-    snap.router_decision = solve_router_decision(snap.params);
+    snap.router_decision = solve_router_decision(state);
 
-    if (state.auto_router) {
-        snap.current_layer = snap.router_decision.layer;
-        snap.target_layer = snap.router_decision.layer;
-        snap.backend = snap.router_decision.backend;
-    } else {
-        snap.backend = state.backend;
-    }
+    snap.effective_layer = snap.router_decision.effective_layer;
+    snap.effective_backend = snap.router_decision.effective_backend;
 
-    snap.backend_name = get_backend_name(snap.backend);
+    snap.effective_layer_name = get_layer_name(snap.effective_layer);
+    snap.effective_backend_name = get_backend_name(snap.effective_backend);
 
     // Evaluate function and metrics
-    snap.phi = eval_backend_phi(snap.backend, snap.params.n, snap.lambda, snap.x);
-    snap.cert = compute_certification(snap.params.n, snap.lambda, snap.params.theta, snap.backend);
+    snap.phi = eval_backend_phi(snap.effective_backend, snap.params.n, snap.lambda, snap.x);
+    snap.cert = compute_certification(snap.params.n, snap.lambda, snap.params.theta, snap.effective_backend, snap.params.error_target);
 
     snap.forward_error = snap.cert.forward_error;
     snap.conditioning = snap.cert.conditioning;
+    snap.conditioning_ok = (snap.conditioning <= 1e4);
 
     // Analytic error envelope bound B_K
-    snap.analytic_bound = (1.0 / std::pow(snap.N, 1.0)) * (1.0 / std::pow(std::max(1e-4, std::sin(snap.params.theta)), snap.lambda));
+    snap.analytic_bound = (1.0 / std::pow(snap.N, static_cast<double>(snap.params.asymptotic_K))) *
+                           (1.0 / std::pow(std::max(1e-4, std::sin(snap.params.theta)), snap.lambda));
 
     // Residuals
     snap.r_rec = snap.cert.structural_residual;
     snap.r_ode = snap.cert.structural_residual;
     snap.r_schr = snap.cert.structural_residual;
 
-    // Jacobi residual
-    int m_jac = std::max(5, snap.params.n + 2);
+    // Jacobi residual via cached Golub-Welsch
+    int m_jac = std::max(5, snap.params.jacobi_m);
     GolubWelschResult gw = compute_golub_welsch(m_jac, snap.lambda);
     snap.r_jacobi = gw.eigenpair_residual;
 
@@ -240,6 +269,10 @@ std::vector<double> GegenbauerCore::get_jacobi_alphas(int m, double lam) const {
 }
 
 GolubWelschResult GegenbauerCore::compute_golub_welsch(int m, double lam) const {
+    if (m == cached_m && std::abs(lam - cached_lam) < 1e-12) {
+        return cached_gw;
+    }
+
     GolubWelschResult res;
     res.m = m;
     if (m <= 0) return res;
@@ -336,6 +369,10 @@ GolubWelschResult GegenbauerCore::compute_golub_welsch(int m, double lam) const 
     }
     res.eigenpair_residual = max_res;
 
+    cached_m = m;
+    cached_lam = lam;
+    cached_gw = res;
+
     return res;
 }
 
@@ -395,6 +432,13 @@ double GegenbauerCore::eval_composite_asymptotics(int n_deg, double lam, double 
 
     double bessel_north = eval_bessel_j_nu(nu, z0);
     double bessel_south = ((n_deg % 2 == 0) ? 1.0 : -1.0) * eval_bessel_j_nu(nu, z_pi);
+
+    if (z0 <= 10.0) {
+        return bessel_north;
+    } else if (z_pi <= 10.0) {
+        return bessel_south;
+    }
+
     double wkb_val = eval_wkb_interior(n_deg, lam, th);
 
     double match_north = std::pow(2.0, nu) * gamma_func(nu + 1.0) * std::pow(z0, -nu) *
@@ -431,7 +475,7 @@ double GegenbauerCore::eval_backend_phi(BackendType backend, int n_deg, double l
     }
 }
 
-CertificationStatus GegenbauerCore::compute_certification(int n_deg, double lam, double th, BackendType backend) const {
+CertificationStatus GegenbauerCore::compute_certification(int n_deg, double lam, double th, BackendType backend, double target_err) const {
     CertificationStatus cert;
     double x_val = std::cos(th);
 
@@ -467,18 +511,31 @@ CertificationStatus GegenbauerCore::compute_certification(int n_deg, double lam,
     cert.conditioning = std::max(1.0, 1.0 / std::sin(th));
     cert.forward_error = cert.backend_discrepancy + cert.conditioning * cert.structural_residual;
 
-    // 4 Independent Certification Axes matching Layer VIII taxonomy
+    // 4 Independent Certification Axes
     cert.algebraic_exact = (backend == BackendType::EXACT_RATIONAL);
-    cert.algebraic_reason = cert.algebraic_exact ? "Certified via Q[lambda, x] symbolic fraction algebra" : "Floating-point path (non-symbolic)";
+    cert.algebraic_reason = cert.algebraic_exact ? "Certified via Q[lambda, x] symbolic fraction algebra"
+                                                 : "Floating-point path (non-symbolic)";
 
     cert.arithmetic_exact = (backend == BackendType::MODULAR_RNS);
-    cert.arithmetic_reason = cert.arithmetic_exact ? "Certified via RNS modular CRT integer recovery" : "Non-RNS representation";
+    cert.arithmetic_reason = cert.arithmetic_exact ? "Certified via RNS modular CRT integer recovery"
+                                                  : "Non-RNS representation";
 
-    cert.analytic_certified = (r_rec < 1e-6 && r_ode < 1e-6 && cert.forward_error < 1e-5);
-    cert.analytic_reason = cert.analytic_certified ? "Analytic error envelope bound B_K satisfied" : "Forward error exceeds analytic bound";
+    cert.analytic_certified = (cert.forward_error <= target_err);
+    if (!cert.analytic_certified) {
+        std::ostringstream reason;
+        reason << "Analytic bound B_comp = " << std::scientific << cert.forward_error
+               << " > \u03B5_target = " << target_err;
+        cert.analytic_reason = reason.str();
+    } else {
+        cert.analytic_reason = "Analytic error envelope bound satisfied";
+    }
 
-    cert.numerical_approx = (r_rec < 1e-3);
-    cert.numerical_reason = cert.numerical_approx ? "Recurrence structural residual <= 1e-3" : "Structural residual threshold failed";
+    cert.numerical_approx = (r_rec <= 1e-3);
+    if (!cert.numerical_approx) {
+        cert.numerical_reason = "Recurrence structural residual exceeds threshold 1e-3";
+    } else {
+        cert.numerical_reason = "Recurrence structural residual <= 1e-3";
+    }
 
     return cert;
 }

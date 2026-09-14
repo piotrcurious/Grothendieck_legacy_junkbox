@@ -21,11 +21,16 @@ public:
     std::unique_ptr<Fl_Double_Window> main_win;
     GLCanvas* gl_canvas = nullptr;
 
-    // Controls
+    // Core controls
     Fl_Value_Slider* slider_d = nullptr;
     Fl_Value_Slider* slider_n = nullptr;
-    Fl_Value_Slider* slider_theta = nullptr;
+    Fl_Value_Slider* slider_theta = nullptr; // Endpoint sensitive
     Fl_Value_Slider* slider_transition = nullptr;
+
+    // Advanced numerical controls
+    Fl_Choice* choice_error_target = nullptr;
+    Fl_Value_Slider* slider_asymptotic_k = nullptr;
+    Fl_Value_Slider* slider_jacobi_m = nullptr;
 
     Fl_Choice* choice_layer = nullptr;
     Fl_Choice* choice_backend = nullptr;
@@ -34,13 +39,14 @@ public:
     Fl_Button* btn_auto_router = nullptr;
     Fl_Button* btn_info = nullptr;
 
-    // Structured Telemetry Display
+    // Telemetry Display
     Fl_Text_Display* text_telemetry = nullptr;
     Fl_Text_Buffer* text_buffer = nullptr;
 
-    // Debouncing state
+    // Scheduler and guards
     bool is_dirty = false;
     bool is_morph_animating = false;
+    bool is_updating_widgets = false;
 
     GameUI(int width = 1100, int height = 820);
     ~GameUI();
@@ -57,6 +63,9 @@ public:
     static void cb_slider_n(Fl_Widget* w, void* userdata);
     static void cb_slider_theta(Fl_Widget* w, void* userdata);
     static void cb_slider_transition(Fl_Widget* w, void* userdata);
+    static void cb_choice_error_target(Fl_Widget* w, void* userdata);
+    static void cb_slider_asymptotic_k(Fl_Widget* w, void* userdata);
+    static void cb_slider_jacobi_m(Fl_Widget* w, void* userdata);
     static void cb_choice_layer(Fl_Widget* w, void* userdata);
     static void cb_choice_backend(Fl_Widget* w, void* userdata);
     static void cb_btn_anim_morph(Fl_Widget* w, void* userdata);
