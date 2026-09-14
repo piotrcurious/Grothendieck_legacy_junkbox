@@ -5,6 +5,7 @@
 #include <sstream>
 #include <iomanip>
 #include <numbers>
+#include <algorithm>
 
 static const LayerInfo g_layer_infos[8] = {
     {"Layer I: 3D Projection/Slice of S^{d-1} Hyper-Sphere",
@@ -22,7 +23,7 @@ static const LayerInfo g_layer_infos[8] = {
     {"Layer VII: Multi-Backend Arithmetic Factory",
      "Evaluates Gegenbauer wave across 7 execution backends (FLOAT32 to MODULAR_RNS), displaying precision mantissa lattices and noise particles."},
     {"Layer VIII: Verification & Certification Chamber",
-     "Multi-axis verification wheel classifying truth into ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, or NUMERICAL_APPROX."}
+     "Multi-axis verification wheel classifying verification status into ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, or NUMERICAL_APPROX."}
 };
 
 GameUI::GameUI(int width, int height)
@@ -56,7 +57,7 @@ GameUI::GameUI(int width, int height)
     int col2_x = 70 + static_cast<int>((width - 90) * 0.35);
     int col3_x = 70 + static_cast<int>((width - 90) * 0.68);
 
-    // Column 1: Core Parameters & Endpoint Sensitive Angle
+    // Column 1: Core Parameters
     slider_d = new Fl_Value_Slider(col1_x, canvas_h + 25, 220, 22, "Dim (d):");
     slider_d->type(FL_HOR_SLIDER);
     slider_d->bounds(3, 20);
@@ -146,7 +147,7 @@ GameUI::GameUI(int width, int height)
     choice_backend->add("LONGDOUBLE (80-bit Extended)");
     choice_backend->add("Q16.16 (Fixed Point)");
     choice_backend->add("LNS (Logarithmic System)");
-    choice_backend->add("EXACT_RATIONAL (\u221A Symbolic)");
+    choice_backend->add("EXACT_RATIONAL / SYMBOLIC");
     choice_backend->add("MODULAR_RNS (Residue CRT)");
     choice_backend->value(1);
     choice_backend->labelcolor(FL_WHITE);
@@ -161,7 +162,7 @@ GameUI::GameUI(int width, int height)
     choice_error_target->labelcolor(FL_WHITE);
     choice_error_target->callback(cb_choice_error_target, this);
 
-    // Column 3: Structured 7-Section Telemetry Display
+    // Column 3: Telemetry Display
     text_buffer = new Fl_Text_Buffer();
     text_telemetry = new Fl_Text_Display(col3_x, canvas_h + 20, width - col3_x - margin * 2, 195);
     text_telemetry->buffer(text_buffer);
@@ -181,22 +182,64 @@ GameUI::GameUI(int width, int height)
 GameUI::~GameUI() {
     Fl::remove_timeout(timer_update_cb, this);
     Fl::remove_timeout(timer_morph_cb, this);
+    main_win.reset();
     delete text_buffer;
+    text_buffer = nullptr;
 }
 
 void GameUI::show() {
     main_win->show();
 }
 
+void GameUI::normalize_state(GameState& st) {
+    st.params.d = std::clamp(st.params.d, 3, 20);
+    st.params.n = std::clamp(st.params.n, 0, 500);
+    st.params.theta = std::clamp(st.params.theta, 0.0001, std::numbers::pi - 0.0001);
+    st.params.asymptotic_K = std::clamp(st.params.asymptotic_K, 1, 5);
+    st.params.jacobi_m = std::clamp(st.params.jacobi_m, 4, 30);
+    st.transition = std::clamp(st.transition, 0.0, 1.0);
+
+    int l_curr = std::clamp(static_cast<int>(st.current_layer), 0, 7);
+    st.current_layer = static_cast<LayerType>(l_curr);
+
+    int l_targ = std::clamp(static_cast<int>(st.target_layer), 0, 7);
+    st.target_layer = static_cast<LayerType>(l_targ);
+
+    int b_val = std::clamp(static_cast<int>(st.backend), 0, 6);
+    st.backend = static_cast<BackendType>(b_val);
+}
+
 void GameUI::apply_state_change(const GameState& new_state) {
     state = new_state;
+    normalize_state(state);
     mark_dirty_and_schedule();
 }
 
+void GameUI::begin_layer_transition(LayerType target) {
+    if (target == state.current_layer) {
+        state.target_layer = target;
+        state.transition = 1.0;
+        commit_layer_transition();
+        return;
+    }
+    cancel_layer_transition();
+    state.target_layer = target;
+    state.transition = 0.0;
+    is_morph_animating = true;
+    last_anim_time = std::chrono::steady_clock::now();
+    Fl::add_timeout(0.016, timer_morph_cb, this);
+    mark_dirty_and_schedule();
+}
+
+void GameUI::cancel_layer_transition() {
+    is_morph_animating = false;
+    Fl::remove_timeout(timer_morph_cb, this);
+}
+
 void GameUI::commit_layer_transition() {
+    cancel_layer_transition();
     state.current_layer = state.target_layer;
     state.transition = 1.0;
-    is_morph_animating = false;
     sync_widgets_from_state();
     mark_dirty_and_schedule();
 }
@@ -214,6 +257,14 @@ void GameUI::sync_widgets_from_state() {
 
     choice_layer->value(static_cast<int>(state.target_layer));
     choice_backend->value(static_cast<int>(state.backend));
+
+    if (state.auto_router) {
+        btn_auto_router->label("Router AI: AUTO");
+        btn_auto_router->color(fl_rgb_color(40, 160, 100));
+    } else {
+        btn_auto_router->label("Router AI: MANUAL");
+        btn_auto_router->color(fl_rgb_color(50, 70, 90));
+    }
 
     is_updating_widgets = false;
 }
@@ -240,7 +291,7 @@ void GameUI::timer_morph_cb(void* userdata) {
     double dt = std::chrono::duration<double>(now - ui->last_anim_time).count();
     ui->last_anim_time = now;
 
-    constexpr double duration = 0.8; // 0.8s deterministic morph animation
+    constexpr double duration = 0.8;
     ui->state.transition += dt / duration;
 
     if (ui->state.transition >= 1.0) {
@@ -248,52 +299,53 @@ void GameUI::timer_morph_cb(void* userdata) {
     } else {
         Fl::repeat_timeout(0.016, timer_morph_cb, ui);
         ui->slider_transition->value(ui->state.transition);
-        ui->gl_canvas->set_snapshot(ui->core.evaluate(ui->state));
+        ui->cached_snapshot.transition = ui->state.transition;
+        ui->gl_canvas->set_snapshot(ui->cached_snapshot);
     }
 }
 
 void GameUI::publish_snapshot() {
-    RepresentationSnapshot snap = core.evaluate(state);
-    gl_canvas->set_snapshot(snap);
+    cached_snapshot = core.evaluate(state);
+    gl_canvas->set_snapshot(cached_snapshot);
 
     std::ostringstream oss;
     oss << std::scientific << std::setprecision(2);
 
     oss << "========================================\n";
-    oss << "1. STATE: d=" << snap.params.d << " (\u03BB=" << snap.lambda
-        << ") | n=" << snap.params.n << " | N=" << snap.N << "\n";
-    oss << "   \u03B8=" << std::fixed << std::setprecision(4) << snap.params.theta
-        << " (x=" << snap.x << ") | \u03C6_n=" << snap.phi << "\n";
+    oss << "1. STATE: d=" << cached_snapshot.params.d << " (\u03BB=" << cached_snapshot.lambda
+        << ") | n=" << cached_snapshot.params.n << " | N=" << cached_snapshot.N << "\n";
+    oss << "   \u03B8=" << std::fixed << std::setprecision(4) << cached_snapshot.params.theta
+        << " (x=" << cached_snapshot.x << ") | \u03C6_n=" << cached_snapshot.phi << "\n";
     oss << "----------------------------------------\n";
-    oss << "2. REGIME & DOMAIN VALIDITY: " << snap.regime_name << "\n";
-    oss << "   z_+=" << std::fixed << std::setprecision(3) << snap.z_plus
-        << " [" << (snap.north_valid ? "VALID" : "OUT") << "] | "
-        << "z_-=" << snap.z_minus << " [" << (snap.south_valid ? "VALID" : "OUT") << "]\n";
+    oss << "2. REGIME & DOMAIN VALIDITY: " << cached_snapshot.regime_name << "\n";
+    oss << "   z_+=" << std::fixed << std::setprecision(3) << cached_snapshot.z_plus
+        << " [" << (cached_snapshot.north_valid ? "VALID" : "OUT") << "] | "
+        << "z_-=" << cached_snapshot.z_minus << " [" << (cached_snapshot.south_valid ? "VALID" : "OUT") << "]\n";
     oss << "----------------------------------------\n";
     oss << "3. REPRESENTATION & BACKEND:\n";
-    oss << "   Layer: " << static_cast<int>(snap.current_layer)
-        << " -> " << static_cast<int>(snap.target_layer)
-        << " (T=" << std::fixed << std::setprecision(2) << snap.transition << ")\n";
-    oss << "   Effective: " << snap.effective_layer_name << " | " << snap.effective_backend_name << "\n";
+    oss << "   Layer: " << static_cast<int>(cached_snapshot.current_layer)
+        << " -> " << static_cast<int>(cached_snapshot.target_layer)
+        << " (T=" << std::fixed << std::setprecision(2) << cached_snapshot.transition << ")\n";
+    oss << "   Effective: " << cached_snapshot.effective_layer_name << " | " << cached_snapshot.effective_backend_name << "\n";
     oss << "----------------------------------------\n";
     oss << "4. NUMERICS & CONDITIONING:\n";
     oss << std::scientific << std::setprecision(2);
-    oss << "   \u03BA=" << snap.conditioning << " | Fwd Err=" << snap.forward_error
-        << " | B_K=" << snap.analytic_bound << "\n";
+    oss << "   \u03BA=" << cached_snapshot.conditioning << " | Fwd Err=" << cached_snapshot.forward_error
+        << " | B_K=" << cached_snapshot.analytic_bound << "\n";
     oss << "----------------------------------------\n";
     oss << "5. STRUCTURAL RESIDUALS:\n";
-    oss << "   R_rec=" << snap.r_rec << " | R_ODE=" << snap.r_ode << "\n";
-    oss << "   R_Schr=" << snap.r_schr << " | R_J=" << snap.r_jacobi << "\n";
-    oss << "   Backend Discrepancy = " << snap.backend_error << "\n";
+    oss << "   R_rec=" << cached_snapshot.r_rec << " | R_ODE=" << cached_snapshot.r_ode << "\n";
+    oss << "   R_Schr=" << cached_snapshot.r_schr << " | R_J=" << cached_snapshot.r_jacobi << "\n";
+    oss << "   Backend Discrepancy = " << cached_snapshot.backend_error << "\n";
     oss << "----------------------------------------\n";
-    oss << "6. CERTIFICATION (5-TIER):\n";
-    oss << "   ALG: " << (snap.cert.algebraic_exact ? "[PASS]" : "[FAIL]") << " - " << snap.cert.algebraic_reason << "\n";
-    oss << "   ARITH: " << (snap.cert.arithmetic_exact ? "[PASS]" : "[FAIL]") << " - " << snap.cert.arithmetic_reason << "\n";
-    oss << "   ANALYTIC: " << (snap.cert.analytic_certified ? "[PASS]" : "[FAIL]") << " - " << snap.cert.analytic_reason << "\n";
-    oss << "   NUMERICAL: " << (snap.cert.numerical_approx ? "[PASS]" : "[FAIL]") << " - " << snap.cert.numerical_reason << "\n";
+    oss << "6. CERTIFICATION (4-AXIS):\n";
+    oss << "   ALG: " << (cached_snapshot.cert.algebraic_exact ? "[PASS]" : "[FAIL]") << " - " << cached_snapshot.cert.algebraic_reason << "\n";
+    oss << "   ARITH: " << (cached_snapshot.cert.arithmetic_exact ? "[PASS]" : "[FAIL]") << " - " << cached_snapshot.cert.arithmetic_reason << "\n";
+    oss << "   ANALYTIC: " << (cached_snapshot.cert.analytic_certified ? "[PASS]" : "[FAIL]") << " - " << cached_snapshot.cert.analytic_reason << "\n";
+    oss << "   NUMERICAL: " << (cached_snapshot.cert.numerical_approx ? "[PASS]" : "[FAIL]") << " - " << cached_snapshot.cert.numerical_reason << "\n";
     oss << "----------------------------------------\n";
     oss << "7. ROUTER DECISION:\n";
-    oss << "   " << snap.router_decision.reason << "\n";
+    oss << "   " << cached_snapshot.router_decision.reason << "\n";
     oss << "========================================";
 
     const std::string text = oss.str();
@@ -351,9 +403,10 @@ void GameUI::cb_slider_transition(Fl_Widget* w, void* userdata) {
     GameState next_state = ui->state;
     next_state.transition = ui->slider_transition->value();
     if (next_state.transition >= 1.0) {
-        next_state.current_layer = next_state.target_layer;
+        ui->commit_layer_transition();
+    } else {
+        ui->apply_state_change(next_state);
     }
-    ui->apply_state_change(next_state);
 }
 
 void GameUI::cb_choice_layer(Fl_Widget* w, void* userdata) {
@@ -361,17 +414,7 @@ void GameUI::cb_choice_layer(Fl_Widget* w, void* userdata) {
     if (ui->is_updating_widgets) return;
     int val = std::clamp(ui->choice_layer->value(), 0, 7);
     LayerType target = static_cast<LayerType>(val);
-    if (target == ui->state.current_layer) {
-        GameState next_state = ui->state;
-        next_state.target_layer = target;
-        next_state.transition = 1.0;
-        ui->apply_state_change(next_state);
-        return;
-    }
-    GameState next_state = ui->state;
-    next_state.target_layer = target;
-    next_state.transition = 0.0;
-    ui->apply_state_change(next_state);
+    ui->begin_layer_transition(target);
 }
 
 void GameUI::cb_choice_backend(Fl_Widget* w, void* userdata) {
@@ -385,24 +428,16 @@ void GameUI::cb_choice_backend(Fl_Widget* w, void* userdata) {
 
 void GameUI::cb_btn_anim_morph(Fl_Widget* w, void* userdata) {
     GameUI* ui = static_cast<GameUI*>(userdata);
-    ui->state.transition = 0.0;
-    ui->is_morph_animating = true;
-    ui->last_anim_time = std::chrono::steady_clock::now();
-    Fl::remove_timeout(timer_morph_cb, ui);
-    Fl::add_timeout(0.016, timer_morph_cb, ui);
+    if (ui->state.current_layer == ui->state.target_layer && ui->state.transition >= 1.0) {
+        return; // Terminal state guard
+    }
+    ui->begin_layer_transition(ui->state.target_layer);
 }
 
 void GameUI::cb_btn_auto_router(Fl_Widget* w, void* userdata) {
     GameUI* ui = static_cast<GameUI*>(userdata);
     GameState next_state = ui->state;
     next_state.auto_router = !next_state.auto_router;
-    if (next_state.auto_router) {
-        ui->btn_auto_router->label("Router AI: AUTO");
-        ui->btn_auto_router->color(fl_rgb_color(40, 160, 100));
-    } else {
-        ui->btn_auto_router->label("Router AI: MANUAL");
-        ui->btn_auto_router->color(fl_rgb_color(50, 70, 90));
-    }
     ui->apply_state_change(next_state);
 }
 

@@ -11,6 +11,7 @@
 #include <FL/Fl_Text_Buffer.H>
 #include <memory>
 #include <chrono>
+#include <algorithm>
 #include "GegenbauerCore.h"
 #include "GLCanvas.h"
 
@@ -24,15 +25,18 @@ public:
     GegenbauerCore core;
     GameState state;
 
+    RepresentationSnapshot cached_snapshot;
+
     std::unique_ptr<Fl_Double_Window> main_win;
     GLCanvas* gl_canvas = nullptr;
 
-    // Controls
+    // Core controls
     Fl_Value_Slider* slider_d = nullptr;
     Fl_Value_Slider* slider_n = nullptr;
     Fl_Value_Slider* slider_theta = nullptr; // Endpoint sensitive
     Fl_Value_Slider* slider_transition = nullptr;
 
+    // Advanced numerical controls
     Fl_Choice* choice_error_target = nullptr;
     Fl_Value_Slider* slider_asymptotic_k = nullptr;
     Fl_Value_Slider* slider_jacobi_m = nullptr;
@@ -58,7 +62,10 @@ public:
     ~GameUI();
 
     void show();
+    void normalize_state(GameState& st);
     void apply_state_change(const GameState& new_state);
+    void begin_layer_transition(LayerType target);
+    void cancel_layer_transition();
     void commit_layer_transition();
     void sync_widgets_from_state();
     void mark_dirty_and_schedule();
