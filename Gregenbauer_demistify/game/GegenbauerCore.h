@@ -10,6 +10,9 @@
 #include <numbers>
 #include <chrono>
 
+constexpr int kNumLayers = 8;
+constexpr int kNumBackends = 7;
+
 // Certification status matching Layer VIII taxonomy
 struct CertificationStatus {
     bool algebraic_exact = false;
