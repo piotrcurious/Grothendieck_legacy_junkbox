@@ -473,8 +473,15 @@ def check_c_n_admissibility(n: int, lambda_val: Union[int, Fraction], p: int) ->
     Admissibility certificate for unnormalized Gegenbauer polynomial C_n^(lambda)(x) in F_p (PolyCertificate):
       Parameter notation: lambda = a/b.
       D_alg = lcm({den_red(a_k), den_red(b_k)} u {b}).
-      PolyCertificate requires gcd(p, D_alg) == 1.
+      PolyCertificate requires Prime(p) and gcd(p, D_alg) == 1.
     """
+    if p <= 1:
+        return False
+    # Check primality for F_p field structure
+    for i in range(2, int(math.isqrt(p)) + 1):
+        if p % i == 0:
+            return False
+
     d_alg = get_algorithm_denominator_lcm(n, lambda_val)
     return (d_alg % p != 0)
 
@@ -494,11 +501,11 @@ def check_phi_n_admissibility(n: int, lambda_val: Union[int, Fraction], x: Union
       Formal logical dependency: ZonalCertificate = PolyCertificate and PointCertificate and NormalizationRepresentation and NormalizationSingularity
       Failure Mode Taxonomy:
         1. PointLocalizationFailure (p | r): evaluation point x=c/r non-local in F_p.
-        2. NormalizationRepresentationFailure (p | v_n): C_n(1) = u_n/v_n denominator non-invertible in F_p.
+        2. NormalizationRepresentationFailure (p | v_n): rational representation u_n/v_n of C_n(1) non-local in F_p.
         3. NormalizationSingularityFailure (p | u_n): C_n(1) == 0 mod p, normalization division by zero in F_p.
     """
     if not check_c_n_admissibility(n, lambda_val, p):
-        return False, "PointLocalizationFailure: p divides algorithm recurrence denominator product D_alg"
+        return False, "PointLocalizationFailure: p non-prime or divides algorithm recurrence denominator product D_alg"
 
     if not check_point_admissibility(x, p):
         return False, "PointLocalizationFailure: p divides evaluation point denominator r"

@@ -8,10 +8,11 @@ account, and selects optimal expression permutations on the Computational Cost
 Features:
 - First-Class Typed Hierarchy: `ExactValue`, `ErrorBound`, `Residual`, `Domain`, `BoundSource`, `NumericalCertificate`
   enforcing `ExactValue != ErrorBound != Residual` and `Residual != ErrorBound`.
+- `CertificateTarget` Enum: `NODE`, `WEIGHT`, `EIGENVECTOR`, `QUADRATURE`.
 - `TheoremStatus` Enum: `ALGEBRAIC_EXACT`, `ARITHMETIC_EXACT`, `ANALYTIC_CERTIFIED`,
   `NUMERICAL_CERTIFIED`, `EMPIRICAL_DIAGNOSTIC`.
-- Composable NumericalCertificate Composition Invariant:
-  B_forward >= kappa * B_back + B_conv
+- Target-Specific Composable NumericalCertificate Composition Invariant:
+  B_{Q,forward} >= kappa_Q * B_back + B_{Q,conv}.
 - Exactness Semantics: "Algebraic/arithmetic exactness => zero execution error relative
   to the specified exact algorithm."
 - Staged Perturbation Error Composition:
@@ -83,6 +84,14 @@ class TheoremStatus(Enum):
     EMPIRICAL_DIAGNOSTIC = "EMPIRICAL_DIAGNOSTIC"
 
 
+class CertificateTarget(Enum):
+    """Target output type for target-specific numerical certificates."""
+    NODE = "NODE"
+    WEIGHT = "WEIGHT"
+    EIGENVECTOR = "EIGENVECTOR"
+    QUADRATURE = "QUADRATURE"
+
+
 @dataclass
 class Domain:
     """Represents the spatial/parameter domain for evaluation or error certification."""
@@ -105,11 +114,12 @@ class BoundSource(Enum):
 @dataclass
 class NumericalCertificate:
     """
-    Full Numerical Eigensolver / Solver Certificate.
-    Includes algorithm, backward bound B_back, residual bound R, conditioning kappa,
-    forward conversion bound B_conv, and certified forward bound B_forward.
-    Composition Invariant: B_forward >= kappa * B_back + B_conv.
+    Target-Specific Numerical Certificate.
+    Includes target, algorithm, backward bound B_back, residual bound R, conditioning kappa_Q,
+    forward conversion bound B_{Q,conv}, and certified forward bound B_{Q,forward}.
+    Composition Invariant: B_{Q,forward} >= kappa_Q * B_back + B_{Q,conv}.
     """
+    target: CertificateTarget
     algorithm: str
     backward_bound: float
     residual_bound: float
