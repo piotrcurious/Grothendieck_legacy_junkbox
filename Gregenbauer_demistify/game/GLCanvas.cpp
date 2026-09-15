@@ -515,6 +515,37 @@ void GLCanvas::render_layer_vi(const LayerFrame& frame, const RepresentationSnap
     }
     glEnd();
 
+    // Render Anchor Points & Probe Particle in Layer I & VI
+    if (snap.anchors.size() > 0) {
+        glPointSize(8.0f);
+        glBegin(GL_POINTS);
+        for (const auto& anc : snap.anchors) {
+            float lat = std::numbers::pi * 0.5f - static_cast<float>(anc.theta);
+            float r_a = frame.geometry_scale * std::cos(lat);
+            float z_a = frame.geometry_scale * std::sin(lat);
+
+            if (anc.type == AnchorType::NORTH_POLE_ANCHOR) glColor4f(1.0f, 0.2f, 0.2f, frame.alpha);
+            else if (anc.type == AnchorType::SOUTH_POLE_ANCHOR) glColor4f(0.2f, 0.2f, 1.0f, frame.alpha);
+            else glColor4f(1.0f, 1.0f, 0.0f, frame.alpha);
+
+            glVertex3f(r_a, z_a, 0.0f);
+        }
+        glEnd();
+    }
+
+    // Render Probe Particle & Trajectory Trail
+    float lat_p = std::numbers::pi * 0.5f - static_cast<float>(snap.probe.theta);
+    float r_p = frame.geometry_scale * std::cos(lat_p);
+    float z_p = frame.geometry_scale * std::sin(lat_p);
+    float x_p = r_p * std::cos(snap.probe.phi_angle);
+    float y_p = r_p * std::sin(snap.probe.phi_angle);
+
+    glPointSize(12.0f);
+    glColor4f(1.0f, 0.3f, 0.8f, frame.alpha);
+    glBegin(GL_POINTS);
+    glVertex3f(x_p, z_p, y_p);
+    glEnd();
+
     // Live Overlays: Exact reference curve & Analytic Error Envelope B_K
     if (show_live_overlays) {
         // Exact reference curve

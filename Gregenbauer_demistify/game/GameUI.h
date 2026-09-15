@@ -57,9 +57,14 @@ public:
     Fl_Choice* choice_layer = nullptr;
     Fl_Choice* choice_backend = nullptr;
 
+    // Interactive mechanics & simulation controls
     Fl_Button* btn_anim_morph = nullptr;
     Fl_Button* btn_auto_router = nullptr;
     Fl_Button* btn_info = nullptr;
+    Fl_Button* btn_sim_probe = nullptr;
+    Fl_Button* btn_toggle_anchors = nullptr;
+    Fl_Button* btn_toggle_boundaries = nullptr;
+    Fl_Value_Slider* slider_probe_theta = nullptr;
 
     // Telemetry Display
     Fl_Text_Display* text_telemetry = nullptr;
@@ -92,6 +97,9 @@ public:
 
     static void timer_update_cb(void* userdata);
     static void timer_morph_cb(void* userdata);
+    static void timer_sim_cb(void* userdata);
+
+    void step_physics_simulation(double dt);
 
     // Callbacks
     static void cb_slider_d(Fl_Widget* w, void* userdata);
@@ -106,6 +114,10 @@ public:
     static void cb_btn_anim_morph(Fl_Widget* w, void* userdata);
     static void cb_btn_auto_router(Fl_Widget* w, void* userdata);
     static void cb_btn_info(Fl_Widget* w, void* userdata);
+    static void cb_btn_sim_probe(Fl_Widget* w, void* userdata);
+    static void cb_btn_toggle_anchors(Fl_Widget* w, void* userdata);
+    static void cb_btn_toggle_boundaries(Fl_Widget* w, void* userdata);
+    static void cb_slider_probe_theta(Fl_Widget* w, void* userdata);
 };
 
 #endif // GAME_UI_H

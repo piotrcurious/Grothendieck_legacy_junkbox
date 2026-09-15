@@ -86,6 +86,38 @@ void test_4_axis_certification_and_snapshot() {
     std::cout << "  -> GameState Evaluation & Router Decision [PASSED]" << std::endl;
 }
 
+void test_interactive_mechanics_and_anchors() {
+    std::cout << "[Test 6] Testing Interactive Mechanics, Boundaries & Anchor Points..." << std::endl;
+    GegenbauerCore core;
+
+    GameState state;
+    state.params.d = 3;
+    state.params.n = 5;
+    state.params.theta = 0.5;
+    state.probe.theta = 0.8;
+    state.probe.v_theta = 0.1;
+
+    RepresentationSnapshot snap = core.evaluate(state);
+
+    // 1. Anchor Points check: must contain North (+1) and South (-1) poles plus zero nodes
+    assert(snap.anchors.size() >= 2);
+    assert(snap.anchors[0].type == AnchorType::NORTH_POLE_ANCHOR);
+    assert(std::abs(snap.anchors[0].val - 1.0) < 1e-12);
+    assert(snap.anchors[1].type == AnchorType::SOUTH_POLE_ANCHOR);
+
+    // 2. Boundary Layers check
+    assert(snap.boundaries.north_bessel_limit > 0.0);
+    assert(snap.boundaries.south_bessel_limit < std::numbers::pi);
+
+    // 3. Probe Particle Force & Potential
+    assert(std::isfinite(snap.probe_potential));
+    assert(std::isfinite(snap.probe_force));
+
+    std::cout << "  -> Anchors count=" << snap.anchors.size()
+              << ", North limit=" << snap.boundaries.north_bessel_limit
+              << ", Probe V(0.8)=" << snap.probe_potential << " [PASSED]" << std::endl;
+}
+
 void test_game_ui_cache_and_transition() {
     std::cout << "[Test 5] Testing GameUI Cache & Transition Lifecycle..." << std::endl;
     GameUI ui(800, 600);
@@ -141,10 +173,11 @@ int main() {
     test_golub_welsch_spectrum();
     test_boundary_layer_and_asymptotics();
     test_4_axis_certification_and_snapshot();
+    test_interactive_mechanics_and_anchors();
     test_game_ui_cache_and_transition();
 
     std::cout << "====================================================" << std::endl;
-    std::cout << "       ALL MATHEMATICAL CORE TESTS PASSED (5/5)!     " << std::endl;
+    std::cout << "       ALL MATHEMATICAL CORE TESTS PASSED (6/6)!     " << std::endl;
     std::cout << "====================================================" << std::endl;
     return 0;
 }

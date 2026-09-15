@@ -144,6 +144,66 @@ RepresentationSnapshot GegenbauerCore::evaluate(const GameState& state, LayerTyp
     snap.interior_valid = (snap.z_plus >= 1.5 && snap.z_minus >= 1.5);
     snap.domain_valid = (snap.params.theta > 1e-5 && snap.params.theta < std::numbers::pi - 1e-5);
 
+    // Copy interactive state & simulation objects
+    snap.probe = state.probe;
+    snap.projection = state.projection;
+
+    // Boundaries & turning points
+    snap.boundaries.north_bessel_limit = 10.0 / snap.N;
+    snap.boundaries.south_bessel_limit = std::numbers::pi - (10.0 / snap.N);
+    snap.boundaries.in_north_zone = (snap.params.theta <= snap.boundaries.north_bessel_limit);
+    snap.boundaries.in_south_zone = (snap.params.theta >= snap.boundaries.south_bessel_limit);
+    snap.boundaries.in_interior_wkb = (!snap.boundaries.in_north_zone && !snap.boundaries.in_south_zone);
+
+    // Exact Anchors: North Pole (+1), South Pole (-1), Zero Nodes, and Local Extrema
+    snap.anchors.clear();
+    // North Pole anchor: phi_n(1) = 1, phi_n'(1) = n(n+2*lam)/(2*lam+1)
+    double north_p1 = (snap.params.n * (snap.params.n + 2.0 * snap.lambda)) / (2.0 * snap.lambda + 1.0);
+    snap.anchors.push_back(AnchorPoint{AnchorType::NORTH_POLE_ANCHOR, 0.0, 1.0, 1.0, north_p1, "North Pole Anchor x=+1"});
+
+    // South Pole anchor: phi_n(-1) = (-1)^n
+    double south_val = (snap.params.n % 2 == 0) ? 1.0 : -1.0;
+    double south_p1 = south_val * north_p1;
+    snap.anchors.push_back(AnchorPoint{AnchorType::SOUTH_POLE_ANCHOR, std::numbers::pi, -1.0, south_val, south_p1, "South Pole Anchor x=-1"});
+
+    // Exact Zero Nodes of Gegenbauer polynomial via sampling & bisect
+    int num_samples = 200;
+    for (int k = 0; k < num_samples; ++k) {
+        double th_a = std::numbers::pi * static_cast<double>(k) / num_samples;
+        double th_b = std::numbers::pi * static_cast<double>(k + 1) / num_samples;
+        double phi_a = eval_phi(snap.params.n, snap.lambda, std::cos(th_a));
+        double phi_b = eval_phi(snap.params.n, snap.lambda, std::cos(th_b));
+
+        if (phi_a * phi_b <= 0.0 && snap.params.n > 0) {
+            double low = th_a, high = th_b;
+            for (int iter = 0; iter < 15; ++iter) {
+                double mid = 0.5 * (low + high);
+                double p_mid = eval_phi(snap.params.n, snap.lambda, std::cos(mid));
+                if (p_mid * eval_phi(snap.params.n, snap.lambda, std::cos(low)) <= 0.0) {
+                    high = mid;
+                } else {
+                    low = mid;
+                }
+            }
+            double zero_th = 0.5 * (low + high);
+            double zero_x = std::cos(zero_th);
+            double zero_p1 = eval_phi_prime(snap.params.n, snap.lambda, zero_x);
+            std::ostringstream oss;
+            oss << "Zero Node #" << snap.anchors.size() - 1;
+            snap.anchors.push_back(AnchorPoint{AnchorType::ZERO_NODE, zero_th, zero_x, 0.0, zero_p1, oss.str()});
+        }
+    }
+
+    // Probe Particle mechanics & potential
+    snap.probe_potential = eval_potential_v(snap.lambda, snap.probe.theta);
+    double th_p = snap.probe.theta;
+    double phi_val = eval_phi(snap.params.n, snap.lambda, std::cos(th_p));
+    double phi_p = eval_phi_prime(snap.params.n, snap.lambda, std::cos(th_p));
+    double s = std::sin(th_p);
+    // Force field F(theta) = -dV/dtheta + n(n+2*lambda)*phi*phi'
+    double dV_dth = (s > 1e-6) ? -2.0 * snap.lambda * (snap.lambda - 1.0) * std::cos(th_p) / (s * s * s) : 0.0;
+    snap.probe_force = -dV_dth + snap.params.n * (snap.params.n + 2.0 * snap.lambda) * phi_val * phi_p;
+
     snap.auto_router = state.auto_router;
     snap.current_layer = state.current_layer;
     snap.target_layer = state.target_layer;

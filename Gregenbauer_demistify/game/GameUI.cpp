@@ -168,6 +168,17 @@ GameUI::GameUI(int width, int height)
     choice_error_target->labelcolor(FL_WHITE);
     choice_error_target->callback(cb_choice_error_target, this);
 
+    // Interactive Mechanics & Simulation Controls
+    btn_sim_probe = new Fl_Button(col2_x, canvas_h + 165, 115, 25, "Probe: STOPPED");
+    btn_sim_probe->color(fl_rgb_color(180, 60, 60));
+    btn_sim_probe->labelcolor(FL_WHITE);
+    btn_sim_probe->callback(cb_btn_sim_probe, this);
+
+    btn_toggle_anchors = new Fl_Button(col2_x + 125, canvas_h + 165, 115, 25, "Anchors: ON");
+    btn_toggle_anchors->color(fl_rgb_color(60, 120, 180));
+    btn_toggle_anchors->labelcolor(FL_WHITE);
+    btn_toggle_anchors->callback(cb_btn_toggle_anchors, this);
+
     // Column 3: Telemetry Display
     text_buffer = new Fl_Text_Buffer();
     text_telemetry = new Fl_Text_Display(col3_x, canvas_h + 20, width - col3_x - margin * 2, 195);
@@ -395,6 +406,36 @@ RepresentationSnapshot GameUI::get_or_evaluate_snapshot(const SnapshotKey& key,
     return snap;
 }
 
+void GameUI::step_physics_simulation(double dt) {
+    if (!state.sim_running) return;
+
+    // Numerical Euler integration under force field
+    state.probe.v_theta += current_snapshot.probe_force * dt;
+    state.probe.theta += state.probe.v_theta * dt;
+
+    if (state.probe.theta <= 0.001) {
+        state.probe.theta = 0.001;
+        state.probe.v_theta = -state.probe.v_theta * 0.8;
+    } else if (state.probe.theta >= std::numbers::pi - 0.001) {
+        state.probe.theta = std::numbers::pi - 0.001;
+        state.probe.v_theta = -state.probe.v_theta * 0.8;
+    }
+
+    state.probe.phi_angle += 0.5 * dt;
+
+    mark_dirty_and_schedule();
+}
+
+void GameUI::timer_sim_cb(void* userdata) {
+    GameUI* ui = static_cast<GameUI*>(userdata);
+    if (!ui) return;
+
+    if (ui->state.sim_running) {
+        ui->step_physics_simulation(kFrameInterval);
+        Fl::repeat_timeout(kFrameInterval, timer_sim_cb, ui);
+    }
+}
+
 void GameUI::publish_snapshot() {
     // Two-snapshot evaluation model with explicit evaluation layers
     SnapshotKey req_curr_key = SnapshotKey{state.params.d, state.params.n, state.params.theta,
@@ -464,6 +505,13 @@ void GameUI::publish_snapshot() {
     oss << "----------------------------------------\n";
     oss << "7. ROUTER DECISION:\n";
     oss << "   " << current_snapshot.router_decision.reason << "\n";
+    oss << "----------------------------------------\n";
+    oss << "8. INTERACTIVE OBJECTS & MECHANICS:\n";
+    oss << "   Probe \u03B8=" << std::fixed << std::setprecision(4) << current_snapshot.probe.theta
+        << " | V(\u03B8)=" << current_snapshot.probe_potential
+        << " | Force=" << current_snapshot.probe_force << "\n";
+    oss << "   Anchors Count = " << current_snapshot.anchors.size()
+        << " | Boundary Limit (North Bessel) = " << current_snapshot.boundaries.north_bessel_limit << "\n";
     oss << "========================================";
 
     const std::string text = oss.str();
@@ -552,6 +600,33 @@ void GameUI::cb_btn_auto_router(Fl_Widget* w, void* userdata) {
     GameState next_state = ui->state;
     next_state.auto_router = !next_state.auto_router;
     ui->apply_state_change(next_state);
+}
+
+void GameUI::cb_btn_sim_probe(Fl_Widget* w, void* userdata) {
+    GameUI* ui = static_cast<GameUI*>(userdata);
+    ui->state.sim_running = !ui->state.sim_running;
+    if (ui->state.sim_running) {
+        ui->btn_sim_probe->label("Probe: RUNNING");
+        ui->btn_sim_probe->color(fl_rgb_color(40, 160, 100));
+        Fl::add_timeout(kFrameInterval, timer_sim_cb, ui);
+    } else {
+        ui->btn_sim_probe->label("Probe: STOPPED");
+        ui->btn_sim_probe->color(fl_rgb_color(180, 60, 60));
+        Fl::remove_timeout(timer_sim_cb, ui);
+    }
+}
+
+void GameUI::cb_btn_toggle_anchors(Fl_Widget* w, void* userdata) {
+    GameUI* ui = static_cast<GameUI*>(userdata);
+    ui->state.show_anchors = !ui->state.show_anchors;
+    if (ui->state.show_anchors) {
+        ui->btn_toggle_anchors->label("Anchors: ON");
+        ui->btn_toggle_anchors->color(fl_rgb_color(60, 120, 180));
+    } else {
+        ui->btn_toggle_anchors->label("Anchors: OFF");
+        ui->btn_toggle_anchors->color(fl_rgb_color(80, 80, 90));
+    }
+    ui->mark_dirty_and_schedule();
 }
 
 void GameUI::cb_btn_info(Fl_Widget* w, void* userdata) {

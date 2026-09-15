@@ -96,6 +96,57 @@ struct GolubWelschResult {
     double eigenpair_residual = 0.0;     // max ||J_m v_k - x_k v_k||
 };
 
+// Interactive Probe Particle moving on S^{d-1} or in quantum potential V(theta)
+struct ProbeParticle {
+    double theta = 0.5;
+    double phi_angle = 0.0;
+    double v_theta = 0.0;
+    double v_phi = 0.0;
+    double energy = 1.0;
+    bool active = false;
+    bool pinned = false;
+    std::vector<std::tuple<double, double, double>> trail;
+};
+
+// Anchor Point: zero node, extrema, or derivative boundary anchor
+enum class AnchorType {
+    ZERO_NODE = 0,
+    LOCAL_EXTREMUM = 1,
+    NORTH_POLE_ANCHOR = 2,
+    SOUTH_POLE_ANCHOR = 3,
+    TURNING_POINT = 4
+};
+
+struct AnchorPoint {
+    AnchorType type = AnchorType::ZERO_NODE;
+    double theta = 0.0;
+    double x = 1.0;
+    double val = 0.0;
+    double deriv = 0.0;
+    std::string label;
+};
+
+// Boundary Layer Specification
+struct BoundaryZone {
+    double north_bessel_limit = 0.1; // z_plus <= threshold
+    double south_bessel_limit = 0.1; // z_minus <= threshold
+    double turning_point_north = 0.05;
+    double turning_point_south = std::numbers::pi - 0.05;
+    bool in_north_zone = false;
+    bool in_south_zone = false;
+    bool in_interior_wkb = true;
+};
+
+// Projection Specification for S^{d-1} -> R^3
+struct ProjectionSpec {
+    double slice_theta = 0.5;
+    double slice_offset = 0.0;
+    double focal_distance = 3.0;
+    double proj_matrix[3][3] = {{1,0,0},{0,1,0},{0,0,1}};
+    bool show_projection_plane = true;
+    bool show_rays = true;
+};
+
 struct CoreParameters {
     int d = 3;
     int n = 5;
@@ -113,6 +164,13 @@ struct GameState {
     BackendType backend = BackendType::FLOAT64;
     bool auto_router = false;
     double transition = 0.0; // T in [0, 1]
+
+    // Interactive mechanics & objects
+    ProbeParticle probe;
+    ProjectionSpec projection;
+    bool sim_running = false;
+    bool show_anchors = true;
+    bool show_boundaries = true;
 };
 
 struct SnapshotKey {
@@ -150,6 +208,14 @@ struct RepresentationSnapshot {
     bool south_valid = false;
     bool domain_valid = true;
     bool conditioning_ok = true;
+
+    // Interactive Objects & Mechanical Anchors
+    ProbeParticle probe;
+    ProjectionSpec projection;
+    BoundaryZone boundaries;
+    std::vector<AnchorPoint> anchors;
+    double probe_potential = 0.0;
+    double probe_force = 0.0;
 
     LayerType current_layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
     LayerType target_layer = LayerType::LAYER_I_HARMONIC_GEOMETRY;
