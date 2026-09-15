@@ -13,7 +13,10 @@ for Gegenbauer polynomials and complex projective quadric hypersurfaces Q_{d-2} 
 6. Normalized Gegenbauer _2F_1 Hypergeometric Expansion Coefficients
 7. EndpointClass Enum & Physical vs Analytic Continuation Parameter Domain Classifier
 8. Execution Metadata N_max & Split Algorithm/Point Denominators D_alg and D_eval
-9. PolyCertificate, PointCertificate, and ZonalCertificate Admissibility with 3 distinct bad-prime failure modes
+9. PolyCertificate, PointCertificate, and ZonalCertificate Admissibility with 3 distinct bad-prime failure modes:
+   - PointLocalizationFailure (p | r)
+   - NormalizationRepresentationFailure (p | v_n)
+   - NormalizationSingularityFailure (p | u_n)
 """
 
 from enum import Enum
@@ -427,14 +430,15 @@ def exact_rational_bit_length(n: int, lambda_val: Union[int, Fraction], x: Union
 
 def get_algorithm_denominator_lcm(n: int, lambda_val: Union[int, Fraction]) -> int:
     """
-    Computes D_alg = lcm({d_k in D_rec} u {b}) for degree n and parameter lambda = a/b.
-    D_rec is the set of denominators introduced by executed recurrence steps {1, ..., n}.
+    Computes D_alg = lcm({den_red(a_k), den_red(b_k) : k = 1..n} u {b}) for parameter lambda = a/b.
+    Uses exact reduced denominators of recurrence coefficients.
     """
     b = Fraction(lambda_val).denominator
-    lcm_val = 1
+    lcm_val = b
     for k in range(1, n + 1):
-        lcm_val = math.lcm(lcm_val, k)
-    lcm_val = math.lcm(lcm_val, b)
+        a_k, b_k = normalized_jacobi_coefficients(k, Fraction(lambda_val), exact=True)
+        lcm_val = math.lcm(lcm_val, Fraction(a_k).denominator)
+        lcm_val = math.lcm(lcm_val, Fraction(b_k).denominator)
     return lcm_val
 
 
@@ -442,7 +446,7 @@ def check_c_n_admissibility(n: int, lambda_val: Union[int, Fraction], p: int) ->
     """
     Admissibility certificate for unnormalized Gegenbauer polynomial C_n^(lambda)(x) in F_p (PolyCertificate):
       Parameter notation: lambda = a/b.
-      D_alg = lcm({d_k in D_rec} u {b}).
+      D_alg = lcm({den_red(a_k), den_red(b_k)} u {b}).
       PolyCertificate requires gcd(p, D_alg) == 1.
     """
     d_alg = get_algorithm_denominator_lcm(n, lambda_val)
@@ -461,12 +465,11 @@ def check_point_admissibility(x: Union[int, Fraction], p: int) -> bool:
 def check_phi_n_admissibility(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], p: int) -> Tuple[bool, str]:
     """
     Admissibility certificate for normalized zonal spherical function phi_n(x) = C_n^(lambda)(x) / C_n^(lambda)(1) in F_p (ZonalCertificate):
-      Formal logical dependency: ZonalCertificate = PolyCertificate and PointCertificate and NormalizationRepresentation and ZonalZeroing
+      Formal logical dependency: ZonalCertificate = PolyCertificate and PointCertificate and NormalizationRepresentation and NormalizationSingularity
       Failure Mode Taxonomy:
-        1. PolyCertificate failure (p | D_alg): recurrence denominator non-invertible in F_p.
-        2. PointCertificate failure (p | r): evaluation point x=c/r non-local in F_p.
-        3. Normalization representation failure (p | v_n): C_n(1) = u_n/v_n denominator non-invertible in F_p.
-        4. Zonal zeroing failure (p | u_n): C_n(1) == 0 mod p, division by zero in normalization.
+        1. PointLocalizationFailure (p | r): evaluation point x=c/r non-local in F_p.
+        2. NormalizationRepresentationFailure (p | v_n): C_n(1) = u_n/v_n denominator non-invertible in F_p.
+        3. NormalizationSingularityFailure (p | u_n): C_n(1) == 0 mod p, normalization division by zero in F_p.
     """
     if not check_c_n_admissibility(n, lambda_val, p):
         return False, "PointLocalizationFailure: p divides algorithm recurrence denominator product D_alg"
@@ -482,7 +485,7 @@ def check_phi_n_admissibility(n: int, lambda_val: Union[int, Fraction], x: Union
         return False, f"NormalizationRepresentationFailure: p={p} divides C_n(1) denominator v_n={v_n}"
 
     if u_n % p == 0:
-        return False, f"ZonalZeroingFailure: bad prime p={p} divides C_n(1) numerator u_n={u_n} (C_n(1) == 0 mod p)"
+        return False, f"NormalizationSingularityFailure: bad prime p={p} divides C_n(1) numerator u_n={u_n} (C_n(1) == 0 mod p)"
 
     return True, "Valid ZonalCertificate"
 

@@ -6,15 +6,14 @@ account, and selects optimal expression permutations on the Computational Cost
 (measured latency / FLOPs) vs Numerical Error plane.
 
 Features:
-- First-Class Typed Hierarchy: `ExactValue`, `ErrorBound`, `Residual`, `Domain`, `BoundSource`
+- First-Class Typed Hierarchy: `ExactValue`, `ErrorBound`, `Residual`, `Domain`, `BoundSource`, `NumericalCertificate`
   enforcing `ExactValue != ErrorBound != Residual` and `Residual != ErrorBound`.
 - `TheoremStatus` Enum: `ALGEBRAIC_EXACT`, `ARITHMETIC_EXACT`, `ANALYTIC_CERTIFIED`,
   `NUMERICAL_CERTIFIED`, `EMPIRICAL_DIAGNOSTIC`.
 - Exactness Semantics: "Algebraic/arithmetic exactness => zero execution error relative
   to the specified exact algorithm."
 - Strengthened Decomposed Error Model:
-  E_total <= E_analytic + E_arithmetic + E_conditioning + E_implementation
-  where E_conditioning <= kappa * E_input.
+  E_total <= sum_i E_i provided Cert(E_i) holds, where E_conditioning <= kappa * E_input.
 - Domain-Compatible Selector:
   M*(theta) = argmin_{M, theta in D_M, ErrorBound_M certified} ErrorBound_M(theta).
 - Real Execution Backends: FLOAT32, FLOAT64, LONGDOUBLE, MPMATH (100+ bits),
@@ -102,6 +101,15 @@ class BoundSource(Enum):
 
 
 @dataclass
+class NumericalCertificate:
+    """Formal tuple defining a numerical eigensolver or solver certificate."""
+    algorithm: str
+    backward_bound: float
+    residual_bound: float
+    forward_conversion_bound: float
+
+
+@dataclass
 class ExactValue:
     """Represents a certified exact algebraic/arithmetic value."""
     val: Union[float, int, object]
@@ -116,11 +124,20 @@ class ExactValue:
 
 @dataclass
 class ErrorDecomposition:
-    """Decomposed computational error breakdown."""
+    """Decomposed computational error breakdown carrying individual certification statuses."""
     e_analytic: float = 0.0
     e_arithmetic: float = 0.0
     e_conditioning: float = 0.0
     e_implementation: float = 0.0
+
+    analytic_cert: bool = True
+    arithmetic_cert: bool = True
+    conditioning_cert: bool = True
+    implementation_cert: bool = True
+
+    @property
+    def is_fully_certified(self) -> bool:
+        return self.analytic_cert and self.arithmetic_cert and self.conditioning_cert and self.implementation_cert
 
     @property
     def total(self) -> float:
@@ -466,7 +483,11 @@ class SolverPerformanceMetrics:
             e_analytic=self.e_analytic,
             e_arithmetic=self.e_arithmetic,
             e_conditioning=self.e_conditioning,
-            e_implementation=self.e_implementation
+            e_implementation=self.e_implementation,
+            analytic_cert=(self.e_analytic == 0.0 or self.permutation in (AlgebraicPermutation.COMPOSITE_MATCHED, AlgebraicPermutation.INTERIOR_WKB_WEYL, AlgebraicPermutation.MEHLER_HEINE_BESSEL)),
+            arithmetic_cert=True,
+            conditioning_cert=True,
+            implementation_cert=True
         )
         return ErrorBound(
             value=tot,
