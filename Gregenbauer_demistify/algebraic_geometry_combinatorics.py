@@ -11,7 +11,7 @@ for Gegenbauer polynomials and complex projective quadric hypersurfaces Q_{d-2} 
 4. Orthonormal Symmetric Jacobi Matrix Coefficients alpha_n = 1/2 * sqrt( (n+1)(n+2*lambda) / ((n+lambda)(n+lambda+1)) )
 5. Golub-Welsch Gauss-Gegenbauer Quadrature over m x m principal truncation J_m (sigma(J_m) = {x_1, ..., x_m})
 6. Normalized Gegenbauer _2F_1 Hypergeometric Expansion Coefficients
-7. EndpointClass Enum & Physical vs Analytic Continuation Parameter Domain Classifier
+7. EndpointClass Enum, EndpointBoundaryCondition, and Physical vs Analytic Continuation Parameter Domain Classifier
 8. Execution Metadata N_max & Split Algorithm/Point Denominators D_alg and D_eval
 9. PolyCertificate, PointCertificate, and ZonalCertificate Admissibility with 3 distinct bad-prime failure modes:
    - PointLocalizationFailure (p | r)
@@ -19,6 +19,7 @@ for Gegenbauer polynomials and complex projective quadric hypersurfaces Q_{d-2} 
    - NormalizationSingularityFailure (p | u_n)
 """
 
+from dataclasses import dataclass
 from enum import Enum
 from fractions import Fraction
 import math
@@ -35,6 +36,16 @@ class EndpointClass(Enum):
     REGULAR = "REGULAR_ENDPOINT"
     LIMIT_CIRCLE = "LIMIT_CIRCLE"
     LIMIT_POINT = "LIMIT_POINT"
+
+
+@dataclass
+class EndpointBoundaryCondition:
+    """Represents explicit two-sided endpoint boundary conditions and indicial root metadata."""
+    left: EndpointClass
+    right: EndpointClass
+    indicial_root_plus: float = 0.5
+    indicial_root_minus: float = 0.5
+    forbidden_log_coeff_zero: bool = True
 
 
 def endpoint_class(lambda_val: Union[float, Fraction]) -> EndpointClass:
@@ -55,6 +66,21 @@ def endpoint_class(lambda_val: Union[float, Fraction]) -> EndpointClass:
         return EndpointClass.LIMIT_CIRCLE
     else:
         return EndpointClass.LIMIT_POINT
+
+
+def get_endpoint_boundary_condition(lambda_val: Union[float, Fraction]) -> EndpointBoundaryCondition:
+    """Returns explicit two-sided EndpointBoundaryCondition with indicial root metadata."""
+    cls = endpoint_class(lambda_val)
+    lam = float(lambda_val)
+    r_plus = max(lam, 1.0 - lam) if lam < 1.5 else lam
+    r_minus = min(lam, 1.0 - lam) if lam < 1.5 else 1.0 - lam
+    return EndpointBoundaryCondition(
+        left=cls,
+        right=cls,
+        indicial_root_plus=r_plus,
+        indicial_root_minus=r_minus,
+        forbidden_log_coeff_zero=True
+    )
 
 
 def lambda_for_sphere(d: int) -> Fraction:
