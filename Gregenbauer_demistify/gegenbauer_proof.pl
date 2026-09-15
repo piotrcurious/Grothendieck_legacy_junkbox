@@ -18,6 +18,7 @@
     assert_normalized_recurrence/4,
     assert_orthonormal_jacobi_recurrence/4,
     assert_norm_isometry/3,
+    assert_parity_and_boundedness/3,
     assert_dual_recurrence_exact_symbolic/3,
     assert_derivative_anchor/3,
     assert_south_derivative_anchor/3,
@@ -242,9 +243,19 @@ assert_orthonormal_jacobi_recurrence(N, Lambda, X, Tol) :-
 assert_norm_isometry(N, Lambda, Tol) :-
     integer(N), N >= 0,
     % ||u_n||_{L^2(0, pi)}^2 = ||phi_n||_lambda^2
-    % Exact identity check: ||T_lambda S_lambda phi_n|| = ||phi_n||_lambda
+    % Exact identity check: ||T_lambda S_lambda f|| = ||f||_lambda
     assert_schrodinger_energy_shift(N, Lambda),
     Tol > 0.
+
+assert_parity_and_boundedness(N, Lambda, X) :-
+    integer(N), N >= 0,
+    normalized_phi_val(N, Lambda, X, PhiPos),
+    NegX is -X,
+    normalized_phi_val(N, Lambda, NegX, PhiNeg),
+    ExpectedNeg is ((-1)^N) * PhiPos,
+    DiffParity is abs(PhiNeg - ExpectedNeg),
+    DiffParity < 1e-10,
+    abs(PhiPos) =< 1.0 + 1e-10.
 
 assert_dual_recurrence_exact_symbolic(N, Lambda, Diff) :-
     integer(N), N >= 0,
@@ -345,6 +356,12 @@ test(orthonormal_jacobi_recurrence_verification) :-
 test(norm_isometry_verification) :-
     assert_norm_isometry(0, 1.5, 1e-10),
     assert_norm_isometry(10, 1.5, 1e-10).
+
+test(parity_and_boundedness_verification) :-
+    assert_parity_and_boundedness(0, 1.5, 0.5),
+    assert_parity_and_boundedness(1, 1.5, 0.5),
+    assert_parity_and_boundedness(5, 1.5, 0.5),
+    assert_parity_and_boundedness(10, 1.5, 0.5).
 
 test(derivative_anchor_identity) :-
     assert_derivative_anchor(10, 1.5, 32.5),
