@@ -12,11 +12,11 @@ Features:
 - `TheoremStatus` Enum: `ALGEBRAIC_EXACT`, `ARITHMETIC_EXACT`, `ANALYTIC_CERTIFIED`,
   `NUMERICAL_CERTIFIED`, `EMPIRICAL_DIAGNOSTIC`.
 - Target-Specific Composable NumericalCertificate Composition Invariant:
-  B_{Q,forward} >= kappa_Q * B_back + B_{Q,conv}.
+  B_{Q,forward} := kappa_Q * B_back + B_{Q,conv} (guaranteeing E_{Q,forward} <= kappa_Q * B_back + B_{Q,conv} <= B_{Q,forward}).
 - Exactness Semantics: "Algebraic/arithmetic exactness => zero execution error relative
   to the specified exact algorithm."
 - Staged Perturbation Error Composition:
-  F_0 -> F_1 -> ... -> F_k  =>  |F_0 - F_k| <= sum_{i=0}^{k-1} |F_i - F_{i+1}|
+  F_0(Q) -> F_1(Q) -> ... -> F_k(Q)  =>  |F_0(Q) - F_k(Q)| <= sum_{i=0}^{k-1} |F_i(Q) - F_{i+1}(Q)| <= sum_{i=0}^{k-1} E_i
 - Domain-Compatible Selector:
   M*(theta) = argmin_{M, theta in D_M, ErrorBound_M certified} ErrorBound_M(theta).
 - Real Execution Backends: FLOAT32, FLOAT64, LONGDOUBLE, MPMATH (100+ bits),
@@ -115,9 +115,8 @@ class BoundSource(Enum):
 class NumericalCertificate:
     """
     Target-Specific Numerical Certificate.
-    Includes target, algorithm, backward bound B_back, residual bound R, conditioning kappa_Q,
-    forward conversion bound B_{Q,conv}, and certified forward bound B_{Q,forward}.
-    Composition Invariant: B_{Q,forward} >= kappa_Q * B_back + B_{Q,conv}.
+    Includes target Q, algorithm, backward bound B_back, residual bound R, conditioning kappa_Q,
+    forward conversion bound B_{Q,conv}, and certified forward bound B_{Q,forward} := kappa_Q * B_back + B_{Q,conv}.
     """
     target: CertificateTarget
     algorithm: str
@@ -125,11 +124,11 @@ class NumericalCertificate:
     residual_bound: float
     conditioning_kappa: float
     forward_conversion_bound: float
-    forward_bound: float
 
     @property
-    def composition_invariant_valid(self) -> bool:
-        return self.forward_bound >= (self.conditioning_kappa * self.backward_bound + self.forward_conversion_bound) - 1e-15
+    def forward_bound(self) -> float:
+        """Certified Forward Bound Definition: B_{Q,forward} := kappa_Q * B_back + B_{Q,conv}."""
+        return self.conditioning_kappa * self.backward_bound + self.forward_conversion_bound
 
 
 @dataclass
@@ -176,7 +175,7 @@ class ErrorBound:
     Conversion mapping:
       - ALGEBRAIC_EXACT / ARITHMETIC_EXACT => 0 (relative to certified exact target)
       - ANALYTIC_CERTIFIED => B_theorem
-      - NUMERICAL_CERTIFIED => B_forward
+      - NUMERICAL_CERTIFIED => B_{Q,forward} := kappa_Q * B_back + B_{Q,conv}
     """
     value: float
     domain: Domain
