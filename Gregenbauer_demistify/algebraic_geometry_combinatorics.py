@@ -11,7 +11,7 @@ for Gegenbauer polynomials and complex projective quadric hypersurfaces Q_{d-2} 
 4. Orthonormal Symmetric Jacobi Matrix Coefficients alpha_n = 1/2 * sqrt( (n+1)(n+2*lambda) / ((n+lambda)(n+lambda+1)) )
 5. Golub-Welsch Gauss-Gegenbauer Quadrature over m x m principal truncation J_m (sigma(J_m) = {x_1, ..., x_m})
 6. Normalized Gegenbauer _2F_1 Hypergeometric Expansion Coefficients
-7. Helper lambda_for_sphere(d) = Fraction(d-2, 2)
+7. Separate Finite-Field & RNS Admissibility Certificates for C_n vs phi_n (handling bad primes where p | u_n)
 """
 
 from fractions import Fraction
@@ -394,12 +394,40 @@ def exact_rational_bit_length(n: int, lambda_val: Union[int, Fraction], x: Union
     return bits_C, bits_phi
 
 
+def check_c_n_admissibility(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], p: int) -> bool:
+    """
+    Admissibility certificate for unnormalized Gegenbauer polynomial C_n^(lambda)(x) in F_p:
+      Requires prime p > max(2, n), p \nmid den(lambda), p \nmid den(x).
+    """
+    if p <= max(2, n):
+        return False
+    b = Fraction(lambda_val).denominator
+    d = Fraction(x).denominator
+    return (math.gcd(b, p) == 1) and (math.gcd(d, p) == 1)
+
+
+def check_phi_n_admissibility(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], p: int) -> Tuple[bool, str]:
+    """
+    Admissibility certificate for normalized zonal spherical function phi_n(x) = C_n^(lambda)(x) / C_n^(lambda)(1) in F_p:
+      Requires C_n admissibility A_C(p) AND p \nmid u_n (where C_n^(lambda)(1) = u_n/v_n with gcd(u_n, v_n) = 1).
+      For bad primes (p | u_n), C_n^(lambda)(1) = 0 in F_p, so normalization fails.
+    """
+    if not check_c_n_admissibility(n, lambda_val, x, p):
+        return False, "Failed C_n recurrence admissibility (p <= n or denominator not coprime to p)"
+
+    c1 = exact_rational_gegenbauer(n, lambda_val, Fraction(1))
+    u_n = c1.numerator
+    if u_n % p == 0:
+        return False, f"Bad prime p={p} divides C_n(1) numerator u_n={u_n} (C_n(1) == 0 mod p)"
+
+    return True, "Valid phi_n admissibility"
+
+
 def modular_gegenbauer_recurrence(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], mod: int) -> int:
     """
     Evaluates Gegenbauer polynomial C_n^(lambda)(x) in the modular ring Z/mod Z.
     Characteristic p admissibility requires p > max(2, n), p \nmid b (for lambda = a/b),
-    p \nmid d (for x = c/d), and p \nmid u_n v_n where C_n^(lambda)(1) = u_n/v_n (gcd(u_n, v_n) = 1)
-    for normalized spherical functions.
+    and p \nmid d (for x = c/d).
     """
     if n < 0:
         raise ValueError("n must be non-negative integer")
@@ -467,7 +495,7 @@ def rns_crt_gegenbauer_eval(n: int, lambda_val: Union[int, Fraction], x: Union[i
         y_i = pow(M_i, -1, m_i)
         X = (X + r_i * M_i * y_i) % M
 
-    # Signed integer conversion
+    # Signed integer conversion for |X| < M / 2
     if X > M // 2:
         X -= M
 
@@ -500,7 +528,7 @@ def gauss_gegenbauer_quadrature(m: int, lambda_val: float) -> Tuple[np.ndarray, 
     # Golub-Welsch algorithm: Eigendecomposition of symmetric tridiagonal J_m
     nodes, eigenvectors = np.linalg.eigh(J_m)
 
-    # Total integral weight norm mu_0 evaluated safely in log-gamma domain
+    # Total integral weight norm mu_0 evaluated safely in log-gamma domain: mu_0 = B(1/2, lambda + 1/2)
     mu_0 = float(math.sqrt(math.pi) * math.exp(math.lgamma(lambda_val + 0.5) - math.lgamma(lambda_val + 1.0)))
 
     # Weights w_k = mu_0 * (v_{k, 0})^2 where v_{k, 0} is first component of k-th normalized eigenvector
@@ -525,6 +553,7 @@ if __name__ == "__main__":
     print(f"  * Exact Rational Jacobi Recurrence Coefficients (a_n, b_n): ({a_n}, {b_n}) [a_n + b_n = {a_n + b_n}]")
     print(f"  * Orthonormal Symmetric Jacobi Matrix Subdiagonal alpha_0 (lambda=0.5): {alpha_0_legendre:.6f} [expected 1/sqrt(3) = {1/math.sqrt(3):.6f}]")
 
-    # Test Quotient Ring Normal Form
-    poly = QuadricQuotientPolynomial(3, {(0, 0, 2): 1})  # z_3^2 in C[z_1, z_2, z_3]/(z_1^2+z_2^2+z_3^2)
-    print(f"  * Exact Normal Form of z_3^2 modulo q: {poly}")
+    # Test Bad Prime Check
+    valid_c, _ = check_c_n_admissibility(5, Fraction(3, 2), Fraction(1, 2), 7)
+    valid_phi, msg = check_phi_n_admissibility(5, Fraction(3, 2), Fraction(1, 2), 7)
+    print(f"  * Admissibility p=7: C_5={valid_c}, phi_5={valid_phi} ({msg})")

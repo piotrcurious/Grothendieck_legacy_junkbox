@@ -16,6 +16,7 @@
     assert_dim_v_n_identity/4,
     assert_dim_v_n_exact_rational/3,
     assert_normalized_recurrence/4,
+    assert_dual_recurrence_exact_symbolic/3,
     assert_derivative_anchor/3,
     assert_south_derivative_anchor/3,
     assert_ode_second_derivative/4,
@@ -136,7 +137,6 @@ gegenbauer_modular_loop(K, N, _LamMod, _XMod, _Mod, Ck1, _Ck0, Val) :-
     K > N, !, Val = Ck1.
 gegenbauer_modular_loop(K, N, LamMod, XMod, Mod, Ck1, Ck0, Val) :-
     K =< N,
-    % Require gcd(K, Mod) == 1 for degree invertibility (Mod > N)
     1 =:= gcd(K, Mod),
     KInv is powm(K, Mod - 2, Mod),
     Term1 is (2 * (K + LamMod - 1) * XMod * Ck1) mod Mod,
@@ -202,6 +202,17 @@ assert_normalized_recurrence(N, Lambda, X, Tol) :-
     RHS is An * PhiNp1 + Bn * PhiNm1,
     Diff is abs(LHS - RHS),
     Diff < Tol.
+
+assert_dual_recurrence_exact_symbolic(N, Lambda, Diff) :-
+    integer(N), N >= 0,
+    % alpha_n^2 = (N+1)*(N+2*Lambda) / (4*(N+Lambda)*(N+Lambda+1))
+    AlphaN_Sq is ((N + 1) * (N + 2 * Lambda)) rdiv (4 * (N + Lambda) * (N + Lambda + 1)),
+    % a_n * b_{n+1} = [(N+2*Lambda) / (2*(N+Lambda))] * [(N+1) / (2*(N+Lambda+1))]
+    An is (N + 2 * Lambda) rdiv (2 * (N + Lambda)),
+    Bnp1 is (N + 1) rdiv (2 * (N + Lambda + 1)),
+    An_Bnp1 is An * Bnp1,
+    Diff is AlphaN_Sq - An_Bnp1,
+    Diff =:= 0.
 
 assert_derivative_anchor(N, Lambda, ExpectedPrime) :-
     integer(N), N >= 1,
@@ -273,6 +284,10 @@ test(schrodinger_casimir_shift) :-
 test(hilbert_series_dimension_exact) :-
     assert_dim_v_n_exact_rational(5, 10, 506),
     assert_dim_v_n_identity(5, 10, 506, 66.0).
+
+test(dual_recurrence_symbolic_exact_identity) :-
+    assert_dual_recurrence_exact_symbolic(10, 3 rdiv 2, Diff),
+    Diff =:= 0.
 
 test(normalized_recurrence_verification) :-
     assert_normalized_recurrence(10, 1.5, 0.5, 1e-10),
