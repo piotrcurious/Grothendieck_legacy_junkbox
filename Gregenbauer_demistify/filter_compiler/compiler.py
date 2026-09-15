@@ -1,13 +1,8 @@
 """
-Gegenbauer Filter Compiler Module
-=================================
+Gegenbauer Filter Compiler Module (Refined & Integrated)
+========================================================
 A comprehensive FIR/IIR/QMF DSP filter compiler based on Gegenbauer polynomial bases,
 Jacobi matrix operators, Sturm-Liouville differential regularizers, and asymptotic boundary layer theory.
-
-Integrates with the parent framework:
-  - algebraic_geometry_combinatorics (normalized_jacobi_coefficients, phi_norm_squared, Golub-Welsch quadrature)
-  - gegenbauer_asymptotics (normalized_phi_recurrence, endpoint_bessel_leading, composite_matched_approx)
-  - computational_layer (Pareto metrics, execution backends)
 """
 
 import os
@@ -22,17 +17,13 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-# Ensure parent directory is in sys.path for framework imports
 PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
 from algebraic_geometry_combinatorics import (
-    normalized_jacobi_coefficients,
-    orthonormal_jacobi_coefficients,
     phi_norm_squared,
-    gauss_gegenbauer_quadrature,
-    exact_rational_gegenbauer
+    gauss_gegenbauer_quadrature
 )
 from gegenbauer_asymptotics import (
     normalized_phi_recurrence,
@@ -54,25 +45,25 @@ from computational_layer import (
 @dataclass
 class FilterSpec:
     """Specification of target DSP filter."""
-    kind: str = "lowpass"  # 'lowpass', 'highpass', 'bandpass', 'qmf'
-    order: int = 63        # Filter length N (number of taps)
-    cutoff: float = 0.25   # Normalized cutoff frequency in cycles/sample (0.0 to 0.5, Nyquist = 0.5)
-    wp: Optional[float] = None  # Passband edge (cycles/sample, 0.0 to 0.5)
-    ws: Optional[float] = None  # Stopband edge (cycles/sample, 0.0 to 0.5)
-    wp2: Optional[float] = None # Upper passband edge for bandpass
-    ws2: Optional[float] = None # Upper stopband edge for bandpass
-    sampling_rate: int = 2000   # Sampling rate in Hz
-    passband_ripple_db: float = 0.1     # Target max passband ripple in dB
-    stopband_atten_db: float = 60.0     # Target min stopband attenuation in dB
+    kind: str = "lowpass"
+    order: int = 63
+    cutoff: float = 0.25
+    wp: Optional[float] = None
+    ws: Optional[float] = None
+    wp2: Optional[float] = None
+    ws2: Optional[float] = None
+    sampling_rate: int = 2000
+    passband_ripple_db: float = 0.1
+    stopband_atten_db: float = 60.0
 
     def __post_init__(self):
         self.kind = self.kind.lower()
         if self.kind not in ("lowpass", "highpass", "bandpass", "qmf"):
-            raise ValueError(f"Unknown filter kind: '{self.kind}'. Supported: lowpass, highpass, bandpass, qmf")
+            raise ValueError(f"Unknown filter kind: '{self.kind}'")
         if self.order < 3:
-            raise ValueError("Filter order (taps N) must be >= 3")
+            raise ValueError("Filter order must be >= 3")
         if not (0.0 < self.cutoff < 0.5):
-            raise ValueError(f"Normalized cutoff must be in range (0.0, 0.5), got {self.cutoff}")
+            raise ValueError(f"Cutoff must be in (0.0, 0.5), got {self.cutoff}")
         if self.wp is None:
             self.wp = max(0.01, self.cutoff - 0.05)
         if self.ws is None:
@@ -98,7 +89,7 @@ class FilterResult:
     lam: float
     basis_terms: int
     h0_taps: QuantizedTaps
-    h1_taps: Optional[QuantizedTaps] = None  # For QMF filter pairs
+    h1_taps: Optional[QuantizedTaps] = None
     freq_grid: np.ndarray = field(default_factory=lambda: np.array([]))
     H0_response: np.ndarray = field(default_factory=lambda: np.array([]))
     H1_response: Optional[np.ndarray] = None
@@ -108,6 +99,7 @@ class FilterResult:
     qmf_alias_distortion_max_db: float = 0.0
     regularization_energy: float = 0.0
     asymptotic_error_bound: float = 0.0
+    provenance_mixed_error: float = 0.0
     header_code: str = ""
 
     def summary(self) -> str:
@@ -121,25 +113,25 @@ class FilterResult:
             lines.append(f"QMF Power Complementarity Peak Ripple: {self.qmf_power_complementarity_max_db:.4f} dB")
             lines.append(f"QMF Peak Alias Distortion: {self.qmf_alias_distortion_max_db:.2f} dB")
         lines.append(f"Sturm-Liouville Regularization Energy: {self.regularization_energy:.6e}")
-        lines.append(f"Asymptotic Phase-Map Boundary Error Bound: {self.asymptotic_error_bound:.6e}")
+        lines.append(f"Asymptotic Boundary Error Bound: {self.asymptotic_error_bound:.6e}")
+        lines.append(f"Computational Layer Provenance Error: {self.provenance_mixed_error:.6e}")
         return "\n".join(lines)
 
 
 class GegenbauerFilterCompiler:
-    """
-    Advanced DSP Filter Compiler leveraging the VIII-Layer Gegenbauer Theoretical Framework.
-    """
+    """DSP Filter Compiler leveraging the VIII-Layer Gegenbauer Theoretical Framework."""
 
     def __init__(
         self,
         lam: float = 1.5,
         basis_terms: Optional[int] = None,
-        basis_type: str = "normalized",  # 'normalized' phi_n(x) or 'standard' C_n^(lambda)(x)
-        solver: str = "wls",             # 'wls', 'spectral_regularized', 'quadrature'
-        mu_reg: float = 1e-4,            # Spectral regularization weight for L_lambda = n(n+2*lambda)
-        reg_power: int = 1,              # Power p in [n(n+2*lambda)]^p
-        asymptotic_mode: str = "auto",   # 'auto', 'bessel', 'wkb', 'composite'
-        grid_samples: int = 1024
+        basis_type: str = "normalized",
+        solver: str = "spectral_regularized",
+        mu_reg: float = 1e-4,
+        reg_power: int = 1,
+        asymptotic_mode: str = "auto",
+        grid_samples: int = 2048,
+        precision: PrecisionType = PrecisionType.FLOAT64
     ):
         if lam <= -0.5:
             raise ValueError(f"Lambda parameter must be > -0.5, got {lam}")
@@ -151,22 +143,17 @@ class GegenbauerFilterCompiler:
         self.reg_power = int(reg_power)
         self.asymptotic_mode = asymptotic_mode
         self.grid_samples = grid_samples
+        self.ctx = NumericalContext(precision=precision, base=NumericalBase.BASE_2)
 
     def _eval_basis(self, n: int, x: np.ndarray) -> np.ndarray:
-        """Evaluates n-th basis function at array of x in [-1, 1]."""
+        """Evaluates n-th basis function at array x in [-1, 1]."""
         x_arr = np.clip(np.asarray(x, dtype=np.float64), -1.0, 1.0)
         if self.basis_type == "normalized":
             return normalized_phi_recurrence(n, self.lam, x_arr)
-        else:
-            c1 = float(c_n_1_val(n, self.lam))
-            return c1 * normalized_phi_recurrence(n, self.lam, x_arr)
+        c1 = float(c_n_1_val(n, self.lam))
+        return c1 * normalized_phi_recurrence(n, self.lam, x_arr)
 
     def _eval_asymptotic_basis(self, n: int, omega: np.ndarray) -> np.ndarray:
-        """
-        Evaluates n-th Gegenbauer basis function using boundary layer asymptotics
-        (Bessel near poles, WKB interior, or composite matched).
-        """
-        x_arr = np.cos(omega)
         theta = omega
         if self.asymptotic_mode == "bessel":
             return endpoint_bessel_leading(n, self.lam, theta)
@@ -174,67 +161,44 @@ class GegenbauerFilterCompiler:
             return interior_wkb_approx(n, self.lam, theta)
         elif self.asymptotic_mode == "composite":
             return composite_matched_approx(n, self.lam, theta)
-        else:
-            # Auto phase-map classification:
-            # Near 0 (theta < 3/N): Bessel North pole
-            # Near pi (theta > pi - 3/N): Bessel South pole
-            # Interior: Composite matched or exact recurrence
-            res = np.zeros_like(theta)
-            n_eff = max(1, n)
-            north_mask = theta < (3.0 / n_eff)
-            south_mask = theta > (np.pi - 3.0 / n_eff)
-            interior_mask = ~(north_mask | south_mask)
 
-            if np.any(north_mask):
-                res[north_mask] = endpoint_bessel_leading(n, self.lam, theta[north_mask])
-            if np.any(south_mask):
-                res[south_mask] = south_pole_bessel_leading(n, self.lam, theta[south_mask])
-            if np.any(interior_mask):
-                res[interior_mask] = composite_matched_approx(n, self.lam, theta[interior_mask])
-            return res
+        res = np.zeros_like(theta)
+        n_eff = max(1, n)
+        north_mask = theta < (3.0 / n_eff)
+        south_mask = theta > (np.pi - 3.0 / n_eff)
+        interior_mask = ~(north_mask | south_mask)
+
+        if np.any(north_mask):
+            res[north_mask] = endpoint_bessel_leading(n, self.lam, theta[north_mask])
+        if np.any(south_mask):
+            res[south_mask] = south_pole_bessel_leading(n, self.lam, theta[south_mask])
+        if np.any(interior_mask):
+            res[interior_mask] = composite_matched_approx(n, self.lam, theta[interior_mask])
+        return res
 
     def _build_spectral_target(self, spec: FilterSpec, omega: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Constructs target frequency amplitude D(omega) and weighting W(omega).
-        omega in [0, pi].
-        """
-        f = omega / (2.0 * np.pi)  # 0 to 0.5
+        f = omega / (2.0 * np.pi)
         D = np.zeros_like(omega)
         W = np.ones_like(omega)
-
-        wp = spec.wp
-        ws = spec.ws
+        wp, ws = spec.wp, spec.ws
 
         if spec.kind in ("lowpass", "qmf"):
             pass_mask = f <= wp
             stop_mask = f >= ws
             trans_mask = ~(pass_mask | stop_mask)
-
             D[pass_mask] = 1.0
-            D[stop_mask] = 0.0
             if np.any(trans_mask):
-                # Smooth cosine transition in transition band
-                f_trans = f[trans_mask]
-                D[trans_mask] = 0.5 * (1.0 + np.cos(np.pi * (f_trans - wp) / (ws - wp)))
-
-            W[pass_mask] = 1.0
-            W[stop_mask] = 10.0  # Higher weight on stopband attenuation
-            W[trans_mask] = 0.1
+                D[trans_mask] = 0.5 * (1.0 + np.cos(np.pi * (f[trans_mask] - wp) / (ws - wp)))
+            W[pass_mask], W[stop_mask], W[trans_mask] = 1.0, 10.0, 0.1
 
         elif spec.kind == "highpass":
             stop_mask = f <= ws
             pass_mask = f >= wp
             trans_mask = ~(pass_mask | stop_mask)
-
-            D[stop_mask] = 0.0
             D[pass_mask] = 1.0
             if np.any(trans_mask):
-                f_trans = f[trans_mask]
-                D[trans_mask] = 0.5 * (1.0 - np.cos(np.pi * (f_trans - ws) / (wp - ws)))
-
-            W[stop_mask] = 10.0
-            W[pass_mask] = 1.0
-            W[trans_mask] = 0.1
+                D[trans_mask] = 0.5 * (1.0 - np.cos(np.pi * (f[trans_mask] - ws) / (wp - ws)))
+            W[stop_mask], W[pass_mask], W[trans_mask] = 10.0, 1.0, 0.1
 
         elif spec.kind == "bandpass":
             wp2 = spec.wp2 if spec.wp2 is not None else spec.cutoff + 0.1
@@ -242,72 +206,49 @@ class GegenbauerFilterCompiler:
             pass_mask = (f >= wp) & (f <= wp2)
             stop_mask = (f <= ws) | (f >= ws2)
             trans_mask = ~(pass_mask | stop_mask)
-
             D[pass_mask] = 1.0
-            D[stop_mask] = 0.0
-            if np.any(trans_mask):
-                # Interpolate passband
-                D[trans_mask] = 0.5
-
-            W[pass_mask] = 1.0
-            W[stop_mask] = 10.0
-            W[trans_mask] = 0.1
+            D[trans_mask] = 0.5
+            W[pass_mask], W[stop_mask], W[trans_mask] = 1.0, 10.0, 0.1
 
         return D, W
 
     def solve_coefficients(self, spec: FilterSpec) -> Tuple[np.ndarray, int]:
-        """
-        Solves for Gegenbauer basis expansion coefficients a_n (n=0..K-1).
-        Uses Sturm-Liouville operator L_lambda = n(n+2*lambda) matrix regularization.
-        """
         N = spec.order
-        # Number of even terms for symmetric linear-phase FIR
         M = (N + 1) // 2
         K = self.basis_terms if self.basis_terms is not None else max(4, int(np.sqrt(N)) + 2)
         K = min(K, M)
 
         if self.solver == "quadrature":
-            # Gauss-Gegenbauer quadrature projection
             nodes, weights = gauss_gegenbauer_quadrature(self.grid_samples, self.lam)
-            # nodes x in (-1, 1), corresponding theta = arccos(x)
             omega_q = np.arccos(nodes)
             D_q, _ = self._build_spectral_target(spec, omega_q)
 
             a_coeffs = np.zeros(K)
             for k in range(K):
-                degree = 2 * k  # even terms for symmetric FIR
+                degree = 2 * k
                 phi_k = self._eval_basis(degree, nodes)
                 norm_sq = phi_norm_squared(degree, self.lam)
-                # Integral of D * phi_k * w(x) dx
-                num = np.sum(D_q * phi_k * weights)
-                a_coeffs[k] = num / norm_sq
+                a_coeffs[k] = np.sum(D_q * phi_k * weights) / norm_sq
             return a_coeffs, K
 
-        # Frequency grid grid_samples
         omega = np.linspace(0, np.pi, self.grid_samples)
         x = np.cos(omega)
         D, W = self._build_spectral_target(spec, omega)
 
-        # Design matrix A of shape (grid_samples, K)
         A = np.zeros((self.grid_samples, K))
         for k in range(K):
-            degree = 2 * k
-            A[:, k] = self._eval_basis(degree, x)
+            A[:, k] = self._eval_basis(2 * k, x)
 
-        # Weighting
         sqrt_W = np.sqrt(W)
         A_w = A * sqrt_W[:, np.newaxis]
         D_w = D * sqrt_W
 
         if self.solver == "spectral_regularized" or self.mu_reg > 0:
-            # Sturm-Liouville differential operator eigenvalue: L_lambda phi_n = n(n+2*lambda) phi_n
-            # Regularization matrix R_diag = diag( ( (2k)*(2k + 2*lambda) )^p )
             R_diag = np.zeros(K)
             for k in range(K):
                 deg = 2 * k
                 eig = deg * (deg + 2.0 * self.lam)
                 R_diag[k] = (eig ** self.reg_power)
-
             R_mat = np.diag(np.sqrt(self.mu_reg * R_diag))
             A_sys = np.vstack([A_w, R_mat])
             D_sys = np.concatenate([D_w, np.zeros(K)])
@@ -318,74 +259,59 @@ class GegenbauerFilterCompiler:
         return a_coeffs, K
 
     def transform_to_taps(self, a_coeffs: np.ndarray, spec: FilterSpec) -> np.ndarray:
-        """
-        Transforms Gegenbauer expansion coefficients a_n into linear-phase FIR taps h[n].
-        Utilizes windowed-sinc synthesis modulated by the fitted Gegenbauer basis window.
-        """
+        """Transforms Gegenbauer spectral expansion coefficients into zero-phase FIR taps using IDFT projection."""
         N = spec.order
-        mid = (N - 1) / 2.0
-        cutoff = spec.cutoff
+        grid_L = self.grid_samples
+        omega = np.linspace(0, np.pi, grid_L)
+        x = np.cos(omega)
 
-        h = np.zeros(N, dtype=float)
+        # Reconstruct fitted frequency response A(omega)
+        A_freq = np.zeros(grid_L, dtype=np.float64)
+        for k, c in enumerate(a_coeffs):
+            A_freq += c * self._eval_basis(2 * k, x)
+
+        # Project frequency response back to time domain via continuous cosine transform
+        h = np.zeros(N, dtype=np.float64)
+        mid = (N - 1) / 2.0
+        d_omega = np.pi / (grid_L - 1)
+
+        trapz_fn = getattr(np, 'trapezoid', getattr(np, 'trapz', None))
         for n in range(N):
             m = n - mid
-            pos_x = 2.0 * n / (N - 1) - 1.0 if N > 1 else 0.0
-            win_val = np.sum([c * self._eval_basis(2*k, np.array([pos_x]))[0] for k, c in enumerate(a_coeffs)])
+            integrand = A_freq * np.cos(m * omega)
+            # Trapezoidal quadrature over [0, pi]
+            h[n] = (1.0 / np.pi) * trapz_fn(integrand, dx=d_omega)
 
-            if spec.kind in ("lowpass", "qmf"):
-                if abs(m) < 1e-12:
-                    ideal = 2.0 * cutoff
-                else:
-                    ideal = np.sin(2.0 * np.pi * cutoff * m) / (np.pi * m)
-            elif spec.kind == "highpass":
-                if abs(m) < 1e-12:
-                    ideal = 1.0 - 2.0 * cutoff
-                else:
-                    ideal = -np.sin(2.0 * np.pi * cutoff * m) / (np.pi * m)
-            elif spec.kind == "bandpass":
-                wp2 = spec.wp2 if spec.wp2 is not None else cutoff + 0.1
-                if abs(m) < 1e-12:
-                    ideal = 2.0 * (wp2 - cutoff)
-                else:
-                    ideal = (np.sin(2.0 * np.pi * wp2 * m) - np.sin(2.0 * np.pi * cutoff * m)) / (np.pi * m)
-            else:
-                if abs(m) < 1e-12:
-                    ideal = 2.0 * cutoff
-                else:
-                    ideal = np.sin(2.0 * np.pi * cutoff * m) / (np.pi * m)
-
-            h[n] = ideal * win_val
-
-        # Enforce exact symmetry h[n] == h[N-1-n]
+        # Enforce exact linear-phase symmetry
         h = 0.5 * (h + h[::-1])
 
-        # Normalize DC gain or passband gain depending on filter type
+        # Normalize gain
         if spec.kind in ("lowpass", "qmf"):
             sum_h = np.sum(h)
             if abs(sum_h) > 1e-12:
-                h = h / sum_h
+                h /= sum_h
         elif spec.kind == "highpass":
-            sign_pattern = np.array([(-1.0)**n for n in range(N)])
-            nyq_gain = np.sum(h * sign_pattern)
+            nyq_gain = np.sum(h * np.array([(-1.0)**n for n in range(N)]))
             if abs(nyq_gain) > 1e-12:
-                h = h / nyq_gain
+                h /= nyq_gain
         elif spec.kind == "bandpass":
-            H_f = np.abs(np.fft.fft(h, 4096))
-            max_g = np.max(H_f)
+            max_g = np.max(np.abs(np.fft.fft(h, 4096)))
             if max_g > 1e-12:
-                h = h / max_g
+                h /= max_g
 
         return h
 
     def quantize_taps(self, h_float: np.ndarray) -> QuantizedTaps:
-        """Quantizes float64 taps into Q15, Q23, and Q31 fixed-point integer arrays."""
-        q15_scale = 32767.0
-        q23_scale = 8388607.0
-        q31_scale = 2147483647.0
+        peak = float(np.max(np.abs(h_float))) if len(h_float) > 0 else 1.0
+        norm_factor = peak if peak > 1.0 else 1.0
 
-        q15 = np.clip(np.round(h_float * q15_scale), -32768, 32767).astype(np.int32)
-        q23 = np.clip(np.round(h_float * q23_scale), -8388608, 8388607).astype(np.int32)
-        q31 = np.clip(np.round(h_float * q31_scale), -2147483648, 2147483647).astype(np.int64)
+        q15_scale = 32767.0 / norm_factor
+        q23_scale = 8388607.0 / norm_factor
+        q31_scale = 2147483647.0 / norm_factor
+
+        q15 = np.clip(np.round((h_float / norm_factor) * 32767.0), -32768, 32767).astype(np.int32)
+        q23 = np.clip(np.round((h_float / norm_factor) * 8388607.0), -8388608, 8388607).astype(np.int32)
+        q31 = np.clip(np.round((h_float / norm_factor) * 2147483647.0), -2147483648, 2147483647).astype(np.int64)
 
         return QuantizedTaps(
             float64_taps=h_float,
@@ -470,40 +396,28 @@ class GegenbauerFilterCompiler:
         return "\n".join(header)
 
     def compile(self, spec: FilterSpec) -> FilterResult:
-        """
-        Executes complete filter compilation pipeline.
-        """
-        # 1. Solve Gegenbauer basis coefficients
         a_coeffs, K = self.solve_coefficients(spec)
-
-        # 2. Transform coefficients to FIR taps
         h0_float = self.transform_to_taps(a_coeffs, spec)
         h0_quant = self.quantize_taps(h0_float)
 
         h1_quant = None
         if spec.kind == "qmf":
-            # Mirror highpass filter h1[n] = (-1)^n * h0[n]
             sign_pattern = np.array([(-1.0)**n for n in range(spec.order)])
             h1_float = h0_float * sign_pattern
             h1_quant = self.quantize_taps(h1_float)
 
-        # 3. Analyze Frequency Response
         K_fft = 4096
         H0 = np.fft.fft(h0_float, K_fft)
         freq_grid = np.linspace(0, 0.5, K_fft // 2)
-        H0_mag = np.abs(H0[:K_fft // 2])
-        H0_db = 20 * np.log10(np.maximum(1e-12, H0_mag))
+        H0_db = 20 * np.log10(np.maximum(1e-12, np.abs(H0[:K_fft // 2])))
 
-        # Calculate passband ripple and stopband attenuation
         pass_idx = freq_grid <= spec.wp
         stop_idx = freq_grid >= spec.ws
-
         pass_ripple = np.max(H0_db[pass_idx]) - np.min(H0_db[pass_idx]) if np.any(pass_idx) else 0.0
         stop_atten = -np.max(H0_db[stop_idx]) if np.any(stop_idx) else 0.0
 
         qmf_pow_db = 0.0
         qmf_alias_db = 0.0
-
         if spec.kind == "qmf" and h1_quant is not None:
             H1 = np.fft.fft(h1_quant.float64_taps, K_fft)
             H1_shift = np.roll(H1, K_fft // 2)
@@ -512,26 +426,20 @@ class GegenbauerFilterCompiler:
             pow_comp = np.abs(H0)**2 + np.abs(H1)**2
             aliasing_func = 0.5 * np.abs(H0 * H0_shift + H1 * H1_shift)
 
-            pow_db = 10 * np.log10(np.maximum(1e-12, pow_comp[:K_fft // 2]))
-            alias_db = 20 * np.log10(np.maximum(1e-12, aliasing_func[:K_fft // 2]))
+            qmf_pow_db = float(np.max(np.abs(10 * np.log10(np.maximum(1e-12, pow_comp[:K_fft // 2])))))
+            qmf_alias_db = float(np.max(20 * np.log10(np.maximum(1e-12, aliasing_func[:K_fft // 2]))))
 
-            qmf_pow_db = float(np.max(np.abs(pow_db)))
-            qmf_alias_db = float(np.max(alias_db))
+        reg_energy = sum((c ** 2) * (((2*k) * (2*k + 2.0 * self.lam)) ** self.reg_power) for k, c in enumerate(a_coeffs))
 
-        # Sturm-Liouville energy
-        reg_energy = 0.0
-        for k, c in enumerate(a_coeffs):
-            deg = 2 * k
-            eig = deg * (deg + 2.0 * self.lam)
-            reg_energy += (c ** 2) * (eig ** self.reg_power)
-
-        # Asymptotic boundary check comparison
         asymp_err = 0.0
         if self.asymptotic_mode != "none":
             omega_sample = np.linspace(0.001, np.pi - 0.001, 100)
             phi_exact = self._eval_basis(spec.order // 2, np.cos(omega_sample))
             phi_asymp = self._eval_asymptotic_basis(spec.order // 2, omega_sample)
             asymp_err = float(np.max(np.abs(phi_exact - phi_asymp)))
+
+        # Provenance verification via Framework computational layer
+        prov_err = float(np.max(mixed_error(h0_quant.float64_taps, h0_quant.q31_taps / h0_quant.q31_scale)))
 
         result = FilterResult(
             spec=spec,
@@ -547,9 +455,9 @@ class GegenbauerFilterCompiler:
             qmf_power_complementarity_max_db=qmf_pow_db,
             qmf_alias_distortion_max_db=qmf_alias_db,
             regularization_energy=float(reg_energy),
-            asymptotic_error_bound=asymp_err
+            asymptotic_error_bound=asymp_err,
+            provenance_mixed_error=prov_err
         )
-
         result.header_code = self.generate_header(result)
         return result
 
