@@ -108,10 +108,40 @@ class FilterSpec:
             raise ValueError("Filter order must be >= 3")
         if not (0.0 < self.cutoff < 0.5):
             raise ValueError(f"Cutoff must be in (0.0, 0.5), got {self.cutoff}")
-        if self.wp is None:
-            self.wp = max(0.01, self.cutoff - 0.05)
-        if self.ws is None:
-            self.ws = min(0.49, self.cutoff + 0.05)
+
+        if self.kind == "highpass" and self.order % 2 == 0:
+            raise ValueError(f"Highpass FIR filter (Type II) cannot have an even order N={self.order} due to forced Nyquist zero. Filter order must be odd.")
+
+        if self.kind == "bandpass":
+            if self.wp is None:
+                self.wp = max(0.02, self.cutoff - 0.05)
+            if self.ws is None:
+                self.ws = max(0.01, self.wp - 0.05)
+            if self.wp2 is None:
+                self.wp2 = min(0.48, max(self.wp + 0.05, self.cutoff + 0.1))
+            if self.ws2 is None:
+                self.ws2 = min(0.49, self.wp2 + 0.05)
+        else:
+            if self.wp is None:
+                if self.kind == "highpass":
+                    self.wp = min(0.49, self.cutoff + 0.05)
+                else:
+                    self.wp = max(0.01, self.cutoff - 0.05)
+            if self.ws is None:
+                if self.kind == "highpass":
+                    self.ws = max(0.01, self.cutoff - 0.05)
+                else:
+                    self.ws = min(0.49, self.cutoff + 0.05)
+
+        if self.kind in ("lowpass", "qmf"):
+            if self.wp >= self.ws:
+                raise ValueError(f"Passband edge wp ({self.wp}) must be less than stopband edge ws ({self.ws})")
+        elif self.kind == "highpass":
+            if self.ws >= self.wp:
+                raise ValueError(f"Stopband edge ws ({self.ws}) must be less than passband edge wp ({self.wp})")
+        elif self.kind == "bandpass":
+            if not (self.ws < self.wp < self.wp2 < self.ws2):
+                raise ValueError(f"Bandpass frequencies must satisfy ws ({self.ws}) < wp ({self.wp}) < wp2 ({self.wp2}) < ws2 ({self.ws2})")
 
 
 @dataclass
@@ -212,8 +242,9 @@ class GegenbauerFilterCompiler:
 
         res = np.zeros_like(theta)
         n_eff = max(1, n)
-        north_mask = theta < (3.0 / n_eff)
-        south_mask = theta > (np.pi - 3.0 / n_eff)
+        boundary = min(3.0 / n_eff, np.pi / 2.5)
+        north_mask = theta < boundary
+        south_mask = theta > (np.pi - boundary)
         interior_mask = ~(north_mask | south_mask)
 
         if np.any(north_mask):
@@ -506,8 +537,9 @@ class GegenbauerFilterCompiler:
         matching_status = MatchingStatus.MATCHING_SCHEMA
         if self.asymptotic_mode != "none":
             omega_sample = np.linspace(0.001, np.pi - 0.001, 100)
-            phi_exact = self._eval_basis(spec.order // 2, np.cos(omega_sample))
-            phi_asymp = self._eval_asymptotic_basis(spec.order // 2, omega_sample)
+            n_eval = max(1, 2 * (K - 1))
+            phi_exact = self._eval_basis(n_eval, np.cos(omega_sample))
+            phi_asymp = self._eval_asymptotic_basis(n_eval, omega_sample)
             asymp_err = float(np.max(np.abs(phi_exact - phi_asymp)))
 
             if spec.order > K and self.lam > 0:
@@ -645,7 +677,7 @@ class GegenbauerFilterCompiler:
     ) -> FilterResult:
         """
         Searches over (lambda, mu) parameter space to find the Pareto-optimal design
-        balancing passband ripple vs stopband attenuation vs quantization degradation.
+        balancing passband ripple vs stopband attenuation vs quantization degradation vs certified provenance error.
         """
         best_res = None
         best_score = float('inf')
@@ -655,10 +687,17 @@ class GegenbauerFilterCompiler:
                 compiler = GegenbauerFilterCompiler(lam=lam, mu_reg=mu)
                 res = compiler.compile(spec)
 
-                # Cost metric balancing passband ripple & stopband attenuation
+                # Cost metric balancing passband ripple, stopband attenuation, and provenance total error bound
                 score = res.passband_ripple_actual * 10.0 - res.stopband_atten_actual
                 if res.spec.kind == "qmf":
                     score += res.qmf_power_complementarity_max_db * 20.0 + res.qmf_alias_distortion_max_db
+
+                # Incorporate provenance total error bound into Pareto cost
+                score += res.payload.provenance.total * 100.0
+
+                # Penalize non-certified topology/status
+                if not res.payload.is_certified:
+                    score += 1e5
 
                 if score < best_score:
                     best_score = score
