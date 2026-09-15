@@ -204,3 +204,24 @@ def test_layer_viii_provenance_and_truth_status():
     assert '#define GEG_TRUTH_STATUS "PHYSICAL_SPHERE_GEOMETRY"' in res_phys.header_code
     assert '#define GEG_MATCHING_STATUS "ANALYTICALLY_CERTIFIED_MATCHING"' in res_phys.header_code
     assert 'GEG_E_TOTAL_BOUND' in res_phys.header_code
+
+
+def test_filter_spec_edge_cases():
+    """Tests highpass even-N rejection, transition band overlap validation, and clamped bandpass defaults."""
+    # Highpass even N must raise ValueError
+    with pytest.raises(ValueError, match="Highpass FIR filter .* cannot have an even order"):
+        FilterSpec(kind="highpass", order=64, cutoff=0.25)
+
+    # Transition band overlap for lowpass (wp >= ws)
+    with pytest.raises(ValueError, match="Passband edge wp .* must be less than stopband edge ws"):
+        FilterSpec(kind="lowpass", order=31, cutoff=0.25, wp=0.3, ws=0.2)
+
+    # Transition band overlap for highpass (ws >= wp)
+    with pytest.raises(ValueError, match="Stopband edge ws .* must be less than passband edge wp"):
+        FilterSpec(kind="highpass", order=31, cutoff=0.25, wp=0.2, ws=0.3)
+
+    # Clamped bandpass upper bounds for cutoff near Nyquist
+    bp_spec = FilterSpec(kind="bandpass", order=31, cutoff=0.45)
+    assert bp_spec.wp2 < 0.5
+    assert bp_spec.ws2 < 0.5
+    assert bp_spec.ws < bp_spec.wp < bp_spec.wp2 < bp_spec.ws2
