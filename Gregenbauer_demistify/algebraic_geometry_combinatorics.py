@@ -11,8 +11,8 @@ for Gegenbauer polynomials and complex projective quadric hypersurfaces Q_{d-2} 
 4. Orthonormal Symmetric Jacobi Matrix Coefficients alpha_n = 1/2 * sqrt( (n+1)(n+2*lambda) / ((n+lambda)(n+lambda+1)) )
 5. Golub-Welsch Gauss-Gegenbauer Quadrature over m x m principal truncation J_m (sigma(J_m) = {x_1, ..., x_m})
 6. Normalized Gegenbauer _2F_1 Hypergeometric Expansion Coefficients
-7. Execution Metadata N_max & Exact Recurrence Denominator Exclusion Products D_recurrence
-8. Separate Finite-Field & RNS Admissibility Certificates for C_n vs phi_n (handling bad primes where p | u_n * v_n)
+7. Execution Metadata N_max & Recurrence-Derived Denominator Exclusions D_excl = lcm({d_k in D_rec} u {b, r})
+8. PolyCertificate and ZonalCertificate Admissibility (handling bad primes where p | u_n * v_n)
 """
 
 from fractions import Fraction
@@ -397,31 +397,36 @@ def exact_rational_bit_length(n: int, lambda_val: Union[int, Fraction], x: Union
 
 def check_c_n_admissibility(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], p: int) -> bool:
     """
-    Admissibility certificate for unnormalized Gegenbauer polynomial C_n^(lambda)(x) in F_p:
-      Requires prime p > max(2, n), p \nmid prod_{j in D_recurrence} j * b * d (where D_recurrence = {1,...,n}).
+    Admissibility certificate for unnormalized Gegenbauer polynomial C_n^(lambda)(x) in F_p (PolyCertificate):
+      Parameter notation: lambda = a/b, x = c/r (r is denominator of evaluation point x).
+      D_excl = lcm({d_k in D_rec} u {b, r}) where D_rec = {1, ..., n}.
+      Requires prime p > N_max and p \nmid D_excl.
     """
     if p <= max(2, n):
         return False
+
     b = Fraction(lambda_val).denominator
-    d = Fraction(x).denominator
+    r = Fraction(x).denominator
 
-    # Check that p does not divide any j in D_recurrence = {1, ..., n}
-    for j in range(1, n + 1):
-        if j % p == 0:
-            return False
+    # Compute D_excl = lcm(1, ..., n, b, r)
+    lcm_val = 1
+    for k in range(1, n + 1):
+        lcm_val = math.lcm(lcm_val, k)
+    lcm_val = math.lcm(lcm_val, b)
+    lcm_val = math.lcm(lcm_val, r)
 
-    return (math.gcd(b, p) == 1) and (math.gcd(d, p) == 1)
+    return (lcm_val % p != 0)
 
 
 def check_phi_n_admissibility(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], p: int) -> Tuple[bool, str]:
     """
-    Admissibility certificate for normalized zonal spherical function phi_n(x) = C_n^(lambda)(x) / C_n^(lambda)(1) in F_p:
-      Requires C_n admissibility A_C(p) AND p \nmid u_n AND p \nmid v_n
+    Admissibility certificate for normalized zonal spherical function phi_n(x) = C_n^(lambda)(x) / C_n^(lambda)(1) in F_p (ZonalCertificate):
+      Formal logical dependency: ZonalCertificate = PolyCertificate and p \nmid v_n and p \nmid u_n
       (where C_n^(lambda)(1) = u_n/v_n with gcd(u_n, v_n) = 1).
       For bad primes (p | u_n or p | v_n), C_n^(lambda)(1) is either zero or non-local in F_p, so normalization fails.
     """
     if not check_c_n_admissibility(n, lambda_val, x, p):
-        return False, "Failed C_n recurrence admissibility (p <= n or denominator not coprime to p)"
+        return False, "Failed PolyCertificate (p <= N_max or p divides recurrence exclusion product D_excl)"
 
     c1 = exact_rational_gegenbauer(n, lambda_val, Fraction(1))
     u_n = c1.numerator
@@ -432,14 +437,14 @@ def check_phi_n_admissibility(n: int, lambda_val: Union[int, Fraction], x: Union
     if v_n % p == 0:
         return False, f"Bad prime p={p} divides C_n(1) denominator v_n={v_n}"
 
-    return True, "Valid phi_n admissibility"
+    return True, "Valid ZonalCertificate"
 
 
 def modular_gegenbauer_recurrence(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], mod: int) -> int:
     """
     Evaluates Gegenbauer polynomial C_n^(lambda)(x) in the modular ring Z/mod Z.
     Characteristic p admissibility requires p > max(2, n), p \nmid b (for lambda = a/b),
-    and p \nmid d (for x = c/d).
+    and p \nmid r (for x = c/r).
     """
     if n < 0:
         raise ValueError("n must be non-negative integer")
@@ -456,11 +461,11 @@ def modular_gegenbauer_recurrence(n: int, lambda_val: Union[int, Fraction], x: U
         lam = int(lambda_val) % mod
 
     if isinstance(x, Fraction):
-        c, d = x.numerator, x.denominator
-        if math.gcd(d, mod) != 1:
-            raise ValueError(f"gcd(den(x)={d}, mod={mod}) != 1: x denominator not invertible mod {mod}")
-        d_inv = pow(d, -1, mod)
-        x_mod = (c * d_inv) % mod
+        c, r = x.numerator, x.denominator
+        if math.gcd(r, mod) != 1:
+            raise ValueError(f"gcd(den(x)={r}, mod={mod}) != 1: x denominator not invertible mod {mod}")
+        r_inv = pow(r, -1, mod)
+        x_mod = (c * r_inv) % mod
     else:
         x_mod = int(x) % mod
 
@@ -493,8 +498,8 @@ def rns_crt_gegenbauer_eval(n: int, lambda_val: Union[int, Fraction], x: Union[i
     """
     residues = []
     for m in moduli:
-        r = modular_gegenbauer_recurrence(n, lambda_val, x, m)
-        residues.append(r)
+        r_mod = modular_gegenbauer_recurrence(n, lambda_val, x, m)
+        residues.append(r_mod)
 
     # Chinese Remainder Theorem Reconstruction
     M = 1
