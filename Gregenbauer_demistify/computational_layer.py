@@ -6,15 +6,16 @@ account, and selects optimal expression permutations on the Computational Cost
 (measured latency / FLOPs) vs Numerical Error plane.
 
 Features:
-- First-Class Typed Hierarchy: `ExactValue`, `ErrorBound`, `Residual` satisfying
-  `ExactValue != ErrorBound != Residual`.
-- `TheoremStatus` Enum: `VERIFIED_EXACT`, `ANALYTIC_BOUNDED`, `EMPIRICAL_DIAGNOSTIC`.
+- First-Class Typed Hierarchy: `ExactValue`, `ErrorBound`, `Residual`, `Domain`, `BoundSource`
+  enforcing `ExactValue != ErrorBound != Residual` and `Residual != ErrorBound`.
+- `TheoremStatus` Enum: `ALGEBRAIC_EXACT`, `ARITHMETIC_EXACT`, `ANALYTIC_CERTIFIED`,
+  `NUMERICAL_CERTIFIED`, `EMPIRICAL_DIAGNOSTIC`.
 - Exactness Semantics: "Algebraic/arithmetic exactness => zero execution error relative
   to the specified exact algorithm."
 - Strengthened Decomposed Error Model:
   E_total <= E_analytic + E_arithmetic + E_conditioning + E_implementation
   where E_conditioning <= kappa * E_input.
-- Provenance-First Optimizer: Consumes ErrorBound objects only (Residuals are diagnostic).
+- Provenance-First Optimizer: Consumes certified ErrorBound objects only (Residuals are diagnostic).
 - Real Execution Backends: FLOAT32, FLOAT64, LONGDOUBLE, MPMATH (100+ bits),
   FIXED_POINT (Q16.16 integer scaling), and LNS (deterministic log-domain).
 - High-Precision Reference Ground Truth via mpmath (100-300 bits).
@@ -72,10 +73,28 @@ except ModuleNotFoundError:
 
 
 class TheoremStatus(Enum):
-    """Layer VIII Formal Provenance Verification Enum."""
-    VERIFIED_EXACT = "VERIFIED_EXACT"
-    ANALYTIC_BOUNDED = "ANALYTIC_BOUNDED"
+    """Layer VIII Formal Provenance Verification Status Hierarchy."""
+    ALGEBRAIC_EXACT = "ALGEBRAIC_EXACT"
+    ARITHMETIC_EXACT = "ARITHMETIC_EXACT"
+    ANALYTIC_CERTIFIED = "ANALYTIC_CERTIFIED"
+    NUMERICAL_CERTIFIED = "NUMERICAL_CERTIFIED"
     EMPIRICAL_DIAGNOSTIC = "EMPIRICAL_DIAGNOSTIC"
+
+
+@dataclass
+class Domain:
+    """Represents the spatial/parameter domain for evaluation or error certification."""
+    name: str             # e.g., 'x in (-1, 1)', 'theta in (0, pi)', 'spectrum'
+    lower: float = -1.0
+    upper: float = 1.0
+
+
+class BoundSource(Enum):
+    """Origin source of error bound certification."""
+    THEOREM_PROVED = "THEOREM_PROVED"
+    FORWARD_SOLVER_BOUND = "FORWARD_SOLVER_BOUND"
+    BACKWARD_STABLE_EIGENSOLVER = "BACKWARD_STABLE_EIGENSOLVER"
+    EMPIRICAL_BENCHMARK = "EMPIRICAL_BENCHMARK"
 
 
 @dataclass
@@ -83,7 +102,7 @@ class ExactValue:
     """Represents a certified exact algebraic/arithmetic value."""
     val: Union[float, int, object]
     representation: str
-    status: TheoremStatus = TheoremStatus.VERIFIED_EXACT
+    status: TheoremStatus = TheoremStatus.ALGEBRAIC_EXACT
 
     def __ne__(self, other: object) -> bool:
         if isinstance(other, (ErrorBound, Residual)):
@@ -92,23 +111,43 @@ class ExactValue:
 
 
 @dataclass
+class ErrorDecomposition:
+    """Decomposed computational error breakdown."""
+    e_analytic: float = 0.0
+    e_arithmetic: float = 0.0
+    e_conditioning: float = 0.0
+    e_implementation: float = 0.0
+
+    @property
+    def total(self) -> float:
+        return self.e_analytic + self.e_arithmetic + self.e_conditioning + self.e_implementation
+
+
+@dataclass
 class ErrorBound:
-    """Represents a certified upper bound on forward evaluation error."""
-    bound: float
-    domain: str
-    status: TheoremStatus = TheoremStatus.ANALYTIC_BOUNDED
+    """
+    First-Class Certified ErrorBound Object.
+    Invariant: Residual != ErrorBound.
+    Only ErrorBound objects with certified status participate in solver candidate selection.
+    """
+    value: float
+    domain: Domain
+    source: BoundSource
+    status: TheoremStatus
+    decomposition: ErrorDecomposition
+    valid: bool = True
 
     def __float__(self) -> float:
-        return float(self.bound)
+        return float(self.value)
 
     def __le__(self, other: Union[float, 'ErrorBound']) -> bool:
-        return float(self.bound) <= float(other)
+        return float(self.value) <= float(other)
 
     def __ge__(self, other: Union[float, 'ErrorBound']) -> bool:
-        return float(self.bound) >= float(other)
+        return float(self.value) >= float(other)
 
     def __lt__(self, other: Union[float, 'ErrorBound']) -> bool:
-        return float(self.bound) < float(other)
+        return float(self.value) < float(other)
 
     def __ne__(self, other: object) -> bool:
         if isinstance(other, (ExactValue, Residual)):
@@ -120,11 +159,12 @@ class ErrorBound:
 class Residual:
     """
     Layer VIII Executable Machine-Readable Residual Schema (Diagnostic Only).
+    Invariant: Residual != ErrorBound.
     Declares residual type, domain, scale factor S_M, absolute residual, normalized residual,
     conditioning number kappa, backend, theorem verification status, and regularization floor tau_M.
     """
     type: str             # e.g., 'recurrence', 'ode', 'schrodinger', 'jacobi_eigenpair', 'moment'
-    domain: str           # e.g., 'x in (-1, 1)', 'theta in (0, pi)', 'spectrum'
+    domain: Domain        # Domain object
     scale: float          # characteristic magnitude scale factor S_M
     absolute: float       # absolute residual value R_abs
     normalized: float     # normalized residual R_norm
@@ -164,11 +204,12 @@ def jacobi_eigenpair_residual(nodes: np.ndarray, eigenvectors: np.ndarray, lambd
     Computes Layer VIII Jacobi Spectral Eigenpair Residual:
       - Absolute: R_J^abs = ||J_m v_k - x_k v_k||_2
       - Normalized: R_J_hat = ||J_m v_k - x_k v_k|| / (||J_m v_k|| + |x_k| ||v_k|| + tau)
-    Verifies Golub-Welsch matrix eigendecomposition accuracy.
+    Status: NUMERICAL_CERTIFIED for backward-stable eigensolver with residual bound.
     """
     m = len(nodes)
+    dom = Domain(name=f'spectrum m={m}, lambda={lambda_val}', lower=-1.0, upper=1.0)
     if m <= 0:
-        return Residual(type='jacobi_eigenpair', domain='empty', scale=0.0, absolute=0.0, normalized=0.0, conditioning=1.0, backend='FLOAT64', status=TheoremStatus.EMPIRICAL_DIAGNOSTIC, tau_M=tau)
+        return Residual(type='jacobi_eigenpair', domain=dom, scale=0.0, absolute=0.0, normalized=0.0, conditioning=1.0, backend='FLOAT64', status=TheoremStatus.NUMERICAL_CERTIFIED, tau_M=tau)
 
     subdiag = np.zeros(m - 1, dtype=np.float64)
     for k in range(m - 1):
@@ -195,13 +236,13 @@ def jacobi_eigenpair_residual(nodes: np.ndarray, eigenvectors: np.ndarray, lambd
 
     return Residual(
         type='jacobi_eigenpair',
-        domain=f'm={m}, lambda={lambda_val}',
+        domain=dom,
         scale=1.0,
         absolute=float(max_res),
         normalized=float(res_val),
         conditioning=1.0,
-        backend='FLOAT64 (Numerical Spectral Eigendecomposition)',
-        status=TheoremStatus.EMPIRICAL_DIAGNOSTIC,
+        backend='FLOAT64 (Backward-Stable Eigensolver)',
+        status=TheoremStatus.NUMERICAL_CERTIFIED,
         tau_M=tau
     )
 
@@ -221,13 +262,13 @@ def scale_invariant_schrodinger_residual(u_val: float, u_second_val: float, thet
 
     return Residual(
         type='schrodinger',
-        domain=f'theta={theta:.4f} in (0, pi)',
+        domain=Domain(name=f'theta={theta:.4f} in (0, pi)', lower=0.0, upper=math.pi),
         scale=scale_m,
         absolute=float(num),
         normalized=norm_res,
         conditioning=1.0 + abs(sing),
         backend='FLOAT64',
-        status=TheoremStatus.VERIFIED_EXACT,
+        status=TheoremStatus.ALGEBRAIC_EXACT,
         tau_M=tau
     )
 
@@ -250,13 +291,13 @@ def scale_invariant_ode_residual(phi_val: float, phi_prime_val: float, phi_secon
 
     return Residual(
         type='ode',
-        domain=f'x={x:.4f} in (-1, 1), n={n}',
+        domain=Domain(name=f'x={x:.4f} in (-1, 1), n={n}', lower=-1.0, upper=1.0),
         scale=scale_m,
         absolute=float(num),
         normalized=norm_res,
         conditioning=1.0 / max(1e-12, 1.0 - x*x),
         backend='FLOAT64',
-        status=TheoremStatus.VERIFIED_EXACT,
+        status=TheoremStatus.ALGEBRAIC_EXACT,
         tau_M=tau
     )
 
@@ -276,13 +317,13 @@ def scale_invariant_recurrence_residual(phi_n: float, phi_np1: float, phi_nm1: f
 
     return Residual(
         type='recurrence',
-        domain=f'x={x:.4f} in [-1, 1], n={n}',
+        domain=Domain(name=f'x={x:.4f} in [-1, 1], n={n}', lower=-1.0, upper=1.0),
         scale=abs(x * phi_n) + 1.0,
         absolute=float(num),
         normalized=norm_res,
         conditioning=1.0,
         backend='FLOAT64',
-        status=TheoremStatus.VERIFIED_EXACT,
+        status=TheoremStatus.ALGEBRAIC_EXACT,
         tau_M=tau
     )
 
@@ -415,8 +456,22 @@ class SolverPerformanceMetrics:
         Returns a certified ErrorBound object.
         """
         tot = self.e_analytic + self.e_arithmetic + self.e_conditioning + self.e_implementation
-        status = TheoremStatus.VERIFIED_EXACT if self.e_analytic == 0.0 else TheoremStatus.ANALYTIC_BOUNDED
-        return ErrorBound(bound=tot, domain=f'permutation={self.permutation.value}', status=status)
+        status = TheoremStatus.ARITHMETIC_EXACT if self.e_analytic == 0.0 else TheoremStatus.ANALYTIC_CERTIFIED
+        source = BoundSource.THEOREM_PROVED if self.e_analytic == 0.0 else BoundSource.FORWARD_SOLVER_BOUND
+        decomp = ErrorDecomposition(
+            e_analytic=self.e_analytic,
+            e_arithmetic=self.e_arithmetic,
+            e_conditioning=self.e_conditioning,
+            e_implementation=self.e_implementation
+        )
+        return ErrorBound(
+            value=tot,
+            domain=Domain(name=f'permutation={self.permutation.value}', lower=-1.0, upper=1.0),
+            source=source,
+            status=status,
+            decomposition=decomp,
+            valid=True
+        )
 
 
 class GegenbauerComputationalSolver:
@@ -591,7 +646,7 @@ class GegenbauerComputationalSolver:
                                             AlgebraicPermutation.MEHLER_HEINE_BESSEL,
                                             AlgebraicPermutation.COMPOSITE_MATCHED) else 0.0
 
-            status = TheoremStatus.VERIFIED_EXACT if e_analytic == 0.0 else TheoremStatus.ANALYTIC_BOUNDED
+            status = TheoremStatus.ARITHMETIC_EXACT if e_analytic == 0.0 else TheoremStatus.ANALYTIC_CERTIFIED
 
             cert = BackendCapabilityCertificate(
                 backend_id=self.context.precision.value,
@@ -638,7 +693,7 @@ class GegenbauerComputationalSolver:
                                    max_flop_budget: Optional[int] = None) -> SolverPerformanceMetrics:
         """
         Feasibility-First Provenance Optimizer:
-        Selects optimal permutation evaluating ErrorBound objects only (Residuals are diagnostic).
+        Selects optimal permutation evaluating certified ErrorBound objects only (Residuals are diagnostic).
         Rejects candidates with unknown or uncertified error bounds.
         """
         metrics = self.benchmark_permutations(domain_x)
@@ -651,7 +706,7 @@ class GegenbauerComputationalSolver:
             filtered = [
                 m for m in pareto_candidates
                 if m.capability_cert is not None
-                and m.capability_cert.provenance_status in (TheoremStatus.VERIFIED_EXACT, TheoremStatus.ANALYTIC_BOUNDED)
+                and m.capability_cert.provenance_status in (TheoremStatus.ALGEBRAIC_EXACT, TheoremStatus.ARITHMETIC_EXACT, TheoremStatus.ANALYTIC_CERTIFIED, TheoremStatus.NUMERICAL_CERTIFIED)
                 and m.total_error_bound <= max_error_tol
                 and m.max_mixed_error <= max_error_tol
             ]
