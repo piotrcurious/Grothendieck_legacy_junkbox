@@ -351,7 +351,7 @@ class GegenbauerFilterCompiler:
         for n in range(N):
             m = n - mid
             integrand = A_freq * np.cos(m * omega)
-            h[n] = (1.0 / np.pi) * trapz_fn(integrand, dx=d_omega)
+            h[n] = (1.0 / np.pi) * trapz_fn(integrand, x=omega)
 
         # Enforce exact linear-phase symmetry
         h = 0.5 * (h + h[::-1])
