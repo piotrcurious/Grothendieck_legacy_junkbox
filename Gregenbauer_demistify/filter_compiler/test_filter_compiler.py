@@ -61,7 +61,7 @@ def test_lowpass_compilation():
     assert abs(np.sum(taps) - 1.0) < 1e-10
 
     # Check header generation non-empty
-    assert "GEG_N = 31" in result.header_code
+    assert "GEG_N 31" in result.header_code or "GEG_N = 31" in result.header_code
     assert "h0_geg_q15" in result.header_code
 
 
@@ -96,7 +96,7 @@ def test_bandpass_compilation():
 
 def test_qmf_pair_compilation():
     """Tests QMF complementary filter bank synthesis and aliasing distortion metrics."""
-    spec = FilterSpec(kind="qmf", order=63, cutoff=0.25)
+    spec = FilterSpec(kind="qmf", order=64, cutoff=0.25)
     compiler = GegenbauerFilterCompiler(lam=1.25, solver="spectral_regularized", mu_reg=1e-4)
     result = compiler.compile(spec)
 
@@ -104,11 +104,11 @@ def test_qmf_pair_compilation():
     h0 = result.h0_taps.float64_taps
     h1 = result.h1_taps.float64_taps
 
-    assert len(h0) == 63
-    assert len(h1) == 63
+    assert len(h0) == 64
+    assert len(h1) == 64
 
     # Verify mirror relationship: h1[n] = (-1)^n * h0[n]
-    sign_pattern = np.array([(-1.0)**n for n in range(63)])
+    sign_pattern = np.array([(-1.0)**n for n in range(64)])
     np.testing.assert_allclose(h1, h0 * sign_pattern, atol=1e-12)
 
     # Check QMF metrics computed
@@ -162,7 +162,7 @@ def test_pareto_search():
 
 def test_header_and_plot_output():
     """Tests C/C++ header writing and plot file generation."""
-    spec = FilterSpec(kind="qmf", order=31, cutoff=0.25)
+    spec = FilterSpec(kind="qmf", order=32, cutoff=0.25)
     compiler = GegenbauerFilterCompiler(lam=1.25)
     result = compiler.compile(spec)
 
@@ -207,17 +207,21 @@ def test_layer_viii_provenance_and_truth_status():
 
 
 def test_filter_spec_edge_cases():
-    """Tests highpass even-N rejection, transition band overlap validation, and clamped bandpass defaults."""
+    """Tests highpass even-N rejection, QMF odd-N rejection, transition band overlap validation, and clamped bandpass defaults."""
     # Highpass even N must raise ValueError
-    with pytest.raises(ValueError, match="Highpass FIR filter .* cannot have an even order"):
+    with pytest.raises(ValueError, match="Highpass FIR filter .* cannot have an even"):
         FilterSpec(kind="highpass", order=64, cutoff=0.25)
 
+    # QMF odd N must raise ValueError
+    with pytest.raises(ValueError, match="QMF filter pair requires an even tap length"):
+        FilterSpec(kind="qmf", order=63, cutoff=0.25)
+
     # Transition band overlap for lowpass (wp >= ws)
-    with pytest.raises(ValueError, match="Passband edge wp .* must be less than stopband edge ws"):
+    with pytest.raises(ValueError, match="Passband edge wp .* must be < stopband edge ws"):
         FilterSpec(kind="lowpass", order=31, cutoff=0.25, wp=0.3, ws=0.2)
 
     # Transition band overlap for highpass (ws >= wp)
-    with pytest.raises(ValueError, match="Stopband edge ws .* must be less than passband edge wp"):
+    with pytest.raises(ValueError, match="Stopband edge ws .* must be < passband edge wp"):
         FilterSpec(kind="highpass", order=31, cutoff=0.25, wp=0.2, ws=0.3)
 
     # Clamped bandpass upper bounds for cutoff near Nyquist

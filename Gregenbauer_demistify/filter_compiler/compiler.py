@@ -11,9 +11,8 @@ import math
 import argparse
 from enum import Enum
 from dataclasses import dataclass, field
-from typing import List, Tuple, Dict, Optional, Union
+from typing import List, Tuple, Optional
 import numpy as np
-import scipy.signal
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -36,7 +35,6 @@ from gegenbauer_asymptotics import (
 )
 from computational_layer import (
     mixed_error,
-    cross_backend_error,
     NumericalContext,
     PrecisionType,
     NumericalBase
@@ -90,7 +88,7 @@ def determine_truth_status(lam: float) -> TruthStatus:
 class FilterSpec:
     """Specification of target DSP filter."""
     kind: str = "lowpass"
-    order: int = 63
+    order: int = 64
     cutoff: float = 0.25
     wp: Optional[float] = None
     ws: Optional[float] = None
@@ -109,39 +107,31 @@ class FilterSpec:
         if not (0.0 < self.cutoff < 0.5):
             raise ValueError(f"Cutoff must be in (0.0, 0.5), got {self.cutoff}")
 
+        # Highpass FIR filters cannot have an even number of taps (Type II)
         if self.kind == "highpass" and self.order % 2 == 0:
-            raise ValueError(f"Highpass FIR filter (Type II) cannot have an even order N={self.order} due to forced Nyquist zero. Filter order must be odd.")
+            raise ValueError(f"Highpass FIR filter (Type II) cannot have an even length N={self.order} due to forced Nyquist zero. Filter length must be odd.")
+
+        # QMF filter pairs require an even tap length
+        if self.kind == "qmf" and self.order % 2 != 0:
+            raise ValueError(f"QMF filter pair requires an even tap length N, got {self.order}.")
 
         if self.kind == "bandpass":
-            if self.wp is None:
-                self.wp = max(0.02, self.cutoff - 0.05)
-            if self.ws is None:
-                self.ws = max(0.01, self.wp - 0.05)
-            if self.wp2 is None:
-                self.wp2 = min(0.48, max(self.wp + 0.05, self.cutoff + 0.1))
-            if self.ws2 is None:
-                self.ws2 = min(0.49, self.wp2 + 0.05)
+            if self.wp is None: self.wp = max(0.02, self.cutoff - 0.05)
+            if self.ws is None: self.ws = max(0.01, self.wp - 0.05)
+            if self.wp2 is None: self.wp2 = min(0.48, max(self.wp + 0.05, self.cutoff + 0.1))
+            if self.ws2 is None: self.ws2 = min(0.49, self.wp2 + 0.05)
         else:
             if self.wp is None:
-                if self.kind == "highpass":
-                    self.wp = min(0.49, self.cutoff + 0.05)
-                else:
-                    self.wp = max(0.01, self.cutoff - 0.05)
+                self.wp = min(0.49, self.cutoff + 0.05) if self.kind == "highpass" else max(0.01, self.cutoff - 0.05)
             if self.ws is None:
-                if self.kind == "highpass":
-                    self.ws = max(0.01, self.cutoff - 0.05)
-                else:
-                    self.ws = min(0.49, self.cutoff + 0.05)
+                self.ws = max(0.01, self.cutoff - 0.05) if self.kind == "highpass" else min(0.49, self.cutoff + 0.05)
 
-        if self.kind in ("lowpass", "qmf"):
-            if self.wp >= self.ws:
-                raise ValueError(f"Passband edge wp ({self.wp}) must be less than stopband edge ws ({self.ws})")
-        elif self.kind == "highpass":
-            if self.ws >= self.wp:
-                raise ValueError(f"Stopband edge ws ({self.ws}) must be less than passband edge wp ({self.wp})")
-        elif self.kind == "bandpass":
-            if not (self.ws < self.wp < self.wp2 < self.ws2):
-                raise ValueError(f"Bandpass frequencies must satisfy ws ({self.ws}) < wp ({self.wp}) < wp2 ({self.wp2}) < ws2 ({self.ws2})")
+        if self.kind in ("lowpass", "qmf") and self.wp >= self.ws:
+            raise ValueError(f"Passband edge wp ({self.wp}) must be < stopband edge ws ({self.ws})")
+        elif self.kind == "highpass" and self.ws >= self.wp:
+            raise ValueError(f"Stopband edge ws ({self.ws}) must be < passband edge wp ({self.wp})")
+        elif self.kind == "bandpass" and not (self.ws < self.wp < self.wp2 < self.ws2):
+            raise ValueError(f"Bandpass frequencies must satisfy ws ({self.ws}) < wp ({self.wp}) < wp2 ({self.wp2}) < ws2 ({self.ws2})")
 
 
 @dataclass
@@ -239,21 +229,8 @@ class GegenbauerFilterCompiler:
             return interior_wkb_approx(n, self.lam, theta)
         elif self.asymptotic_mode == "composite":
             return composite_matched_approx(n, self.lam, theta)
-
-        res = np.zeros_like(theta)
-        n_eff = max(1, n)
-        boundary = min(3.0 / n_eff, np.pi / 2.5)
-        north_mask = theta < boundary
-        south_mask = theta > (np.pi - boundary)
-        interior_mask = ~(north_mask | south_mask)
-
-        if np.any(north_mask):
-            res[north_mask] = endpoint_bessel_leading(n, self.lam, theta[north_mask])
-        if np.any(south_mask):
-            res[south_mask] = south_pole_bessel_leading(n, self.lam, theta[south_mask])
-        if np.any(interior_mask):
-            res[interior_mask] = composite_matched_approx(n, self.lam, theta[interior_mask])
-        return res
+        else:
+            return composite_matched_approx(n, self.lam, theta)
 
     def _build_spectral_target(self, spec: FilterSpec, omega: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         f = omega / (2.0 * np.pi)
@@ -271,23 +248,30 @@ class GegenbauerFilterCompiler:
             W[pass_mask], W[stop_mask], W[trans_mask] = 1.0, 10.0, 0.1
 
         elif spec.kind == "highpass":
-            stop_mask = f <= ws
             pass_mask = f >= wp
+            stop_mask = f <= ws
             trans_mask = ~(pass_mask | stop_mask)
             D[pass_mask] = 1.0
             if np.any(trans_mask):
                 D[trans_mask] = 0.5 * (1.0 - np.cos(np.pi * (f[trans_mask] - ws) / (wp - ws)))
-            W[stop_mask], W[pass_mask], W[trans_mask] = 10.0, 1.0, 0.1
+            W[pass_mask], W[stop_mask], W[trans_mask] = 1.0, 10.0, 0.1
 
         elif spec.kind == "bandpass":
-            wp2 = spec.wp2 if spec.wp2 is not None else spec.cutoff + 0.1
-            ws2 = spec.ws2 if spec.ws2 is not None else spec.cutoff + 0.15
+            wp2, ws2 = spec.wp2, spec.ws2
             pass_mask = (f >= wp) & (f <= wp2)
             stop_mask = (f <= ws) | (f >= ws2)
-            trans_mask = ~(pass_mask | stop_mask)
+            trans_mask1 = (f > ws) & (f < wp)
+            trans_mask2 = (f > wp2) & (f < ws2)
+
             D[pass_mask] = 1.0
-            D[trans_mask] = 0.5
-            W[pass_mask], W[stop_mask], W[trans_mask] = 1.0, 10.0, 0.1
+            if np.any(trans_mask1):
+                D[trans_mask1] = 0.5 * (1.0 - np.cos(np.pi * (f[trans_mask1] - ws) / (wp - ws)))
+            if np.any(trans_mask2):
+                D[trans_mask2] = 0.5 * (1.0 + np.cos(np.pi * (f[trans_mask2] - wp2) / (ws2 - wp2)))
+
+            W[pass_mask], W[stop_mask] = 1.0, 10.0
+            if np.any(trans_mask1): W[trans_mask1] = 0.1
+            if np.any(trans_mask2): W[trans_mask2] = 0.1
 
         return D, W
 
@@ -304,9 +288,8 @@ class GegenbauerFilterCompiler:
 
             a_coeffs = np.zeros(K)
             for k in range(K):
-                degree = k
-                phi_k = self._eval_basis(degree, nodes)
-                norm_sq = phi_norm_squared(degree, self.lam)
+                phi_k = self._eval_basis(k, nodes)
+                norm_sq = 1.0 if self.basis_type == "normalized" else phi_norm_squared(k, self.lam)
                 a_coeffs[k] = np.sum(D_q * phi_k * weights) / norm_sq
             return a_coeffs, K
 
@@ -317,8 +300,7 @@ class GegenbauerFilterCompiler:
 
             A = np.zeros((self.grid_samples, K))
             for k in range(K):
-                degree = k
-                A[:, k] = self._eval_basis(degree, nodes)
+                A[:, k] = self._eval_basis(k, nodes)
 
             sqrt_W = np.sqrt(W_q * weights)
             A_w = A * sqrt_W[:, np.newaxis]
@@ -326,8 +308,7 @@ class GegenbauerFilterCompiler:
 
             R_diag = np.zeros(K)
             for k in range(K):
-                deg = k
-                eig = deg * (deg + 2.0 * self.lam)
+                eig = k * (k + 2.0 * self.lam)
                 R_diag[k] = (eig ** self.reg_power)
 
             R_mat = np.diag(np.sqrt(self.mu_reg * R_diag))
@@ -342,8 +323,7 @@ class GegenbauerFilterCompiler:
 
         A = np.zeros((self.grid_samples, K))
         for k in range(K):
-            degree = k
-            A[:, k] = self._eval_basis(degree, x)
+            A[:, k] = self._eval_basis(k, x)
 
         sqrt_W = np.sqrt(W)
         A_w = A * sqrt_W[:, np.newaxis]
@@ -359,27 +339,24 @@ class GegenbauerFilterCompiler:
         omega = np.linspace(0, np.pi, grid_L)
         x = np.cos(omega)
 
-        # Reconstruct fitted frequency response A(omega)
         A_freq = np.zeros(grid_L, dtype=np.float64)
         for k, c in enumerate(a_coeffs):
             A_freq += c * self._eval_basis(k, x)
 
-        # Project frequency response back to time domain via continuous cosine transform
         h = np.zeros(N, dtype=np.float64)
         mid = (N - 1) / 2.0
         d_omega = np.pi / (grid_L - 1)
 
-        trapz_fn = getattr(np, 'trapezoid', getattr(np, 'trapz', None))
+        trapz_fn = np.trapezoid if hasattr(np, 'trapezoid') else np.trapz
         for n in range(N):
             m = n - mid
             integrand = A_freq * np.cos(m * omega)
-            # Trapezoidal quadrature over [0, pi]
             h[n] = (1.0 / np.pi) * trapz_fn(integrand, dx=d_omega)
 
         # Enforce exact linear-phase symmetry
         h = 0.5 * (h + h[::-1])
 
-        # Normalize gain
+        # Normalize gain based on filter type
         if spec.kind in ("lowpass", "qmf"):
             sum_h = np.sum(h)
             if abs(sum_h) > 1e-12:
@@ -389,7 +366,8 @@ class GegenbauerFilterCompiler:
             if abs(nyq_gain) > 1e-12:
                 h /= nyq_gain
         elif spec.kind == "bandpass":
-            max_g = np.max(np.abs(np.fft.fft(h, 4096)))
+            K_fft_norm = max(4096, 1 << (math.ceil(math.log2(spec.order)) + 2))
+            max_g = np.max(np.abs(np.fft.fft(h, K_fft_norm)))
             if max_g > 1e-12:
                 h /= max_g
 
@@ -424,71 +402,71 @@ class GegenbauerFilterCompiler:
         h1 = result.h1_taps
         p = result.payload.provenance
 
-        header = []
-        header.append("// Auto-generated Gegenbauer DSP Filter Coefficients Header")
-        header.append("// VIII-Layer Gegenbauer Theoretical Framework Compiler Engine")
-        header.append(f"// Target Specification: {spec.kind.upper()} | N = {spec.order} | Cutoff = {spec.cutoff} fs")
-        header.append(f"// Parameters: Lambda = {result.lam} | Basis Terms = {result.basis_terms} | Sampling Rate = {spec.sampling_rate} Hz")
-        header.append(f"// Performance: Passband Ripple = {result.passband_ripple_actual:.4f} dB | Stopband Atten = {result.stopband_atten_actual:.2f} dB")
-        header.append(f"// Certification: TruthStatus = {result.payload.truth_status.value} | MatchingStatus = {result.payload.matching_status.value}")
-        header.append(f"// Provenance Error Bound: E_total <= E_analytic + E_arithmetic + kappa * E_input + E_impl")
-        header.append(f"//   E_analytic = {p.e_analytic:.6e} | E_arithmetic = {p.e_arithmetic:.6e} | E_total = {p.total:.6e}")
+        header = [
+            "// Auto-generated Gegenbauer DSP Filter Coefficients Header",
+            "// VIII-Layer Gegenbauer Theoretical Framework Compiler Engine",
+            f"// Target Specification: {spec.kind.upper()} | N = {spec.order} | Cutoff = {spec.cutoff} fs",
+            f"// Parameters: Lambda = {result.lam} | Basis Terms = {result.basis_terms} | Sampling Rate = {spec.sampling_rate} Hz",
+            f"// Performance: Passband Ripple = {result.passband_ripple_actual:.4f} dB | Stopband Atten = {result.stopband_atten_actual:.2f} dB",
+            f"// Certification: TruthStatus = {result.payload.truth_status.value} | MatchingStatus = {result.payload.matching_status.value}",
+            "// Provenance Error Bound: E_total <= E_analytic + E_arithmetic + kappa * E_input + E_impl",
+            f"//   E_analytic = {p.e_analytic:.6e} | E_arithmetic = {p.e_arithmetic:.6e} | E_total = {p.total:.6e}"
+        ]
         if spec.kind == "qmf":
             header.append(f"// QMF Metrics: Max Power Ripple = {result.qmf_power_complementarity_max_db:.4f} dB | Max Alias Dist = {result.qmf_alias_distortion_max_db:.2f} dB")
-        header.append("")
-        header.append("#ifndef GEGENBAUER_FILTER_COEFFS_H")
-        header.append("#define GEGENBAUER_FILTER_COEFFS_H")
-        header.append("")
-        header.append("#include <stdint.h>")
-        header.append("#ifdef __AVR__")
-        header.append("  #include <avr/pgmspace.h>")
-        header.append("#else")
-        header.append("  #ifndef PROGMEM")
-        header.append("    #define PROGMEM")
-        header.append("  #endif")
-        header.append("#endif")
-        header.append("")
-        header.append(f'#define GEG_TRUTH_STATUS "{result.payload.truth_status.value}"')
-        header.append(f'#define GEG_MATCHING_STATUS "{result.payload.matching_status.value}"')
-        header.append(f"constexpr int GEG_N = {spec.order};")
-        header.append(f"constexpr int GEG_SAMPLING_RATE = {spec.sampling_rate};")
-        header.append(f"constexpr float GEG_CUTOFF = {spec.cutoff}f;")
-        header.append(f"constexpr float GEG_LAMBDA = {result.lam}f;")
-        header.append(f"constexpr int GEG_BASIS_TERMS = {result.basis_terms};")
-        header.append(f"constexpr float GEG_E_TOTAL_BOUND = {p.total}f;")
-        header.append("")
 
-        # Float64 taps
-        header.append(f"const double h0_geg_float64[GEG_N] = {{")
+        header.extend([
+            "",
+            "#ifndef GEGENBAUER_FILTER_COEFFS_H",
+            "#define GEGENBAUER_FILTER_COEFFS_H",
+            "",
+            "#include <stdint.h>",
+            "#ifdef __AVR__",
+            "  #include <avr/pgmspace.h>",
+            "#else",
+            "  #ifndef PROGMEM",
+            "    #define PROGMEM",
+            "  #endif",
+            "#endif",
+            "",
+            f'#define GEG_TRUTH_STATUS "{result.payload.truth_status.value}"',
+            f'#define GEG_MATCHING_STATUS "{result.payload.matching_status.value}"',
+            f"#define GEG_N {spec.order}",
+            f"#define GEG_SAMPLING_RATE {spec.sampling_rate}",
+            f"#define GEG_CUTOFF {spec.cutoff}f",
+            f"#define GEG_LAMBDA {result.lam}f",
+            f"#define GEG_BASIS_TERMS {result.basis_terms}",
+            f"#define GEG_E_TOTAL_BOUND {p.total}f",
+            ""
+        ])
+
+        header.append(f"const double h0_geg_float64[{spec.order}] = {{")
         header.append("    " + ", ".join(f"{val:.12e}" for val in h0.float64_taps))
         header.append("};")
         header.append("")
 
-        # Float32 taps
-        header.append(f"const float h0_geg_float32[GEG_N] = {{")
-        header.append("    " + ", ".join(f"{val:.8f}f" for val in h0.float64_taps))
+        header.append(f"const float h0_geg_float32[{spec.order}] = {{")
+        header.append("    " + ", ".join(f"{val:.8e}f" for val in h0.float64_taps))
         header.append("};")
         header.append("")
 
-        # Q15 16-bit
-        header.append(f"const int16_t h0_geg_q15[GEG_N] PROGMEM = {{")
+        header.append(f"const int16_t h0_geg_q15[{spec.order}] PROGMEM = {{")
         header.append("    " + ", ".join(str(int(val)) for val in h0.q15_taps))
         header.append("};")
         header.append("")
 
-        # Q31 32-bit
-        header.append(f"const int32_t h0_geg_q31[GEG_N] PROGMEM = {{")
+        header.append(f"const int32_t h0_geg_q31[{spec.order}] PROGMEM = {{")
         header.append("    " + ", ".join(str(int(val)) for val in h0.q31_taps))
         header.append("};")
         header.append("")
 
         if h1 is not None:
             header.append("// Highpass / Complementary Mirror QMF Pair Taps (h1)")
-            header.append(f"const float h1_geg_float32[GEG_N] = {{")
-            header.append("    " + ", ".join(f"{val:.8f}f" for val in h1.float64_taps))
+            header.append(f"const float h1_geg_float32[{spec.order}] = {{")
+            header.append("    " + ", ".join(f"{val:.8e}f" for val in h1.float64_taps))
             header.append("};")
             header.append("")
-            header.append(f"const int16_t h1_geg_q15[GEG_N] PROGMEM = {{")
+            header.append(f"const int16_t h1_geg_q15[{spec.order}] PROGMEM = {{")
             header.append("    " + ", ".join(str(int(val)) for val in h1.q15_taps))
             header.append("};")
             header.append("")
@@ -509,13 +487,24 @@ class GegenbauerFilterCompiler:
             h1_float = h0_float * sign_pattern
             h1_quant = self.quantize_taps(h1_float)
 
-        K_fft = 4096
+        # Ensure FFT size scales dynamically to avoid aliasing on massive filter lengths
+        K_fft = max(4096, 1 << (math.ceil(math.log2(spec.order)) + 3))
+
         H0 = np.fft.fft(h0_float, K_fft)
         freq_grid = np.arange(K_fft // 2) / float(K_fft)
         H0_db = 20 * np.log10(np.maximum(1e-12, np.abs(H0[:K_fft // 2])))
 
-        pass_idx = freq_grid <= spec.wp
-        stop_idx = freq_grid >= spec.ws
+        # Compute accurate masks depending on target topology
+        if spec.kind in ("lowpass", "qmf"):
+            pass_idx = freq_grid <= spec.wp
+            stop_idx = freq_grid >= spec.ws
+        elif spec.kind == "highpass":
+            pass_idx = freq_grid >= spec.wp
+            stop_idx = freq_grid <= spec.ws
+        elif spec.kind == "bandpass":
+            pass_idx = (freq_grid >= spec.wp) & (freq_grid <= spec.wp2)
+            stop_idx = (freq_grid <= spec.ws) | (freq_grid >= spec.ws2)
+
         pass_ripple = np.max(H0_db[pass_idx]) - np.min(H0_db[pass_idx]) if np.any(pass_idx) else 0.0
         stop_atten = -np.max(H0_db[stop_idx]) if np.any(stop_idx) else 0.0
 
@@ -546,17 +535,13 @@ class GegenbauerFilterCompiler:
             if spec.order > K and self.lam > 0:
                 matching_status = MatchingStatus.ANALYTICALLY_CERTIFIED_MATCHING
 
-        # Arithmetic quantization error provenance
-        e_arithmetic = float(np.max(np.abs(h0_quant.float64_taps - h0_quant.q31_taps / h0_quant.q31_scale)))
-        e_analytic = asymp_err
-        e_conditioning = self.ctx.eps * 1.0
-        e_implementation = 0.0
-
+        # Arithmetic quantization error provenance based on Q15 target
+        e_arithmetic = float(np.max(np.abs(h0_quant.float64_taps - h0_quant.q15_taps / h0_quant.q15_scale)))
         provenance = ErrorBoundProvenance(
-            e_analytic=e_analytic,
+            e_analytic=asymp_err,
             e_arithmetic=e_arithmetic,
-            e_conditioning=e_conditioning,
-            e_implementation=e_implementation
+            e_conditioning=self.ctx.eps * 1.0,
+            e_implementation=0.0
         )
 
         payload = CertifiedEvaluationPayload(
@@ -566,7 +551,7 @@ class GegenbauerFilterCompiler:
             is_certified=True
         )
 
-        prov_err = float(np.max(mixed_error(h0_quant.float64_taps, h0_quant.q31_taps / h0_quant.q31_scale)))
+        prov_err = float(np.max(mixed_error(h0_quant.float64_taps, h0_quant.q15_taps / h0_quant.q15_scale)))
 
         result = FilterResult(
             spec=spec,
@@ -610,13 +595,11 @@ class GegenbauerFilterCompiler:
         # Subplot 2: Passband Detail / Ripple
         plt.subplot(2, 2, 2)
         if spec.kind == "highpass":
-            pass_mask = result.freq_grid >= (spec.wp if spec.wp else spec.cutoff)
+            pass_mask = result.freq_grid >= spec.wp
         elif spec.kind == "bandpass":
-            wp_low = spec.wp if spec.wp else spec.cutoff
-            wp_high = spec.wp2 if spec.wp2 else spec.cutoff + 0.1
-            pass_mask = (result.freq_grid >= wp_low) & (result.freq_grid <= wp_high)
+            pass_mask = (result.freq_grid >= spec.wp) & (result.freq_grid <= spec.wp2)
         else:
-            pass_mask = result.freq_grid <= (spec.wp if spec.wp else spec.cutoff)
+            pass_mask = result.freq_grid <= spec.wp
 
         if np.any(pass_mask):
             plt.plot(result.freq_grid[pass_mask], result.H0_response[pass_mask], 'b-', linewidth=2)
@@ -696,15 +679,12 @@ class GegenbauerFilterCompiler:
                 compiler = GegenbauerFilterCompiler(lam=lam, mu_reg=mu)
                 res = compiler.compile(spec)
 
-                # Cost metric balancing passband ripple, stopband attenuation, and provenance total error bound
                 score = res.passband_ripple_actual * 10.0 - res.stopband_atten_actual
                 if res.spec.kind == "qmf":
                     score += res.qmf_power_complementarity_max_db * 20.0 + res.qmf_alias_distortion_max_db
 
-                # Incorporate provenance total error bound into Pareto cost
                 score += res.payload.provenance.total * 100.0
 
-                # Penalize non-certified topology/status
                 if not res.payload.is_certified:
                     score += 1e5
 
@@ -718,7 +698,7 @@ class GegenbauerFilterCompiler:
 def main():
     parser = argparse.ArgumentParser(description="VIII-Layer Gegenbauer DSP Filter Compiler CLI")
     parser.add_argument("--kind", type=str, default="qmf", choices=["lowpass", "highpass", "bandpass", "qmf"])
-    parser.add_argument("--N", type=int, default=63, help="Filter length N (number of taps)")
+    parser.add_argument("--N", type=int, default=64, help="Filter length N (number of taps)")
     parser.add_argument("--cutoff", type=float, default=0.25, help="Normalized cutoff frequency (0 to 0.5)")
     parser.add_argument("--lambda_param", type=float, default=1.25, help="Gegenbauer parameter lambda > -0.5")
     parser.add_argument("--basis_terms", type=int, default=None, help="Number of Gegenbauer basis terms")
