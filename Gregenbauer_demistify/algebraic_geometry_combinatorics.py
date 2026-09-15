@@ -49,25 +49,21 @@ class EndpointBoundaryCondition:
     forbidden_log_coeff_zero: bool = True
 
 
-def endpoint_class(lambda_val: Union[float, Fraction], is_physical_domain: bool = True) -> EndpointClass:
-    """
-    Returns exact Sturm-Liouville endpoint classification for H_lambda = -d^2/dtheta^2 + lambda(lambda-1)csc^2 theta.
-    Precedence rule: PhysicalSphereDomain prec AnalyticContinuationDomain.
-      - lambda = 1/2 (d=3, S^2): CRITICAL_LC (u ~ A theta^{1/2} + B theta^{1/2} log theta)
-      - lambda = 1 (d=4, S^3): REGULAR (u ~ A theta + B)
-      - 1/2 < lambda < 3/2 (lambda != 1): LIMIT_CIRCLE (u ~ A theta^lambda + B theta^{1-lambda})
-      - 0 < lambda < 1/2: LIMIT_CIRCLE (u ~ A theta^lambda + B theta^{1-lambda})
-      - lambda >= 3/2 (d >= 5): LIMIT_POINT (singular branch theta^{1-lambda} not in L^2(0, pi))
-    """
+def physical_classifier(lambda_val: Union[float, Fraction]) -> EndpointClass:
+    """Classifies parameters within PhysicalSphereDomain (d >= 3 => lambda in {1/2, 1, 3/2, ...})."""
     lam = float(lambda_val)
-    if is_physical_domain:
-        if abs(lam - 0.5) < 1e-12:
-            return EndpointClass.CRITICAL_LC
-        elif abs(lam - 1.0) < 1e-12:
-            return EndpointClass.REGULAR
-        elif lam >= 1.5:
-            return EndpointClass.LIMIT_POINT
+    if abs(lam - 0.5) < 1e-12:
+        return EndpointClass.CRITICAL_LC
+    elif abs(lam - 1.0) < 1e-12:
+        return EndpointClass.REGULAR
+    elif lam >= 1.5:
+        return EndpointClass.LIMIT_POINT
+    return EndpointClass.LIMIT_CIRCLE
 
+
+def analytic_classifier(lambda_val: Union[float, Fraction]) -> EndpointClass:
+    """Classifies parameters within AnalyticContinuationDomain (lambda > 0)."""
+    lam = float(lambda_val)
     if abs(lam - 0.5) < 1e-12:
         return EndpointClass.CRITICAL_LC
     elif abs(lam - 1.0) < 1e-12:
@@ -76,6 +72,21 @@ def endpoint_class(lambda_val: Union[float, Fraction], is_physical_domain: bool 
         return EndpointClass.LIMIT_CIRCLE
     else:
         return EndpointClass.LIMIT_POINT
+
+
+def classify_parameter_domain(lambda_val: Union[float, Fraction], is_physical_domain: bool = True) -> EndpointClass:
+    """
+    Explicit Classifier Precedence Function:
+      Classify(lambda) = PhysicalClassifier(lambda) if lambda in PhysicalSphereDomain else AnalyticClassifier(lambda)
+    """
+    if is_physical_domain:
+        return physical_classifier(lambda_val)
+    else:
+        return analytic_classifier(lambda_val)
+
+
+# Alias endpoint_class for backwards compatibility
+endpoint_class = classify_parameter_domain
 
 
 def get_endpoint_boundary_condition(lambda_val: Union[float, Fraction]) -> EndpointBoundaryCondition:
@@ -464,7 +475,7 @@ def exact_rational_bit_length(n: int, lambda_val: Union[int, Fraction], x: Union
     return bits_C, bits_phi
 
 
-def get_algorithm_denominator_lcm(n: int, lambda_val: Union[int, Fraction]) -> int:
+def get_recurrence_denominator_lcm(n: int, lambda_val: Union[int, Fraction]) -> int:
     """
     Computes D_rec = lcm({den_red(a_k), den_red(b_k) : k = 1..n} u {b}) for parameter lambda = a/b.
     Uses exact reduced denominators of recurrence coefficients.
@@ -476,6 +487,35 @@ def get_algorithm_denominator_lcm(n: int, lambda_val: Union[int, Fraction]) -> i
         lcm_val = math.lcm(lcm_val, Fraction(a_k).denominator)
         lcm_val = math.lcm(lcm_val, Fraction(b_k).denominator)
     return lcm_val
+
+
+# Alias for backward compatibility
+get_algorithm_denominator_lcm = get_recurrence_denominator_lcm
+
+
+def get_normalization_denominator(n: int, lambda_val: Union[int, Fraction]) -> int:
+    """
+    Computes D_norm = den(C_n^(lambda)(1)) * den(||phi_n||_lambda^2).
+    """
+    c1 = exact_rational_gegenbauer(n, lambda_val, Fraction(1))
+    v_n = c1.denominator
+    # den(h_n^2) = den(||phi_n||_lambda^2)
+    norm_sq = phi_norm_squared(n, float(lambda_val))
+    norm_frac = Fraction(norm_sq).limit_denominator(1000000)
+    return v_n * norm_frac.denominator
+
+
+def get_evaluation_denominator(x: Union[int, Fraction]) -> int:
+    """Computes D_eval = r for evaluation point x = c/r."""
+    return Fraction(x).denominator
+
+
+def get_excluded_primes_denominator(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction]) -> int:
+    """Computes D_excl = lcm(D_rec, D_norm, D_eval)."""
+    d_rec = get_recurrence_denominator_lcm(n, lambda_val)
+    d_norm = get_normalization_denominator(n, lambda_val)
+    d_eval = get_evaluation_denominator(x)
+    return math.lcm(d_rec, math.lcm(d_norm, d_eval))
 
 
 def check_c_n_admissibility(n: int, lambda_val: Union[int, Fraction], p: int) -> bool:
@@ -492,8 +532,8 @@ def check_c_n_admissibility(n: int, lambda_val: Union[int, Fraction], p: int) ->
         if p % i == 0:
             return False
 
-    d_alg = get_algorithm_denominator_lcm(n, lambda_val)
-    return (d_alg % p != 0)
+    d_rec = get_recurrence_denominator_lcm(n, lambda_val)
+    return (d_rec % p != 0)
 
 
 def check_point_admissibility(x: Union[int, Fraction], p: int) -> bool:
@@ -505,18 +545,29 @@ def check_point_admissibility(x: Union[int, Fraction], p: int) -> bool:
     return (r % p != 0)
 
 
-def check_phi_n_admissibility(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], p: int) -> Tuple[bool, str]:
+def check_poly_evaluation_admissibility(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], p: int) -> bool:
     """
-    Admissibility certificate for normalized zonal spherical function phi_n(x) = C_n^(lambda)(x) / C_n^(lambda)(1) in F_p (ZonalCertificate):
-      Formal logical dependency: ZonalCertificate = PolyCertificate and PointCertificate and NormalizationRepresentation and NormalizationSingularity
+    Admissibility certificate for polynomial evaluation C_n^(lambda)(x) in F_p (PolyEvaluationCertificate):
+      PolyEvaluationCertificate = PolyCertificate and PointCertificate.
+    """
+    return check_c_n_admissibility(n, lambda_val, p) and check_point_admissibility(x, p)
+
+
+def check_zonal_admissibility(p: int, execution_plan: object, degree: int, point: Union[int, Fraction], lambda_val: Union[int, Fraction] = Fraction(1, 2)) -> Tuple[bool, str]:
+    """
+    Admissibility certificate for normalized zonal spherical function phi_n(x) = C_n^(lambda)(x) / C_n^(lambda)(1) in F_p:
+      ZonalCertificate(p, execution_plan, degree=n, point=x=c/r)
+      Formal logical dependency: ZonalCertificate = PolyEvaluationCertificate and (p nmid v_n) and (C_n(1) != 0 mod p)
       Failure Mode Taxonomy:
-        1. PointLocalizationFailure (p | r): evaluation point x=c/r non-local in F_p.
+        1. PointLocalizationFailure (p | r or p divides D_rec): non-local in F_p.
         2. NormalizationRepresentationFailure (p | v_n): rational representation u_n/v_n of C_n(1) non-local in F_p (p | v_n).
         3. NormalizationSingularityFailure (p | u_n): C_n(1) == 0 mod p, normalization division by zero in F_p (p | u_n).
-      Equivalence: p nmid v_n and C_n(1) != 0 mod p <=> p nmid v_n * u_n.
     """
+    n = degree
+    x = point
+
     if not check_c_n_admissibility(n, lambda_val, p):
-        return False, "PointLocalizationFailure: p non-prime or divides algorithm recurrence denominator product D_rec"
+        return False, "PointLocalizationFailure: p non-prime or divides recurrence denominator product D_rec"
 
     if not check_point_admissibility(x, p):
         return False, "PointLocalizationFailure: p divides evaluation point denominator r"
@@ -532,6 +583,11 @@ def check_phi_n_admissibility(n: int, lambda_val: Union[int, Fraction], x: Union
         return False, f"NormalizationSingularityFailure: bad prime p={p} divides C_n(1) numerator u_n={u_n} (C_n(1) == 0 mod p)"
 
     return True, "Valid ZonalCertificate"
+
+
+# Alias for backward compatibility
+def check_phi_n_admissibility(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], p: int) -> Tuple[bool, str]:
+    return check_zonal_admissibility(p=p, execution_plan=None, degree=n, point=x, lambda_val=lambda_val)
 
 
 def modular_gegenbauer_recurrence(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], mod: int) -> int:

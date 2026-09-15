@@ -320,6 +320,40 @@ def scale_invariant_schrodinger_residual(u_val: float, u_second_val: float, thet
     )
 
 
+def orthonormal_jacobi_recurrence_residual(e_n: float, e_np1: float, e_nm1: float, x: float, n: int, lambda_val: float, tau: float = 1e-14) -> Residual:
+    """
+    Computes Layer VIII Orthonormal Jacobi Basis Recurrence Residual.
+    Split:
+      n = 0: x * e_0 - alpha_0 * e_1 = 0
+      n >= 1: x * e_n - alpha_n * e_{n+1} - alpha_{n-1} * e_{n-1} = 0
+    """
+    if lambda_val <= 0:
+        raise ValueError("lambda_val must be > 0")
+    if n == 0:
+        alpha_0 = orthonormal_jacobi_coefficients(0, lambda_val)
+        num = abs(x * e_n - alpha_0 * e_np1)
+        den = abs(x * e_n) + abs(alpha_0 * e_np1) + tau
+    else:
+        alpha_n = orthonormal_jacobi_coefficients(n, lambda_val)
+        alpha_nm1 = orthonormal_jacobi_coefficients(n - 1, lambda_val)
+        num = abs(x * e_n - alpha_n * e_np1 - alpha_nm1 * e_nm1)
+        den = abs(x * e_n) + abs(alpha_n * e_np1) + abs(alpha_nm1 * e_nm1) + tau
+
+    norm_res = float(num / den)
+
+    return Residual(
+        type='orthonormal_jacobi_recurrence',
+        domain=Domain(name=f'x={x:.4f} in [-1, 1], n={n}', lower=-1.0, upper=1.0),
+        scale=abs(x * e_n) + 1.0,
+        absolute=float(num),
+        normalized=norm_res,
+        conditioning=1.0,
+        backend='FLOAT64',
+        status=TheoremStatus.ALGEBRAIC_EXACT,
+        tau_M=tau
+    )
+
+
 def scale_invariant_ode_residual(phi_val: float, phi_prime_val: float, phi_second_val: float, x: float, n: int, lambda_val: float, tau: float = 1e-14) -> Residual:
     """
     Computes Layer VIII Normalized Scale-Invariant ODE Residual R_ODE(x) for interior x in (-1, 1).

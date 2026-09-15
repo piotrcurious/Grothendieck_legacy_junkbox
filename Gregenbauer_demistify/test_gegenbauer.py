@@ -25,22 +25,33 @@ from scipy.special import eval_gegenbauer, eval_legendre, gamma, gammaln
 from Gregenbauer_demistify.algebraic_geometry_combinatorics import (
     EndpointClass,
     QuadricQuotientPolynomial,
+    classify_parameter_domain,
     endpoint_class,
     exact_rational_gegenbauer,
     exact_rational_gegenbauer_derivative,
     exact_rational_gegenbauer_second_derivative,
     gauss_gegenbauer_quadrature,
+    get_recurrence_denominator_lcm,
+    get_normalization_denominator,
+    get_evaluation_denominator,
+    get_excluded_primes_denominator,
     lambda_for_sphere,
     modular_gegenbauer_recurrence,
     normalized_gegenbauer_2f1_coefficients,
     normalized_jacobi_coefficients,
     orthonormal_jacobi_coefficients,
+    phi_norm_squared,
     pochhammer,
     quadric_hilbert_series_dim,
     rns_crt_gegenbauer_eval,
     check_c_n_admissibility,
     check_point_admissibility,
+    check_poly_evaluation_admissibility,
+    check_zonal_admissibility,
     check_phi_n_admissibility,
+)
+from Gregenbauer_demistify.computational_layer import (
+    orthonormal_jacobi_recurrence_residual,
 )
 from Gregenbauer_demistify.computational_layer import (
     AlgebraicPermutation,
@@ -713,3 +724,60 @@ def test_modular_rns_crt_exact_recovery():
 
     rns_crt_val = rns_crt_gegenbauer_eval(n, lam, x, moduli=[10007, 10009])
     assert rns_crt_val == exact_val
+
+
+def test_canonical_test_matrix_d345_n0123():
+    """
+    Tests canonical matrix d in {3, 4, 5}, n in {0, 1, 2, 3}:
+      - Initial data anchors: phi_0 = 1, phi_1 = x
+      - Recurrence invariants: n=0: x phi_0 - phi_1 = 0; n>=1: x phi_n - a_n phi_{n+1} - b_n phi_{n-1} = 0
+      - Orthonormal Jacobi basis recurrence split: n=0: x e_0 - alpha_0 e_1 = 0; n>=1: x e_n - alpha_n e_{n+1} - alpha_{n-1} e_{n-1} = 0
+    """
+    x_grid = np.array([-0.5, 0.0, 0.5])
+    for d in [3, 4, 5]:
+        lam = lambda_for_sphere(d)
+        for n in [0, 1, 2, 3]:
+            for x in x_grid:
+                phi_n = float(normalized_phi_recurrence(n, lam, np.array([x]))[0])
+                phi_np1 = float(normalized_phi_recurrence(n + 1, lam, np.array([x]))[0])
+                phi_nm1 = float(normalized_phi_recurrence(max(0, n - 1), lam, np.array([x]))[0])
+
+                res_rec = scale_invariant_recurrence_residual(phi_n, phi_np1, phi_nm1, x, n, float(lam))
+                assert res_rec.normalized < 1e-12
+
+                # Orthonormal Jacobi Recurrence Check
+                h_n = 1.0 / math.sqrt(phi_norm_squared(n, float(lam)))
+                h_np1 = 1.0 / math.sqrt(phi_norm_squared(n + 1, float(lam)))
+                h_nm1 = 1.0 / math.sqrt(phi_norm_squared(max(0, n - 1), float(lam)))
+
+                e_n = phi_n * h_n
+                e_np1 = phi_np1 * h_np1
+                e_nm1 = phi_nm1 * h_nm1
+
+                res_jac = orthonormal_jacobi_recurrence_residual(e_n, e_np1, e_nm1, x, n, float(lam))
+                assert res_jac.normalized < 1e-12
+
+
+def test_denominator_separation_and_zonal_certificate_signature():
+    """
+    Verifies split denominators D_rec, D_norm, D_eval and ZonalCertificate signature:
+      ZonalCertificate(p, plan, degree=n, point=x=c/r)
+    """
+    d_rec = get_recurrence_denominator_lcm(5, Fraction(3, 2))
+    d_norm = get_normalization_denominator(5, Fraction(3, 2))
+    d_eval = get_evaluation_denominator(Fraction(1, 2))
+    d_excl = get_excluded_primes_denominator(5, Fraction(3, 2), Fraction(1, 2))
+
+    assert d_rec > 0
+    assert d_norm > 0
+    assert d_eval == 2
+    assert d_excl % d_rec == 0 and d_excl % d_eval == 0
+
+    # D_rec for n=5, lambda=3/2 has denominator factors including 7
+    # Use prime p=17 for valid admissibility test
+    poly_eval_valid = check_poly_evaluation_admissibility(5, Fraction(3, 2), Fraction(1, 2), 17)
+    assert poly_eval_valid is True
+
+    zonal_valid, msg = check_zonal_admissibility(p=17, execution_plan="test_plan", degree=5, point=Fraction(1, 2), lambda_val=Fraction(3, 2))
+    assert zonal_valid is True
+    assert msg == "Valid ZonalCertificate"
