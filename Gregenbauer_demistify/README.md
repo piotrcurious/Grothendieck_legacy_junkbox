@@ -18,12 +18,16 @@ This repository implements a mathematically closed, VIII-Layer unified architect
   Layer III. Exact Differential Operators, Normalization Types & Dual Recurrences
   Types: C_n^{(λ)}(x) [Poly] | ϕ_n(x) = C_n/C_n(1) [Zonal, ϕ_n(1)=1] | e_n(x) = h_n ϕ_n(x) [Orthonormal, ||e_n||_λ=1]
   Unitary Map: L^2((0,π), (sin θ)^{2λ} dθ) ──u=(sin θ)^λ ϕ──> L^2(0,π)  |  H_λ u_n = N_n^2 u_n
-  SL Limit-Circle: λ ∈ (0,1) ⟹ Deficiency index (2,2), asymptotics u ~ θ^λ (regular) vs u ~ θ^{1-λ} (singular), Friedrichs Extension u(0)=u(π)=0
+  Physical Sphere Family: d ≥ 3 ⟹ λ ∈ {1/2, 1, 3/2, 2, ...}.
+  SL Friedrichs Extension (selecting exponent max(λ, 1-λ) = 1/2 + |λ - 1/2|):
+    - Critical λ=1/2 (d=3): u ~ A θ^{1/2} + B θ^{1/2} log θ (Friedrichs B=0 ⟹ u ~ A θ^{1/2})
+    - Analytic Continuation 0<λ<1, λ≠1/2: u ~ A θ^λ + B θ^{1-λ} (Friedrichs B=0 for λ>1/2; A=0 for 0<λ<1/2)
   Dual Recurrences: a_n, b_n ⟷ α_n via α_n^2 = a_n b_{n+1} = (n+1)(n+2λ) / [4(n+λ)(n+λ+1)] (Exact Symbolic Identity I_dual)
         │
         ▼
   Layer IV. Jacobi Spectral Operator & Unitary Matrix Realization
-  (M_x f)(x) = x f(x),  U M_x U^{-1} = J = J^*  ⟹  ||J|| = 1 and σ(J) = [-1, 1] as consequences,  ||J_m|| < 1 for m < ∞,  α_n = 1/2 + λ(1-λ)/(4 n^2) + O(n^{-3}) as n → ∞
+  (M_x f)(x) = x f(x),  U M_x U^{-1} = J = J^*  ⟹  ||J|| = 1 and σ(J) = [-1, 1] as consequences; ||J_m|| < 1 derived via compactness
+  Subdiagonal Expansion (n → ∞, λ fixed): α_n = 1/2 + λ(1-λ)/(4 n^2) + O(n^{-3})
         │
         ▼
   Layer V. Two-Endpoint Boundary Coordinates
@@ -31,22 +35,22 @@ This repository implements a mathematically closed, VIII-Layer unified architect
         │
         ▼
   Layer VI. Two-Overlap Composite Uniform Asymptotic Schema & Quantified Selector
-  Composite Approximation: F_comp = F_north + F_south + F_interior - F_{+O} - F_{-O}
-  Quantified Overlap Contract: F_endpoint^{(K)} - F_O^{(K)} = O(N_n^{-K}) on Z_0 ≤ z_± ≤ δ N_n
-  Evaluation Selector: M^*(\theta) = argmin_{M ∈ ℳ_valid} B_M(\theta) using certified ErrorBound objects B_M
+  Composite Approximation Schema: F_comp = F_north + F_south + F_interior - F_{+O} - F_{-O} (Status: MATCHING_SCHEMA)
+  Quantified Overlap Contract: |F_endpoint^{(K)} - F_O^{(K)}| ≤ C_{K,λ,Z_0,δ} N_n^{-K} on Z_0 ≤ z_± ≤ δ N_n
+  Evaluation Selector: M^*(\theta) = argmin_{M ∈ ℳ_valid} B_M(\theta) requiring ErrorBound.status ∈ {ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, NUMERICAL_CERTIFIED}
         │
         ▼
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, C_fixed, C_LNS)
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x] ──symbolic rec──> C_n ──eval──> Q ──CRT/RNS──> integer residues)
-  ├── VII-C: Scalable RNS / CRT (N_max := execution metadata, Excluded primes p ∤ ∏_{j ∈ D_rec} j · b · d, CRT Certificate C_CRT)
-  ├── VII-D1: Finite-Field Arithmetic (Split: C_n cert p ∤ ∏_{j ∈ D_rec} j · b · d vs ϕ_n bad-prime cert p ∤ v_n ∧ p ∤ u_n)
+  ├── VII-C: Scalable RNS / CRT (N_max := execution metadata, λ=a/b, x=c/r, D_excl = lcm({d_k ∈ D_rec} ∪ {b, r}))
+  ├── VII-D1: Finite-Field Arithmetic (PolyCertificate p ∤ D_excl vs ZonalCertificate PolyCertificate ∧ p ∤ u_n v_n)
   ├── VII-D2: NTT Acceleration Primitive (L_conv = L_1+L_2-1 ≤ L_NTT | (p-1))
-  └── VII-E: Golub-Welsch Spectral Matrix Truncation (J_m = tridiag(α_0, ..., α_{m-2}), R_J^abs, R_J_hat)
+  └── VII-E: Golub-Welsch Spectral Matrix Truncation (J_m = tridiag(α_0, ..., α_{m-2}), Status: NUMERICAL_CERTIFIED)
         │
         ▼
   Layer VIII. Typed Separation: ExactValue vs ErrorBound vs Residual & Provenance Optimizer
-  First-Class Types: ExactValue != ErrorBound != Residual (TheoremStatus Enum: VERIFIED_EXACT, ANALYTIC_BOUNDED, EMPIRICAL_DIAGNOSTIC)
+  First-Class Types: ExactValue != ErrorBound != Residual (TheoremStatus Enum: ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, NUMERICAL_CERTIFIED, EMPIRICAL_DIAGNOSTIC)
   Decomposition: E_total ≤ E_analytic + E_arithmetic + E_conditioning + E_implementation with E_conditioning ≤ κ · E_input
 ```
 
@@ -85,12 +89,14 @@ $$R(Q)_n \cong \operatorname{Sym}^n(\mathbb{C}^d) / q \operatorname{Sym}^{n-2}(\
 3. Orthonormal Jacobi basis function $e_n(x) = h_n \phi_n(x)$ where $h_n = \|\phi_n\|_\lambda^{-1}$ ($\|e_n\|_\lambda = 1$).
 
 ### Exact Rational Algebra $\mathbb{Q}[\lambda, x]$ vs. Jacobi Spectral Path $\overline{\mathbb{Q}}$
-- **Exact Polynomial Path:** Evaluates $C_n^{(\lambda)}(x) \in \mathbb{Q}$ using three-term recurrence over reduced fraction inputs $\mathcal{A}_{\text{rat}} = \operatorname{RatCert} \land (\gcd(a,b)=\gcd(c,d)=1) \land (b,d>0) \land (C_n^{(\lambda)}(1) \neq 0)$ where $\lambda = a/b, x = c/d$.
+- **Exact Polynomial Path:** Evaluates $C_n^{(\lambda)}(x) \in \mathbb{Q}$ using three-term recurrence over reduced fraction inputs $\mathcal{A}_{\text{rat}} = \operatorname{RatCert} \land (\gcd(a,b)=\gcd(c,r)=1) \land (b,r>0) \land (C_n^{(\lambda)}(1) \neq 0)$ where $\lambda = a/b, x = c/r$.
 - **Jacobi Spectral Path:** Evaluates $J_m = \operatorname{tridiag}(\alpha_0, \dots, \alpha_{m-2}) \in \mathbb{R}^{m \times m}$ operating in algebraic extensions $\overline{\mathbb{Q}}$ due to $\alpha_n = \frac{1}{2}\sqrt{\frac{(n+1)(n+2\lambda)}{(n+\lambda)(n+\lambda+1)}} = \frac{1}{2} + \frac{\lambda(1-\lambda)}{4n^2} + O(n^{-3})$ as $n \to \infty$.
 
 ### Modular & RNS/CRT Admissibility Certificates
-- **Execution Metadata $N_{\max}$:** Defined as execution-plan metadata. Excluded primes are derived from algorithm recurrence steps: $D = \prod_{j \in D_{\text{recurrence}}} j \cdot b \cdot d$.
-- **Normalized Spherical Certificate $\mathcal{A}_\phi(p, n)$:** Requires $\mathcal{A}_C(p) \land (p \nmid v_n) \land (p \nmid u_n)$ where $C_n^{(\lambda)}(1) = u_n/v_n$ ($\gcd(u_n, v_n) = 1$). For bad primes ($p \mid u_n$ or $p \mid v_n$), normalization fails in $\mathbb{F}_p$.
+- **Execution Metadata $N_{\max}$:** Defined as execution-plan metadata. For $\lambda = a/b, x = c/r$, excluded primes are $D_{\text{excl}} = \operatorname{lcm}(\{d_k \in \mathcal{D}_{\text{rec}}\} \cup \{b, r\})$.
+- **Finite-Field Certificates:**
+  - $\texttt{PolyCertificate}(p, n) \iff p > N_{\max} \land p \nmid D_{\text{excl}}$.
+  - $\texttt{ZonalCertificate}(p, n) \iff \texttt{PolyCertificate}(p, n) \land p \nmid v_n \land p \nmid u_n$ where $C_n^{(\lambda)}(1) = u_n/v_n$.
 - **Typed Separation:** `ExactValue` != `ErrorBound` != `Residual`. Total error $E_{\text{total}} \le E_{\text{analytic}} + E_{\text{arithmetic}} + E_{\text{conditioning}} + E_{\text{implementation}}$ with $E_{\text{conditioning}} \le \kappa \cdot E_{\text{input}}$.
 
 ---
