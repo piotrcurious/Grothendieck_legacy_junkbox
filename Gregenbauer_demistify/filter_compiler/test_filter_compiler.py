@@ -178,3 +178,29 @@ def test_header_and_plot_output():
         assert os.path.getsize(header_path) > 100
         assert os.path.exists(plot_path)
         assert os.path.getsize(plot_path) > 1000
+
+
+def test_layer_viii_provenance_and_truth_status():
+    """Tests TruthStatus topology classification and Layer VIII CertifiedEvaluationPayload."""
+    from filter_compiler.compiler import TruthStatus, MatchingStatus
+
+    # Subcritical limit circle
+    spec = FilterSpec(kind="lowpass", order=31, cutoff=0.2)
+    res_sub = GegenbauerFilterCompiler(lam=0.5).compile(spec)
+    assert res_sub.payload.truth_status == TruthStatus.LIMIT_CIRCLE_SUBCRITICAL
+
+    # Physical sphere geometry (lambda = 1.5 => d = 5)
+    res_phys = GegenbauerFilterCompiler(lam=1.5).compile(spec)
+    assert res_phys.payload.truth_status == TruthStatus.PHYSICAL_SPHERE_GEOMETRY
+
+    # Analytic continuation (lambda = 0.3)
+    res_ac = GegenbauerFilterCompiler(lam=0.3).compile(spec)
+    assert res_ac.payload.truth_status == TruthStatus.ANALYTIC_CONTINUATION
+
+    # Matching status certification
+    assert res_phys.payload.matching_status == MatchingStatus.ANALYTICALLY_CERTIFIED_MATCHING
+
+    # Header macro checks
+    assert '#define GEG_TRUTH_STATUS "PHYSICAL_SPHERE_GEOMETRY"' in res_phys.header_code
+    assert '#define GEG_MATCHING_STATUS "ANALYTICALLY_CERTIFIED_MATCHING"' in res_phys.header_code
+    assert 'GEG_E_TOTAL_BOUND' in res_phys.header_code
