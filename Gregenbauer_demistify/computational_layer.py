@@ -15,7 +15,8 @@ Features:
 - Strengthened Decomposed Error Model:
   E_total <= E_analytic + E_arithmetic + E_conditioning + E_implementation
   where E_conditioning <= kappa * E_input.
-- Provenance-First Optimizer: Consumes certified ErrorBound objects only (Residuals are diagnostic).
+- Domain-Compatible Selector:
+  M*(theta) = argmin_{M, theta in D_M, ErrorBound_M certified} ErrorBound_M(theta).
 - Real Execution Backends: FLOAT32, FLOAT64, LONGDOUBLE, MPMATH (100+ bits),
   FIXED_POINT (Q16.16 integer scaling), and LNS (deterministic log-domain).
 - High-Precision Reference Ground Truth via mpmath (100-300 bits).
@@ -87,6 +88,9 @@ class Domain:
     name: str             # e.g., 'x in (-1, 1)', 'theta in (0, pi)', 'spectrum'
     lower: float = -1.0
     upper: float = 1.0
+
+    def contains(self, x: float) -> bool:
+        return self.lower <= x <= self.upper
 
 
 class BoundSource(Enum):
@@ -693,7 +697,8 @@ class GegenbauerComputationalSolver:
                                    max_flop_budget: Optional[int] = None) -> SolverPerformanceMetrics:
         """
         Feasibility-First Provenance Optimizer:
-        Selects optimal permutation evaluating certified ErrorBound objects only (Residuals are diagnostic).
+        Selects optimal permutation evaluating certified ErrorBound objects only on domain-compatible points.
+        M*(theta) = argmin_{M, theta in D_M, ErrorBound_M certified} ErrorBound_M(theta).
         Rejects candidates with unknown or uncertified error bounds.
         """
         metrics = self.benchmark_permutations(domain_x)
@@ -702,16 +707,29 @@ class GegenbauerComputationalSolver:
         if not pareto_candidates:
             pareto_candidates = list(metrics.values())
 
+        min_x, max_x = float(np.min(domain_x)), float(np.max(domain_x))
+
         if max_error_tol is not None:
-            filtered = [
-                m for m in pareto_candidates
-                if m.capability_cert is not None
-                and m.capability_cert.provenance_status in (TheoremStatus.ALGEBRAIC_EXACT, TheoremStatus.ARITHMETIC_EXACT, TheoremStatus.ANALYTIC_CERTIFIED, TheoremStatus.NUMERICAL_CERTIFIED)
-                and m.total_error_bound <= max_error_tol
-                and m.max_mixed_error <= max_error_tol
-            ]
+            filtered = []
+            for m in pareto_candidates:
+                if m.capability_cert is None:
+                    continue
+                if m.capability_cert.provenance_status not in (
+                    TheoremStatus.ALGEBRAIC_EXACT,
+                    TheoremStatus.ARITHMETIC_EXACT,
+                    TheoremStatus.ANALYTIC_CERTIFIED,
+                    TheoremStatus.NUMERICAL_CERTIFIED
+                ):
+                    continue
+
+                # Domain compatibility check
+                eb = m.total_error_bound
+                if eb.domain.contains(min_x) and eb.domain.contains(max_x):
+                    if eb <= max_error_tol and m.max_mixed_error <= max_error_tol:
+                        filtered.append(m)
+
             if not filtered:
-                raise ValueError(f"No algebraic permutation satisfies certified total_error_bound <= {max_error_tol}")
+                raise ValueError(f"No algebraic permutation satisfies certified domain-compatible total_error_bound <= {max_error_tol}")
             pareto_candidates = filtered
 
         if max_flop_budget is not None:
