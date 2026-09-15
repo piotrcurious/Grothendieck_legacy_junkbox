@@ -310,8 +310,9 @@ test(modular_congruence_rns) :-
 
 test(s2_s3_s4_exact_anchors) :-
     N = 10, Theta = 0.5, X is cos(Theta),
-    % S^2 (d=3, Lambda=0.5): Legendre P_10(0.5)
-    normalized_phi_val(N, 0.5, X, _ValS2),
+    % S^2 (d=3, Lambda=0.5): Legendre P_10(X)
+    normalized_phi_val(N, 0.5, X, ValS2),
+    abs(ValS2 - (-0.09434662105534553)) < 1e-6,
     % S^3 (d=4, Lambda=1.0): sin(11*0.5) / (11*sin(0.5))
     normalized_phi_val(N, 1.0, X, ValS3),
     ExactS3 is sin((N + 1) * Theta) / ((N + 1) * sin(Theta)),

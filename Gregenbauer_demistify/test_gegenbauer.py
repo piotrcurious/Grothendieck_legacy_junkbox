@@ -2,21 +2,13 @@
 Comprehensive Mathematical and Numerical Unit Test Suite
 =========================================================
 Independent, non-tautological test suite verifying the Gegenbauer demystification framework:
-1. Independent Reference Oracles (scipy.special.eval_legendre, eval_gegenbauer, mpmath)
-2. Decoupled Hilbert Series Dimensions and Normalization Identity
-3. Quadric Quotient Ring Normal Forms, Idempotency, Exact Fractions & Invariants Modulo q
-4. Symmetric Orthonormal Jacobi Matrix Coefficients alpha_n (alpha_0 = 1/sqrt(3) for Legendre)
-5. Normalized Gegenbauer Derivatives phi_n^{(k)}(x) & Structural Scale-Invariant ODE Residuals
-6. High-Precision Ground Truth Reference via mpmath (100+ bits)
-7. Two-Endpoint Bessel Layer Tests (North & South Poles)
-8. Empirical Asymptotic Convergence Exponents (WKB p > 0.9, Bessel p > 1.7)
-9. Robust Mixed Error Computational Layer, Hard Constraints & Deterministic Pareto Dominance
-10. Real Execution Backends (FLOAT32, FLOAT64, LONGDOUBLE, MPMATH, Q16.16, LNS)
-11. High-Degree Log-Space Stability up to n = 10^6
-12. Theta-Space Orthogonality Norm Verification (Closed-Form Gamma vs Quadrature)
-13. Exact Derivative Anchors phi_n'(1) and phi_n'(-1)
-14. Mandatory Canonical Verification Anchors (lambda=1/2 Legendre, lambda=1 Chebyshev 2nd kind, n=0..3, x in {-1, -1/2, 0, 1/2, 1})
-15. Prolog Integration Test with shutil.which and pathlib Resolution
+1. Mandatory Canonical Verification Anchors (lambda=1/2 Legendre, lambda=1 Chebyshev 2nd kind, n=0..3, x in {-1, -1/2, 0, 1/2, 1})
+2. Exact Derivative Anchors phi_n'(1) and phi_n'(-1) for k=0..n
+3. Operator Equivalences L_x <-> L_theta <-> H_lambda
+4. Dimension Invariant I_dim(n)=0 and Symbolic Dual Recurrence Invariant I_dual(n)=0
+5. Jacobi Eigenvalue Bounds sigma(J_m) in (-1, 1), ||J_m|| < 1
+6. Quadrature Moments int x^(2r) w(x) dx = B(r+1/2, lambda+1/2)
+7. Exact Rational -> RNS/CRT Reconstruction and Finite-Field Modular Congruences (with bad prime check)
 """
 
 from fractions import Fraction
@@ -647,10 +639,10 @@ def test_gauss_gegenbauer_quadrature_precision():
         subdiag[k] = orthonormal_jacobi_coefficients(k, lambda_val)
     J_m = np.diag(subdiag, k=1) + np.diag(subdiag, k=-1)
     evals, evecs = np.linalg.eigh(J_m)
-    r_j_abs = jacobi_eigenpair_residual(evals, evecs, lambda_val, normalized=False)
-    r_j_hat = jacobi_eigenpair_residual(evals, evecs, lambda_val, normalized=True)
-    assert r_j_abs < 1e-14
-    assert r_j_hat < 1e-14
+    res_abs = jacobi_eigenpair_residual(evals, evecs, lambda_val, normalized=False)
+    res_hat = jacobi_eigenpair_residual(evals, evecs, lambda_val, normalized=True)
+    assert res_abs.normalized < 1e-14
+    assert res_hat.normalized < 1e-14
 
     mu_0_expected = math.sqrt(math.pi) * gamma(lambda_val + 0.5) / gamma(lambda_val + 1.0)
     assert np.isclose(np.sum(weights), mu_0_expected, rtol=1e-12)
