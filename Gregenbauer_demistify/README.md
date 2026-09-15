@@ -41,7 +41,7 @@ This repository implements a mathematically closed, VIII-Layer unified architect
   Layer VI. Two-Overlap Composite Uniform Asymptotic Schema & Quantified Selector
   Composite Approximation Schema: F_comp = F_north + F_south + F_interior - F_{+O} - F_{-O} (Status: MATCHING_SCHEMA, γ_K := unspecified)
   Global Coverage: 𝒟_north ∪ 𝒟_interior ∪ 𝒟_south = 𝒟_global
-  Full Composite Error: |F - F_comp^{(K)}| ≤ B_north + B_south + B_interior + B_+O + B_-O =: B_comp
+  Derived Composite Bound: |F - F_comp^{(K)}| ≤ B_north + B_south + B_interior + B_+O + B_-O =: B_comp
   Selector Candidate Interface: Candidate { domain 𝒟_M, target Q, status, ErrorBound.valid, B_M(θ) } requiring target Q matching
         │
         ▼
@@ -49,9 +49,9 @@ This repository implements a mathematically closed, VIII-Layer unified architect
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, C_fixed, C_LNS)
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x] ──symbolic rec──> C_n ──eval──> Q ──CRT/RNS──> integer residues)
   ├── VII-C: Scalable RNS / CRT (N_max := metadata, D_rec(P) = lcm{den_red(q)}, D_den = lcm(D_rec, D_norm, D_eval))
-  ├── VII-D1: Finite-Field Arithmetic (PolyCert(p, P, n) Prime(p) ∧ gcd(p, D_rec(P))=1; PointCert(p, x) gcd(p, r)=1; Bad_zonal(p) ⟺ p|r ∨ p|v_n ∨ p|u_n ∨ p|D_rec(P))
+  ├── VII-D1: Finite-Field Arithmetic (Canonical u_n/v_n, c/r; PolyCert(p, P, n) Prime(p) ∧ gcd(p, D_rec(P))=1; Bad_zonal(p) ⟺ p|r ∨ p|v_n ∨ p|u_n ∨ p|D_rec(P))
   ├── VII-D2: NTT Acceleration Primitive (L_conv = L_1+L_2-1 ≤ L_NTT | (p-1))
-  └── VII-E: Golub-Welsch Spectral Truncation (J_m = tridiag(α_0, ..., α_{m-2}), Implication: R_Q ≤ B_back ⟹ E_Q ≤ κ_Q R_Q + B_{Q,conv})
+  └── VII-E: Golub-Welsch Spectral Truncation (J_m = tridiag(α_0, ..., α_{m-2}), Typed Implication: CertSensitivity_Q(A, κ_Q) ∧ R_Q ≤ B_back ⟹ E_Q ≤ κ_Q B_back + B_{Q,conv})
         │
         ▼
   Layer VIII. Typed Separation: ExactValue vs ErrorBound vs Residual & Provenance Optimizer
@@ -77,7 +77,7 @@ Gregenbauer_demistify/
 ├── algebraic_geometry_combinatorics.py   # Quotient algebra R(Q), exact Q[λ,x], RNS/CRT, Golub-Welsch
 ├── gegenbauer_asymptotics.py             # Scaled recurrence, WKB, Bessel, phase map classifier
 ├── computational_layer.py                # Pareto optimization solver across bases, capability certs, and precisions
-└── test_gegenbauer.py                    # Pytest test suite (41 unit tests & Prolog bridge)
+└── test_gegenbauer.py                    # Pytest test suite (44 unit tests & Prolog bridge)
 ```
 
 ---
@@ -99,6 +99,7 @@ $$R(Q)_n \cong \operatorname{Sym}^n(\mathbb{C}^d) / q \operatorname{Sym}^{n-2}(\
 
 ### Modular & RNS/CRT Admissibility Certificates
 - **Split Denominators:** $D_{\text{rec}}(P) = \operatorname{lcm}\{ \operatorname{den}_{\text{red}}(q) : q \in P_{\text{recurrence\_arithmetic}} \}$, $D_{\text{norm}}$, $D_{\text{eval}}$. Nonlocality: $D_{\text{den}} = \operatorname{lcm}(D_{\text{rec}}(P), D_{\text{norm}}, D_{\text{eval}})$.
+- **Canonical Reduced Fraction Preconditions:** $C_n^{(\lambda)}(1) = u_n/v_n$ with $\gcd(u_n, v_n)=1, v_n>0$, and $x = c/r$ with $\gcd(c, r)=1, r>0$.
 - **Bad Zonal Prime Predicate:** $\operatorname{Bad}_{\text{zonal}}(p) \iff p \mid r \lor p \mid v_n \lor p \mid u_n \lor p \mid D_{\text{rec}}(P)$.
 - **Finite-Field Certificates:**
   - $\texttt{PolyCertificate}(p, P, n) \iff \operatorname{Prime}(p) \land \gcd(p, D_{\text{rec}}(P)) = 1$.
@@ -118,7 +119,7 @@ swipl -g "consult('Gregenbauer_demistify/gegenbauer_proof.pl'), run_all_proofs, 
 ```
 
 ### Python Unit Test Suite
-To run the 41 pytest unit tests covering Prolog assertions, quotient ring normal forms, Hilbert series growth, exact test anchors ($S^2, S^3, S^4$), phase diagram map selection, high-precision reference convergence ($p_{\text{ref}} \ge 384$ bits), exact rational bit-lengths, RNS/CRT integer recovery, cheap invariants (random function norm isometry & parity/boundedness), bad zonal prime predicates, and Pareto optimization solver:
+To run the 44 pytest unit tests covering Prolog assertions, quotient ring normal forms, Hilbert series growth, exact test anchors ($S^2, S^3, S^4$), phase diagram map selection, high-precision reference convergence ($p_{\text{ref}} \ge 384$ bits), exact rational bit-lengths, RNS/CRT integer recovery, cheap invariants (random function norm isometry & parity/boundedness), bad zonal prime predicates, and Pareto optimization solver:
 ```bash
 PYTHONPATH=. python3 -m pytest Gregenbauer_demistify/test_gegenbauer.py
 ```

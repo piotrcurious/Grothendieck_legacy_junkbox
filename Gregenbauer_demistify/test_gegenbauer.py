@@ -54,6 +54,8 @@ from Gregenbauer_demistify.algebraic_geometry_combinatorics import (
 from Gregenbauer_demistify.computational_layer import (
     AlgebraicPermutation,
     CertificateTarget,
+    CertifiedSensitivity,
+    NumericalCertificate,
     Domain,
     ErrorBound,
     ErrorDecomposition,
@@ -857,3 +859,27 @@ def test_arbitrary_test_function_norm_isometry():
 
     quad_norm_sq = float(np.sum(weights * (f_vals ** 2)))
     assert np.isclose(quad_norm_sq, exact_f_norm_sq, rtol=1e-10)
+
+
+def test_golub_welsch_typed_certified_sensitivity():
+    """
+    Verifies Golub-Welsch typed CertifiedSensitivity_Q and NumericalCertificate implication:
+      CertifiedSensitivity_Q(A, kappa_Q) and R_Q <= B_back and E_{Q,conv} <= B_{Q,conv}
+      => E_Q <= kappa_Q * B_back + B_{Q,conv}
+    """
+    sens = CertifiedSensitivity(
+        target=CertificateTarget.EIGENVECTOR,
+        operator_name="J_m",
+        kappa_Q=2.5,
+        certified=True
+    )
+    cert = NumericalCertificate(
+        target=CertificateTarget.EIGENVECTOR,
+        algorithm="Golub-Welsch",
+        backward_bound=1e-12,
+        residual_bound=1e-12,
+        sensitivity=sens,
+        forward_conversion_bound=1e-15
+    )
+    assert cert.conditioning_kappa == 2.5
+    assert np.isclose(cert.forward_bound, 2.5 * 1e-12 + 1e-15)

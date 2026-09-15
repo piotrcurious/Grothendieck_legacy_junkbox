@@ -23,7 +23,7 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   Operator Morphism Chain: L^2([-1,1], (1-x^2)^{λ-1/2} dx) ──(S_λ f)(θ) = f(cos θ)──> L^2((0,π), (sin θ)^{2λ} dθ) ──(T_λ g)(θ) = (sin θ)^λ g(θ)──> L^2(0,π)
   Resulting Morphism: u_n = T_λ S_λ ϕ_n = (sin θ)^λ ϕ_n(cos θ)  |  H_λ u_n = N_n^2 u_n  |  Isometry: ||T_λ S_λ f||_{L^2(0,π)} = ||f||_{ℋ_λ} for arbitrary f
   Precedence Classifier: Classify(λ) = PhysicalClassifier(λ) if λ ∈ PhysicalSphereDomain else AnalyticClassifier(λ)
-  Physical Sphere Family: d ≥ 3 ⟹ λ ∈ {1/2, 1, 3/2, 2, ...}. Parity: ϕ_n(-x) = (-1)^n ϕ_n(x), Boundedness: |ϕ_n(x)| ≤ 1
+  Physical Sphere Family: d ≥ 3 ⟹ λ ∈ {1/2, 1, 3/2, 2, ...}. Invariants: ϕ_n(-x) = (-1)^n ϕ_n(x), |ϕ_n(x)| ≤ 1
   SL Friedrichs Extension (selecting exponent max(λ, 1-λ) = 1/2 + |λ - 1/2|):
     - Critical λ=1/2 (d=3): u ~ A θ^{1/2} + B θ^{1/2} log θ (Friedrichs B=0 ⟹ u ~ A θ^{1/2})
     - d=4 (λ=1): Regular Endpoint, H_1 = -∂_θ^2, u ~ A θ + B (Friedrichs B=0)
@@ -45,7 +45,7 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   Layer VI. Two-Overlap Composite Uniform Asymptotic Schema & Quantified Selector
   Composite Approximation Schema: F_comp = F_north + F_south + F_interior - F_{+O} - F_{-O} (Status: MATCHING_SCHEMA, γ_K := unspecified)
   Global Coverage: 𝒟_north ∪ 𝒟_interior ∪ 𝒟_south = 𝒟_global
-  Full Composite Error Certificate: |F - F_comp^{(K)}| ≤ B_north + B_south + B_interior + B_+O + B_-O =: B_comp
+  Derived Composite Bound: |F - F_comp^{(K)}| ≤ B_north + B_south + B_interior + B_+O + B_-O =: B_comp
   Selector Candidate Interface: Candidate { domain 𝒟_M, target Q, status, ErrorBound.valid, B_M(θ) } requiring target Q matching
         │
         ▼
@@ -53,9 +53,9 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, C_fixed, C_LNS)
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x] ──symbolic rec──> C_n ──eval──> Q ──CRT/RNS──> integer residues)
   ├── VII-C: Scalable RNS / CRT (N_max := metadata, D_rec(P) = lcm{den_red(q) : q ∈ P_rec_arithmetic}, D_den = lcm(D_rec, D_norm, D_eval))
-  ├── VII-D1: Finite-Field Arithmetic (PolyCert(p, P, n) Prime(p) ∧ gcd(p, D_rec)=1; PointCert(p, x) gcd(p, r)=1; Bad_zonal(p) ⟺ p|r ∨ p|v_n ∨ p|u_n ∨ p|D_rec)
+  ├── VII-D1: Finite-Field Arithmetic (Canonical u_n/v_n, c/r; PolyCert(p, P, n) Prime(p) ∧ gcd(p, D_rec(P))=1; Bad_zonal(p) ⟺ p|r ∨ p|v_n ∨ p|u_n ∨ p|D_rec(P))
   ├── VII-D2: NTT Acceleration Primitive (L_conv = L_1+L_2-1 ≤ L_NTT | (p-1))
-  └── VII-E: Golub-Welsch Spectral Truncation (J_m = tridiag(α_0, ..., α_{m-2}), Target Implication: R_Q ≤ B_back ⟹ E_Q ≤ κ_Q R_Q + B_{Q,conv})
+  └── VII-E: Golub-Welsch Spectral Truncation (J_m = tridiag(α_0, ..., α_{m-2}), Typed Implication: CertSensitivity_Q(A, κ_Q) ∧ R_Q ≤ B_back ∧ E_{Q,conv} ≤ B_{Q,conv} ⟹ E_Q ≤ κ_Q B_back + B_{Q,conv})
         │
         ▼
   Layer VIII. Typed Separation: ExactValue vs ErrorBound vs Residual & Provenance Optimizer
@@ -80,12 +80,12 @@ The restriction map to $S^{d-1}$:
 $$\boxed{\operatorname{Res}_S : \mathcal{H}_n(\mathbb{C}^d) \xrightarrow{\,\,\sim\,\,} \mathscr{Y}_n^\mathbb{C}(S^{d-1}),}$$
 is an isomorphism of $SO(d)$-modules mapping complex harmonic polynomials to complex spherical harmonics $\mathscr{Y}_n^\mathbb{C}(S^{d-1})$.
 
-### Hilbert Series & Representation Dimension
+### Hilbert Series & Representation Dimension Conventions
 $$\dim \mathcal{H}_n(\mathbb{C}^d) = [t^n] \frac{1 - t^2}{(1 - t)^d} = \binom{n + d - 1}{d - 1} - \binom{n + d - 3}{d - 1} = \frac{n + \lambda}{\lambda} C_n^{(\lambda)}(1),$$
 where $\lambda = \frac{d-2}{2}$ and $C_n^{(\lambda)}(1) = \frac{(2\lambda)_n}{n!} = \binom{n + 2\lambda - 1}{n}$.
 
-To ensure uniform validity for every $n \ge 0$ (including $n=0$ and $n=1$), binomial coefficients with upper arguments smaller than the lower argument are defined by:
-$$\binom{r}{d-1} = 0 \qquad \text{for } r < d - 1, \qquad \text{or equivalently } \operatorname{Sym}^m(\mathbb{C}^d) = 0 \text{ for } m < 0.$$
+To ensure uniform validity for every $n \ge 0$ (including $n=0$ and $n=1$), the following separate conventions are specified:
+$$\boxed{\binom{r}{d-1} = 0 \quad (r < d - 1), \qquad \operatorname{Sym}^m(\mathbb{C}^d) = 0 \quad (m < 0).}$$
 
 ---
 
@@ -187,13 +187,22 @@ $$\boxed{\|J_m\| = \max_{v \in S^{m-1}} f(v) = f(v^*) < 1 \quad \text{for all } 
 
 ## 6. Layer V & VI: Asymptotic Schemas, Quantified Overlap Contract & Selector
 
-### 6.1 Composite Approximation Schema & Quantified Two-Sided Overlap Majorants
+### 6.1 Composite Approximation Schema & Derived Composite Bound
 The composite uniform expression combines endpoint Bessel layers and interior WKB waves over global domain coverage:
 $$\boxed{\mathcal{D}_{\text{north}} \cup \mathcal{D}_{\text{interior}} \cup \mathcal{D}_{\text{south}} = \mathcal{D}_{\text{global}}.}$$
 The composite approximation schema is:
 $$F_{\text{comp}}^{(K)} = F_{\text{north}}^{(K)}(z_+) + F_{\text{south}}^{(K)}(z_-) + F_{\text{interior}}^{(K)}(N_n, \theta) - F_{+O}^{(K)}(z_+) - F_{-O}^{(K)}(z_-).$$
 
-The full composite error certificate bounding the exact function $F(\theta)$ is explicitly structured as:
+The component certificates defining the proof obligations are:
+$$\begin{aligned}
+|F - F_{\text{north}}| &\le B_{\text{north}} \quad \text{on } \mathcal{D}_{\text{north}}, \\
+|F - F_{\text{interior}}| &\le B_{\text{interior}} \quad \text{on } \mathcal{D}_{\text{interior}}, \\
+|F - F_{\text{south}}| &\le B_{\text{south}} \quad \text{on } \mathcal{D}_{\text{south}}, \\
+|F_{\text{north}} - F_{+O}| &\le B_{+O} \quad \text{on } \mathcal{D}_{\text{north}} \cap \mathcal{D}_{\text{interior}}, \\
+|F_{\text{south}} - F_{-O}| &\le B_{-O} \quad \text{on } \mathcal{D}_{\text{south}} \cap \mathcal{D}_{\text{interior}}.
+\end{aligned}$$
+
+By triangle inequality on $\mathcal{D}_{\text{global}}$, the derived full composite error certificate bounding the exact function $F(\theta)$ is:
 $$\boxed{|F(\theta) - F_{\text{comp}}^{(K)}(\theta)| \le B_{\text{north}} + B_{\text{south}} + B_{\text{interior}} + B_{+O} + B_{-O} =: B_{\text{comp}}(\theta).}$$
 
 Under status $\texttt{MATCHING\_SCHEMA}$, the asymptotic growth exponent is declared as $\gamma_K := \text{unspecified}$. It is promoted to $\texttt{ANALYTIC\_CERTIFIED}$ only after proving the uniform majorant theorem:
@@ -211,18 +220,22 @@ $$\boxed{M^*(\theta) = \arg\min_{\substack{M \\ \theta \in \mathcal{D}_M \\ \tex
 
 ### VII-A & VII-B. Hardware & Exact Symbolic Sub-Backends
 - **Polynomial Path:** $\mathbb{Q}[\lambda, x] \to \mathbb{Q} \to \text{RNS/CRT}$ (truth class `ARITHMETIC_EXACT`).
-- **Jacobi Golub-Welsch Path:** Eigendecomposition of symmetric tridiagonal $J_m$. When backed by a backward-stable eigensolver with validated residual bounds, status is `NUMERICAL_CERTIFIED` via a formal target-specific `NumericalCertificate` using explicit implication:
-  $$\boxed{R_Q \le B_{\text{back}} \implies E_Q \le \kappa_Q R_Q + B_{Q, \text{conv}} := B_{Q, \text{forward}},}$$
+- **Jacobi Golub-Welsch Path:** Eigendecomposition of symmetric tridiagonal $J_m$. When backed by a backward-stable eigensolver with validated residual bounds, status is `NUMERICAL_CERTIFIED` via a formal target-specific `NumericalCertificate` using explicit typed implication:
+  $$\boxed{\operatorname{CertifiedSensitivity}_Q(A, \kappa_Q) \land R_Q \le B_{\text{back}} \land E_{Q, \text{conv}} \le B_{Q, \text{conv}} \implies E_Q \le \kappa_Q B_{\text{back}} + B_{Q, \text{conv}} := B_{Q, \text{forward}},}$$
   where target $Q \in \{\texttt{NODE}, \texttt{WEIGHT}, \texttt{EIGENVECTOR}, \texttt{QUADRATURE}\}$ and $\kappa_Q$ is explicitly certified (including eigenvalue-gap conditioning for eigenvectors/weights).
 
-### VII-C. Split Denominators & RNS / CRT Execution Plan
+### VII-C. Plan-Pure Recurrence Denominators & RNS / CRT Execution Plan
 The execution plan $P$ extracts recurrence arithmetic denominators dynamically from executed operations:
-$$\boxed{D_{\text{rec}}(P) = \operatorname{lcm}\left(\{ \operatorname{den}_{\text{red}}(q) : q \in P_{\text{recurrence\_arithmetic}} \} \cup \{b\}\right).}$$
+$$\boxed{D_{\text{rec}}(P) = \operatorname{lcm}\left(\{ \operatorname{den}_{\text{red}}(q) : q \in P_{\text{recurrence\_arithmetic}} \}\right).}$$
 
 Overall denominator nonlocality product:
 $$\boxed{D_{\text{den}} = \operatorname{lcm}(D_{\text{rec}}(P), D_{\text{norm}}, D_{\text{eval}}).}$$
 
-### VII-D. Explicit Certificate Hierarchy & Bad Zonal Prime Predicate
+### VII-D. Explicit Canonical Preconditions & Bad Zonal Prime Predicate
+Canonical reduced fraction representation preconditions:
+$$\boxed{C_n^{(\lambda)}(1) = \frac{u_n}{v_n}, \quad \gcd(u_n, v_n) = 1, \ v_n > 0; \qquad x = \frac{c}{r}, \ \gcd(c, r) = 1, \ r > 0.}$$
+
+Finite-field certificates and bad prime predicate:
 1. **Unnormalized Polynomial Certificate ($\texttt{PolyCertificate}$):**
    $$\boxed{\texttt{PolyCertificate}(p, P, n) \iff \operatorname{Prime}(p) \land \gcd(p, D_{\text{rec}}(P)) = 1.}$$
 2. **Point Evaluation Certificate ($\texttt{PointCertificate}$):**
