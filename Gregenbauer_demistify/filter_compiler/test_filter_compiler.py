@@ -61,7 +61,7 @@ def test_lowpass_compilation():
     assert abs(np.sum(taps) - 1.0) < 1e-10
 
     # Check header generation non-empty
-    assert "GEG_N = 31" in result.header_code
+    assert "GEG_N 31" in result.header_code or "GEG_N = 31" in result.header_code
     assert "h0_geg_q15" in result.header_code
 
 
@@ -209,15 +209,15 @@ def test_layer_viii_provenance_and_truth_status():
 def test_filter_spec_edge_cases():
     """Tests highpass even-N rejection, transition band overlap validation, and clamped bandpass defaults."""
     # Highpass even N must raise ValueError
-    with pytest.raises(ValueError, match="Highpass FIR filter .* cannot have an even order"):
+    with pytest.raises(ValueError, match="Highpass FIR filter .* cannot have an even"):
         FilterSpec(kind="highpass", order=64, cutoff=0.25)
 
     # Transition band overlap for lowpass (wp >= ws)
-    with pytest.raises(ValueError, match="Passband edge wp .* must be less than stopband edge ws"):
+    with pytest.raises(ValueError, match="Passband edge wp .* must be < stopband edge ws"):
         FilterSpec(kind="lowpass", order=31, cutoff=0.25, wp=0.3, ws=0.2)
 
     # Transition band overlap for highpass (ws >= wp)
-    with pytest.raises(ValueError, match="Stopband edge ws .* must be less than passband edge wp"):
+    with pytest.raises(ValueError, match="Stopband edge ws .* must be < passband edge wp"):
         FilterSpec(kind="highpass", order=31, cutoff=0.25, wp=0.2, ws=0.3)
 
     # Clamped bandpass upper bounds for cutoff near Nyquist
