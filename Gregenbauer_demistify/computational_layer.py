@@ -10,6 +10,8 @@ Features:
   enforcing `ExactValue != ErrorBound != Residual` and `Residual != ErrorBound`.
 - `TheoremStatus` Enum: `ALGEBRAIC_EXACT`, `ARITHMETIC_EXACT`, `ANALYTIC_CERTIFIED`,
   `NUMERICAL_CERTIFIED`, `EMPIRICAL_DIAGNOSTIC`.
+- Composable NumericalCertificate Composition Invariant:
+  B_forward >= kappa * B_back + B_conv
 - Exactness Semantics: "Algebraic/arithmetic exactness => zero execution error relative
   to the specified exact algorithm."
 - Staged Perturbation Error Composition:
@@ -104,18 +106,20 @@ class BoundSource(Enum):
 class NumericalCertificate:
     """
     Full Numerical Eigensolver / Solver Certificate.
-    Includes algorithm, backward bound, residual bound, conditioning kappa, forward conversion bound,
-    and certified forward error bound E_forward <= kappa * B_back + B_conv.
+    Includes algorithm, backward bound B_back, residual bound R, conditioning kappa,
+    forward conversion bound B_conv, and certified forward bound B_forward.
+    Composition Invariant: B_forward >= kappa * B_back + B_conv.
     """
     algorithm: str
     backward_bound: float
     residual_bound: float
     conditioning_kappa: float
     forward_conversion_bound: float
+    forward_bound: float
 
     @property
-    def forward_error_bound(self) -> float:
-        return self.conditioning_kappa * self.backward_bound + self.forward_conversion_bound
+    def composition_invariant_valid(self) -> bool:
+        return self.forward_bound >= (self.conditioning_kappa * self.backward_bound + self.forward_conversion_bound) - 1e-15
 
 
 @dataclass
@@ -159,6 +163,10 @@ class ErrorBound:
     First-Class Certified ErrorBound Object.
     Invariant: Residual != ErrorBound.
     Only ErrorBound objects with certified status participate in solver candidate selection.
+    Conversion mapping:
+      - ALGEBRAIC_EXACT / ARITHMETIC_EXACT => 0 (relative to certified exact target)
+      - ANALYTIC_CERTIFIED => B_theorem
+      - NUMERICAL_CERTIFIED => B_forward
     """
     value: float
     domain: Domain
@@ -334,15 +342,21 @@ def scale_invariant_ode_residual(phi_val: float, phi_prime_val: float, phi_secon
 
 def scale_invariant_recurrence_residual(phi_n: float, phi_np1: float, phi_nm1: float, x: float, n: int, lambda_val: float, tau: float = 1e-14) -> Residual:
     """
-    Computes Layer VIII Normalized Scale-Invariant Recurrence Residual R_rec(n, x) for n >= 1
-    and returns a typed Residual schema.
+    Computes Layer VIII Normalized Scale-Invariant Recurrence Residual R_rec(n, x).
+    Split:
+      n = 0: x * phi_0 - phi_1 = 0
+      n >= 1: x * phi_n - a_n * phi_{n+1} - b_n * phi_{n-1} = 0
+    Returns a typed Residual schema.
     """
-    if n < 1:
-        raise ValueError("Scale-invariant recurrence residual R_rec(n, x) is defined for n >= 1")
-    a_n = (n + 2.0 * lambda_val) / (2.0 * (n + lambda_val))
-    b_n = n / (2.0 * (n + lambda_val))
-    num = abs(x * phi_n - a_n * phi_np1 - b_n * phi_nm1)
-    den = abs(x * phi_n) + abs(a_n * phi_np1) + abs(b_n * phi_nm1) + tau
+    if n == 0:
+        num = abs(x * phi_n - phi_np1)
+        den = abs(x * phi_n) + abs(phi_np1) + tau
+    else:
+        a_n = (n + 2.0 * lambda_val) / (2.0 * (n + lambda_val))
+        b_n = n / (2.0 * (n + lambda_val))
+        num = abs(x * phi_n - a_n * phi_np1 - b_n * phi_nm1)
+        den = abs(x * phi_n) + abs(a_n * phi_np1) + abs(b_n * phi_nm1) + tau
+
     norm_res = float(num / den)
 
     return Residual(
