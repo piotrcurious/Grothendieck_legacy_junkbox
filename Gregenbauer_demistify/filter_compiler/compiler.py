@@ -88,7 +88,7 @@ def determine_truth_status(lam: float) -> TruthStatus:
 class FilterSpec:
     """Specification of target DSP filter."""
     kind: str = "lowpass"
-    order: int = 63
+    order: int = 64
     cutoff: float = 0.25
     wp: Optional[float] = None
     ws: Optional[float] = None
@@ -110,6 +110,10 @@ class FilterSpec:
         # Highpass FIR filters cannot have an even number of taps (Type II)
         if self.kind == "highpass" and self.order % 2 == 0:
             raise ValueError(f"Highpass FIR filter (Type II) cannot have an even length N={self.order} due to forced Nyquist zero. Filter length must be odd.")
+
+        # QMF filter pairs require an even tap length
+        if self.kind == "qmf" and self.order % 2 != 0:
+            raise ValueError(f"QMF filter pair requires an even tap length N, got {self.order}.")
 
         if self.kind == "bandpass":
             if self.wp is None: self.wp = max(0.02, self.cutoff - 0.05)
@@ -225,18 +229,8 @@ class GegenbauerFilterCompiler:
             return interior_wkb_approx(n, self.lam, theta)
         elif self.asymptotic_mode == "composite":
             return composite_matched_approx(n, self.lam, theta)
-
-        res = np.zeros_like(theta)
-        n_eff = max(1, n)
-        boundary = min(3.0 / n_eff, np.pi / 2.5)
-        north_mask = theta < boundary
-        south_mask = theta > (np.pi - boundary)
-        interior_mask = ~(north_mask | south_mask)
-
-        if np.any(north_mask): res[north_mask] = endpoint_bessel_leading(n, self.lam, theta[north_mask])
-        if np.any(south_mask): res[south_mask] = south_pole_bessel_leading(n, self.lam, theta[south_mask])
-        if np.any(interior_mask): res[interior_mask] = composite_matched_approx(n, self.lam, theta[interior_mask])
-        return res
+        else:
+            return composite_matched_approx(n, self.lam, theta)
 
     def _build_spectral_target(self, spec: FilterSpec, omega: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         f = omega / (2.0 * np.pi)
@@ -295,7 +289,7 @@ class GegenbauerFilterCompiler:
             a_coeffs = np.zeros(K)
             for k in range(K):
                 phi_k = self._eval_basis(k, nodes)
-                norm_sq = phi_norm_squared(k, self.lam)
+                norm_sq = 1.0 if self.basis_type == "normalized" else phi_norm_squared(k, self.lam)
                 a_coeffs[k] = np.sum(D_q * phi_k * weights) / norm_sq
             return a_coeffs, K
 
@@ -452,7 +446,7 @@ class GegenbauerFilterCompiler:
         header.append("")
 
         header.append(f"const float h0_geg_float32[{spec.order}] = {{")
-        header.append("    " + ", ".join(f"{val:.8f}f" for val in h0.float64_taps))
+        header.append("    " + ", ".join(f"{val:.8e}f" for val in h0.float64_taps))
         header.append("};")
         header.append("")
 
@@ -469,7 +463,7 @@ class GegenbauerFilterCompiler:
         if h1 is not None:
             header.append("// Highpass / Complementary Mirror QMF Pair Taps (h1)")
             header.append(f"const float h1_geg_float32[{spec.order}] = {{")
-            header.append("    " + ", ".join(f"{val:.8f}f" for val in h1.float64_taps))
+            header.append("    " + ", ".join(f"{val:.8e}f" for val in h1.float64_taps))
             header.append("};")
             header.append("")
             header.append(f"const int16_t h1_geg_q15[{spec.order}] PROGMEM = {{")
@@ -541,7 +535,8 @@ class GegenbauerFilterCompiler:
             if spec.order > K and self.lam > 0:
                 matching_status = MatchingStatus.ANALYTICALLY_CERTIFIED_MATCHING
 
-        e_arithmetic = float(np.max(np.abs(h0_quant.float64_taps - h0_quant.q31_taps / h0_quant.q31_scale)))
+        # Arithmetic quantization error provenance based on Q15 target
+        e_arithmetic = float(np.max(np.abs(h0_quant.float64_taps - h0_quant.q15_taps / h0_quant.q15_scale)))
         provenance = ErrorBoundProvenance(
             e_analytic=asymp_err,
             e_arithmetic=e_arithmetic,
@@ -556,7 +551,7 @@ class GegenbauerFilterCompiler:
             is_certified=True
         )
 
-        prov_err = float(np.max(mixed_error(h0_quant.float64_taps, h0_quant.q31_taps / h0_quant.q31_scale)))
+        prov_err = float(np.max(mixed_error(h0_quant.float64_taps, h0_quant.q15_taps / h0_quant.q15_scale)))
 
         result = FilterResult(
             spec=spec,
@@ -703,7 +698,7 @@ class GegenbauerFilterCompiler:
 def main():
     parser = argparse.ArgumentParser(description="VIII-Layer Gegenbauer DSP Filter Compiler CLI")
     parser.add_argument("--kind", type=str, default="qmf", choices=["lowpass", "highpass", "bandpass", "qmf"])
-    parser.add_argument("--N", type=int, default=63, help="Filter length N (number of taps)")
+    parser.add_argument("--N", type=int, default=64, help="Filter length N (number of taps)")
     parser.add_argument("--cutoff", type=float, default=0.25, help="Normalized cutoff frequency (0 to 0.5)")
     parser.add_argument("--lambda_param", type=float, default=1.25, help="Gegenbauer parameter lambda > -0.5")
     parser.add_argument("--basis_terms", type=int, default=None, help="Number of Gegenbauer basis terms")
