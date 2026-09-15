@@ -11,8 +11,8 @@ for Gegenbauer polynomials and complex projective quadric hypersurfaces Q_{d-2} 
 4. Orthonormal Symmetric Jacobi Matrix Coefficients alpha_n = 1/2 * sqrt( (n+1)(n+2*lambda) / ((n+lambda)(n+lambda+1)) )
 5. Golub-Welsch Gauss-Gegenbauer Quadrature over m x m principal truncation J_m (sigma(J_m) = {x_1, ..., x_m})
 6. Normalized Gegenbauer _2F_1 Hypergeometric Expansion Coefficients
-7. Execution Metadata N_max & Recurrence-Derived Denominator Exclusions D_excl = lcm({d_k in D_rec} u {b, r})
-8. PolyCertificate and ZonalCertificate Admissibility (handling bad primes where p | u_n * v_n)
+7. Execution Metadata N_max & Split Algorithm/Point Denominators D_alg and D_eval
+8. PolyCertificate, PointCertificate, and ZonalCertificate Admissibility (handling bad primes where p | u_n * v_n)
 """
 
 from fractions import Fraction
@@ -399,34 +399,40 @@ def check_c_n_admissibility(n: int, lambda_val: Union[int, Fraction], x: Union[i
     """
     Admissibility certificate for unnormalized Gegenbauer polynomial C_n^(lambda)(x) in F_p (PolyCertificate):
       Parameter notation: lambda = a/b, x = c/r (r is denominator of evaluation point x).
-      D_excl = lcm({d_k in D_rec} u {b, r}) where D_rec = {1, ..., n}.
-      Requires prime p > N_max and p \nmid D_excl.
+      D_alg = lcm({d_k in D_rec} u {b}) where D_rec = {1, ..., n}.
+      PolyCertificate requires gcd(p, D_alg) == 1.
     """
-    if p <= max(2, n):
-        return False
-
     b = Fraction(lambda_val).denominator
-    r = Fraction(x).denominator
 
-    # Compute D_excl = lcm(1, ..., n, b, r)
     lcm_val = 1
     for k in range(1, n + 1):
         lcm_val = math.lcm(lcm_val, k)
     lcm_val = math.lcm(lcm_val, b)
-    lcm_val = math.lcm(lcm_val, r)
 
     return (lcm_val % p != 0)
+
+
+def check_point_admissibility(x: Union[int, Fraction], p: int) -> bool:
+    """
+    Admissibility certificate for evaluation point x = c/r in F_p (PointCertificate):
+      Requires gcd(p, r) == 1.
+    """
+    r = Fraction(x).denominator
+    return (r % p != 0)
 
 
 def check_phi_n_admissibility(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], p: int) -> Tuple[bool, str]:
     """
     Admissibility certificate for normalized zonal spherical function phi_n(x) = C_n^(lambda)(x) / C_n^(lambda)(1) in F_p (ZonalCertificate):
-      Formal logical dependency: ZonalCertificate = PolyCertificate and p \nmid v_n and p \nmid u_n
+      Formal logical dependency: ZonalCertificate = PolyCertificate and PointCertificate and p \nmid v_n and p \nmid u_n
       (where C_n^(lambda)(1) = u_n/v_n with gcd(u_n, v_n) = 1).
       For bad primes (p | u_n or p | v_n), C_n^(lambda)(1) is either zero or non-local in F_p, so normalization fails.
     """
     if not check_c_n_admissibility(n, lambda_val, x, p):
-        return False, "Failed PolyCertificate (p <= N_max or p divides recurrence exclusion product D_excl)"
+        return False, "Failed PolyCertificate (p divides recurrence exclusion product D_alg)"
+
+    if not check_point_admissibility(x, p):
+        return False, "Failed PointCertificate (p divides evaluation point denominator r)"
 
     c1 = exact_rational_gegenbauer(n, lambda_val, Fraction(1))
     u_n = c1.numerator
