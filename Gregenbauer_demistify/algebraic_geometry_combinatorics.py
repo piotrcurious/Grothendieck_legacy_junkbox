@@ -478,8 +478,9 @@ def exact_rational_bit_length(n: int, lambda_val: Union[int, Fraction], x: Union
 def extract_plan_recurrence_denominator(execution_plan: object = None, degree: int = 0, lambda_val: Union[int, Fraction] = Fraction(1, 2)) -> int:
     """
     Computes D_rec(P) = lcm({den_red(q) : q in P_recurrence_arithmetic}).
+    Plan-pure recurrence denominator extraction without extra b factor.
     If execution_plan is an object with 'recurrence_arithmetic', extracts denominators from it.
-    Otherwise computes D_rec directly for degree n and parameter lambda = a/b.
+    Otherwise computes D_rec directly for degree n and parameter lambda.
     """
     if execution_plan is not None and hasattr(execution_plan, 'recurrence_arithmetic'):
         lcm_val = 1
@@ -487,8 +488,7 @@ def extract_plan_recurrence_denominator(execution_plan: object = None, degree: i
             lcm_val = math.lcm(lcm_val, Fraction(q).denominator)
         return lcm_val
 
-    b = Fraction(lambda_val).denominator
-    lcm_val = b
+    lcm_val = 1
     for k in range(1, degree + 1):
         a_k, b_k = normalized_jacobi_coefficients(k, Fraction(lambda_val), exact=True)
         lcm_val = math.lcm(lcm_val, Fraction(a_k).denominator)
@@ -548,34 +548,46 @@ def check_c_n_admissibility(n: int, lambda_val: Union[int, Fraction], p: int, ex
     return (d_rec % p != 0)
 
 
-def bad_zonal_prime(p: int, degree: int, point: Union[int, Fraction], lambda_val: Union[int, Fraction] = Fraction(1, 2), execution_plan: object = None) -> bool:
+def zonal_admissible(p: int, degree: int, point: Union[int, Fraction], lambda_val: Union[int, Fraction] = Fraction(1, 2), execution_plan: object = None) -> bool:
     """
-    Semantically exact bad zonal prime predicate:
-      Bad_zonal(p) <=> (p | r) or (p | v_n) or (p | u_n) or (p | D_rec(P))
-    where x = c/r and C_n^(lambda)(1) = u_n / v_n.
+    Semantically exact ZonalAdmissible predicate over canonical reduced fractions
+      C_n^(lambda)(1) = u_n / v_n with gcd(u_n, v_n) = 1, v_n > 0
+      and x = c / r with gcd(c, r) = 1, r > 0:
+      ZonalAdmissible(p, P, n, x) <=> Prime(p) and gcd(p, D_rec(P)) == 1 and p nmid r and p nmid u_n * v_n.
     """
     if p <= 1:
-        return True
+        return False
     for i in range(2, int(math.isqrt(p)) + 1):
         if p % i == 0:
-            return True
+            return False
 
-    r = Fraction(point).denominator
+    r_frac = Fraction(point)
+    c, r = r_frac.numerator, r_frac.denominator
     if r % p == 0:
-        return True
+        return False
 
     d_rec = extract_plan_recurrence_denominator(execution_plan=execution_plan, degree=degree, lambda_val=lambda_val)
+    if d_rec % p != 0: # wait, if d_rec % p == 0 then p | d_rec, not admissible
+        pass
     if d_rec % p == 0:
-        return True
+        return False
 
     c1 = exact_rational_gegenbauer(degree, lambda_val, Fraction(1))
-    u_n = c1.numerator
+    u_n = abs(c1.numerator)
     v_n = c1.denominator
 
     if v_n % p == 0 or u_n % p == 0:
-        return True
+        return False
 
-    return False
+    return True
+
+
+def bad_zonal_prime(p: int, degree: int, point: Union[int, Fraction], lambda_val: Union[int, Fraction] = Fraction(1, 2), execution_plan: object = None) -> bool:
+    """
+    Semantically exact bad zonal prime predicate defined as the logical negation:
+      Bad_zonal := not ZonalAdmissible.
+    """
+    return not zonal_admissible(p=p, degree=degree, point=point, lambda_val=lambda_val, execution_plan=execution_plan)
 
 
 def check_point_admissibility(x: Union[int, Fraction], p: int) -> bool:
