@@ -20,17 +20,17 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   Layer III. Exact Differential Operators, Normalization Types & Dual Recurrences
   Types: C_n^{(λ)}(x) [Poly] | ϕ_n(x) = C_n/C_n(1) [Zonal, ϕ_n(1)=1] | e_n(x) = h_n ϕ_n(x) [Orthonormal, ||e_n||_λ=1]
   Operator Morphism T_λ: L^2((0,π), (sin θ)^{2λ} dθ) ──(T_λ ϕ)(θ) = (sin θ)^λ ϕ(cos θ)──> L^2(0,π)  |  H_λ u_n = N_n^2 u_n
-  Physical Sphere Family (d ≥ 3 ⟹ PhysicalDomain λ = (d-2)/2 ∈ {1/2, 1, 3/2, ...}):
-    - d=3 (λ=1/2): Critical Limit-Circle (LC), u ~ A θ^{1/2} + B θ^{1/2} log θ (Friedrichs B=0 ⟹ u ~ A θ^{1/2})
-    - d=4 (λ=1): Regular Endpoint, H_1 = -∂_θ^2, u ~ A θ
-    - d≥5 (λ≥3/2): Limit-Point (LP), singular branch 1-λ ≤ -1/2 ∉ L^2(0,π), no endpoint BC required
-  AnalyticContinuationDomain (λ > 0, λ ∉ PhysicalDomain): 1/2 < λ < 3/2 ⟹ LC (u ~ A θ^λ); 0 < λ < 1/2 ⟹ LC (u ~ B θ^{1-λ})
+  Physical Sphere Family (d ≥ 3 ⟹ PhysicalDomain λ = (d-2)/2 ∈ {1/2, 1, 3/2, ...}) at both endpoints (θ → 0+, t = π-θ → 0+):
+    - d=3 (λ=1/2): Critical Limit-Circle (LC), u ~ A θ^{1/2} + B θ^{1/2} log θ (forbidden_log_coefficient B = 0)
+    - d=4 (λ=1): Regular Endpoint, H_1 = -∂_θ^2, u ~ A θ + B (singular_branch_coefficient B = 0)
+    - d≥5 (λ≥3/2): Limit-Point (LP), singular branch 1-λ ≤ -1/2 ∉ L^2(0,π), no boundary parameter required
+  AnalyticContinuationDomain (λ > 0, λ ∉ PhysicalDomain): 1/2 < λ < 3/2 ⟹ LC (B = 0); 0 < λ < 1/2 ⟹ LC (A = 0)
   Exact Norm Invariant: ||ϕ_n||_λ^2 = (π 2^{1-2λ} Γ(n+2λ)) / (n! (n+λ) Γ(λ)^2 [C_n^{(λ)}(1)]^2) ⟹ h_n = ||ϕ_n||_λ^{-1} ⟹ α_n = a_n (h_n/h_{n+1})
         │
         ▼
   Layer IV. Jacobi Spectral Operator & Unitary Matrix Realization
   (M_x f)(x) = x f(x),  U M_x U^{-1} = J = J^*  ⟹  ||J|| = 1 and σ(J) = [-1, 1] as consequences
-  Rayleigh-Ritz Spectral Theorem: ||J_m|| = max_{||v||=1} |⟨J_m v, v⟩| < 1 derived via compactness of unit sphere S^{m-1}
+  Rayleigh-Ritz Spectral Theorem: ||J_m|| = max_{||v||=1} |⟨J_m v, v⟩| < 1 derived via compactness of unit sphere S^{m-1} and real symmetry of J_m
   Subdiagonal Expansion (n → ∞, λ fixed): α_n = 1/2 + λ(1-λ)/(4 n^2) + O(n^{-3})
         │
         ▼
@@ -41,21 +41,24 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   Layer VI. Two-Overlap Composite Uniform Asymptotic Schema & Quantified Selector
   Composite Approximation Schema: F_comp = F_north + F_south + F_interior - F_{+O} - F_{-O} (Status: MATCHING_SCHEMA)
   Quantified Overlap Contract: |F_endpoint^{(K)} - F_O^{(K)}| ≤ N_n^{-K} G_{K,λ,Z_0,δ}(z_±) on Z_0 ≤ z_± ≤ δ N_n
-  Evaluation Selector: M^*(\theta) = argmin_{M, \theta ∈ mathcal{D}_M, B_M \text{ cert}} B_M(\theta)
+  Majorant Function Contract: G_{K,λ,Z_0,δ} : [Z_0, δ N_n] → ℝ_{≥0} (MATCHING_SCHEMA unproved vs ANALYTIC_CERTIFIED proved)
+  Evaluation Selector: M^*(\theta) = argmin_{M, \theta ∈ ℛ_M, B_M \text{ cert}} B_M(\theta)
         │
         ▼
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, C_fixed, C_LNS)
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x] ──symbolic rec──> C_n ──eval──> Q ──CRT/RNS──> integer residues)
-  ├── VII-C: Scalable RNS / CRT (N_max := execution metadata, D_alg = lcm({d_k} ∪ {b}), D_eval = lcm(D_alg, r))
+  ├── VII-C: Scalable RNS / CRT (N_max := execution metadata, D_alg = lcm(den_red(a_n), den_red(b_n), ..., b), D_eval = lcm(D_alg, r))
   ├── VII-D1: Finite-Field Arithmetic (PolyCert gcd(p, D_alg)=1 ∧ PointCert gcd(p, r)=1 vs ZonalCert PolyCert ∧ PointCert ∧ p ∤ u_n v_n)
+  │          Failure Taxonomy: PointLocalizationFailure (p|r), NormalizationRepresentationFailure (p|v_n), NormalizationSingularityFailure (p|u_n)
   ├── VII-D2: NTT Acceleration Primitive (L_conv = L_1+L_2-1 ≤ L_NTT | (p-1))
-  └── VII-E: Golub-Welsch Spectral Matrix Truncation (J_m = tridiag(α_0, ..., α_{m-2}), Status: NUMERICAL_CERTIFIED)
+  └── VII-E: Golub-Welsch Spectral Matrix Truncation (J_m = tridiag(α_0, ..., α_{m-2}), Status: NUMERICAL_CERTIFIED via NumericalCertificate)
         │
         ▼
   Layer VIII. Typed Separation: ExactValue vs ErrorBound vs Residual & Provenance Optimizer
   First-Class Types: ExactValue != ErrorBound != Residual (TheoremStatus Enum: ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, NUMERICAL_CERTIFIED, EMPIRICAL_DIAGNOSTIC)
-  Residual != ErrorBound Invariant; Provenance-Aware Decomposition: E_total ≤ E_analytic + E_arithmetic + E_conditioning + E_implementation with E_conditioning ≤ κ · E_input
+  Residual != ErrorBound Invariant; Certified Error Decomposition: E_total ≤ ∑ E_i provided Cert(E_i) holds, with E_conditioning ≤ κ · E_input
+  Canonical Test Matrix: d ∈ {3, 4, 5}, n ∈ {0, 1, 2, 3} validating x ϕ_n - a_n ϕ_{n+1} - b_n ϕ_{n-1} = 0 and α_n^2 - a_n b_{n+1} = 0
 ```
 
 ---
@@ -101,23 +104,23 @@ $$\phi_n(x) = \frac{C_n^{(\lambda)}(x)}{C_n^{(\lambda)}(1)}.$$
 
 ## 4. Layer III: Domain Operators, Type System & Singular Sturm-Liouville Extensions
 
-### 4.1 Parameter Domains: PhysicalSphereDomain vs AnalyticContinuationDomain
+### 4.1 Parameter Domains & Endpoint Boundary Conditions
 The framework distinguishes two named parameter domains:
 1. **$\texttt{PhysicalSphereDomain}$:** For $S^{d-1} \cong SO(d)/SO(d-1)$ ($d \ge 3$), parameter $\lambda = \frac{d-2}{2} \in \left\{ \frac{1}{2}, 1, \frac{3}{2}, 2, \dots \right\}$.
 2. **$\texttt{AnalyticContinuationDomain}$:** For continuous parameter range $\lambda > 0$.
 
 ### 4.2 Endpoint Classification Function ($\operatorname{EndpointClass}(\lambda)$)
-The Sturm-Liouville operator $H_\lambda = -\partial_\theta^2 + \lambda(\lambda-1)\csc^2\theta$ on $(0, \pi)$ admits the following exact classification:
+The Sturm-Liouville operator $H_\lambda = -\partial_\theta^2 + \lambda(\lambda-1)\csc^2\theta$ on $(0, \pi)$ admits identical endpoint classifications at both endpoints $\theta \to 0^+$ and $t = \pi - \theta \to 0^+$:
 
 $$\boxed{
 \begin{array}{c|c|c|l}
-\text{Domain} & \text{Parameter } \lambda & \operatorname{EndpointClass}(\lambda) & \text{Friedrichs Self-Adjoint Boundary Behavior} \\ \hline
-\texttt{PhysicalDomain} & d=3 \ (\lambda=1/2) & \texttt{CRITICAL\_LC} & u(\theta) = A \theta^{1/2} + B \theta^{1/2} \log\theta \implies B = 0 \quad (u \sim A \theta^{1/2}) \\[1.5mm]
-\texttt{PhysicalDomain} & d=4 \ (\lambda=1) & \texttt{REGULAR} & H_1 = -\partial_\theta^2, \ u(\theta) \sim A \theta + B \implies B = 0 \quad (u \sim A \theta) \\[1.5mm]
-\texttt{PhysicalDomain} & d \ge 5 \ (\lambda \ge 3/2) & \texttt{LIMIT\_POINT} & \text{Singular branch } \theta^{1-\lambda} \notin L^2(0,\pi); \text{ no endpoint BC required} \\[1.5mm]
+\text{Domain} & \text{Parameter } \lambda & \operatorname{EndpointClass}(\lambda) & \text{Asymptotic Coefficient Condition (Friedrichs)} \\ \hline
+\texttt{PhysicalDomain} & d=3 \ (\lambda=1/2) & \texttt{CRITICAL\_LC} & u(\theta) = A \theta^{1/2} + B \theta^{1/2} \log\theta \implies \texttt{forbidden\_log\_coeff } B = 0 \\[1.5mm]
+\texttt{PhysicalDomain} & d=4 \ (\lambda=1) & \texttt{REGULAR} & H_1 = -\partial_\theta^2, \ u(\theta) \sim A \theta + B \implies \texttt{singular\_branch\_coeff } B = 0 \\[1.5mm]
+\texttt{PhysicalDomain} & d \ge 5 \ (\lambda \ge 3/2) & \texttt{LIMIT\_POINT} & \text{Singular branch } \theta^{1-\lambda} \notin L^2(0,\pi); \text{ no boundary parameter required} \\[1.5mm]
 \hline
-\texttt{AnalyticDomain} & 1/2 < \lambda < 3/2, \lambda \ne 1 & \texttt{LIMIT\_CIRCLE} & u(\theta) \sim A \theta^\lambda + B \theta^{1-\lambda} \implies B = 0 \quad (u \sim A \theta^\lambda) \\[1.5mm]
-\texttt{AnalyticDomain} & 0 < \lambda < 1/2 & \texttt{LIMIT\_CIRCLE} & u(\theta) \sim A \theta^\lambda + B \theta^{1-\lambda} \implies A = 0 \quad (u \sim B \theta^{1-\lambda})
+\texttt{AnalyticDomain} & 1/2 < \lambda < 3/2, \lambda \ne 1 & \texttt{LIMIT\_CIRCLE} & u(\theta) \sim A \theta^\lambda + B \theta^{1-\lambda} \implies \texttt{singular\_branch\_coeff } B = 0 \\[1.5mm]
+\texttt{AnalyticDomain} & 0 < \lambda < 1/2 & \texttt{LIMIT\_CIRCLE} & u(\theta) \sim A \theta^\lambda + B \theta^{1-\lambda} \implies \texttt{regular\_branch\_coeff } A = 0
 \end{array}
 }$$
 
@@ -136,7 +139,7 @@ The three differential operators are related by changes of variable and unitary 
 The $L^2$ norm of normalized zonal functions $\phi_n(x)$ on $\mathscr{H}_\lambda = L^2([-1, 1], (1-x^2)^{\lambda-1/2} dx)$ has the exact closed-form expression:
 $$\boxed{\|\phi_n\|_\lambda^2 = \int_{-1}^1 \phi_n(x)^2 (1-x^2)^{\lambda - 1/2} dx = \frac{\pi 2^{1-2\lambda} \Gamma(n+2\lambda)}{n!(n+\lambda) \Gamma(\lambda)^2 \left[ C_n^{(\lambda)}(1) \right]^2}.}$$
 
-The exact norm norm-weight $h_n = \|\phi_n\|_\lambda^{-1}$ provides the direct cross-layer algebraic bridge converting polynomial-normalized recurrence $a_n$ to orthonormal Jacobi recurrence $\alpha_n$:
+The exact norm weight $h_n = \|\phi_n\|_\lambda^{-1}$ provides the direct cross-layer algebraic bridge converting polynomial-normalized recurrence $a_n$ to orthonormal Jacobi recurrence $\alpha_n$:
 $$\boxed{h_n = \|\phi_n\|_\lambda^{-1} \implies \alpha_n = a_n \frac{h_n}{h_{n+1}} = b_{n+1} \frac{h_{n+1}}{h_n}, \qquad \alpha_n^2 = a_n b_{n+1} = \frac{(n+1)(n+2\lambda)}{4(n+\lambda)(n+\lambda+1)}.}$$
 
 ---
@@ -168,11 +171,12 @@ $$\boxed{\alpha_n = \frac{1}{2} + \frac{\lambda(1-\lambda)}{4n^2} + O(n^{-3}) \q
 ### 6.1 Composite Approximation Schema & Quantified Overlap Contract
 The composite uniform expression combines endpoint Bessel layers and interior WKB waves:
 $$F_{\text{comp}}^{(K)} = F_{\text{north}}^{(K)}(z_+) + F_{\text{south}}^{(K)}(z_-) + F_{\text{interior}}^{(K)}(N_n, \theta) - F_{+O}^{(K)}(z_+) - F_{-O}^{(K)}(z_-).$$
-In Layer VI, $F_{\text{comp}}^{(K)}$ is categorized as `MATCHING_SCHEMA` until explicit analytic remainder majorants are derived.
 
 The overlap re-expansion contract is quantified over intermediate overlap domains $Z_0 \le z_\pm \le \delta N_n$:
 $$\boxed{\left| F_{\text{endpoint}}^{(K)} - F_O^{(K)} \right| \le N_n^{-K} \, G_{K, \lambda, Z_0, \delta}(z_\pm) \qquad \text{for } Z_0 \le z_\pm \le \delta N_n \quad (0 < \delta < \pi/2),}$$
-where $G_{K, \lambda, Z_0, \delta}(z)$ is an explicit $z$-dependent majorant function.
+where $G_{K, \lambda, Z_0, \delta}: [Z_0, \delta N_n] \to \mathbb{R}_{\ge 0}$ is a $z$-dependent majorant function.
+- **$\texttt{MATCHING\_SCHEMA}$:** Function $G$ is symbolically specified / unproved.
+- **$\texttt{ANALYTIC\_CERTIFIED}$:** Function $G$ is accompanied by a proved majorant theorem.
 
 ### 6.2 Certified Domain-Compatible Evaluation Selector ($M^*$)
 Pointwise representation selection minimizes local certified forward error bound $B_M(\theta)$ over domain-compatible candidates:
@@ -184,11 +188,12 @@ $$\boxed{M^*(\theta) = \arg\min_{\substack{M \\ \theta \in \mathcal{D}_M \\ \tex
 
 ### VII-A & VII-B. Hardware & Exact Symbolic Sub-Backends
 - **Polynomial Path:** $\mathbb{Q}[\lambda, x] \to \mathbb{Q} \to \text{RNS/CRT}$ (truth class `ARITHMETIC_EXACT`).
-- **Jacobi Golub-Welsch Path:** Eigendecomposition of symmetric tridiagonal $J_m$. When backed by a backward-stable eigensolver with validated residual bounds, status is `NUMERICAL_CERTIFIED`.
+- **Jacobi Golub-Welsch Path:** Eigendecomposition of symmetric tridiagonal $J_m$. When backed by a backward-stable eigensolver with validated residual bounds, status is `NUMERICAL_CERTIFIED` via a formal `NumericalCertificate`:
+  $$\boxed{\texttt{NumericalCertificate} = (\text{algorithm}, \text{backward bound}, \text{residual bound}, \text{forward conversion bound}).}$$
 
-### VII-C. RNS / CRT Sub-Backend with Algorithm & Point Denominators
-$N_{\max}$ is defined as **execution-plan metadata**. For rational parameter $\lambda = a/b$ and evaluation point $x = c/r$ (where $r$ is the denominator of evaluation point $x$), algorithm and point denominators are split:
-$$\boxed{D_{\text{alg}} = \operatorname{lcm}\left(\{d_k : d_k \in \mathcal{D}_{\text{rec}}\} \cup \{b\}\right), \qquad D_{\text{eval}} = \operatorname{lcm}(D_{\text{alg}}, r).}$$
+### VII-C. RNS / CRT Sub-Backend with Reduced Denominators
+$N_{\max}$ is defined as **execution-plan metadata**. For rational parameter $\lambda = a/b$ and evaluation point $x = c/r$ (where $r$ is the denominator of evaluation point $x$), algorithm denominators are computed from reduced fractions:
+$$\boxed{D_{\text{alg}} = \operatorname{lcm}\left( \operatorname{den}_{\text{red}}(a_n), \operatorname{den}_{\text{red}}(b_n), \dots, b \right), \qquad D_{\text{eval}} = \operatorname{lcm}(D_{\text{alg}}, r).}$$
 
 ### VII-D. Finite-Field Polynomial Arithmetic & NTT Sub-Backends
 Explicit formal dependency for finite-field certificates:
@@ -201,9 +206,9 @@ Explicit formal dependency for finite-field certificates:
    $$\boxed{\texttt{ZonalCertificate}(p, n) \iff \left( \texttt{PolyCertificate}(p) \land \texttt{PointCertificate}(p) \land p \nmid v_n \land p \nmid u_n \right).}$$
 
    *Failure Mode Taxonomy:*
-   - $p \mid r$: Point localization failure (evaluation point $x=c/r$ non-local in $\mathbb{F}_p$).
-   - $p \mid v_n$: Normalization representation failure ($C_n(1)$ denominator non-invertible in $\mathbb{F}_p$).
-   - $p \mid u_n$: Zonal zeroing failure ($C_n(1) \equiv 0 \pmod p$, division by zero in normalization).
+   - `PointLocalizationFailure` ($p \mid r$): Evaluation point $x=c/r$ non-local in $\mathbb{F}_p$.
+   - `NormalizationRepresentationFailure` ($p \mid v_n$): $C_n(1)$ denominator non-invertible in $\mathbb{F}_p$.
+   - `NormalizationSingularityFailure` ($p \mid u_n$): $C_n(1) \equiv 0 \pmod p$, normalization division by zero in $\mathbb{F}_p$.
 
 ---
 
@@ -217,7 +222,7 @@ $$\boxed{\texttt{ExactValue} \neq \texttt{ErrorBound} \neq \texttt{Residual}}$$
 $$\boxed{\{\texttt{ALGEBRAIC\_EXACT}, \texttt{ARITHMETIC\_EXACT}, \texttt{ANALYTIC\_CERTIFIED}, \texttt{NUMERICAL\_CERTIFIED}, \texttt{EMPIRICAL\_DIAGNOSTIC}\}}$$
 
 Provenance-aware total computational forward error decomposes as:
-$$\boxed{E_{\text{total}} \le E_{\text{analytic}} + E_{\text{arithmetic}} + E_{\text{conditioning}} + E_{\text{implementation}}, \qquad E_{\text{conditioning}} \le \kappa \cdot E_{\text{input}}.}$$
+$$\boxed{E_{\text{total}} \le \sum_i E_i \quad \text{provided } \operatorname{Cert}(E_i) \text{ holds}, \qquad E_{\text{conditioning}} \le \kappa \cdot E_{\text{input}}.}$$
 
 ### VIII-B. Provenance Invariant
 $$\boxed{\texttt{Residual} \not\implies \texttt{ErrorBound}}$$

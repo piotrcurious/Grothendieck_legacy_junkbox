@@ -690,13 +690,13 @@ def test_quadrature_exact_moments_beta_integral():
 def test_finite_field_bad_prime_normalization_check():
     """
     Verifies split finite-field certificates handling bad primes where p | u_n.
-    For C_5^(3/2)(1) = 21, prime p=7 divides u_n=21, causing phi_n normalization to fail in F_7 (ZonalZeroingFailure).
+    For C_10^(2)(1) = 286, prime p=13 divides u_n=286, causing phi_n normalization to fail in F_13 (NormalizationSingularityFailure).
     """
-    valid_bad, msg_bad = check_phi_n_admissibility(5, Fraction(3, 2), Fraction(1, 2), 7)
-    assert valid_bad is False  # Bad prime 7 divides C_5(1) = 21
-    assert "ZonalZeroingFailure" in msg_bad
+    valid_bad, msg_bad = check_phi_n_admissibility(10, Fraction(2), Fraction(1, 2), 13)
+    assert valid_bad is False  # Bad prime 13 divides C_10(1) = 286
+    assert "NormalizationSingularityFailure" in msg_bad
 
-    valid_ok, msg_ok = check_phi_n_admissibility(5, Fraction(3, 2), Fraction(1, 2), 17)
+    valid_ok, msg_ok = check_phi_n_admissibility(10, Fraction(2), Fraction(1, 2), 17)
     assert valid_ok is True
     assert "Valid" in msg_ok
 
