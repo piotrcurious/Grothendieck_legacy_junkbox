@@ -475,18 +475,32 @@ def exact_rational_bit_length(n: int, lambda_val: Union[int, Fraction], x: Union
     return bits_C, bits_phi
 
 
-def get_recurrence_denominator_lcm(n: int, lambda_val: Union[int, Fraction]) -> int:
+def extract_plan_recurrence_denominator(execution_plan: object = None, degree: int = 0, lambda_val: Union[int, Fraction] = Fraction(1, 2)) -> int:
     """
-    Computes D_rec = lcm({den_red(a_k), den_red(b_k) : k = 1..n} u {b}) for parameter lambda = a/b.
-    Uses exact reduced denominators of recurrence coefficients.
+    Computes D_rec(P) = lcm({den_red(q) : q in P_recurrence_arithmetic}).
+    If execution_plan is an object with 'recurrence_arithmetic', extracts denominators from it.
+    Otherwise computes D_rec directly for degree n and parameter lambda = a/b.
     """
+    if execution_plan is not None and hasattr(execution_plan, 'recurrence_arithmetic'):
+        lcm_val = 1
+        for q in getattr(execution_plan, 'recurrence_arithmetic'):
+            lcm_val = math.lcm(lcm_val, Fraction(q).denominator)
+        return lcm_val
+
     b = Fraction(lambda_val).denominator
     lcm_val = b
-    for k in range(1, n + 1):
+    for k in range(1, degree + 1):
         a_k, b_k = normalized_jacobi_coefficients(k, Fraction(lambda_val), exact=True)
         lcm_val = math.lcm(lcm_val, Fraction(a_k).denominator)
         lcm_val = math.lcm(lcm_val, Fraction(b_k).denominator)
     return lcm_val
+
+
+def get_recurrence_denominator_lcm(n: int, lambda_val: Union[int, Fraction]) -> int:
+    """
+    Computes D_rec = lcm({den_red(a_k), den_red(b_k) : k = 1..n} u {b}) for parameter lambda = a/b.
+    """
+    return extract_plan_recurrence_denominator(execution_plan=None, degree=n, lambda_val=lambda_val)
 
 
 # Alias for backward compatibility
@@ -518,12 +532,10 @@ def get_excluded_primes_denominator(n: int, lambda_val: Union[int, Fraction], x:
     return math.lcm(d_rec, math.lcm(d_norm, d_eval))
 
 
-def check_c_n_admissibility(n: int, lambda_val: Union[int, Fraction], p: int) -> bool:
+def check_c_n_admissibility(n: int, lambda_val: Union[int, Fraction], p: int, execution_plan: object = None) -> bool:
     """
     Admissibility certificate for unnormalized Gegenbauer polynomial C_n^(lambda)(x) in F_p (PolyCertificate):
-      Parameter notation: lambda = a/b.
-      D_rec = lcm({den_red(a_k), den_red(b_k)} u {b}).
-      PolyCertificate requires Prime(p) and gcd(p, D_rec) == 1.
+      PolyCertificate(p, P, n) requires Prime(p) and gcd(p, D_rec(P)) == 1.
     """
     if p <= 1:
         return False
@@ -532,8 +544,38 @@ def check_c_n_admissibility(n: int, lambda_val: Union[int, Fraction], p: int) ->
         if p % i == 0:
             return False
 
-    d_rec = get_recurrence_denominator_lcm(n, lambda_val)
+    d_rec = extract_plan_recurrence_denominator(execution_plan=execution_plan, degree=n, lambda_val=lambda_val)
     return (d_rec % p != 0)
+
+
+def bad_zonal_prime(p: int, degree: int, point: Union[int, Fraction], lambda_val: Union[int, Fraction] = Fraction(1, 2), execution_plan: object = None) -> bool:
+    """
+    Semantically exact bad zonal prime predicate:
+      Bad_zonal(p) <=> (p | r) or (p | v_n) or (p | u_n) or (p | D_rec(P))
+    where x = c/r and C_n^(lambda)(1) = u_n / v_n.
+    """
+    if p <= 1:
+        return True
+    for i in range(2, int(math.isqrt(p)) + 1):
+        if p % i == 0:
+            return True
+
+    r = Fraction(point).denominator
+    if r % p == 0:
+        return True
+
+    d_rec = extract_plan_recurrence_denominator(execution_plan=execution_plan, degree=degree, lambda_val=lambda_val)
+    if d_rec % p == 0:
+        return True
+
+    c1 = exact_rational_gegenbauer(degree, lambda_val, Fraction(1))
+    u_n = c1.numerator
+    v_n = c1.denominator
+
+    if v_n % p == 0 or u_n % p == 0:
+        return True
+
+    return False
 
 
 def check_point_admissibility(x: Union[int, Fraction], p: int) -> bool:

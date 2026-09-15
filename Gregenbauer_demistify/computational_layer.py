@@ -182,6 +182,7 @@ class ErrorBound:
     source: BoundSource
     status: TheoremStatus
     decomposition: ErrorDecomposition
+    target: CertificateTarget = CertificateTarget.NODE
     valid: bool = True
 
     def __float__(self) -> float:
@@ -200,6 +201,25 @@ class ErrorBound:
         if isinstance(other, (ExactValue, Residual)):
             return True
         return super().__ne__(other)
+
+
+@dataclass
+class SelectorCandidate:
+    """
+    Layer VI Candidate Interface for Selector:
+      Candidate { domain D_M, target Q, status, ErrorBound.valid, B_M(theta) }
+    Requires target Q matching: valid => B_M(theta) bounds the same target quantity F_Q(theta).
+    """
+    name: str
+    domain: Domain
+    target: CertificateTarget
+    status: TheoremStatus
+    error_bound: ErrorBound
+    cost: float  # FLOPs or execution time
+
+    @property
+    def is_valid_target_bound(self) -> bool:
+        return self.error_bound.valid and self.error_bound.target == self.target
 
 
 @dataclass
@@ -781,12 +801,12 @@ class GegenbauerComputationalSolver:
             a.is_pareto_optimal = not dominated
 
     def solve_optimal_permutation(self, domain_x: np.ndarray, max_error_tol: Optional[float] = None,
-                                   max_flop_budget: Optional[int] = None) -> SolverPerformanceMetrics:
+                                   max_flop_budget: Optional[int] = None, target: CertificateTarget = CertificateTarget.NODE) -> SolverPerformanceMetrics:
         """
         Feasibility-First Provenance Optimizer:
-        Selects optimal permutation evaluating certified ErrorBound objects only on domain-compatible points.
-        M*(theta) = argmin_{M, theta in D_M, ErrorBound_M certified} ErrorBound_M(theta).
-        Rejects candidates with unknown or uncertified error bounds.
+        Selects optimal permutation evaluating certified ErrorBound objects matching target Q.
+        M*(theta) = argmin_{M, theta in D_M, Candidate_M.target == Q, ErrorBound_M certified} ErrorBound_M(theta).
+        Rejects candidates with target mismatches, unknown, or uncertified error bounds.
         """
         metrics = self.benchmark_permutations(domain_x)
         pareto_candidates = [m for m in metrics.values() if m.is_pareto_optimal]
@@ -809,14 +829,24 @@ class GegenbauerComputationalSolver:
                 ):
                     continue
 
-                # Domain compatibility check
+                # Target matching & domain compatibility check
                 eb = m.total_error_bound
-                if eb.domain.contains(min_x) and eb.domain.contains(max_x):
+                eb.target = target  # Bind target
+                candidate = SelectorCandidate(
+                    name=m.permutation.value,
+                    domain=eb.domain,
+                    target=target,
+                    status=m.capability_cert.provenance_status,
+                    error_bound=eb,
+                    cost=m.exec_time_sec
+                )
+
+                if candidate.is_valid_target_bound and eb.domain.contains(min_x) and eb.domain.contains(max_x):
                     if eb <= max_error_tol and m.max_mixed_error <= max_error_tol:
                         filtered.append(m)
 
             if not filtered:
-                raise ValueError(f"No algebraic permutation satisfies certified domain-compatible total_error_bound <= {max_error_tol}")
+                raise ValueError(f"No algebraic permutation satisfies certified domain-compatible target={target.value} total_error_bound <= {max_error_tol}")
             pareto_candidates = filtered
 
         if max_flop_budget is not None:

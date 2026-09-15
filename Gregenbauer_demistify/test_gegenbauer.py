@@ -25,6 +25,7 @@ from scipy.special import eval_gegenbauer, eval_legendre, gamma, gammaln
 from Gregenbauer_demistify.algebraic_geometry_combinatorics import (
     EndpointClass,
     QuadricQuotientPolynomial,
+    bad_zonal_prime,
     classify_parameter_domain,
     endpoint_class,
     exact_rational_gegenbauer,
@@ -51,17 +52,21 @@ from Gregenbauer_demistify.algebraic_geometry_combinatorics import (
     check_phi_n_admissibility,
 )
 from Gregenbauer_demistify.computational_layer import (
-    orthonormal_jacobi_recurrence_residual,
-)
-from Gregenbauer_demistify.computational_layer import (
     AlgebraicPermutation,
+    CertificateTarget,
+    Domain,
+    ErrorBound,
+    ErrorDecomposition,
     GegenbauerComputationalSolver,
     NumericalBase,
     NumericalContext,
     PrecisionType,
+    SelectorCandidate,
     TheoremStatus,
+    BoundSource,
     high_precision_reference,
     jacobi_eigenpair_residual,
+    orthonormal_jacobi_recurrence_residual,
     scale_invariant_schrodinger_residual,
     scale_invariant_ode_residual,
     scale_invariant_recurrence_residual,
@@ -781,3 +786,74 @@ def test_denominator_separation_and_zonal_certificate_signature():
     zonal_valid, msg = check_zonal_admissibility(p=17, execution_plan="test_plan", degree=5, point=Fraction(1, 2), lambda_val=Fraction(3, 2))
     assert zonal_valid is True
     assert msg == "Valid ZonalCertificate"
+
+
+def test_semantically_exact_bad_zonal_prime_predicate():
+    """
+    Tests Bad_zonal(p) <=> (p | r) or (p | v_n) or (p | u_n) or (p | D_rec(P)).
+    """
+    # p=13 divides C_10^(2)(1) = 286 (u_n=286), so Bad_zonal(13) is True
+    assert bad_zonal_prime(13, degree=10, point=Fraction(1, 2), lambda_val=Fraction(2)) is True
+    # p=17 is clean, Bad_zonal(17) is False
+    assert bad_zonal_prime(17, degree=10, point=Fraction(1, 2), lambda_val=Fraction(2)) is False
+
+
+def test_selector_candidate_target_q_interface():
+    """
+    Verifies SelectorCandidate interface target Q matching requirement.
+    """
+    dom = Domain(name="test_domain", lower=-1.0, upper=1.0)
+    eb_node = ErrorBound(
+        value=1e-5,
+        domain=dom,
+        source=BoundSource.THEOREM_PROVED,
+        status=TheoremStatus.ALGEBRAIC_EXACT,
+        decomposition=ErrorDecomposition(),
+        target=CertificateTarget.NODE,
+        valid=True
+    )
+
+    cand_valid = SelectorCandidate(
+        name="test_node_cand",
+        domain=dom,
+        target=CertificateTarget.NODE,
+        status=TheoremStatus.ALGEBRAIC_EXACT,
+        error_bound=eb_node,
+        cost=1.0
+    )
+    assert cand_valid.is_valid_target_bound is True
+
+    cand_mismatch = SelectorCandidate(
+        name="test_weight_cand",
+        domain=dom,
+        target=CertificateTarget.WEIGHT,  # Mismatch with eb_node.target == NODE
+        status=TheoremStatus.ALGEBRAIC_EXACT,
+        error_bound=eb_node,
+        cost=1.0
+    )
+    assert cand_mismatch.is_valid_target_bound is False
+
+
+def test_arbitrary_test_function_norm_isometry():
+    """
+    Verifies ||T_lambda S_lambda f||_{L^2(0, pi)} = ||f||_{H_lambda}
+    for arbitrary linear combinations f = c_0 phi_0 + c_1 phi_1 + c_2 phi_2.
+    """
+    lam = 1.5
+    c0, c1, c2 = 2.0, -1.5, 0.5
+
+    # Compute ||f||_{H_lambda}^2 via exact orthogonality
+    norm0_sq = phi_norm_squared(0, lam)
+    norm1_sq = phi_norm_squared(1, lam)
+    norm2_sq = phi_norm_squared(2, lam)
+    exact_f_norm_sq = c0**2 * norm0_sq + c1**2 * norm1_sq + c2**2 * norm2_sq
+
+    # Compute ||T_lambda S_lambda f||_{L^2(0, pi)}^2 via high-order Gauss-Gegenbauer quadrature
+    nodes, weights = gauss_gegenbauer_quadrature(m=10, lambda_val=lam)
+    phi0 = normalized_phi_recurrence(0, lam, nodes)
+    phi1 = normalized_phi_recurrence(1, lam, nodes)
+    phi2 = normalized_phi_recurrence(2, lam, nodes)
+    f_vals = c0 * phi0 + c1 * phi1 + c2 * phi2
+
+    quad_norm_sq = float(np.sum(weights * (f_vals ** 2)))
+    assert np.isclose(quad_norm_sq, exact_f_norm_sq, rtol=1e-10)
