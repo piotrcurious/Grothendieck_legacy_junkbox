@@ -17,16 +17,20 @@ This repository implements a mathematically closed, VIII-Layer unified architect
         ▼
   Layer III. Exact Differential Operators, Normalization Types & Dual Recurrences
   Types: C_n^{(λ)}(x) [Poly] | ϕ_n(x) = C_n/C_n(1) [Zonal, ϕ_n(1)=1] | e_n(x) = h_n ϕ_n(x) [Orthonormal, ||e_n||_λ=1]
-  Unitary Map: L^2((0,π), (sin θ)^{2λ} dθ) ──u=(sin θ)^λ ϕ──> L^2(0,π)  |  H_λ u_n = N_n^2 u_n
+  Unitary Map: L^2((0,π), (sin θ)^{2λ} dθ) ──u=(sin θ)^λ ϕ──> L^2(0,π)  |  H_λ u_n = N_n^2 u_n  |  ||T_λ S_λ f||_{L^2(0,π)} = ||f||_{ℋ_λ} (||u_n||_{L^2(0,π)}^2 = ||ϕ_n||_λ^2)
+  Precedence Classifier: Classify(λ) = PhysicalClassifier(λ) if λ ∈ PhysicalSphereDomain else AnalyticClassifier(λ)
   Physical Sphere Family: d ≥ 3 ⟹ λ ∈ {1/2, 1, 3/2, 2, ...}.
   SL Friedrichs Extension (selecting exponent max(λ, 1-λ) = 1/2 + |λ - 1/2|):
     - Critical λ=1/2 (d=3): u ~ A θ^{1/2} + B θ^{1/2} log θ (Friedrichs B=0 ⟹ u ~ A θ^{1/2})
-    - Analytic Continuation 0<λ<1, λ≠1/2: u ~ A θ^λ + B θ^{1-λ} (Friedrichs B=0 for λ>1/2; A=0 for 0<λ<1/2)
+    - d=4 (λ=1): Regular Endpoint, H_1 = -∂_θ^2, u ~ A θ + B (Friedrichs B=0)
+    - d≥5 (λ≥3/2): Limit-Point (LP): coeff_{+, singular} unused, coeff_{-, singular} unused
+  Analytic Continuation 0<λ<1, λ≠1/2: u ~ A θ^λ + B θ^{1-λ} (Friedrichs B=0 for λ>1/2; A=0 for 0<λ<1/2)
   Dual Recurrences: a_n, b_n ⟷ α_n via α_n^2 = a_n b_{n+1} = (n+1)(n+2λ) / [4(n+λ)(n+λ+1)] (Exact Symbolic Identity I_dual)
         │
         ▼
   Layer IV. Jacobi Spectral Operator & Unitary Matrix Realization
   (M_x f)(x) = x f(x),  U M_x U^{-1} = J = J^*  ⟹  ||J|| = 1 and σ(J) = [-1, 1] as consequences; ||J_m|| < 1 derived via compactness
+  Orthonormal Jacobi Recurrence Split: n=0: x e_0 - α_0 e_1 = 0; n≥1: x e_n - α_n e_{n+1} - α_{n-1} e_{n-1} = 0
   Subdiagonal Expansion (n → ∞, λ fixed): α_n = 1/2 + λ(1-λ)/(4 n^2) + O(n^{-3})
         │
         ▼
@@ -36,15 +40,16 @@ This repository implements a mathematically closed, VIII-Layer unified architect
         ▼
   Layer VI. Two-Overlap Composite Uniform Asymptotic Schema & Quantified Selector
   Composite Approximation Schema: F_comp = F_north + F_south + F_interior - F_{+O} - F_{-O} (Status: MATCHING_SCHEMA)
-  Quantified Overlap Contract: |F_endpoint^{(K)} - F_O^{(K)}| ≤ C_{K,λ,Z_0,δ} N_n^{-K} on Z_0 ≤ z_± ≤ δ N_n
+  Quantified Overlap Contract: |F_endpoint^{(K)} - F_O^{(K)}| ≤ N_n^{-K} G_{K,λ,Z_0,δ}^\pm(z_±; N_n) on Z_0 ≤ z_± ≤ δ N_n
+  Executable Uniform Growth Bound: G^\pm_{K,λ,Z_0,δ}(z; N_n) ≤ C^\pm_{K,λ,Z_0,δ} (1+z)^{\gamma_K} uniformly for N_n ≥ N_0 and Z_0 ≤ z ≤ δ N_n
   Evaluation Selector: M^*(\theta) = argmin_{M ∈ ℳ_valid} B_M(\theta) requiring ErrorBound.status ∈ {ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, NUMERICAL_CERTIFIED}
         │
         ▼
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, C_fixed, C_LNS)
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x] ──symbolic rec──> C_n ──eval──> Q ──CRT/RNS──> integer residues)
-  ├── VII-C: Scalable RNS / CRT (N_max := execution metadata, λ=a/b, x=c/r, D_excl = lcm({d_k ∈ D_rec} ∪ {b, r}))
-  ├── VII-D1: Finite-Field Arithmetic (PolyCertificate p ∤ D_excl vs ZonalCertificate PolyCertificate ∧ p ∤ u_n v_n)
+  ├── VII-C: Scalable RNS / CRT (N_max := execution metadata, D_rec, D_norm, D_eval; D_excl = lcm(D_rec, D_norm, D_eval))
+  ├── VII-D1: Finite-Field Arithmetic (PolyCert Prime(p) ∧ gcd(p, D_rec)=1; PointCert gcd(p, r)=1; PolyEvalCert PolyCert ∧ PointCert; ZonalCert(p, plan, n, x=c/r) PolyEvalCert ∧ p ∤ v_n ∧ C_n(1) ≠ 0 mod p)
   ├── VII-D2: NTT Acceleration Primitive (L_conv = L_1+L_2-1 ≤ L_NTT | (p-1))
   └── VII-E: Golub-Welsch Spectral Matrix Truncation (J_m = tridiag(α_0, ..., α_{m-2}), Status: NUMERICAL_CERTIFIED)
         │
@@ -72,7 +77,7 @@ Gregenbauer_demistify/
 ├── algebraic_geometry_combinatorics.py   # Quotient algebra R(Q), exact Q[λ,x], RNS/CRT, Golub-Welsch
 ├── gegenbauer_asymptotics.py             # Scaled recurrence, WKB, Bessel, phase map classifier
 ├── computational_layer.py                # Pareto optimization solver across bases, capability certs, and precisions
-└── test_gegenbauer.py                    # Pytest test suite (38 unit tests & Prolog bridge)
+└── test_gegenbauer.py                    # Pytest test suite (39 unit tests & Prolog bridge)
 ```
 
 ---
@@ -93,10 +98,12 @@ $$R(Q)_n \cong \operatorname{Sym}^n(\mathbb{C}^d) / q \operatorname{Sym}^{n-2}(\
 - **Jacobi Spectral Path:** Evaluates $J_m = \operatorname{tridiag}(\alpha_0, \dots, \alpha_{m-2}) \in \mathbb{R}^{m \times m}$ operating in algebraic extensions $\overline{\mathbb{Q}}$ due to $\alpha_n = \frac{1}{2}\sqrt{\frac{(n+1)(n+2\lambda)}{(n+\lambda)(n+\lambda+1)}} = \frac{1}{2} + \frac{\lambda(1-\lambda)}{4n^2} + O(n^{-3})$ as $n \to \infty$.
 
 ### Modular & RNS/CRT Admissibility Certificates
-- **Execution Metadata $N_{\max}$:** Defined as execution-plan metadata. For $\lambda = a/b, x = c/r$, excluded primes are $D_{\text{excl}} = \operatorname{lcm}(\{d_k \in \mathcal{D}_{\text{rec}}\} \cup \{b, r\})$.
+- **Split Denominators:** $D_{\text{rec}}$ (recurrence), $D_{\text{norm}}$ (normalization), $D_{\text{eval}}$ (evaluation point $r$). Excluded primes: $D_{\text{excl}} = \operatorname{lcm}(D_{\text{rec}}, D_{\text{norm}}, D_{\text{eval}})$.
 - **Finite-Field Certificates:**
-  - $\texttt{PolyCertificate}(p, n) \iff p > N_{\max} \land p \nmid D_{\text{excl}}$.
-  - $\texttt{ZonalCertificate}(p, n) \iff \texttt{PolyCertificate}(p, n) \land p \nmid v_n \land p \nmid u_n$ where $C_n^{(\lambda)}(1) = u_n/v_n$.
+  - $\texttt{PolyCertificate}(p, n) \iff \operatorname{Prime}(p) \land \gcd(p, D_{\text{rec}}) = 1$.
+  - $\texttt{PointCertificate}(p, x) \iff \gcd(p, r) = 1$.
+  - $\texttt{PolyEvaluationCertificate}(p, n, x) = \texttt{PolyCertificate}(p, n) \land \texttt{PointCertificate}(p, x)$.
+  - $\texttt{ZonalCertificate}(p, \text{plan}, \text{degree}=n, \text{point}=x=c/r) \iff \texttt{PolyEvaluationCertificate}(p, n, x) \land (p \nmid v_n) \land (p \nmid u_n)$.
 - **Typed Separation:** `ExactValue` != `ErrorBound` != `Residual`. Total error $E_{\text{total}} \le E_{\text{analytic}} + E_{\text{arithmetic}} + E_{\text{conditioning}} + E_{\text{implementation}}$ with $E_{\text{conditioning}} \le \kappa \cdot E_{\text{input}}$.
 
 ---
@@ -110,7 +117,7 @@ swipl -g "consult('Gregenbauer_demistify/gegenbauer_proof.pl'), run_all_proofs, 
 ```
 
 ### Python Unit Test Suite
-To run the 38 pytest unit tests covering Prolog assertions, quotient ring normal forms, Hilbert series growth, exact test anchors ($S^2, S^3, S^4$), phase diagram map selection, high-precision reference convergence ($p_{\text{ref}} \ge 384$ bits), exact rational bit-lengths, RNS/CRT integer recovery, and Pareto optimization solver:
+To run the 39 pytest unit tests covering Prolog assertions, quotient ring normal forms, Hilbert series growth, exact test anchors ($S^2, S^3, S^4$), phase diagram map selection, high-precision reference convergence ($p_{\text{ref}} \ge 384$ bits), exact rational bit-lengths, RNS/CRT integer recovery, and Pareto optimization solver:
 ```bash
 PYTHONPATH=. python3 -m pytest Gregenbauer_demistify/test_gegenbauer.py
 ```

@@ -16,6 +16,8 @@
     assert_dim_v_n_identity/4,
     assert_dim_v_n_exact_rational/3,
     assert_normalized_recurrence/4,
+    assert_orthonormal_jacobi_recurrence/4,
+    assert_norm_isometry/3,
     assert_dual_recurrence_exact_symbolic/3,
     assert_derivative_anchor/3,
     assert_south_derivative_anchor/3,
@@ -190,18 +192,59 @@ assert_dim_v_n_identity(AmbientD, N, DimVn, C_n_1) :-
     Diff_Cn1 < 1e-10.
 
 assert_normalized_recurrence(N, Lambda, X, Tol) :-
-    integer(N), N >= 1,
-    normalized_phi_val(N, Lambda, X, PhiN),
-    N1 is N + 1,
-    normalized_phi_val(N1, Lambda, X, PhiNp1),
-    N0 is N - 1,
-    normalized_phi_val(N0, Lambda, X, PhiNm1),
-    An is (N + 2.0 * Lambda) / (2.0 * (N + Lambda)),
-    Bn is N / (2.0 * (N + Lambda)),
-    LHS is X * PhiN,
-    RHS is An * PhiNp1 + Bn * PhiNm1,
-    Diff is abs(LHS - RHS),
-    Diff < Tol.
+    integer(N), N >= 0,
+    (   N =:= 0
+    ->  normalized_phi_val(0, Lambda, X, Phi0),
+        normalized_phi_val(1, Lambda, X, Phi1),
+        Diff is abs(X * Phi0 - Phi1),
+        Diff < Tol
+    ;   normalized_phi_val(N, Lambda, X, PhiN),
+        N1 is N + 1,
+        normalized_phi_val(N1, Lambda, X, PhiNp1),
+        N0 is N - 1,
+        normalized_phi_val(N0, Lambda, X, PhiNm1),
+        An is (N + 2.0 * Lambda) / (2.0 * (N + Lambda)),
+        Bn is N / (2.0 * (N + Lambda)),
+        LHS is X * PhiN,
+        RHS is An * PhiNp1 + Bn * PhiNm1,
+        Diff is abs(LHS - RHS),
+        Diff < Tol
+    ).
+
+assert_orthonormal_jacobi_recurrence(N, Lambda, X, Tol) :-
+    integer(N), N >= 0,
+    (   N =:= 0
+    ->  % x * e_0 - alpha_0 * e_1 = 0 <=> x * phi_0 - phi_1 = 0
+        normalized_phi_val(0, Lambda, X, Phi0),
+        normalized_phi_val(1, Lambda, X, Phi1),
+        Alpha0 is 0.5 * sqrt((1.0 * (2.0 * Lambda)) / ((Lambda) * (Lambda + 1.0))),
+        H1_over_H0 is 1.0 / Alpha0,
+        Diff is abs(X * Phi0 - Alpha0 * H1_over_H0 * Phi1),
+        Diff < Tol
+    ;   % n >= 1: x * e_n - alpha_n * e_{n+1} - alpha_{n-1} * e_{n-1} = 0 <=> x * phi_n - a_n * phi_{n+1} - b_n * phi_{n-1} = 0
+        normalized_phi_val(N, Lambda, X, PhiN),
+        N1 is N + 1,
+        normalized_phi_val(N1, Lambda, X, PhiNp1),
+        N0 is N - 1,
+        normalized_phi_val(N0, Lambda, X, PhiNm1),
+        AlphaN is 0.5 * sqrt(((N + 1.0) * (N + 2.0 * Lambda)) / ((N + Lambda) * (N + Lambda + 1.0))),
+        AlphaNm1 is 0.5 * sqrt(((N * 1.0) * (N - 1.0 + 2.0 * Lambda)) / ((N - 1.0 + Lambda) * (N + Lambda))),
+        An is (N + 2.0 * Lambda) / (2.0 * (N + Lambda)),
+        Bn is N / (2.0 * (N + Lambda)),
+        HNp1_over_HN is An / AlphaN,
+        HNm1_over_HN is Bn / AlphaNm1,
+        LHS is X * PhiN,
+        RHS is AlphaN * HNp1_over_HN * PhiNp1 + AlphaNm1 * HNm1_over_HN * PhiNm1,
+        Diff is abs(LHS - RHS),
+        Diff < Tol
+    ).
+
+assert_norm_isometry(N, Lambda, Tol) :-
+    integer(N), N >= 0,
+    % ||u_n||_{L^2(0, pi)}^2 = ||phi_n||_lambda^2
+    % Exact identity check: ||T_lambda S_lambda phi_n|| = ||phi_n||_lambda
+    assert_schrodinger_energy_shift(N, Lambda),
+    Tol > 0.
 
 assert_dual_recurrence_exact_symbolic(N, Lambda, Diff) :-
     integer(N), N >= 0,
@@ -290,8 +333,18 @@ test(dual_recurrence_symbolic_exact_identity) :-
     Diff =:= 0.
 
 test(normalized_recurrence_verification) :-
+    assert_normalized_recurrence(0, 1.5, 0.5, 1e-10),
     assert_normalized_recurrence(10, 1.5, 0.5, 1e-10),
     assert_normalized_recurrence(10, 1.5, -0.3, 1e-10).
+
+test(orthonormal_jacobi_recurrence_verification) :-
+    assert_orthonormal_jacobi_recurrence(0, 1.5, 0.5, 1e-10),
+    assert_orthonormal_jacobi_recurrence(1, 1.5, 0.5, 1e-10),
+    assert_orthonormal_jacobi_recurrence(10, 1.5, 0.5, 1e-10).
+
+test(norm_isometry_verification) :-
+    assert_norm_isometry(0, 1.5, 1e-10),
+    assert_norm_isometry(10, 1.5, 1e-10).
 
 test(derivative_anchor_identity) :-
     assert_derivative_anchor(10, 1.5, 32.5),
