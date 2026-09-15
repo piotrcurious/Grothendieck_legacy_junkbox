@@ -20,7 +20,8 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   Layer III. Exact Differential Operators, Normalization Types & Dual Recurrences
   Initial Data Anchors: ϕ_0(x) = 1, ϕ_1(x) = x, e_n = h_n ϕ_n
   Types: C_n^{(λ)}(x) [Poly] | ϕ_n(x) = C_n/C_n(1) [Zonal, ϕ_n(1)=1] | e_n(x) = h_n ϕ_n(x) [Orthonormal, ||e_n||_λ=1]
-  Operator Morphism T_λ: L^2((0,π), (sin θ)^{2λ} dθ) ──(T_λ ϕ)(θ) = (sin θ)^λ ϕ(cos θ)──> L^2(0,π)  |  H_λ u_n = N_n^2 u_n
+  Operator Morphism Chain: L^2([-1,1], (1-x^2)^{λ-1/2} dx) ──(S_λ f)(θ) = f(cos θ)──> L^2((0,π), (sin θ)^{2λ} dθ) ──(T_λ g)(θ) = (sin θ)^λ g(θ)──> L^2(0,π)
+  Resulting Morphism: u_n = T_λ S_λ ϕ_n = (sin θ)^λ ϕ_n(cos θ)  |  H_λ u_n = N_n^2 u_n
   Two-Sided EndpointBoundaryCondition ((A_+, B_+) at θ → 0+, (A_-, B_-) at t = π-θ → 0+):
     - d=3 (λ=1/2): Critical Limit-Circle (LC), r_+ = r_- = 1/2, u ~ A_± θ^{1/2} + B_± θ^{1/2} log θ (forbidden_log_coeff B_± = 0)
     - d=4 (λ=1): Regular Endpoint, H_1 = -∂_θ^2, u ~ A_± θ + B_± (singular_branch_coeff B_± = 0)
@@ -41,8 +42,8 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
         ▼
   Layer VI. Two-Overlap Composite Uniform Asymptotic Schema & Quantified Selector
   Composite Approximation Schema: F_comp = F_north + F_south + F_interior - F_{+O} - F_{-O} (Status: MATCHING_SCHEMA)
-  Quantified Overlap Contract: |F_endpoint^{(K)} - F_O^{(K)}| ≤ N_n^{-K} G_{K,λ,Z_0,δ}(z_±) on Z_0 ≤ z_± ≤ δ N_n
-  Majorant Function Contract: G_{K,λ,Z_0,δ} : [Z_0, δ N_n] → ℝ_{≥0} (MATCHING_SCHEMA unproved vs ANALYTIC_CERTIFIED proved)
+  Quantified Overlap Majorants: |R_{+,O}^{(K)}| ≤ N_n^{-K} G^+_{K,λ,Z_0,δ}(z_+) and |R_{-,O}^{(K)}| ≤ N_n^{-K} G^-_{K,λ,Z_0,δ}(z_-) on Z_0 ≤ z_± ≤ δ N_n
+  Majorant Function Contract: G^+/G^- : [Z_0, δ N_n] → ℝ_{≥0} (MATCHING_SCHEMA unproved vs ANALYTIC_CERTIFIED proved)
   Evaluation Selector: M^*(\theta) = argmin_{M, \theta ∈ 𝒟_M, B_M \text{ cert}} B_M(\theta)
         │
         ▼
@@ -50,19 +51,20 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, C_fixed, C_LNS)
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x] ──symbolic rec──> C_n ──eval──> Q ──CRT/RNS──> integer residues)
   ├── VII-C: Scalable RNS / CRT (N_max := execution metadata, D_rec(P) = lcm({den_red(c) : c ∈ P_ops}), D_eval = lcm(D_rec, r))
-  ├── VII-D1: Finite-Field Arithmetic (PolyCert gcd(p, D_rec)=1 ∧ PointCert gcd(p, r)=1 vs ZonalCert PolyCert ∧ PointCert ∧ p ∤ u_n v_n)
+  ├── VII-D1: Finite-Field Arithmetic (PolyCert Prime(p) ∧ gcd(p, D_rec)=1 ∧ PointCert gcd(p, r)=1 vs ZonalCert PolyCert ∧ PointCert ∧ p ∤ v_n ∧ C_n(1) ≠ 0 mod p)
   │          Failure Taxonomy: PointLocalizationFailure (p|r), NormalizationRepresentationFailure (p|v_n), NormalizationSingularityFailure (p|u_n)
   ├── VII-D2: NTT Acceleration Primitive (L_conv = L_1+L_2-1 ≤ L_NTT | (p-1))
-  └── VII-E: Golub-Welsch Spectral Matrix Truncation (J_m = tridiag(α_0, ..., α_{m-2}), Status: NUMERICAL_CERTIFIED via NumericalCertificate)
+  └── VII-E: Golub-Welsch Spectral Matrix Truncation (J_m = tridiag(α_0, ..., α_{m-2}), Target-Specific NumericalCertificate)
         │
         ▼
   Layer VIII. Typed Separation: ExactValue vs ErrorBound vs Residual & Provenance Optimizer
   First-Class Types: ExactValue != ErrorBound != Residual (TheoremStatus Enum: ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, NUMERICAL_CERTIFIED, EMPIRICAL_DIAGNOSTIC)
   Residual != ErrorBound Invariant; Staged Perturbation Chain: F_0 ──E_0──> F_1 ──E_1──> ... ──E_{k-1}──> F_k ⟹ |F_0 - F_k| ≤ ∑_{i=0}^{k-1} E_i
+  Target-Specific NumericalCertificate: (target, A, B_back, R, κ_Q, B_conv, B_forward) ⟹ B_{Q,forward} ≥ κ_Q B_back + B_{Q,conv}
   Selector Candidate Conversion Mapping:
     - ALGEBRAIC_EXACT / ARITHMETIC_EXACT ⟹ 0 (relative to certified exact target)
     - ANALYTIC_CERTIFIED ⟹ B_theorem
-    - NUMERICAL_CERTIFIED ⟹ B_forward (via Composable Invariant B_forward ≥ κ B_back + B_conv)
+    - NUMERICAL_CERTIFIED ⟹ B_{Q,forward}
   Canonical Test Matrix: d ∈ {3, 4, 5}, n ∈ {0, 1, 2, 3} validating:
     - Initial Data Anchors: ϕ_0 = 1, ϕ_1 = x
     - Recurrence Invariants: n=0: x ϕ_0 - ϕ_1 = 0; n≥1: x ϕ_n - a_n ϕ_{n+1} - b_n ϕ_{n-1} = 0
@@ -132,16 +134,16 @@ $$\boxed{
 \end{array}
 }$$
 
-### 4.3 Three Operator Representations & Domain Operator Morphisms
-The three differential operators are related by changes of variable and unitary transformations between explicit function spaces via operator morphism $T_\lambda$:
+### 4.3 Three Operator Representations & Domain Operator Morphism Chain
+The three differential operators are related by changes of variable and unitary transformations between explicit function spaces via operator morphism chain $T_\lambda S_\lambda$:
 1. **Algebraic Differential Operator $L_x$:**
    $$L_x = (1 - x^2) \frac{d^2}{dx^2} - (2\lambda + 1)x \frac{d}{dx}, \qquad \text{Domain: } x \in (-1, 1) \subset \mathbb{R}.$$
-2. **Compact Radial Operator $L_\theta$:** Under coordinate change $x = \cos\theta$:
-   $$L_\theta = \frac{d^2}{d\theta^2} + 2\lambda \cot\theta \frac{d}{d\theta}, \qquad \text{Domain: } \theta \in (0, \pi).$$
-3. **Sturm-Liouville Hamiltonian $H_\lambda$:** Under operator morphism $T_\lambda$:
-   $$\boxed{T_\lambda : L^2\left((0, \pi), (\sin\theta)^{2\lambda} d\theta\right) \longrightarrow L^2(0, \pi), \qquad (T_\lambda \phi)(\theta) = (\sin\theta)^\lambda \phi(\cos\theta),}$$
-   $$H_\lambda = -\frac{d^2}{d\theta^2} + \lambda(\lambda - 1)\csc^2\theta, \qquad \text{Domain: } \theta \in (0, \pi).$$
-   Eigenvalue equation: $H_\lambda u_n = N_n^2 u_n$, where $N_n := n + \lambda$, so $N_n^2 = E_n + \lambda^2$.
+2. **Compact Radial Coordinate Transformation $S_\lambda$:** Under coordinate change $x = \cos\theta$:
+   $$\boxed{S_\lambda : L^2\left([-1, 1], (1-x^2)^{\lambda-1/2} dx\right) \longrightarrow L^2\left((0, \pi), (\sin\theta)^{2\lambda} d\theta\right), \qquad (S_\lambda f)(\theta) = f(\cos\theta).}$$
+3. **Sturm-Liouville Unitary Transformation $T_\lambda$:**
+   $$\boxed{T_\lambda : L^2\left((0, \pi), (\sin\theta)^{2\lambda} d\theta\right) \longrightarrow L^2(0, \pi), \qquad (T_\lambda g)(\theta) = (\sin\theta)^\lambda g(\theta).}$$
+   Combining $T_\lambda$ and $S_\lambda$ yields the exact Sturm-Liouville eigenfunction $u_n$:
+   $$\boxed{u_n = T_\lambda S_\lambda \phi_n = (\sin\theta)^\lambda \phi_n(\cos\theta), \qquad H_\lambda u_n = N_n^2 u_n \quad (N_n = n + \lambda).}$$
 
 ### 4.4 Exact Zonal Norm Formula & Dual Recurrence Invariant
 The $L^2$ norm of normalized zonal functions $\phi_n(x)$ on $\mathscr{H}_\lambda = L^2([-1, 1], (1-x^2)^{\lambda-1/2} dx)$ has the exact closed-form expression:
@@ -176,15 +178,15 @@ $$\boxed{\alpha_n = \frac{1}{2} + \frac{\lambda(1-\lambda)}{4n^2} + O(n^{-3}) \q
 
 ## 6. Layer V & VI: Asymptotic Schemas, Quantified Overlap Contract & Selector
 
-### 6.1 Composite Approximation Schema & Quantified Overlap Contract
+### 6.1 Composite Approximation Schema & Quantified Two-Sided Overlap Majorants
 The composite uniform expression combines endpoint Bessel layers and interior WKB waves:
 $$F_{\text{comp}}^{(K)} = F_{\text{north}}^{(K)}(z_+) + F_{\text{south}}^{(K)}(z_-) + F_{\text{interior}}^{(K)}(N_n, \theta) - F_{+O}^{(K)}(z_+) - F_{-O}^{(K)}(z_-).$$
 
-The overlap re-expansion contract is quantified over intermediate overlap domains $Z_0 \le z_\pm \le \delta N_n$:
-$$\boxed{\left| F_{\text{endpoint}}^{(K)} - F_O^{(K)} \right| \le N_n^{-K} \, G_{K, \lambda, Z_0, \delta}(z_\pm) \qquad \text{for } Z_0 \le z_\pm \le \delta N_n \quad (0 < \delta < \pi/2),}$$
-where $G_{K, \lambda, Z_0, \delta}: [Z_0, \delta N_n] \to \mathbb{R}_{\ge 0}$ is a $z$-dependent majorant function.
-- **$\texttt{MATCHING\_SCHEMA}$:** Function $G$ is symbolically specified / unproved.
-- **$\texttt{ANALYTIC\_CERTIFIED}$:** Function $G$ is accompanied by a proved majorant theorem.
+The two-sided overlap re-expansion contract is quantified over intermediate overlap domains $Z_0 \le z_\pm \le \delta N_n$:
+$$\boxed{\left| F_{\text{north}}^{(K)} - F_{+O}^{(K)} \right| \le N_n^{-K} \, G_{K, \lambda, Z_0, \delta}^+(z_+), \qquad \left| F_{\text{south}}^{(K)} - F_{-O}^{(K)} \right| \le N_n^{-K} \, G_{K, \lambda, Z_0, \delta}^-(z_-),}$$
+where $G^+:[Z_0, \delta N_n] \to \mathbb{R}_{\ge 0}$ and $G^-:[Z_0, \delta N_n] \to \mathbb{R}_{\ge 0}$ are explicit two-sided majorant functions.
+- **$\texttt{MATCHING\_SCHEMA}$:** Majorant functions $G^+, G^-$ are symbolically specified / unproved.
+- **$\texttt{ANALYTIC\_CERTIFIED}$:** Majorant functions $G^+, G^-$ are accompanied by proved majorant theorems.
 
 ### 6.2 Certified Domain-Compatible Evaluation Selector ($M^*$)
 Pointwise representation selection minimizes local certified forward error bound $B_M(\theta)$ over domain-compatible candidates:
@@ -196,8 +198,9 @@ $$\boxed{M^*(\theta) = \arg\min_{\substack{M \\ \theta \in \mathcal{D}_M \\ \tex
 
 ### VII-A & VII-B. Hardware & Exact Symbolic Sub-Backends
 - **Polynomial Path:** $\mathbb{Q}[\lambda, x] \to \mathbb{Q} \to \text{RNS/CRT}$ (truth class `ARITHMETIC_EXACT`).
-- **Jacobi Golub-Welsch Path:** Eigendecomposition of symmetric tridiagonal $J_m$. When backed by a backward-stable eigensolver with validated residual bounds, status is `NUMERICAL_CERTIFIED` via a formal `NumericalCertificate`:
-  $$\boxed{\texttt{NumericalCertificate} = (A, B_{\text{back}}, R, \kappa, B_{\text{conv}}, B_{\text{forward}}) \implies B_{\text{forward}} \ge \kappa \cdot B_{\text{back}} + B_{\text{conv}}.}$$
+- **Jacobi Golub-Welsch Path:** Eigendecomposition of symmetric tridiagonal $J_m$. When backed by a backward-stable eigensolver with validated residual bounds, status is `NUMERICAL_CERTIFIED` via a formal target-specific `NumericalCertificate`:
+  $$\boxed{\texttt{NumericalCertificate}_Q = (Q, A, B_{\text{back}}, R, \kappa_Q, B_{Q,\text{conv}}, B_{Q,\text{forward}}) \implies B_{Q,\text{forward}} \ge \kappa_Q \cdot B_{\text{back}} + B_{Q,\text{conv}},}$$
+  where target $Q \in \{\texttt{NODE}, \texttt{WEIGHT}, \texttt{EIGENVECTOR}, \texttt{QUADRATURE}\}$.
 
 ### VII-C. RNS / CRT Sub-Backend with Execution-Plan Denominators
 $N_{\max}$ is defined as **execution-plan metadata**. For an execution plan $P$, rational parameter $\lambda = a/b$, and evaluation point $x = c/r$:
@@ -206,12 +209,12 @@ $$\boxed{D_{\text{recurrence}}(P) = \operatorname{lcm}\left( \{ \operatorname{de
 ### VII-D. Finite-Field Polynomial Arithmetic & NTT Sub-Backends
 Explicit formal dependency for finite-field certificates:
 1. **Unnormalized Polynomial Certificate ($\texttt{PolyCertificate}$):**
-   $$\boxed{\texttt{PolyCertificate}(p, P) \iff \gcd(p, D_{\text{recurrence}}(P)) = 1.}$$
+   $$\boxed{\texttt{PolyCertificate}(p, P) \iff \operatorname{Prime}(p) \land \gcd(p, D_{\text{recurrence}}(P)) = 1.}$$
 2. **Point Evaluation Certificate ($\texttt{PointCertificate}$):**
    $$\boxed{\texttt{PointCertificate}(p, r) \iff \gcd(p, r) = 1.}$$
 3. **Normalized Zonal Spherical Certificate ($\texttt{ZonalCertificate}$):**
    For canonical reduced fraction $C_n^{(\lambda)}(1) = u_n/v_n$ ($\gcd(u_n, v_n)=1$):
-   $$\boxed{\texttt{ZonalCertificate}(p, P, n) \iff \left( \texttt{PolyCertificate}(p, P) \land \texttt{PointCertificate}(p, r) \land p \nmid v_n \land p \nmid u_n \right).}$$
+   $$\boxed{\texttt{ZonalCertificate}(p, P, n) \iff \left( \texttt{PolyCertificate}(p, P) \land \texttt{PointCertificate}(p, r) \land p \nmid v_n \land (C_n^{(\lambda)}(1) \neq 0 \bmod p) \right).}$$
 
    *Failure Mode Taxonomy:*
    - `PointLocalizationFailure` ($p \mid r$): Evaluation point $x=c/r$ non-local in $\mathbb{F}_p$.
@@ -233,10 +236,10 @@ Selector Candidate Conversion Mapping:
 $$\boxed{
 \begin{array}{c|c}
 \text{Status} & \text{Certified Forward Error Bound} \\ \hline
-\texttt{ALGEBRAIC\_EXACT} & 0 \quad (\text{relative to exact target}) \\
+\texttt{ALGEBRAIC\_EXACT} & 0 \quad (\text{relative to certified exact target}) \\
 \texttt{ARITHMETIC\_EXACT} & 0 \quad (\text{relative to exact algorithm}) \\
 \texttt{ANALYTIC\_CERTIFIED} & B_{\text{theorem}} \\
-\texttt{NUMERICAL\_CERTIFIED} & B_{\text{forward}} \quad (\text{via } B_{\text{forward}} \ge \kappa B_{\text{back}} + B_{\text{conv}})
+\texttt{NUMERICAL\_CERTIFIED} & B_{Q,\text{forward}} \quad (\text{via } B_{Q,\text{forward}} \ge \kappa_Q B_{\text{back}} + B_{Q,\text{conv}})
 \end{array}
 }$$
 
