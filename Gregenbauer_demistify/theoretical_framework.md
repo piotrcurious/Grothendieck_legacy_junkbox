@@ -20,9 +20,9 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   Layer III. Exact Differential Operators, Normalization Types & Dual Recurrences
   Types: C_n^{(λ)}(x) [Poly] | ϕ_n(x) = C_n/C_n(1) [Zonal, ϕ_n(1)=1] | e_n(x) = h_n ϕ_n(x) [Orthonormal, ||e_n||_λ=1]
   Operator Morphism T_λ: L^2((0,π), (sin θ)^{2λ} dθ) ──(T_λ ϕ)(θ) = (sin θ)^λ ϕ(cos θ)──> L^2(0,π)  |  H_λ u_n = N_n^2 u_n
-  Physical Sphere Family (d ≥ 3 ⟹ PhysicalDomain λ = (d-2)/2 ∈ {1/2, 1, 3/2, ...}) at both endpoints (θ → 0+, t = π-θ → 0+):
-    - d=3 (λ=1/2): Critical Limit-Circle (LC), u ~ A θ^{1/2} + B θ^{1/2} log θ (forbidden_log_coefficient B = 0)
-    - d=4 (λ=1): Regular Endpoint, H_1 = -∂_θ^2, u ~ A θ + B (singular_branch_coefficient B = 0)
+  Two-Sided EndpointBoundaryCondition (left θ → 0+, right t = π-θ → 0+):
+    - d=3 (λ=1/2): Critical Limit-Circle (LC), indicial root coalescence r_+ = r_- = 1/2, u ~ A θ^{1/2} + B θ^{1/2} log θ (forbidden_log_coeff B = 0)
+    - d=4 (λ=1): Regular Endpoint, H_1 = -∂_θ^2, u ~ A θ + B (singular_branch_coeff B = 0)
     - d≥5 (λ≥3/2): Limit-Point (LP), singular branch 1-λ ≤ -1/2 ∉ L^2(0,π), no boundary parameter required
   AnalyticContinuationDomain (λ > 0, λ ∉ PhysicalDomain): 1/2 < λ < 3/2 ⟹ LC (B = 0); 0 < λ < 1/2 ⟹ LC (A = 0)
   Exact Norm Invariant: ||ϕ_n||_λ^2 = (π 2^{1-2λ} Γ(n+2λ)) / (n! (n+λ) Γ(λ)^2 [C_n^{(λ)}(1)]^2) ⟹ h_n = ||ϕ_n||_λ^{-1} ⟹ α_n = a_n (h_n/h_{n+1})
@@ -42,13 +42,13 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   Composite Approximation Schema: F_comp = F_north + F_south + F_interior - F_{+O} - F_{-O} (Status: MATCHING_SCHEMA)
   Quantified Overlap Contract: |F_endpoint^{(K)} - F_O^{(K)}| ≤ N_n^{-K} G_{K,λ,Z_0,δ}(z_±) on Z_0 ≤ z_± ≤ δ N_n
   Majorant Function Contract: G_{K,λ,Z_0,δ} : [Z_0, δ N_n] → ℝ_{≥0} (MATCHING_SCHEMA unproved vs ANALYTIC_CERTIFIED proved)
-  Evaluation Selector: M^*(\theta) = argmin_{M, \theta ∈ ℛ_M, B_M \text{ cert}} B_M(\theta)
+  Evaluation Selector: M^*(\theta) = argmin_{M, \theta ∈ 𝒟_M, B_M \text{ cert}} B_M(\theta)
         │
         ▼
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, C_fixed, C_LNS)
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x] ──symbolic rec──> C_n ──eval──> Q ──CRT/RNS──> integer residues)
-  ├── VII-C: Scalable RNS / CRT (N_max := execution metadata, D_alg = lcm(den_red(a_n), den_red(b_n), ..., b), D_eval = lcm(D_alg, r))
+  ├── VII-C: Scalable RNS / CRT (N_max := execution metadata, D_alg(P) = lcm({den_red(c) : c ∈ P_ops}), D_eval = lcm(D_alg, r))
   ├── VII-D1: Finite-Field Arithmetic (PolyCert gcd(p, D_alg)=1 ∧ PointCert gcd(p, r)=1 vs ZonalCert PolyCert ∧ PointCert ∧ p ∤ u_n v_n)
   │          Failure Taxonomy: PointLocalizationFailure (p|r), NormalizationRepresentationFailure (p|v_n), NormalizationSingularityFailure (p|u_n)
   ├── VII-D2: NTT Acceleration Primitive (L_conv = L_1+L_2-1 ≤ L_NTT | (p-1))
@@ -57,8 +57,8 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
         ▼
   Layer VIII. Typed Separation: ExactValue vs ErrorBound vs Residual & Provenance Optimizer
   First-Class Types: ExactValue != ErrorBound != Residual (TheoremStatus Enum: ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, NUMERICAL_CERTIFIED, EMPIRICAL_DIAGNOSTIC)
-  Residual != ErrorBound Invariant; Certified Error Decomposition: E_total ≤ ∑ E_i provided Cert(E_i) holds, with E_conditioning ≤ κ · E_input
-  Canonical Test Matrix: d ∈ {3, 4, 5}, n ∈ {0, 1, 2, 3} validating x ϕ_n - a_n ϕ_{n+1} - b_n ϕ_{n-1} = 0 and α_n^2 - a_n b_{n+1} = 0
+  Residual != ErrorBound Invariant; Staged Perturbation Chain: F_0 ──E_0──> F_1 ──E_1──> ... ──E_{k-1}──> F_k ⟹ |F_0 - F_k| ≤ ∑ E_i
+  Canonical Test Matrix: d ∈ {3, 4, 5}, n ∈ {0, 1, 2, 3} validating R_rec(n,x) = x ϕ_n - a_n ϕ_{n+1} - b_n ϕ_{n-1} = 0 and I_dual(n) = α_n^2 - a_n b_{n+1} = 0
 ```
 
 ---
@@ -109,13 +109,13 @@ The framework distinguishes two named parameter domains:
 1. **$\texttt{PhysicalSphereDomain}$:** For $S^{d-1} \cong SO(d)/SO(d-1)$ ($d \ge 3$), parameter $\lambda = \frac{d-2}{2} \in \left\{ \frac{1}{2}, 1, \frac{3}{2}, 2, \dots \right\}$.
 2. **$\texttt{AnalyticContinuationDomain}$:** For continuous parameter range $\lambda > 0$.
 
-### 4.2 Endpoint Classification Function ($\operatorname{EndpointClass}(\lambda)$)
-The Sturm-Liouville operator $H_\lambda = -\partial_\theta^2 + \lambda(\lambda-1)\csc^2\theta$ on $(0, \pi)$ admits identical endpoint classifications at both endpoints $\theta \to 0^+$ and $t = \pi - \theta \to 0^+$:
+### 4.2 Two-Sided Endpoint Classification Function ($\operatorname{EndpointClass}(\lambda)$)
+The Sturm-Liouville operator $H_\lambda = -\partial_\theta^2 + \lambda(\lambda-1)\csc^2\theta$ on $(0, \pi)$ admits identical two-sided endpoint boundary conditions at both endpoints ($\theta \to 0^+$ and $t = \pi - \theta \to 0^+$):
 
 $$\boxed{
 \begin{array}{c|c|c|l}
 \text{Domain} & \text{Parameter } \lambda & \operatorname{EndpointClass}(\lambda) & \text{Asymptotic Coefficient Condition (Friedrichs)} \\ \hline
-\texttt{PhysicalDomain} & d=3 \ (\lambda=1/2) & \texttt{CRITICAL\_LC} & u(\theta) = A \theta^{1/2} + B \theta^{1/2} \log\theta \implies \texttt{forbidden\_log\_coeff } B = 0 \\[1.5mm]
+\texttt{PhysicalDomain} & d=3 \ (\lambda=1/2) & \texttt{CRITICAL\_LC} & r_+ = r_- = 1/2, \ u \sim A \theta^{1/2} + B \theta^{1/2} \log\theta \implies \texttt{forbidden\_log\_coeff } B = 0 \\[1.5mm]
 \texttt{PhysicalDomain} & d=4 \ (\lambda=1) & \texttt{REGULAR} & H_1 = -\partial_\theta^2, \ u(\theta) \sim A \theta + B \implies \texttt{singular\_branch\_coeff } B = 0 \\[1.5mm]
 \texttt{PhysicalDomain} & d \ge 5 \ (\lambda \ge 3/2) & \texttt{LIMIT\_POINT} & \text{Singular branch } \theta^{1-\lambda} \notin L^2(0,\pi); \text{ no boundary parameter required} \\[1.5mm]
 \hline
@@ -189,16 +189,16 @@ $$\boxed{M^*(\theta) = \arg\min_{\substack{M \\ \theta \in \mathcal{D}_M \\ \tex
 ### VII-A & VII-B. Hardware & Exact Symbolic Sub-Backends
 - **Polynomial Path:** $\mathbb{Q}[\lambda, x] \to \mathbb{Q} \to \text{RNS/CRT}$ (truth class `ARITHMETIC_EXACT`).
 - **Jacobi Golub-Welsch Path:** Eigendecomposition of symmetric tridiagonal $J_m$. When backed by a backward-stable eigensolver with validated residual bounds, status is `NUMERICAL_CERTIFIED` via a formal `NumericalCertificate`:
-  $$\boxed{\texttt{NumericalCertificate} = (\text{algorithm}, \text{backward bound}, \text{residual bound}, \text{forward conversion bound}).}$$
+  $$\boxed{\texttt{NumericalCertificate} = (A, B_{\text{back}}, R, \kappa, B_{\text{conv}}, B_{\text{forward}}) \implies E_{\text{forward}} \le \kappa \cdot B_{\text{back}} + B_{\text{conv}}.}$$
 
-### VII-C. RNS / CRT Sub-Backend with Reduced Denominators
-$N_{\max}$ is defined as **execution-plan metadata**. For rational parameter $\lambda = a/b$ and evaluation point $x = c/r$ (where $r$ is the denominator of evaluation point $x$), algorithm denominators are computed from reduced fractions:
-$$\boxed{D_{\text{alg}} = \operatorname{lcm}\left( \operatorname{den}_{\text{red}}(a_n), \operatorname{den}_{\text{red}}(b_n), \dots, b \right), \qquad D_{\text{eval}} = \operatorname{lcm}(D_{\text{alg}}, r).}$$
+### VII-C. RNS / CRT Sub-Backend with Execution-Plan Denominators
+$N_{\max}$ is defined as **execution-plan metadata**. For an execution plan $P$, rational parameter $\lambda = a/b$, and evaluation point $x = c/r$:
+$$\boxed{D_{\text{alg}}(P) = \operatorname{lcm}\left( \{ \operatorname{den}_{\text{red}}(c) : c \in P_{\text{rational\_operations}} \} \cup \{b\} \right), \qquad D_{\text{eval}} = \operatorname{lcm}(D_{\text{alg}}(P), r).}$$
 
 ### VII-D. Finite-Field Polynomial Arithmetic & NTT Sub-Backends
 Explicit formal dependency for finite-field certificates:
 1. **Unnormalized Polynomial Certificate ($\texttt{PolyCertificate}$):**
-   $$\boxed{\texttt{PolyCertificate}(p) \iff \gcd(p, D_{\text{alg}}) = 1.}$$
+   $$\boxed{\texttt{PolyCertificate}(p) \iff \gcd(p, D_{\text{alg}}(P)) = 1.}$$
 2. **Point Evaluation Certificate ($\texttt{PointCertificate}$):**
    $$\boxed{\texttt{PointCertificate}(p) \iff \gcd(p, r) = 1.}$$
 3. **Normalized Zonal Spherical Certificate ($\texttt{ZonalCertificate}$):**
@@ -207,7 +207,7 @@ Explicit formal dependency for finite-field certificates:
 
    *Failure Mode Taxonomy:*
    - `PointLocalizationFailure` ($p \mid r$): Evaluation point $x=c/r$ non-local in $\mathbb{F}_p$.
-   - `NormalizationRepresentationFailure` ($p \mid v_n$): $C_n(1)$ denominator non-invertible in $\mathbb{F}_p$.
+   - `NormalizationRepresentationFailure` ($p \mid v_n$): Rational representation $u_n/v_n$ of $C_n(1)$ non-local in $\mathbb{F}_p$.
    - `NormalizationSingularityFailure` ($p \mid u_n$): $C_n(1) \equiv 0 \pmod p$, normalization division by zero in $\mathbb{F}_p$.
 
 ---
@@ -221,9 +221,14 @@ $$\boxed{\texttt{ExactValue} \neq \texttt{ErrorBound} \neq \texttt{Residual}}$$
 `TheoremStatus` Enum:
 $$\boxed{\{\texttt{ALGEBRAIC\_EXACT}, \texttt{ARITHMETIC\_EXACT}, \texttt{ANALYTIC\_CERTIFIED}, \texttt{NUMERICAL\_CERTIFIED}, \texttt{EMPIRICAL\_DIAGNOSTIC}\}}$$
 
-Provenance-aware total computational forward error decomposes as:
-$$\boxed{E_{\text{total}} \le \sum_i E_i \quad \text{provided } \operatorname{Cert}(E_i) \text{ holds}, \qquad E_{\text{conditioning}} \le \kappa \cdot E_{\text{input}}.}$$
+Provenance-aware total computational forward error decomposes across a staged perturbation chain $F_0 \xrightarrow{E_0} F_1 \xrightarrow{E_1} \dots \xrightarrow{E_{k-1}} F_k$:
+$$\boxed{E_{\text{total}} \le \sum_{i=0}^{k-1} E_i \quad \text{provided } \operatorname{Cert}(E_i) \text{ holds for } |F_i - F_{i+1}| \le E_i, \qquad E_{\text{conditioning}} \le \kappa \cdot E_{\text{input}}.}$$
 
-### VIII-B. Provenance Invariant
+### VIII-B. Mandatory Cross-Layer Consistency Invariants
+The Layer VIII canonical test matrix ($d \in \{3, 4, 5\}, n \in \{0, 1, 2, 3\}$) explicitly validates:
+1. **Recurrence Invariant:** $R_{\text{rec}}(n, x) = x \phi_n - a_n \phi_{n+1} - b_n \phi_{n-1} = 0$.
+2. **Dual Conversion Square Invariant:** $I_{\text{dual}}(n) = \alpha_n^2 - a_n b_{n+1} = 0$.
+
+### VIII-C. Provenance Invariant
 $$\boxed{\texttt{Residual} \not\implies \texttt{ErrorBound}}$$
 Unless a theorem explicitly supplies an implication mapping equation residual to forward error bound, `Residual` objects remain diagnostics and do not participate in certified optimization.

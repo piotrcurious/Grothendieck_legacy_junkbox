@@ -12,8 +12,8 @@ Features:
   `NUMERICAL_CERTIFIED`, `EMPIRICAL_DIAGNOSTIC`.
 - Exactness Semantics: "Algebraic/arithmetic exactness => zero execution error relative
   to the specified exact algorithm."
-- Strengthened Decomposed Error Model:
-  E_total <= sum_i E_i provided Cert(E_i) holds, where E_conditioning <= kappa * E_input.
+- Staged Perturbation Error Composition:
+  F_0 -> F_1 -> ... -> F_k  =>  |F_0 - F_k| <= sum_{i=0}^{k-1} |F_i - F_{i+1}|
 - Domain-Compatible Selector:
   M*(theta) = argmin_{M, theta in D_M, ErrorBound_M certified} ErrorBound_M(theta).
 - Real Execution Backends: FLOAT32, FLOAT64, LONGDOUBLE, MPMATH (100+ bits),
@@ -102,11 +102,20 @@ class BoundSource(Enum):
 
 @dataclass
 class NumericalCertificate:
-    """Formal tuple defining a numerical eigensolver or solver certificate."""
+    """
+    Full Numerical Eigensolver / Solver Certificate.
+    Includes algorithm, backward bound, residual bound, conditioning kappa, forward conversion bound,
+    and certified forward error bound E_forward <= kappa * B_back + B_conv.
+    """
     algorithm: str
     backward_bound: float
     residual_bound: float
+    conditioning_kappa: float
     forward_conversion_bound: float
+
+    @property
+    def forward_error_bound(self) -> float:
+        return self.conditioning_kappa * self.backward_bound + self.forward_conversion_bound
 
 
 @dataclass
