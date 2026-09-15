@@ -19,17 +19,18 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
         ▼
   Layer III. Exact Differential Operators, Normalization Types & Dual Recurrences
   Types: C_n^{(λ)}(x) [Poly] | ϕ_n(x) = C_n/C_n(1) [Zonal, ϕ_n(1)=1] | e_n(x) = h_n ϕ_n(x) [Orthonormal, ||e_n||_λ=1]
-  Unitary Map: L^2((0,π), (sin θ)^{2λ} dθ) ──u=(sin θ)^λ ϕ──> L^2(0,π)  |  H_λ u_n = N_n^2 u_n
-  Physical Sphere Family (d ≥ 3 ⟹ λ = (d-2)/2):
+  Operator Morphism T_λ: L^2((0,π), (sin θ)^{2λ} dθ) ──(T_λ ϕ)(θ) = (sin θ)^λ ϕ(cos θ)──> L^2(0,π)  |  H_λ u_n = N_n^2 u_n
+  Physical Sphere Family (d ≥ 3 ⟹ PhysicalDomain λ = (d-2)/2 ∈ {1/2, 1, 3/2, ...}):
     - d=3 (λ=1/2): Critical Limit-Circle (LC), u ~ A θ^{1/2} + B θ^{1/2} log θ (Friedrichs B=0 ⟹ u ~ A θ^{1/2})
-    - d=4 (λ=1): Regular / Limit-Circle (LC), u ~ A θ + B (Friedrichs B=0 ⟹ u ~ A θ)
+    - d=4 (λ=1): Regular Endpoint, H_1 = -∂_θ^2, u ~ A θ
     - d≥5 (λ≥3/2): Limit-Point (LP), singular branch 1-λ ≤ -1/2 ∉ L^2(0,π), no endpoint BC required
-  Dual Recurrences: a_n, b_n ⟷ α_n via α_n^2 = a_n b_{n+1} = (n+1)(n+2λ) / [4(n+λ)(n+λ+1)] (Exact Symbolic Identity I_dual)
+  AnalyticContinuationDomain (λ > 0, λ ∉ PhysicalDomain): 1/2 < λ < 3/2 ⟹ LC (u ~ A θ^λ); 0 < λ < 1/2 ⟹ LC (u ~ B θ^{1-λ})
+  Exact Norm Invariant: ||ϕ_n||_λ^2 = (π 2^{1-2λ} Γ(n+2λ)) / (n! (n+λ) Γ(λ)^2 [C_n^{(λ)}(1)]^2) ⟹ h_n = ||ϕ_n||_λ^{-1} ⟹ α_n = a_n (h_n/h_{n+1})
         │
         ▼
   Layer IV. Jacobi Spectral Operator & Unitary Matrix Realization
   (M_x f)(x) = x f(x),  U M_x U^{-1} = J = J^*  ⟹  ||J|| = 1 and σ(J) = [-1, 1] as consequences
-  Self-Contained Spectral Theorem: ||J_m|| < 1 derived via compactness of unit sphere S^{m-1} and max_{S^{m-1}} |⟨J_m v, v⟩| < 1
+  Rayleigh-Ritz Spectral Theorem: ||J_m|| = max_{||v||=1} |⟨J_m v, v⟩| < 1 derived via compactness of unit sphere S^{m-1}
   Subdiagonal Expansion (n → ∞, λ fixed): α_n = 1/2 + λ(1-λ)/(4 n^2) + O(n^{-3})
         │
         ▼
@@ -39,8 +40,8 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
         ▼
   Layer VI. Two-Overlap Composite Uniform Asymptotic Schema & Quantified Selector
   Composite Approximation Schema: F_comp = F_north + F_south + F_interior - F_{+O} - F_{-O} (Status: MATCHING_SCHEMA)
-  Quantified Overlap Contract: |F_endpoint^{(K)} - F_O^{(K)}| ≤ C_{K,λ,Z_0,δ} N_n^{-K} on Z_0 ≤ z_± ≤ δ N_n
-  Evaluation Selector: M^*(\theta) = argmin_{M, \theta ∈ ℛ_M, B_M \text{ cert}} B_M(\theta)
+  Quantified Overlap Contract: |F_endpoint^{(K)} - F_O^{(K)}| ≤ N_n^{-K} G_{K,λ,Z_0,δ}(z_±) on Z_0 ≤ z_± ≤ δ N_n
+  Evaluation Selector: M^*(\theta) = argmin_{M, \theta ∈ mathcal{D}_M, B_M \text{ cert}} B_M(\theta)
         │
         ▼
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
@@ -100,47 +101,61 @@ $$\phi_n(x) = \frac{C_n^{(\lambda)}(x)}{C_n^{(\lambda)}(1)}.$$
 
 ## 4. Layer III: Domain Operators, Type System & Singular Sturm-Liouville Extensions
 
-### 4.1 Physical Spherical Parameter Family vs Limit-Circle / Limit-Point Classification
-For the physical geometric family $S^{d-1} \cong SO(d)/SO(d-1)$ with $d \ge 3$, the parameter range is discrete: $\lambda = \frac{d-2}{2} \in \left\{ \frac{1}{2}, 1, \frac{3}{2}, 2, \dots \right\}$.
-The Sturm-Liouville operator $H_\lambda = -\partial_\theta^2 + \lambda(\lambda-1)\csc^2\theta$ on $(0, \pi)$ admits the following classification at endpoints $\theta = 0, \pi$:
+### 4.1 Parameter Domains: PhysicalSphereDomain vs AnalyticContinuationDomain
+The framework distinguishes two named parameter domains:
+1. **$\texttt{PhysicalSphereDomain}$:** For $S^{d-1} \cong SO(d)/SO(d-1)$ ($d \ge 3$), parameter $\lambda = \frac{d-2}{2} \in \left\{ \frac{1}{2}, 1, \frac{3}{2}, 2, \dots \right\}$.
+2. **$\texttt{AnalyticContinuationDomain}$:** For continuous parameter range $\lambda > 0$.
+
+### 4.2 Endpoint Classification Function ($\operatorname{EndpointClass}(\lambda)$)
+The Sturm-Liouville operator $H_\lambda = -\partial_\theta^2 + \lambda(\lambda-1)\csc^2\theta$ on $(0, \pi)$ admits the following exact classification:
 
 $$\boxed{
-\begin{array}{c|c|l}
-\text{Parameter } \lambda & \text{Endpoint Type} & \text{Friedrichs Self-Adjoint Boundary Behavior} \\ \hline
-\lambda = 1/2 \ (d=3) & \text{Critical LC} & u(\theta) = A \theta^{1/2} + B \theta^{1/2} \log\theta \implies B = 0 \quad (u \sim A \theta^{1/2}) \\[1.5mm]
-1/2 < \lambda < 3/2 \ (d=4) & \text{LC / Regular} & u(\theta) \sim A \theta^\lambda + B \theta^{1-\lambda} \implies B = 0 \quad (u \sim A \theta^\lambda) \\[1.5mm]
-\lambda \ge 3/2 \ (d \ge 5) & \text{Limit-Point (LP)} & \text{Singular branch } \theta^{1-\lambda} \notin L^2(0,\pi); \text{ no endpoint BC required}
+\begin{array}{c|c|c|l}
+\text{Domain} & \text{Parameter } \lambda & \operatorname{EndpointClass}(\lambda) & \text{Friedrichs Self-Adjoint Boundary Behavior} \\ \hline
+\texttt{PhysicalDomain} & d=3 \ (\lambda=1/2) & \texttt{CRITICAL\_LC} & u(\theta) = A \theta^{1/2} + B \theta^{1/2} \log\theta \implies B = 0 \quad (u \sim A \theta^{1/2}) \\[1.5mm]
+\texttt{PhysicalDomain} & d=4 \ (\lambda=1) & \texttt{REGULAR} & H_1 = -\partial_\theta^2, \ u(\theta) \sim A \theta + B \implies B = 0 \quad (u \sim A \theta) \\[1.5mm]
+\texttt{PhysicalDomain} & d \ge 5 \ (\lambda \ge 3/2) & \texttt{LIMIT\_POINT} & \text{Singular branch } \theta^{1-\lambda} \notin L^2(0,\pi); \text{ no endpoint BC required} \\[1.5mm]
+\hline
+\texttt{AnalyticDomain} & 1/2 < \lambda < 3/2, \lambda \ne 1 & \texttt{LIMIT\_CIRCLE} & u(\theta) \sim A \theta^\lambda + B \theta^{1-\lambda} \implies B = 0 \quad (u \sim A \theta^\lambda) \\[1.5mm]
+\texttt{AnalyticDomain} & 0 < \lambda < 1/2 & \texttt{LIMIT\_CIRCLE} & u(\theta) \sim A \theta^\lambda + B \theta^{1-\lambda} \implies A = 0 \quad (u \sim B \theta^{1-\lambda})
 \end{array}
 }$$
 
-*Note:* The continuous parameter range $0 < \lambda < 1/2$ (where the Friedrichs extension selects branch $A = 0 \implies u \sim B \theta^{1-\lambda}$) represents an analytic continuation in $\lambda$, not part of the physical $SO(d)/SO(d-1)$ ($d \ge 3$) parameter family.
-
-### 4.2 Three Operator Representations & Domain Boundaries
-The three differential operators are related by changes of variable and unitary transformations between explicit function spaces:
+### 4.3 Three Operator Representations & Domain Operator Morphisms
+The three differential operators are related by changes of variable and unitary transformations between explicit function spaces via operator morphism $T_\lambda$:
 1. **Algebraic Differential Operator $L_x$:**
    $$L_x = (1 - x^2) \frac{d^2}{dx^2} - (2\lambda + 1)x \frac{d}{dx}, \qquad \text{Domain: } x \in (-1, 1) \subset \mathbb{R}.$$
 2. **Compact Radial Operator $L_\theta$:** Under coordinate change $x = \cos\theta$:
    $$L_\theta = \frac{d^2}{d\theta^2} + 2\lambda \cot\theta \frac{d}{d\theta}, \qquad \text{Domain: } \theta \in (0, \pi).$$
-3. **Sturm-Liouville Hamiltonian $H_\lambda$:** Under unitary transformation $u_n(\theta) = (\sin\theta)^\lambda \phi_n(\cos\theta)$ mapping:
-   $$\boxed{L^2\left((0, \pi), (\sin\theta)^{2\lambda} d\theta\right) \xrightarrow{\quad u = (\sin\theta)^\lambda \phi \quad} L^2(0, \pi),}$$
+3. **Sturm-Liouville Hamiltonian $H_\lambda$:** Under operator morphism $T_\lambda$:
+   $$\boxed{T_\lambda : L^2\left((0, \pi), (\sin\theta)^{2\lambda} d\theta\right) \longrightarrow L^2(0, \pi), \qquad (T_\lambda \phi)(\theta) = (\sin\theta)^\lambda \phi(\cos\theta),}$$
    $$H_\lambda = -\frac{d^2}{d\theta^2} + \lambda(\lambda - 1)\csc^2\theta, \qquad \text{Domain: } \theta \in (0, \pi).$$
    Eigenvalue equation: $H_\lambda u_n = N_n^2 u_n$, where $N_n := n + \lambda$, so $N_n^2 = E_n + \lambda^2$.
 
+### 4.4 Exact Zonal Norm Formula & Dual Recurrence Invariant
+The $L^2$ norm of normalized zonal functions $\phi_n(x)$ on $\mathscr{H}_\lambda = L^2([-1, 1], (1-x^2)^{\lambda-1/2} dx)$ has the exact closed-form expression:
+$$\boxed{\|\phi_n\|_\lambda^2 = \int_{-1}^1 \phi_n(x)^2 (1-x^2)^{\lambda - 1/2} dx = \frac{\pi 2^{1-2\lambda} \Gamma(n+2\lambda)}{n!(n+\lambda) \Gamma(\lambda)^2 \left[ C_n^{(\lambda)}(1) \right]^2}.}$$
+
+The exact norm norm-weight $h_n = \|\phi_n\|_\lambda^{-1}$ provides the direct cross-layer algebraic bridge converting polynomial-normalized recurrence $a_n$ to orthonormal Jacobi recurrence $\alpha_n$:
+$$\boxed{h_n = \|\phi_n\|_\lambda^{-1} \implies \alpha_n = a_n \frac{h_n}{h_{n+1}} = b_{n+1} \frac{h_{n+1}}{h_n}, \qquad \alpha_n^2 = a_n b_{n+1} = \frac{(n+1)(n+2\lambda)}{4(n+\lambda)(n+\lambda+1)}.}$$
+
 ---
 
-## 5. Layer IV: Jacobi Spectral Operator & Self-Contained $\|J_m\| < 1$ Proof
+## 5. Layer IV: Jacobi Spectral Operator & Rayleigh-Ritz $\|J_m\| < 1$ Proof
 
 On $\mathscr{H}_\lambda = L^2([-1, 1], (1-x^2)^{\lambda-1/2} dx)$, coordinate multiplication $(M_x f)(x) = x f(x)$ is bounded self-adjoint. By unitary equivalence $J = U M_x U^{-1}$ to $M_x$:
 $$\boxed{\|J\| = \|M_x\| = 1 \quad \text{and} \quad \sigma(J) = \sigma(M_x) = [-1, 1] \quad \text{(as mathematical consequences).}}$$
 
 ### Rigorous Self-Contained Proof of $\|J_m\| < 1$
-For any finite principal truncation $J_m = P_m M_x P_m |_{\operatorname{span}\{e_0, \dots, e_{m-1}\}} \in \mathbb{R}^{m \times m}$, consider the continuous Rayleigh quotient function $f(v) = |\langle J_m v, v \rangle|$ defined on the unit sphere $S^{m-1} = \{v \in \mathbb{R}^m : \|v\|_2 = 1\}$.
+For finite principal truncation $J_m = P_m M_x P_m |_{\operatorname{span}\{e_0, \dots, e_{m-1}\}} \in \mathbb{R}^{m \times m}$, since $J_m$ is real symmetric / self-adjoint, its operator norm equals the supremum of its Rayleigh quotient:
+$$\|J_m\| = \max_{v \in S^{m-1}} |\langle J_m v, v \rangle|, \qquad S^{m-1} = \{v \in \mathbb{R}^m : \|v\|_2 = 1\}.$$
 
 Every unit vector $v \in S^{m-1}$ represents a non-zero degree-$(m-1)$ polynomial $p_v(x) = \sum_{k=0}^{m-1} v_k e_k(x) \neq 0$:
 $$\langle J_m v, v \rangle = \int_{-1}^1 x \, [p_v(x)]^2 (1-x^2)^{\lambda-1/2} dx.$$
+Define continuous function $f(v) = |\langle J_m v, v \rangle|$ on $S^{m-1}$.
 Because weight $w_\lambda(x) = (1-x^2)^{\lambda-1/2} > 0$ almost everywhere on $(-1, 1)$ and a non-zero polynomial $p_v(x)$ cannot be supported exclusively at $x = \pm 1$:
 $$f(v) = |\langle J_m v, v \rangle| < \int_{-1}^1 1 \cdot [p_v(x)]^2 w_\lambda(x) dx = \|p_v\|_\lambda^2 = \|v\|_2^2 = 1 \qquad \forall v \in S^{m-1}.$$
-Since $f(v)$ is continuous and $S^{m-1}$ is compact in $\mathbb{R}^m$, the supremum is strictly attained at some $v^* \in S^{m-1}$:
+Since $f(v)$ is continuous and $S^{m-1}$ is compact in $\mathbb{R}^m$, the maximum is strictly attained at some $v^* \in S^{m-1}$:
 $$\boxed{\|J_m\| = \max_{v \in S^{m-1}} f(v) = f(v^*) < 1 \quad \text{for all } m < \infty, \quad \sigma(J_m) \subset (-1, 1).}$$
 
 ### Subdiagonal Asymptotic Expansion ($n \to \infty$ with fixed $\lambda$)
@@ -156,7 +171,8 @@ $$F_{\text{comp}}^{(K)} = F_{\text{north}}^{(K)}(z_+) + F_{\text{south}}^{(K)}(z
 In Layer VI, $F_{\text{comp}}^{(K)}$ is categorized as `MATCHING_SCHEMA` until explicit analytic remainder majorants are derived.
 
 The overlap re-expansion contract is quantified over intermediate overlap domains $Z_0 \le z_\pm \le \delta N_n$:
-$$\boxed{\left| F_{\text{endpoint}}^{(K)} - F_O^{(K)} \right| \le C_{K, \lambda, Z_0, \delta} \, N_n^{-K} \qquad \text{for } Z_0 \le z_\pm \le \delta N_n \quad (0 < \delta < \pi/2).}$$
+$$\boxed{\left| F_{\text{endpoint}}^{(K)} - F_O^{(K)} \right| \le N_n^{-K} \, G_{K, \lambda, Z_0, \delta}(z_\pm) \qquad \text{for } Z_0 \le z_\pm \le \delta N_n \quad (0 < \delta < \pi/2),}$$
+where $G_{K, \lambda, Z_0, \delta}(z)$ is an explicit $z$-dependent majorant function.
 
 ### 6.2 Certified Domain-Compatible Evaluation Selector ($M^*$)
 Pointwise representation selection minimizes local certified forward error bound $B_M(\theta)$ over domain-compatible candidates:
@@ -177,13 +193,17 @@ $$\boxed{D_{\text{alg}} = \operatorname{lcm}\left(\{d_k : d_k \in \mathcal{D}_{\
 ### VII-D. Finite-Field Polynomial Arithmetic & NTT Sub-Backends
 Explicit formal dependency for finite-field certificates:
 1. **Unnormalized Polynomial Certificate ($\texttt{PolyCertificate}$):**
-   $$\boxed{\texttt{PolyCertificate}(p, n) \iff \gcd(p, D_{\text{alg}}) = 1.}$$
+   $$\boxed{\texttt{PolyCertificate}(p) \iff \gcd(p, D_{\text{alg}}) = 1.}$$
 2. **Point Evaluation Certificate ($\texttt{PointCertificate}$):**
    $$\boxed{\texttt{PointCertificate}(p) \iff \gcd(p, r) = 1.}$$
 3. **Normalized Zonal Spherical Certificate ($\texttt{ZonalCertificate}$):**
    For canonical reduced fraction $C_n^{(\lambda)}(1) = u_n/v_n$ ($\gcd(u_n, v_n)=1$):
-   $$\boxed{\texttt{ZonalCertificate}(p, n) \iff \left( \texttt{PolyCertificate}(p, n) \land \texttt{PointCertificate}(p) \land p \nmid v_n \land p \nmid u_n \right).}$$
-   For bad primes ($p \mid u_n$ or $p \mid v_n$), $C_n^{(\lambda)}(1)$ is non-invertible in $\mathbb{F}_p$, failing normalization.
+   $$\boxed{\texttt{ZonalCertificate}(p, n) \iff \left( \texttt{PolyCertificate}(p) \land \texttt{PointCertificate}(p) \land p \nmid v_n \land p \nmid u_n \right).}$$
+
+   *Failure Mode Taxonomy:*
+   - $p \mid r$: Point localization failure (evaluation point $x=c/r$ non-local in $\mathbb{F}_p$).
+   - $p \mid v_n$: Normalization representation failure ($C_n(1)$ denominator non-invertible in $\mathbb{F}_p$).
+   - $p \mid u_n$: Zonal zeroing failure ($C_n(1) \equiv 0 \pmod p$, division by zero in normalization).
 
 ---
 

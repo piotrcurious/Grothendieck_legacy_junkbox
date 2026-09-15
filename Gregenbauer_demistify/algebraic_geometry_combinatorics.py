@@ -11,10 +11,12 @@ for Gegenbauer polynomials and complex projective quadric hypersurfaces Q_{d-2} 
 4. Orthonormal Symmetric Jacobi Matrix Coefficients alpha_n = 1/2 * sqrt( (n+1)(n+2*lambda) / ((n+lambda)(n+lambda+1)) )
 5. Golub-Welsch Gauss-Gegenbauer Quadrature over m x m principal truncation J_m (sigma(J_m) = {x_1, ..., x_m})
 6. Normalized Gegenbauer _2F_1 Hypergeometric Expansion Coefficients
-7. Execution Metadata N_max & Split Algorithm/Point Denominators D_alg and D_eval
-8. PolyCertificate, PointCertificate, and ZonalCertificate Admissibility (handling bad primes where p | u_n * v_n)
+7. EndpointClass Enum & Physical vs Analytic Continuation Parameter Domain Classifier
+8. Execution Metadata N_max & Split Algorithm/Point Denominators D_alg and D_eval
+9. PolyCertificate, PointCertificate, and ZonalCertificate Admissibility with 3 distinct bad-prime failure modes
 """
 
+from enum import Enum
 from fractions import Fraction
 import math
 from typing import Dict, List, Tuple, Union
@@ -22,6 +24,34 @@ from typing import Dict, List, Tuple, Union
 import numpy as np
 
 Number = Union[int, Fraction, float]
+
+
+class EndpointClass(Enum):
+    """Layer III Sturm-Liouville Endpoint Classification Enum."""
+    CRITICAL_LC = "CRITICAL_LIMIT_CIRCLE"
+    REGULAR = "REGULAR_ENDPOINT"
+    LIMIT_CIRCLE = "LIMIT_CIRCLE"
+    LIMIT_POINT = "LIMIT_POINT"
+
+
+def endpoint_class(lambda_val: Union[float, Fraction]) -> EndpointClass:
+    """
+    Returns exact Sturm-Liouville endpoint classification for H_lambda = -d^2/dtheta^2 + lambda(lambda-1)csc^2 theta:
+      - lambda = 1/2 (d=3, S^2): CRITICAL_LC (u ~ A theta^{1/2} + B theta^{1/2} log theta)
+      - lambda = 1 (d=4, S^3): REGULAR (u ~ A theta + B)
+      - 1/2 < lambda < 3/2 (lambda != 1): LIMIT_CIRCLE (u ~ A theta^lambda + B theta^{1-lambda})
+      - 0 < lambda < 1/2: LIMIT_CIRCLE (u ~ A theta^lambda + B theta^{1-lambda})
+      - lambda >= 3/2 (d >= 5): LIMIT_POINT (singular branch theta^{1-lambda} not in L^2(0, pi))
+    """
+    lam = float(lambda_val)
+    if abs(lam - 0.5) < 1e-12:
+        return EndpointClass.CRITICAL_LC
+    elif abs(lam - 1.0) < 1e-12:
+        return EndpointClass.REGULAR
+    elif lam < 1.5:
+        return EndpointClass.LIMIT_CIRCLE
+    else:
+        return EndpointClass.LIMIT_POINT
 
 
 def lambda_for_sphere(d: int) -> Fraction:
@@ -395,21 +425,28 @@ def exact_rational_bit_length(n: int, lambda_val: Union[int, Fraction], x: Union
     return bits_C, bits_phi
 
 
-def check_c_n_admissibility(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], p: int) -> bool:
+def get_algorithm_denominator_lcm(n: int, lambda_val: Union[int, Fraction]) -> int:
     """
-    Admissibility certificate for unnormalized Gegenbauer polynomial C_n^(lambda)(x) in F_p (PolyCertificate):
-      Parameter notation: lambda = a/b, x = c/r (r is denominator of evaluation point x).
-      D_alg = lcm({d_k in D_rec} u {b}) where D_rec = {1, ..., n}.
-      PolyCertificate requires gcd(p, D_alg) == 1.
+    Computes D_alg = lcm({d_k in D_rec} u {b}) for degree n and parameter lambda = a/b.
+    D_rec is the set of denominators introduced by executed recurrence steps {1, ..., n}.
     """
     b = Fraction(lambda_val).denominator
-
     lcm_val = 1
     for k in range(1, n + 1):
         lcm_val = math.lcm(lcm_val, k)
     lcm_val = math.lcm(lcm_val, b)
+    return lcm_val
 
-    return (lcm_val % p != 0)
+
+def check_c_n_admissibility(n: int, lambda_val: Union[int, Fraction], p: int) -> bool:
+    """
+    Admissibility certificate for unnormalized Gegenbauer polynomial C_n^(lambda)(x) in F_p (PolyCertificate):
+      Parameter notation: lambda = a/b.
+      D_alg = lcm({d_k in D_rec} u {b}).
+      PolyCertificate requires gcd(p, D_alg) == 1.
+    """
+    d_alg = get_algorithm_denominator_lcm(n, lambda_val)
+    return (d_alg % p != 0)
 
 
 def check_point_admissibility(x: Union[int, Fraction], p: int) -> bool:
@@ -424,24 +461,28 @@ def check_point_admissibility(x: Union[int, Fraction], p: int) -> bool:
 def check_phi_n_admissibility(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], p: int) -> Tuple[bool, str]:
     """
     Admissibility certificate for normalized zonal spherical function phi_n(x) = C_n^(lambda)(x) / C_n^(lambda)(1) in F_p (ZonalCertificate):
-      Formal logical dependency: ZonalCertificate = PolyCertificate and PointCertificate and p \nmid v_n and p \nmid u_n
-      (where C_n^(lambda)(1) = u_n/v_n with gcd(u_n, v_n) = 1).
-      For bad primes (p | u_n or p | v_n), C_n^(lambda)(1) is either zero or non-local in F_p, so normalization fails.
+      Formal logical dependency: ZonalCertificate = PolyCertificate and PointCertificate and NormalizationRepresentation and ZonalZeroing
+      Failure Mode Taxonomy:
+        1. PolyCertificate failure (p | D_alg): recurrence denominator non-invertible in F_p.
+        2. PointCertificate failure (p | r): evaluation point x=c/r non-local in F_p.
+        3. Normalization representation failure (p | v_n): C_n(1) = u_n/v_n denominator non-invertible in F_p.
+        4. Zonal zeroing failure (p | u_n): C_n(1) == 0 mod p, division by zero in normalization.
     """
-    if not check_c_n_admissibility(n, lambda_val, x, p):
-        return False, "Failed PolyCertificate (p divides recurrence exclusion product D_alg)"
+    if not check_c_n_admissibility(n, lambda_val, p):
+        return False, "PointLocalizationFailure: p divides algorithm recurrence denominator product D_alg"
 
     if not check_point_admissibility(x, p):
-        return False, "Failed PointCertificate (p divides evaluation point denominator r)"
+        return False, "PointLocalizationFailure: p divides evaluation point denominator r"
 
     c1 = exact_rational_gegenbauer(n, lambda_val, Fraction(1))
     u_n = c1.numerator
     v_n = c1.denominator
 
-    if u_n % p == 0:
-        return False, f"Bad prime p={p} divides C_n(1) numerator u_n={u_n} (C_n(1) == 0 mod p)"
     if v_n % p == 0:
-        return False, f"Bad prime p={p} divides C_n(1) denominator v_n={v_n}"
+        return False, f"NormalizationRepresentationFailure: p={p} divides C_n(1) denominator v_n={v_n}"
+
+    if u_n % p == 0:
+        return False, f"ZonalZeroingFailure: bad prime p={p} divides C_n(1) numerator u_n={u_n} (C_n(1) == 0 mod p)"
 
     return True, "Valid ZonalCertificate"
 
@@ -577,6 +618,6 @@ if __name__ == "__main__":
     print(f"  * Orthonormal Symmetric Jacobi Matrix Subdiagonal alpha_0 (lambda=0.5): {alpha_0_legendre:.6f} [expected 1/sqrt(3) = {1/math.sqrt(3):.6f}]")
 
     # Test Bad Prime Check
-    valid_c = check_c_n_admissibility(5, Fraction(3, 2), Fraction(1, 2), 7)
+    valid_c = check_c_n_admissibility(5, Fraction(3, 2), 7)
     valid_phi, msg = check_phi_n_admissibility(5, Fraction(3, 2), Fraction(1, 2), 7)
     print(f"  * Admissibility p=7: C_5={valid_c}, phi_5={valid_phi} ({msg})")
