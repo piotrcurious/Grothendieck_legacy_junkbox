@@ -112,23 +112,40 @@ class BoundSource(Enum):
 
 
 @dataclass
+class CertifiedSensitivity:
+    """
+    Typed Sensitivity Hypothesis for Target Q:
+      CertifiedSensitivity_Q(A, kappa_Q)
+    Declares target matrix/operator A and certified conditioning kappa_Q.
+    """
+    target: CertificateTarget
+    operator_name: str
+    kappa_Q: float
+    certified: bool = True
+
+
+@dataclass
 class NumericalCertificate:
     """
-    Target-Specific Numerical Certificate.
-    Includes target Q, algorithm, backward bound B_back, residual bound R, conditioning kappa_Q,
-    forward conversion bound B_{Q,conv}, and certified forward bound B_{Q,forward} := kappa_Q * B_back + B_{Q,conv}.
+    Target-Specific Numerical Certificate using explicit typed implication:
+      CertifiedSensitivity_Q(A, kappa_Q) and R_Q <= B_back and E_{Q,conv} <= B_{Q,conv}
+      => E_Q <= kappa_Q * B_back + B_{Q,conv} := B_{Q,forward}
     """
     target: CertificateTarget
     algorithm: str
     backward_bound: float
     residual_bound: float
-    conditioning_kappa: float
+    sensitivity: CertifiedSensitivity
     forward_conversion_bound: float
+
+    @property
+    def conditioning_kappa(self) -> float:
+        return self.sensitivity.kappa_Q
 
     @property
     def forward_bound(self) -> float:
         """Certified Forward Bound Definition: B_{Q,forward} := kappa_Q * B_back + B_{Q,conv}."""
-        return self.conditioning_kappa * self.backward_bound + self.forward_conversion_bound
+        return self.sensitivity.kappa_Q * self.backward_bound + self.forward_conversion_bound
 
 
 @dataclass
