@@ -15,7 +15,8 @@ Independent, non-tautological test suite verifying the Gegenbauer demystificatio
 11. High-Degree Log-Space Stability up to n = 10^6
 12. Theta-Space Orthogonality Norm Verification (Closed-Form Gamma vs Quadrature)
 13. Exact Derivative Anchors phi_n'(1) and phi_n'(-1)
-14. Prolog Integration Test with shutil.which and pathlib Resolution
+14. Mandatory Canonical Verification Anchors (lambda=1/2 Legendre, lambda=1 Chebyshev 2nd kind, n=0..3, x in {-1, -1/2, 0, 1/2, 1})
+15. Prolog Integration Test with shutil.which and pathlib Resolution
 """
 
 from fractions import Fraction
@@ -42,6 +43,7 @@ from Gregenbauer_demistify.algebraic_geometry_combinatorics import (
     pochhammer,
     quadric_hilbert_series_dim,
     rns_crt_gegenbauer_eval,
+    check_phi_n_admissibility,
 )
 from Gregenbauer_demistify.computational_layer import (
     AlgebraicPermutation,
@@ -51,6 +53,9 @@ from Gregenbauer_demistify.computational_layer import (
     PrecisionType,
     high_precision_reference,
     jacobi_eigenpair_residual,
+    scale_invariant_schrodinger_residual,
+    scale_invariant_ode_residual,
+    scale_invariant_recurrence_residual,
     mixed_error,
 )
 from Gregenbauer_demistify.gegenbauer_asymptotics import (
@@ -103,6 +108,34 @@ def test_prolog_formal_proof():
 
 # --- 2. INDEPENDENT ANCHOR TESTS & DERIVATIVES ---
 
+def test_mandatory_canonical_anchors_grid():
+    """
+    Mandatory Anchor Test:
+    - lambda = 1/2: Legendre polynomials P_n(x)
+    - lambda = 1: sin((n+1)theta) / ((n+1)sin theta)
+    - degrees n in {0, 1, 2, 3}
+    - coordinates x in {-1, -1/2, 0, 1/2, 1}
+    """
+    grid_x = np.array([-1.0, -0.5, 0.0, 0.5, 1.0])
+
+    # lambda = 1/2 (Legendre)
+    for n in range(4):
+        phi_leg = normalized_phi_recurrence(n, 0.5, grid_x)
+        ref_leg = eval_legendre(n, grid_x)
+        np.testing.assert_allclose(phi_leg, ref_leg, rtol=1e-12, atol=1e-13)
+
+    # lambda = 1 (Chebyshev 2nd kind / Dirichlet-type)
+    for n in range(4):
+        phi_cheb = normalized_phi_recurrence(n, 1.0, grid_x)
+        for i, x in enumerate(grid_x):
+            if abs(x) == 1.0:
+                expected = 1.0 if x == 1.0 else ((-1.0) ** n)
+            else:
+                theta = math.acos(x)
+                expected = math.sin((n + 1) * theta) / ((n + 1) * math.sin(theta))
+            assert np.isclose(phi_cheb[i], expected, rtol=1e-12, atol=1e-13)
+
+
 def test_global_parity_and_boundedness():
     """
     Verifies global invariants:
@@ -146,6 +179,20 @@ def test_dual_recurrence_conversion_square():
 
     assert np.isclose(alpha_n_calc, alpha_n_exact, rtol=1e-10)
     assert np.isclose(alpha_nm1_calc, alpha_nm1_exact, rtol=1e-10)
+
+
+def test_dual_recurrence_symbolic_exact_invariant():
+    """
+    Verifies exact symbolic dual recurrence identity I_dual(n) = alpha_n^2 - a_n * b_{n+1} == 0.
+    """
+    for lambda_val in [0.5, 1.0, 1.5, 2.5]:
+        for n in range(10):
+            a_n, b_n = normalized_jacobi_coefficients(n, lambda_val)
+            _, b_np1 = normalized_jacobi_coefficients(n + 1, lambda_val)
+            alpha_n = orthonormal_jacobi_coefficients(n, lambda_val)
+
+            symbolic_diff = alpha_n**2 - (a_n * b_np1)
+            assert abs(symbolic_diff) < 1e-14
 
 
 def test_s2_anchor_against_independent_legendre():
@@ -221,23 +268,20 @@ def test_normalized_phi_derivative_k_greater_than_n():
 
 def test_scale_invariant_ode_residual():
     """
-    Verifies scale-invariant dimensionless ODE residual:
+    Verifies scale-invariant dimensionless ODE residual via scale_invariant_ode_residual:
       R_ODE = |(1-x^2) phi'' - (2*lambda+1)x phi' + E_n phi| / (|1-x^2||phi''| + |(2*lambda+1)x||phi'| + E_n|phi| + tau)
     """
     n = 10
     lambda_val = 1.5
     x_grid = np.linspace(-0.8, 0.8, 20)
 
-    phi0 = normalized_phi_recurrence(n, lambda_val, x_grid)
-    phi1 = normalized_phi_derivative(n, lambda_val, x_grid, k=1)
-    phi2 = normalized_phi_derivative(n, lambda_val, x_grid, k=2)
+    for x in x_grid:
+        phi0 = float(normalized_phi_recurrence(n, lambda_val, np.array([x]))[0])
+        phi1 = float(normalized_phi_derivative(n, lambda_val, np.array([x]), k=1)[0])
+        phi2 = float(normalized_phi_derivative(n, lambda_val, np.array([x]), k=2)[0])
 
-    e_n = n * (n + 2.0 * lambda_val)
-    num = np.abs((1.0 - x_grid**2) * phi2 - (2.0 * lambda_val + 1.0) * x_grid * phi1 + e_n * phi0)
-    den = (1.0 - x_grid**2) * np.abs(phi2) + (2.0 * lambda_val + 1.0) * np.abs(x_grid) * np.abs(phi1) + e_n * np.abs(phi0) + 1e-14
-
-    r_ode_scale = num / den
-    np.testing.assert_allclose(r_ode_scale, 0.0, atol=1e-12)
+        res = scale_invariant_ode_residual(phi0, phi1, phi2, x, n, lambda_val)
+        assert res.normalized < 1e-12
 
 
 def test_orthonormal_jacobi_matrix_symmetry_and_legendre_anchor():
@@ -249,6 +293,25 @@ def test_orthonormal_jacobi_matrix_symmetry_and_legendre_anchor():
         alpha_n = orthonormal_jacobi_coefficients(n, 1.5)
         assert np.isfinite(alpha_n)
         assert alpha_n > 0.0
+
+
+def test_jacobi_eigenvalue_strict_bounds():
+    """
+    Verifies Jacobi spectral matrix properties:
+      1. J = J* (symmetric)
+      2. ||J_m|| < 1 for all finite m
+      3. Spectrum sigma(J_m) is strictly contained in (-1, 1).
+    """
+    for m in [2, 5, 10, 20]:
+        nodes, _ = gauss_gegenbauer_quadrature(m, lambda_val=1.5)
+        subdiag = np.zeros(m - 1, dtype=np.float64)
+        for k in range(m - 1):
+            subdiag[k] = orthonormal_jacobi_coefficients(k, 1.5)
+        J_m = np.diag(subdiag, k=1) + np.diag(subdiag, k=-1)
+
+        norm_j_m = np.linalg.norm(J_m, 2)
+        assert norm_j_m < 1.0
+        assert np.all(nodes > -1.0) and np.all(nodes < 1.0)
 
 
 def test_recurrence_parameter_validation():
@@ -591,6 +654,35 @@ def test_gauss_gegenbauer_quadrature_precision():
 
     mu_0_expected = math.sqrt(math.pi) * gamma(lambda_val + 0.5) / gamma(lambda_val + 1.0)
     assert np.isclose(np.sum(weights), mu_0_expected, rtol=1e-12)
+
+
+def test_quadrature_exact_moments_beta_integral():
+    """
+    Verifies Gauss-Gegenbauer quadrature moments against exact Beta integral formula:
+      sum w_k x_k^{2r} = B(r + 1/2, lambda + 1/2).
+    """
+    lambda_val = 1.5
+    m = 5
+    nodes, weights = gauss_gegenbauer_quadrature(m, lambda_val)
+
+    for r in range(m):
+        mom_quad = float(np.sum(weights * (nodes ** (2 * r))))
+        mom_exact = math.gamma(r + 0.5) * math.gamma(lambda_val + 0.5) / math.gamma(r + lambda_val + 1.0)
+        assert np.isclose(mom_quad, mom_exact, rtol=1e-12)
+
+
+def test_finite_field_bad_prime_normalization_check():
+    """
+    Verifies split finite-field certificates handling bad primes where p | u_n.
+    For C_5^(3/2)(1) = 21, prime p=7 divides u_n=21, causing phi_n normalization to fail in F_7.
+    """
+    valid_bad, msg_bad = check_phi_n_admissibility(5, Fraction(3, 2), Fraction(1, 2), 7)
+    assert valid_bad is False  # Bad prime 7 divides C_5(1) = 21
+    assert "Bad prime" in msg_bad
+
+    valid_ok, msg_ok = check_phi_n_admissibility(5, Fraction(3, 2), Fraction(1, 2), 17)
+    assert valid_ok is True
+    assert "Valid" in msg_ok
 
 
 def test_modular_rns_crt_exact_recovery():
