@@ -304,7 +304,7 @@ class GegenbauerFilterCompiler:
 
             a_coeffs = np.zeros(K)
             for k in range(K):
-                degree = 2 * k
+                degree = k
                 phi_k = self._eval_basis(degree, nodes)
                 norm_sq = phi_norm_squared(degree, self.lam)
                 a_coeffs[k] = np.sum(D_q * phi_k * weights) / norm_sq
@@ -317,7 +317,7 @@ class GegenbauerFilterCompiler:
 
             A = np.zeros((self.grid_samples, K))
             for k in range(K):
-                degree = 2 * k
+                degree = k
                 A[:, k] = self._eval_basis(degree, nodes)
 
             sqrt_W = np.sqrt(W_q * weights)
@@ -326,13 +326,13 @@ class GegenbauerFilterCompiler:
 
             R_diag = np.zeros(K)
             for k in range(K):
-                deg = 2 * k
+                deg = k
                 eig = deg * (deg + 2.0 * self.lam)
                 R_diag[k] = (eig ** self.reg_power)
 
             R_mat = np.diag(np.sqrt(self.mu_reg * R_diag))
             A_sys = np.vstack([A_w, R_mat])
-            D_sys = np.concatenate([D_w, np.zeros(K)])
+            D_sys = np.concatenate([D_w, np.zeros(R_mat.shape[0])])
             a_coeffs, _, _, _ = np.linalg.lstsq(A_sys, D_sys, rcond=None)
             return a_coeffs, K
 
@@ -342,7 +342,8 @@ class GegenbauerFilterCompiler:
 
         A = np.zeros((self.grid_samples, K))
         for k in range(K):
-            A[:, k] = self._eval_basis(2 * k, x)
+            degree = k
+            A[:, k] = self._eval_basis(degree, x)
 
         sqrt_W = np.sqrt(W)
         A_w = A * sqrt_W[:, np.newaxis]
@@ -361,7 +362,7 @@ class GegenbauerFilterCompiler:
         # Reconstruct fitted frequency response A(omega)
         A_freq = np.zeros(grid_L, dtype=np.float64)
         for k, c in enumerate(a_coeffs):
-            A_freq += c * self._eval_basis(2 * k, x)
+            A_freq += c * self._eval_basis(k, x)
 
         # Project frequency response back to time domain via continuous cosine transform
         h = np.zeros(N, dtype=np.float64)
@@ -510,7 +511,7 @@ class GegenbauerFilterCompiler:
 
         K_fft = 4096
         H0 = np.fft.fft(h0_float, K_fft)
-        freq_grid = np.linspace(0, 0.5, K_fft // 2)
+        freq_grid = np.arange(K_fft // 2) / float(K_fft)
         H0_db = 20 * np.log10(np.maximum(1e-12, np.abs(H0[:K_fft // 2])))
 
         pass_idx = freq_grid <= spec.wp
@@ -531,13 +532,13 @@ class GegenbauerFilterCompiler:
             qmf_pow_db = float(np.max(np.abs(10 * np.log10(np.maximum(1e-12, pow_comp[:K_fft // 2])))))
             qmf_alias_db = float(np.max(20 * np.log10(np.maximum(1e-12, aliasing_func[:K_fft // 2]))))
 
-        reg_energy = sum((c ** 2) * (((2*k) * (2*k + 2.0 * self.lam)) ** self.reg_power) for k, c in enumerate(a_coeffs))
+        reg_energy = sum((c ** 2) * ((k * (k + 2.0 * self.lam)) ** self.reg_power) for k, c in enumerate(a_coeffs))
 
         asymp_err = 0.0
         matching_status = MatchingStatus.MATCHING_SCHEMA
         if self.asymptotic_mode != "none":
             omega_sample = np.linspace(0.001, np.pi - 0.001, 100)
-            n_eval = max(1, 2 * (K - 1))
+            n_eval = max(1, K - 1)
             phi_exact = self._eval_basis(n_eval, np.cos(omega_sample))
             phi_asymp = self._eval_asymptotic_basis(n_eval, omega_sample)
             asymp_err = float(np.max(np.abs(phi_exact - phi_asymp)))
@@ -608,7 +609,15 @@ class GegenbauerFilterCompiler:
 
         # Subplot 2: Passband Detail / Ripple
         plt.subplot(2, 2, 2)
-        pass_mask = result.freq_grid <= (spec.wp if spec.wp else spec.cutoff)
+        if spec.kind == "highpass":
+            pass_mask = result.freq_grid >= (spec.wp if spec.wp else spec.cutoff)
+        elif spec.kind == "bandpass":
+            wp_low = spec.wp if spec.wp else spec.cutoff
+            wp_high = spec.wp2 if spec.wp2 else spec.cutoff + 0.1
+            pass_mask = (result.freq_grid >= wp_low) & (result.freq_grid <= wp_high)
+        else:
+            pass_mask = result.freq_grid <= (spec.wp if spec.wp else spec.cutoff)
+
         if np.any(pass_mask):
             plt.plot(result.freq_grid[pass_mask], result.H0_response[pass_mask], 'b-', linewidth=2)
             plt.title(f"Passband Detail (Ripple = {result.passband_ripple_actual:.4f} dB)")
