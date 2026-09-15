@@ -48,9 +48,10 @@ class EndpointBoundaryCondition:
     forbidden_log_coeff_zero: bool = True
 
 
-def endpoint_class(lambda_val: Union[float, Fraction]) -> EndpointClass:
+def endpoint_class(lambda_val: Union[float, Fraction], is_physical_domain: bool = True) -> EndpointClass:
     """
-    Returns exact Sturm-Liouville endpoint classification for H_lambda = -d^2/dtheta^2 + lambda(lambda-1)csc^2 theta:
+    Returns exact Sturm-Liouville endpoint classification for H_lambda = -d^2/dtheta^2 + lambda(lambda-1)csc^2 theta.
+    Precedence rule: PhysicalSphereDomain prec AnalyticContinuationDomain.
       - lambda = 1/2 (d=3, S^2): CRITICAL_LC (u ~ A theta^{1/2} + B theta^{1/2} log theta)
       - lambda = 1 (d=4, S^3): REGULAR (u ~ A theta + B)
       - 1/2 < lambda < 3/2 (lambda != 1): LIMIT_CIRCLE (u ~ A theta^lambda + B theta^{1-lambda})
@@ -58,6 +59,14 @@ def endpoint_class(lambda_val: Union[float, Fraction]) -> EndpointClass:
       - lambda >= 3/2 (d >= 5): LIMIT_POINT (singular branch theta^{1-lambda} not in L^2(0, pi))
     """
     lam = float(lambda_val)
+    if is_physical_domain:
+        if abs(lam - 0.5) < 1e-12:
+            return EndpointClass.CRITICAL_LC
+        elif abs(lam - 1.0) < 1e-12:
+            return EndpointClass.REGULAR
+        elif lam >= 1.5:
+            return EndpointClass.LIMIT_POINT
+
     if abs(lam - 0.5) < 1e-12:
         return EndpointClass.CRITICAL_LC
     elif abs(lam - 1.0) < 1e-12:
