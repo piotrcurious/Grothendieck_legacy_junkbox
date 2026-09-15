@@ -112,5 +112,5 @@ swipl -g "consult('Gregenbauer_demistify/gegenbauer_proof.pl'), run_all_proofs, 
 ### Python Unit Test Suite
 To run the 38 pytest unit tests covering Prolog assertions, quotient ring normal forms, Hilbert series growth, exact test anchors ($S^2, S^3, S^4$), phase diagram map selection, high-precision reference convergence ($p_{\text{ref}} \ge 384$ bits), exact rational bit-lengths, RNS/CRT integer recovery, and Pareto optimization solver:
 ```bash
-PYTHONPATH=. /home/jules/.pyenv/versions/3.12.13/bin/python3 -m pytest Gregenbauer_demistify/test_gegenbauer.py
+PYTHONPATH=. python3 -m pytest Gregenbauer_demistify/test_gegenbauer.py
 ```

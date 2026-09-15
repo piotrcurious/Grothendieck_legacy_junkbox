@@ -26,33 +26,33 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   Two-Sided EndpointBoundaryCondition ((A_+, B_+) at θ → 0+, (A_-, B_-) at t = π-θ → 0+):
     - d=3 (λ=1/2): Critical Limit-Circle (LC), r_+ = r_- = 1/2, u ~ A_+ θ^{1/2} + B_+ θ^{1/2} log θ (left B_+ = 0) vs u ~ A_- t^{1/2} + B_- t^{1/2} log t (right B_- = 0)
     - d=4 (λ=1): Regular Endpoint, H_1 = -∂_θ^2, u ~ A_+ θ + B_+ (left B_+ = 0) vs u ~ A_- t + B_- (right B_- = 0)
-    - d≥5 (λ≥3/2): Limit-Point (LP), singular branch θ^{1-λ} ∉ L^2(0,π), no boundary parameter required
+    - d≥5 (λ≥3/2): Limit-Point (LP), singular branch t^{1-λ} = t^{-1/2} ∉ L^2(0,π) (potential threshold λ(λ-1) = 3/4), no boundary parameter required
   AnalyticContinuationDomain (λ > 0, λ ∉ PhysicalDomain): 1/2 < λ < 3/2 ⟹ LC (B_± = 0); 0 < λ < 1/2 ⟹ LC (A_± = 0)
   Exact Norm Invariant: ||ϕ_n||_λ^2 = (π 2^{1-2λ} Γ(n+2λ)) / (n! (n+λ) Γ(λ)^2 [C_n^{(λ)}(1)]^2) ⟹ h_n = ||ϕ_n||_λ^{-1} ⟹ α_n = a_n (h_n/h_{n+1})
         │
         ▼
   Layer IV. Jacobi Spectral Operator & Unitary Matrix Realization
   (M_x f)(x) = x f(x),  U M_x U^{-1} = J = J^*  ⟹  ||J|| = 1 and σ(J) = [-1, 1] as consequences
-  Finite-Compression Spectral Bound: ||J_m|| = max_{||v||=1} |⟨J_m v, v⟩| < 1 derived via compactness of unit sphere S^{m-1} and real symmetry of J_m
+  Rayleigh-Ritz Finite-Compression Spectral Bound: ||J_m|| = max_{||v||=1} |⟨J_m v, v⟩| < 1 derived via compactness of unit sphere S^{m-1} and real symmetry of J_m
   Subdiagonal Expansion (n → ∞, λ fixed): α_n = 1/2 + λ(1-λ)/(4 n^2) + O(n^{-3})
         │
         ▼
   Layer V. Two-Endpoint Boundary Coordinates
-  N_n = n + λ,  z_+ = N_n θ,  z_- = N_n (π - θ)
+  N_n = n + λ,  z_+ = N_n θ,  z_- = N_n t = N_n (π - θ)
         │
         ▼
   Layer VI. Two-Overlap Composite Uniform Asymptotic Schema & Quantified Selector
   Composite Approximation Schema: F_comp = F_north + F_south + F_interior - F_{+O} - F_{-O} (Status: MATCHING_SCHEMA)
   Quantified Overlap Majorants: |R_{+,O}^{(K)}| ≤ N_n^{-K} G^+_{K,λ,Z_0,δ}(z_+; N_n) and |R_{-,O}^{(K)}| ≤ N_n^{-K} G^-_{K,λ,Z_0,δ}(z_-; N_n) on Z_0 ≤ z_± ≤ δ N_n
-  Majorant Function Contract: G^+/G^- : [Z_0, δ N_n] × ℕ → ℝ_{≥0} (MATCHING_SCHEMA unproved vs ANALYTIC_CERTIFIED proved)
+  Asymptotic Majorant Growth Class: G^±(z; N_n) ≥ 0, G^±(z; N_n) = O(z^{γ_K})
   Evaluation Selector: M^*(\theta) = argmin_{M, \theta ∈ 𝒟_M, B_M \text{ cert}} B_M(\theta)
         │
         ▼
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, C_fixed, C_LNS)
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x] ──symbolic rec──> C_n ──eval──> Q ──CRT/RNS──> integer residues)
-  ├── VII-C: Scalable RNS / CRT (N_max := execution metadata, D_rec(P) = lcm({den_red(c) : c ∈ P_ops}), D_eval = lcm(D_rec, r))
-  ├── VII-D1: Finite-Field Arithmetic (PolyCert Prime(p) ∧ gcd(p, D_rec)=1 ∧ PointCert gcd(p, r)=1 vs ZonalCert PolyCert ∧ PointCert ∧ p ∤ v_n u_n)
+  ├── VII-C: Scalable RNS / CRT (N_max := execution metadata, D_rec(P) = lcm({den_red(q) : q ∈ P_rec_coeffs}), D_eval = lcm(D_rec, r))
+  ├── VII-D1: Finite-Field Arithmetic (PolyCert Prime(p) ∧ gcd(p, D_rec)=1 ∧ PointCert gcd(p, r)=1 ⟹ PolyEvalCert PolyCert ∧ PointCert vs ZonalCert PolyEvalCert ∧ p ∤ v_n ∧ C_n(1) ≠ 0 mod p)
   │          Failure Taxonomy: PointLocalizationFailure (p|r), NormalizationRepresentationFailure (p|v_n), NormalizationSingularityFailure (p|u_n)
   ├── VII-D2: NTT Acceleration Primitive (L_conv = L_1+L_2-1 ≤ L_NTT | (p-1))
   └── VII-E: Golub-Welsch Spectral Matrix Truncation (J_m = tridiag(α_0, ..., α_{m-2}), Target-Specific NumericalCertificate_Q)
@@ -61,7 +61,7 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   Layer VIII. Typed Separation: ExactValue vs ErrorBound vs Residual & Provenance Optimizer
   First-Class Types: ExactValue != ErrorBound != Residual (TheoremStatus Enum: ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, NUMERICAL_CERTIFIED, EMPIRICAL_DIAGNOSTIC)
   Residual != ErrorBound Invariant; Staged Perturbation Chain for Target Q: F_0(Q) ──E_0──> F_1(Q) ──E_1──> ... ──E_{k-1}──> F_k(Q) ⟹ |F_0(Q) - F_k(Q)| ≤ ∑_{i=0}^{k-1} E_i
-  Target-Specific NumericalCertificate_Q: (Q, A, B_back, R, κ_Q, B_{Q,conv}, B_{Q,forward}) ⟹ E_{Q,forward} ≤ κ_Q B_back + B_{Q,conv} := B_{Q,forward}
+  Two-Stage NumericalCertificate_Q Derivation Theorem: R_Q ≤ B_back ∧ Sensitivity_Q(κ_Q) ∧ E_{Q,conv} ≤ B_{Q,conv} ⟹ E_{Q,forward} ≤ κ_Q B_back + B_{Q,conv} := B_{Q,forward}
   Selector Candidate Conversion Mapping:
     - ALGEBRAIC_EXACT / ARITHMETIC_EXACT ⟹ 0 (relative to certified exact target)
     - ANALYTIC_CERTIFIED ⟹ B_theorem
@@ -69,6 +69,7 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   Canonical Test Matrix: d ∈ {3, 4, 5}, n ∈ {0, 1, 2, 3} validating:
     - Initial Data Anchors: ϕ_0 = 1, ϕ_1 = x
     - Recurrence Invariants: n=0: x ϕ_0 - ϕ_1 = 0; n≥1: x ϕ_n - a_n ϕ_{n+1} - b_n ϕ_{n-1} = 0
+    - Orthonormal Jacobi Recurrence: x e_n - α_n e_{n+1} - α_{n-1} e_{n-1} = 0
     - Dual Conversion Square Invariant: I_dual(n) = α_n^2 - a_n b_{n+1} = 0
 ```
 
@@ -122,15 +123,15 @@ The framework distinguishes two named parameter domains with strict precedence:
 The precedence rule $\texttt{PhysicalSphereDomain} \prec \texttt{AnalyticContinuationDomain}$ resolves boundary parameter ambiguities so that physical sphere parameters always execute the physical classifier.
 
 ### 4.2 Two-Sided Endpoint Classification Function ($\operatorname{EndpointClass}(\lambda)$)
-The Sturm-Liouville operator $H_\lambda = -\partial_\theta^2 + \lambda(\lambda-1)\csc^2\theta$ on $(0, \pi)$ admits two-sided endpoint boundary conditions at both endpoints ($\theta \to 0^+$ and $t = \pi - \theta \to 0^+$) represented as an explicit two-sided coefficient tuple $((A_+, B_+), (A_-, B_-))$:
+The Sturm-Liouville operator $H_\lambda = -\partial_\theta^2 + \lambda(\lambda-1)\csc^2\theta$ on $(0, \pi)$ admits two-sided endpoint boundary conditions at both left endpoint $\theta \to 0^+$ and right endpoint $t = \pi - \theta \to 0^+$, represented as an explicit two-sided coefficient tuple $((A_+, B_+), (A_-, B_-))$:
 
 $$\boxed{
 \begin{array}{c|c|c|l}
 \text{Domain} & \text{Parameter } \lambda & \operatorname{EndpointClass}(\lambda) & \text{Two-Sided Asymptotic Coefficient Condition (Friedrichs)} \\ \hline
 \texttt{PhysicalDomain} & d=3 \ (\lambda=1/2) & \texttt{CRITICAL\_LC} & r_+ = r_- = 1/2, \ u \sim A_+ \theta^{1/2} + B_+ \theta^{1/2} \log\theta \ (\theta \to 0^+) \implies B_+ = 0; \\
 & & & u \sim A_- t^{1/2} + B_- t^{1/2} \log t \ (t = \pi - \theta \to 0^+) \implies B_- = 0 \\[1.5mm]
-\texttt{PhysicalDomain} & d=4 \ (\lambda=1) & \texttt{REGULAR} & H_1 = -\partial_\theta^2, \ u \sim A_+ \theta + B_+ \implies B_+ = 0; \ u \sim A_- t + B_- \implies B_- = 0 \\[1.5mm]
-\texttt{PhysicalDomain} & d \ge 5 \ (\lambda \ge 3/2) & \texttt{LIMIT\_POINT} & \text{Singular branch } \theta^{1-\lambda} \notin L^2(0,\pi); \text{ no boundary parameter required} \\[1.5mm]
+\texttt{PhysicalDomain} & d=4 \ (\lambda=1) & \texttt{REGULAR} & H_1 = -\partial_\theta^2, \ u(\theta) \sim A_+ \theta + B_+ \implies B_+ = 0; \ u(t) \sim A_- t + B_- \implies B_- = 0 \\[1.5mm]
+\texttt{PhysicalDomain} & d \ge 5 \ (\lambda \ge 3/2) & \texttt{LIMIT\_POINT} & \text{Threshold } \lambda(\lambda-1) \ge 3/4; \text{ singular branch } t^{1-\lambda} \le t^{-1/2} \notin L^2(0,\pi); \text{ no BC required} \\[1.5mm]
 \hline
 \texttt{AnalyticDomain} & 1/2 < \lambda < 3/2, \lambda \ne 1 & \texttt{LIMIT\_CIRCLE} & u \sim A_+ \theta^\lambda + B_+ \theta^{1-\lambda} \implies B_+ = 0; \ u \sim A_- t^\lambda + B_- t^{1-\lambda} \implies B_- = 0 \\[1.5mm]
 \texttt{AnalyticDomain} & 0 < \lambda < 1/2 & \texttt{LIMIT\_CIRCLE} & u \sim A_+ \theta^\lambda + B_+ \theta^{1-\lambda} \implies A_+ = 0; \ u \sim A_- t^\lambda + B_- t^{1-\lambda} \implies A_- = 0
@@ -187,7 +188,7 @@ $$F_{\text{comp}}^{(K)} = F_{\text{north}}^{(K)}(z_+) + F_{\text{south}}^{(K)}(z
 
 The two-sided overlap re-expansion contract is quantified over intermediate overlap domains $Z_0 \le z_\pm \le \delta N_n$:
 $$\boxed{\left| F_{\text{north}}^{(K)} - F_{+O}^{(K)} \right| \le N_n^{-K} \, G_{K, \lambda, Z_0, \delta}^+(z_+; N_n), \qquad \left| F_{\text{south}}^{(K)} - F_{-O}^{(K)} \right| \le N_n^{-K} \, G_{K, \lambda, Z_0, \delta}^-(z_-; N_n),}$$
-where $G^+:[Z_0, \delta N_n] \times \mathbb{N} \to \mathbb{R}_{\ge 0}$ and $G^-:[Z_0, \delta N_n] \times \mathbb{N} \to \mathbb{R}_{\ge 0}$ are explicit two-sided majorant functions.
+where $G^+:[Z_0, \delta N_n] \times \mathbb{N} \to \mathbb{R}_{\ge 0}$ and $G^-:[Z_0, \delta N_n] \times \mathbb{N} \to \mathbb{R}_{\ge 0}$ are explicit two-sided majorant functions with growth class $G^\pm(z; N_n) = O(z^{\gamma_K})$.
 - **$\texttt{MATCHING\_SCHEMA}$:** Majorant functions $G^+, G^-$ are symbolically specified / unproved.
 - **$\texttt{ANALYTIC\_CERTIFIED}$:** Majorant functions $G^+, G^-$ are accompanied by proved majorant theorems.
 
@@ -205,9 +206,9 @@ $$\boxed{M^*(\theta) = \arg\min_{\substack{M \\ \theta \in \mathcal{D}_M \\ \tex
   $$\boxed{\texttt{NumericalCertificate}_Q = (Q, A, B_{\text{back}}, R, \kappa_Q, B_{Q,\text{conv}}, B_{Q,\text{forward}}) \implies E_{Q,\text{forward}} \le \kappa_Q \cdot B_{\text{back}} + B_{Q,\text{conv}} := B_{Q,\text{forward}},}$$
   where target $Q \in \{\texttt{NODE}, \texttt{WEIGHT}, \texttt{EIGENVECTOR}, \texttt{QUADRATURE}\}$.
 
-### VII-C. RNS / CRT Sub-Backend with Execution-Plan Denominators
-$N_{\max}$ is defined as **execution-plan metadata**. For an execution plan $P$, rational parameter $\lambda = a/b$, and evaluation point $x = c/r$:
-$$\boxed{D_{\text{recurrence}}(P) = \operatorname{lcm}\left( \{ \operatorname{den}_{\text{red}}(c) : c \in P_{\text{rational\_operations}} \} \cup \{b\} \right), \qquad D_{\text{eval}} = \operatorname{lcm}(D_{\text{recurrence}}(P), r).}$$
+### VII-C. RNS / CRT Sub-Backend with Recurrence-Derived Denominators
+$N_{\max}$ is defined as **execution-plan metadata**. For an execution plan $P$, rational parameter $\lambda = a/b$, and evaluation point $x = c/r$, recurrence arithmetic denominators are extracted directly from executed operations:
+$$\boxed{D_{\text{recurrence}}(P) = \operatorname{lcm}\left( \{ \operatorname{den}_{\text{red}}(q) : q \in P_{\text{recurrence\ coefficients}} \} \cup \{b\} \right), \qquad D_{\text{eval}} = \operatorname{lcm}(D_{\text{recurrence}}(P), r).}$$
 
 ### VII-D. Finite-Field Polynomial Arithmetic & NTT Sub-Backends
 Explicit formal dependency for finite-field certificates:
@@ -215,9 +216,11 @@ Explicit formal dependency for finite-field certificates:
    $$\boxed{\texttt{PolyCertificate}(p, P) \iff \operatorname{Prime}(p) \land \gcd(p, D_{\text{recurrence}}(P)) = 1.}$$
 2. **Point Evaluation Certificate ($\texttt{PointCertificate}$):**
    $$\boxed{\texttt{PointCertificate}(p, r) \iff \gcd(p, r) = 1.}$$
-3. **Normalized Zonal Spherical Certificate ($\texttt{ZonalCertificate}$):**
+3. **Polynomial Evaluation Certificate ($\texttt{PolyEvaluationCertificate}$):**
+   $$\boxed{\texttt{PolyEvaluationCertificate}(p, P, r) \iff \texttt{PolyCertificate}(p, P) \land \texttt{PointCertificate}(p, r).}$$
+4. **Normalized Zonal Spherical Certificate ($\texttt{ZonalCertificate}$):**
    For canonical reduced fraction $C_n^{(\lambda)}(1) = u_n/v_n$ ($\gcd(u_n, v_n)=1$):
-   $$\boxed{\texttt{ZonalCertificate}(p, P, n) \iff \left( \texttt{PolyCertificate}(p, P) \land \texttt{PointCertificate}(p, r) \land (p \nmid v_n) \land (C_n^{(\lambda)}(1) \neq 0 \bmod p) \right).}$$
+   $$\boxed{\texttt{ZonalCertificate}(p, P, n) \iff \left( \texttt{PolyEvaluationCertificate}(p, P, r) \land p \nmid v_n \land (C_n^{(\lambda)}(1) \neq 0 \bmod p) \right).}$$
 
    *Failure Mode Taxonomy:*
    - `PointLocalizationFailure` ($p \mid r$): Evaluation point $x=c/r$ non-local in $\mathbb{F}_p$.
@@ -255,7 +258,8 @@ The Layer VIII canonical test matrix ($d \in \{3, 4, 5\}, n \in \{0, 1, 2, 3\}$)
 2. **Recurrence Invariants:**
    - $n=0$: $x \phi_0 - \phi_1 = 0$.
    - $n \ge 1$: $R_{\text{rec}}(n, x) = x \phi_n - a_n \phi_{n+1} - b_n \phi_{n-1} = 0$.
-3. **Dual Conversion Square Invariant:** $I_{\text{dual}}(n) = \alpha_n^2 - a_n b_{n+1} = 0$.
+3. **Orthonormal Jacobi Basis Recurrence:** $x e_n - \alpha_n e_{n+1} - \alpha_{n-1} e_{n-1} = 0$.
+4. **Dual Conversion Square Invariant:** $I_{\text{dual}}(n) = \alpha_n^2 - a_n b_{n+1} = 0$.
 
 ### VIII-C. Provenance Invariant
 $$\boxed{\texttt{Residual} \not\implies \texttt{ErrorBound}}$$

@@ -12,8 +12,9 @@ for Gegenbauer polynomials and complex projective quadric hypersurfaces Q_{d-2} 
 5. Golub-Welsch Gauss-Gegenbauer Quadrature over m x m principal truncation J_m (sigma(J_m) = {x_1, ..., x_m})
 6. Normalized Gegenbauer _2F_1 Hypergeometric Expansion Coefficients
 7. EndpointClass Enum, EndpointBoundaryCondition, and Physical vs Analytic Continuation Parameter Domain Classifier
-8. Execution Metadata N_max & Split Algorithm/Point Denominators D_alg and D_eval
-9. PolyCertificate, PointCertificate, and ZonalCertificate Admissibility with 3 distinct bad-prime failure modes:
+8. Execution Metadata N_max & Split Algorithm/Point Denominators D_rec and D_eval
+9. PolyCertificate, PointCertificate, PolyEvaluationCertificate, and ZonalCertificate Admissibility
+   with 3 distinct bad-prime failure modes:
    - PointLocalizationFailure (p | r)
    - NormalizationRepresentationFailure (p | v_n)
    - NormalizationSingularityFailure (p | u_n)
@@ -465,7 +466,7 @@ def exact_rational_bit_length(n: int, lambda_val: Union[int, Fraction], x: Union
 
 def get_algorithm_denominator_lcm(n: int, lambda_val: Union[int, Fraction]) -> int:
     """
-    Computes D_alg = lcm({den_red(a_k), den_red(b_k) : k = 1..n} u {b}) for parameter lambda = a/b.
+    Computes D_rec = lcm({den_red(a_k), den_red(b_k) : k = 1..n} u {b}) for parameter lambda = a/b.
     Uses exact reduced denominators of recurrence coefficients.
     """
     b = Fraction(lambda_val).denominator
@@ -481,8 +482,8 @@ def check_c_n_admissibility(n: int, lambda_val: Union[int, Fraction], p: int) ->
     """
     Admissibility certificate for unnormalized Gegenbauer polynomial C_n^(lambda)(x) in F_p (PolyCertificate):
       Parameter notation: lambda = a/b.
-      D_alg = lcm({den_red(a_k), den_red(b_k)} u {b}).
-      PolyCertificate requires Prime(p) and gcd(p, D_alg) == 1.
+      D_rec = lcm({den_red(a_k), den_red(b_k)} u {b}).
+      PolyCertificate requires Prime(p) and gcd(p, D_rec) == 1.
     """
     if p <= 1:
         return False
@@ -510,11 +511,12 @@ def check_phi_n_admissibility(n: int, lambda_val: Union[int, Fraction], x: Union
       Formal logical dependency: ZonalCertificate = PolyCertificate and PointCertificate and NormalizationRepresentation and NormalizationSingularity
       Failure Mode Taxonomy:
         1. PointLocalizationFailure (p | r): evaluation point x=c/r non-local in F_p.
-        2. NormalizationRepresentationFailure (p | v_n): rational representation u_n/v_n of C_n(1) non-local in F_p.
-        3. NormalizationSingularityFailure (p | u_n): C_n(1) == 0 mod p, normalization division by zero in F_p.
+        2. NormalizationRepresentationFailure (p | v_n): rational representation u_n/v_n of C_n(1) non-local in F_p (p | v_n).
+        3. NormalizationSingularityFailure (p | u_n): C_n(1) == 0 mod p, normalization division by zero in F_p (p | u_n).
+      Equivalence: p nmid v_n and C_n(1) != 0 mod p <=> p nmid v_n * u_n.
     """
     if not check_c_n_admissibility(n, lambda_val, p):
-        return False, "PointLocalizationFailure: p non-prime or divides algorithm recurrence denominator product D_alg"
+        return False, "PointLocalizationFailure: p non-prime or divides algorithm recurrence denominator product D_rec"
 
     if not check_point_admissibility(x, p):
         return False, "PointLocalizationFailure: p divides evaluation point denominator r"
