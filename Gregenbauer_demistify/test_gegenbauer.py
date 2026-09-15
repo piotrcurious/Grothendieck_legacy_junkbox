@@ -26,6 +26,7 @@ from Gregenbauer_demistify.algebraic_geometry_combinatorics import (
     EndpointClass,
     QuadricQuotientPolynomial,
     bad_zonal_prime,
+    zonal_admissible,
     classify_parameter_domain,
     endpoint_class,
     exact_rational_gegenbauer,
@@ -792,12 +793,15 @@ def test_denominator_separation_and_zonal_certificate_signature():
 
 def test_semantically_exact_bad_zonal_prime_predicate():
     """
-    Tests Bad_zonal(p) <=> (p | r) or (p | v_n) or (p | u_n) or (p | D_rec(P)).
+    Tests Bad_zonal(p) <=> not ZonalAdmissible(p).
     """
-    # p=13 divides C_10^(2)(1) = 286 (u_n=286), so Bad_zonal(13) is True
+    # p=13 divides C_10^(2)(1) = 286 (u_n=286), so Bad_zonal(13) is True and ZonalAdmissible is False
     assert bad_zonal_prime(13, degree=10, point=Fraction(1, 2), lambda_val=Fraction(2)) is True
-    # p=17 is clean, Bad_zonal(17) is False
+    assert zonal_admissible(13, degree=10, point=Fraction(1, 2), lambda_val=Fraction(2)) is False
+
+    # p=17 is clean, Bad_zonal(17) is False and ZonalAdmissible is True
     assert bad_zonal_prime(17, degree=10, point=Fraction(1, 2), lambda_val=Fraction(2)) is False
+    assert zonal_admissible(17, degree=10, point=Fraction(1, 2), lambda_val=Fraction(2)) is True
 
 
 def test_selector_candidate_target_q_interface():
