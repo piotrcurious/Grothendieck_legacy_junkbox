@@ -5,10 +5,11 @@ Independent, non-tautological test suite verifying the Gegenbauer demystificatio
 1. Mandatory Canonical Verification Anchors (lambda=1/2 Legendre, lambda=1 Chebyshev 2nd kind, n=0..3, x in {-1, -1/2, 0, 1/2, 1})
 2. Exact Derivative Anchors phi_n'(1) and phi_n'(-1) for k=0..n
 3. Operator Equivalences L_x <-> L_theta <-> H_lambda
-4. Dimension Invariant I_dim(n)=0 and Symbolic Dual Recurrence Invariant I_dual(n)=0
-5. Jacobi Eigenvalue Bounds sigma(J_m) in (-1, 1), ||J_m|| < 1
-6. Quadrature Moments int x^(2r) w(x) dx = B(r+1/2, lambda+1/2)
-7. Exact Rational -> RNS/CRT Reconstruction and Finite-Field Modular Congruences (with bad prime check)
+4. EndpointClass Enum & Sturm-Liouville Physical vs Analytic Continuation Classifications
+5. Dimension Invariant I_dim(n)=0 and Symbolic Dual Recurrence Invariant I_dual(n)=0
+6. Jacobi Eigenvalue Bounds sigma(J_m) in (-1, 1), ||J_m|| < 1
+7. Quadrature Moments int x^(2r) w(x) dx = B(r+1/2, lambda+1/2)
+8. Exact Rational -> RNS/CRT Reconstruction and Finite-Field Modular Congruences (with 3-failure-mode bad prime checks)
 """
 
 from fractions import Fraction
@@ -22,7 +23,9 @@ import pytest
 from scipy.special import eval_gegenbauer, eval_legendre, gamma, gammaln
 
 from Gregenbauer_demistify.algebraic_geometry_combinatorics import (
+    EndpointClass,
     QuadricQuotientPolynomial,
+    endpoint_class,
     exact_rational_gegenbauer,
     exact_rational_gegenbauer_derivative,
     exact_rational_gegenbauer_second_derivative,
@@ -35,6 +38,8 @@ from Gregenbauer_demistify.algebraic_geometry_combinatorics import (
     pochhammer,
     quadric_hilbert_series_dim,
     rns_crt_gegenbauer_eval,
+    check_c_n_admissibility,
+    check_point_admissibility,
     check_phi_n_admissibility,
 )
 from Gregenbauer_demistify.computational_layer import (
@@ -43,6 +48,7 @@ from Gregenbauer_demistify.computational_layer import (
     NumericalBase,
     NumericalContext,
     PrecisionType,
+    TheoremStatus,
     high_precision_reference,
     jacobi_eigenpair_residual,
     scale_invariant_schrodinger_residual,
@@ -98,7 +104,25 @@ def test_prolog_formal_proof():
     assert "ALL REGISTERED EXECUTABLE CONSISTENCY CHECKS PASSED SUCCESSFULLY!" in res.stdout
 
 
-# --- 2. INDEPENDENT ANCHOR TESTS & DERIVATIVES ---
+# --- 2. ENDPOINT CLASS ENUM & STURM-LIOUVILLE CLASSIFICATION ---
+
+def test_endpoint_class_classification():
+    """
+    Verifies EndpointClass classification:
+      - d=3 (lambda=1/2): CRITICAL_LC
+      - d=4 (lambda=1): REGULAR
+      - d>=5 (lambda>=3/2): LIMIT_POINT
+      - analytic continuation 0 < lambda < 1/2: LIMIT_CIRCLE
+    """
+    assert endpoint_class(0.5) == EndpointClass.CRITICAL_LC
+    assert endpoint_class(1.0) == EndpointClass.REGULAR
+    assert endpoint_class(0.2) == EndpointClass.LIMIT_CIRCLE
+    assert endpoint_class(0.8) == EndpointClass.LIMIT_CIRCLE
+    assert endpoint_class(1.5) == EndpointClass.LIMIT_POINT
+    assert endpoint_class(2.0) == EndpointClass.LIMIT_POINT
+
+
+# --- 3. MANDATORY CANONICAL ANCHOR SUITE ---
 
 def test_mandatory_canonical_anchors_grid():
     """
@@ -314,7 +338,7 @@ def test_recurrence_parameter_validation():
         normalized_phi_recurrence(5, -0.5, np.array([0.5]))
 
 
-# --- 3. QUADRIC QUOTIENT ALGEBRA INVARIANTS & EXACT FRACTIONS ---
+# --- 4. QUADRIC QUOTIENT ALGEBRA INVARIANTS & EXACT FRACTIONS ---
 
 def test_quadric_exact_fraction_algebra():
     """Verifies exact Fraction arithmetic in QuadricQuotientPolynomial."""
@@ -359,7 +383,7 @@ def test_quotient_ring_zonal_polynomial_projection_accuracy():
     np.testing.assert_allclose(got, expected, rtol=1e-10, atol=1e-12)
 
 
-# --- 4. HIGH-PRECISION MPMATH GROUND TRUTH REFERENCE ---
+# --- 5. HIGH-PRECISION MPMATH GROUND TRUTH REFERENCE ---
 
 def test_mpmath_high_precision_reference():
     """Verifies mpmath high precision reference oracle against scipy eval_gegenbauer."""
@@ -369,7 +393,7 @@ def test_mpmath_high_precision_reference():
     np.testing.assert_allclose(ref_mp, ref_scipy, rtol=1e-10, atol=1e-12)
 
 
-# --- 5. HILBERT SERIES & NORMALIZATION FUNCTIONAL DECOUPLED ---
+# --- 6. HILBERT SERIES & NORMALIZATION FUNCTIONAL DECOUPLED ---
 
 def test_quadric_hilbert_series_dimension_decoupled():
     """Tests Hilbert series dimension formula dim R(Q)_n = binom(n+d-1,d-1) - binom(n+d-3,d-1)."""
@@ -394,7 +418,7 @@ def test_normalization_functional_identity_decoupled():
             assert np.isclose(c_n_1_scipy, identity_val, rtol=1e-12)
 
 
-# --- 6. TWO-ENDPOINT BESSEL & EMPIRICAL ASYMPTOTIC RATES ---
+# --- 7. TWO-ENDPOINT BESSEL & EMPIRICAL ASYMPTOTIC RATES ---
 
 def test_south_pole_bessel_boundary_layer():
     """Verifies South pole Bessel layer phi_n(theta) ~ (-1)^n Cal_J_{lambda-1/2}(K*(pi-theta))."""
@@ -466,7 +490,7 @@ def test_mehler_heine_empirical_convergence_exponent():
     assert all(r > 1.7 for r in rates)
 
 
-# --- 7. TWO-ENDPOINT PHASE CLASSIFIER & ERROR SURFACE DIAGRAM ---
+# --- 8. TWO-ENDPOINT PHASE CLASSIFIER & ERROR SURFACE DIAGRAM ---
 
 def test_two_endpoint_phase_classifier():
     """
@@ -490,7 +514,7 @@ def test_error_surface_diagram_computation():
     assert np.isfinite(err_map["max_err_composite"])
 
 
-# --- 8. COMPUTATIONAL SOLVER HARD CONSTRAINTS & PARETO DOMINANCE ---
+# --- 9. COMPUTATIONAL SOLVER HARD CONSTRAINTS & PARETO DOMINANCE ---
 
 def test_deterministic_pareto_dominance_logic():
     """Verifies Pareto non-dominance algorithm using synthetic deterministic cost/error metrics."""
@@ -521,7 +545,7 @@ def test_solver_hard_constraint_failure():
         solver.solve_optimal_permutation(domain, max_error_tol=1e-30)
 
 
-# --- 9. REAL NUMERICAL BACKENDS ---
+# --- 10. REAL NUMERICAL BACKENDS ---
 
 def test_real_numerical_backends():
     """Tests execution across real backends: FLOAT32, FLOAT64, LONGDOUBLE, FIXED_POINT, LNS."""
@@ -549,7 +573,7 @@ def test_real_numerical_backends():
     assert np.all(np.isfinite(res_lns))
 
 
-# --- 10. HIGH-DEGREE LOG-SPACE STABILITY ---
+# --- 11. HIGH-DEGREE LOG-SPACE STABILITY ---
 
 def test_high_degree_log_space_stability():
     """
@@ -564,7 +588,7 @@ def test_high_degree_log_space_stability():
         assert np.isclose(got_log, ref_log, rtol=1e-12)
 
 
-# --- 11. THETA-SPACE ORTHOGONALITY NORM ---
+# --- 12. THETA-SPACE ORTHOGONALITY NORM ---
 
 def test_theta_space_orthogonality_norm_quadrature():
     """
@@ -583,7 +607,7 @@ def test_theta_space_orthogonality_norm_quadrature():
         assert np.isclose(got_hn, num_hn, rtol=1e-3)
 
 
-# --- 12. FIELD EXTENSIONS Q(lambda, x) & GAUSS-GEGENBAUER QUADRATURE TESTS ---
+# --- 13. FIELD EXTENSIONS Q(lambda, x) & GAUSS-GEGENBAUER QUADRATURE TESTS ---
 
 def test_exact_rational_field_extension_recurrence():
     """
@@ -666,11 +690,11 @@ def test_quadrature_exact_moments_beta_integral():
 def test_finite_field_bad_prime_normalization_check():
     """
     Verifies split finite-field certificates handling bad primes where p | u_n.
-    For C_5^(3/2)(1) = 21, prime p=7 divides u_n=21, causing phi_n normalization to fail in F_7.
+    For C_5^(3/2)(1) = 21, prime p=7 divides u_n=21, causing phi_n normalization to fail in F_7 (ZonalZeroingFailure).
     """
     valid_bad, msg_bad = check_phi_n_admissibility(5, Fraction(3, 2), Fraction(1, 2), 7)
     assert valid_bad is False  # Bad prime 7 divides C_5(1) = 21
-    assert "Bad prime" in msg_bad
+    assert "ZonalZeroingFailure" in msg_bad
 
     valid_ok, msg_ok = check_phi_n_admissibility(5, Fraction(3, 2), Fraction(1, 2), 17)
     assert valid_ok is True
