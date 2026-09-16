@@ -188,11 +188,9 @@ class ErrorBound:
     """
     First-Class Certified ErrorBound Object.
     Invariant: Residual != ErrorBound.
+    Extended Certificate Metadata Tuple Invariant:
+      (target Q, domain D, backend, status, validity_conditions)
     Only ErrorBound objects with certified status participate in solver candidate selection.
-    Conversion mapping:
-      - ALGEBRAIC_EXACT / ARITHMETIC_EXACT => 0 (relative to certified exact target)
-      - ANALYTIC_CERTIFIED => B_theorem
-      - NUMERICAL_CERTIFIED => B_{Q,forward} := kappa_Q * B_back + B_{Q,conv}
     """
     value: float
     domain: Domain
@@ -200,7 +198,18 @@ class ErrorBound:
     status: TheoremStatus
     decomposition: ErrorDecomposition
     target: CertificateTarget = CertificateTarget.NODE
+    backend: str = "FLOAT64"
+    validity_conditions: List[str] = None
     valid: bool = True
+
+    def __post_init__(self):
+        if self.validity_conditions is None:
+            self.validity_conditions = ["domain_contained", "target_matched"]
+
+    @property
+    def certificate_tuple(self) -> Tuple[CertificateTarget, Domain, str, TheoremStatus, List[str]]:
+        """Returns extended certificate metadata tuple (target Q, domain D, backend, status, validity_conditions)."""
+        return (self.target, self.domain, self.backend, self.status, self.validity_conditions)
 
     def __float__(self) -> float:
         return float(self.value)
