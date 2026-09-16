@@ -43,16 +43,17 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
         │
         ▼
   Layer VI. Two-Overlap Composite Uniform Asymptotic Schema & Quantified Selector
-  Composite Approximation Schema: F_comp = F_north + F_south + F_interior - F_{+O} - F_{-O} (Status: MATCHING_SCHEMA, γ_K := unspecified)
+  Target Semantics: F_Q(θ) = TargetValue(Q, θ), F(θ) ≡ F_Q(θ) for fixed Q
   Global Coverage: 𝒟_north ∪ 𝒟_interior ∪ 𝒟_south = 𝒟_global
-  Remainder Reconstruction Identity: F_Q - F_comp = ∑_{i ∈ I(θ)} s_i R_i (s_i ∈ {-1, +1}) ⟹ |F - F_comp^{(K)}| ≤ ∑_{i ∈ I(θ)} B_i(θ) =: B_comp(θ)
+  Piecewise Composite Evaluation: F_{comp,r}^{(K)}(θ) with exact region-dependent remainder identity Reconstruct_r(Q, θ): F_Q - F_{comp,r} = ∑_{i ∈ I_r(θ)} s_{r,i} R_i
+  Global Overlap Exact Identity: F - F_comp = R_I - R_{+O} - R_{-O} ⟹ B_comp = B_I + B_+O + B_-O; Valid: B_comp.valid ⟺ ⋀_{i ∈ I(θ)} Cert(R_i)
   Selector Candidate Interface: Candidate { domain 𝒟_M, target Q, status, ErrorBound.valid, B_M(θ) } requiring target Q matching
         │
         ▼
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, C_fixed, C_LNS)
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x] ──symbolic rec──> C_n ──eval──> Q ──CRT/RNS──> integer residues)
-  ├── VII-C: Scalable RNS / CRT (N_max := metadata, Execution Trace P_rec_arith, D_rec(P) = lcm{den_red(q)}, D_den = lcm(D_rec, D_norm, D_eval))
+  ├── VII-C: Scalable RNS / CRT (N_max := metadata, Trace P_rec_arith, D_rec(P) = lcm{den_red(q)}, Aggregate D_den = lcm(D_rec, D_norm, D_eval) with lcm(∅)=1)
   ├── VII-D1: Finite-Field Arithmetic (ZonalFFBackend ∩ D_norm(P, ZONAL) = ∅; Canonical u_n/v_n, c/r; ZonalAdmissible(p, P, n, x); Bad_zonal := ¬ZonalAdmissible)
   ├── VII-D2: NTT Acceleration Primitive (L_conv = L_1+L_2-1 ≤ L_NTT | (p-1))
   └── VII-E: Golub-Welsch Spectral Truncation (J_m = tridiag(α_0, ..., α_{m-2}), Typed Implication: CertSensitivity_Q(A, κ_Q) ∧ R_Q ≤ B_back ∧ E_{Q,conv} ≤ B_{Q,conv} ⟹ E_Q ≤ κ_Q B_back + B_{Q,conv})
@@ -188,13 +189,17 @@ $$\boxed{\|J_m\| = \max_{v \in S^{m-1}} f(v) = f(v^*) < 1 \quad \text{for all } 
 
 ## 6. Layer V & VI: Asymptotic Schemas, Quantified Overlap Contract & Selector
 
-### 6.1 Composite Approximation Schema & Region-Dependent Remainder Reconstruction
-The composite uniform expression combines endpoint Bessel layers and interior WKB waves over global domain coverage:
-$$\boxed{\mathcal{D}_{\text{north}} \cup \mathcal{D}_{\text{interior}} \cup \mathcal{D}_{\text{south}} = \mathcal{D}_{\text{global}}.}$$
-The composite approximation schema is:
-$$F_{\text{comp}}^{(K)} = F_{\text{north}}^{(K)}(z_+) + F_{\text{south}}^{(K)}(z_-) + F_{\text{interior}}^{(K)}(N_n, \theta) - F_{+O}^{(K)}(z_+) - F_{-O}^{(K)}(z_-).$$
+### 6.1 Target Semantics & Piecewise Composite Approximation Schema
+For a fixed target $Q$, the Layer VI exact target value is normalized:
+$$\boxed{F_Q(\theta) = \operatorname{TargetValue}(Q, \theta), \qquad F(\theta) \equiv F_Q(\theta).}$$
 
-To rigorously close Layer VI logic, define explicit certified remainder objects $R_i$:
+The piecewise composite uniform expression combines endpoint Bessel layers and interior WKB waves over global domain coverage:
+$$\boxed{\mathcal{D}_{\text{north}} \cup \mathcal{D}_{\text{interior}} \cup \mathcal{D}_{\text{south}} = \mathcal{D}_{\text{global}}.}$$
+The piecewise composite approximation schema in region $r$ is:
+$$F_{\text{comp},r}^{(K)} = F_{\text{north}}^{(K)}(z_+) + F_{\text{south}}^{(K)}(z_-) + F_{\text{interior}}^{(K)}(N_n, \theta) - F_{+O}^{(K)}(z_+) - F_{-O}^{(K)}(z_-).$$
+
+### 6.2 Certified Remainder Objects & Region-Dependent Reconstruction Identity
+Define certified remainder objects $R_i$:
 $$\begin{aligned}
 R_{\text{north}} &= F - F_{\text{north}} \quad (\|R_{\text{north}}\| \le B_{\text{north}} \text{ on } \mathcal{D}_{\text{north}}), \\
 R_{\text{interior}} &= F - F_{\text{interior}} \quad (\|R_{\text{interior}}\| \le B_{\text{interior}} \text{ on } \mathcal{D}_{\text{interior}}), \\
@@ -203,15 +208,22 @@ R_{+O} &= F_{\text{north}} - F_{+O} \quad (\|R_{+O}\| \le B_{+O} \text{ on } \ma
 R_{-O} &= F_{\text{south}} - F_{-O} \quad (\|R_{-O}\| \le B_{-O} \text{ on } \mathcal{D}_{\text{south}} \cap \mathcal{D}_{\text{interior}}).
 \end{aligned}$$
 
-The region-dependent reconstruction identity $\operatorname{Reconstruct}(Q, \theta)$ expands the total difference $F_Q - F_{\text{comp}}$ as a signed sum of certified remainders:
-$$\boxed{\operatorname{Reconstruct}(Q, \theta): \quad F_Q(\theta) - F_{\text{comp}}^{(K)}(\theta) = \sum_{i \in I(\theta)} s_i R_i(\theta), \qquad s_i \in \{-1, +1\},}$$
-where $I(\theta)$ is the set of active certified remainder terms valid at $\theta$. Applying the triangle inequality yields the mechanically generated composite error bound:
-$$\boxed{|F(\theta) - F_{\text{comp}}^{(K)}(\theta)| \le \sum_{i \in I(\theta)} B_i(\theta) =: B_{\text{comp}}(\theta).}$$
+In the global overlap region where all three approximations are active, $F - F_{\text{comp}}$ obeys the exact global overlap identity:
+$$\boxed{F - F_{\text{comp}}^{(K)} = (F - F_{\text{interior}}) - (F_{\text{north}} - F_{+O}) - (F_{\text{south}} - F_{-O}) = R_{\text{interior}} - R_{+O} - R_{-O},}$$
+yielding the derived exact global overlap composite bound:
+$$\boxed{B_{\text{comp}}(\theta) = B_{\text{interior}}(\theta) + B_{+O}(\theta) + B_{-O}(\theta).}$$
 
+More generally, the region-dependent reconstruction identity $\operatorname{Reconstruct}_r(Q, \theta)$ expands the total difference $F_Q - F_{\text{comp},r}$ as a signed sum of active certified remainders:
+$$\boxed{\operatorname{Reconstruct}_r(Q, \theta): \quad F_Q(\theta) - F_{\text{comp},r}^{(K)}(\theta) = \sum_{i \in I_r(\theta)} s_{r,i} R_i(\theta), \qquad s_{r,i} \in \{-1, +1\},}$$
+where $I_r(\theta)$ is the set of active certified remainder terms valid in region $r$ at $\theta$. Applying the triangle inequality yields:
+$$\boxed{|F_Q(\theta) - F_{\text{comp},r}^{(K)}(\theta)| \le \sum_{i \in I_r(\theta)} B_i(\theta) =: B_{\text{comp}}(\theta).}$$
+
+**Composite Certificate Status Propagation:**
+$$\boxed{\texttt{B\_comp.valid} \iff \bigwedge_{i \in I_r(\theta)} \texttt{Cert}(R_i).}$$
 Under status $\texttt{MATCHING\_SCHEMA}$, the asymptotic growth exponent is declared as $\gamma_K := \text{unspecified}$. It is promoted to $\texttt{ANALYTIC\_CERTIFIED}$ only after proving the uniform majorant theorem:
 $$\boxed{G^\pm_{K, \lambda, Z_0, \delta}(z; N_n) \le C^\pm_{K, \lambda, Z_0, \delta} (1 + z)^{\gamma_K} \quad \text{uniformly for } N_n \ge N_0 \text{ and } Z_0 \le z \le \delta N_n.}$$
 
-### 6.2 Certified Domain-Compatible Evaluation Selector ($M^*$)
+### 6.3 Certified Domain-Compatible Evaluation Selector ($M^*$)
 Candidate evaluation representations are defined by explicit Candidate interfaces:
 $$\boxed{\text{Candidate } \{ \text{domain } \mathcal{D}_M, \text{ target } Q, \text{ status}, \texttt{ErrorBound.valid}, B_M(\theta) \}.}$$
 Selection requires target $Q$ matching ($\texttt{valid} \implies B_M(\theta)$ bounds the exact target quantity $F_Q(\theta)$):
@@ -227,8 +239,8 @@ $$\boxed{M^*(\theta) = \arg\min_{\substack{M \\ \theta \in \mathcal{D}_M \\ \tex
   $$\boxed{\operatorname{CertifiedSensitivity}_Q(A, \kappa_Q) \land R_Q \le B_{\text{back}} \land E_{Q, \text{conv}} \le B_{Q, \text{conv}} \implies E_Q \le \kappa_Q B_{\text{back}} + B_{Q, \text{conv}} := B_{Q, \text{forward}},}$$
   where target $Q \in \{\texttt{NODE}, \texttt{WEIGHT}, \texttt{EIGENVECTOR}, \texttt{QUADRATURE}\}$ and $\kappa_Q$ is explicitly certified (including eigenvalue-gap conditioning for eigenvectors/weights).
 
-### VII-C. Execution-Trace Recurrence Denominators & Backend Normalization Denominators
-The execution plan $P$ defines $P_{\text{recurrence\_arithmetic}} = \{ q : q \text{ is an exact rational quantity inverted or divided during execution trace} \}$. Recurrence denominators follow the actual executed arithmetic graph:
+### VII-C. Execution-Trace Recurrence Denominators & Aggregate Excluded Modulus
+Define execution-trace arithmetic operations: $P_{\text{recurrence\_arithmetic}} = \{ q : q \text{ is an exact rational quantity inverted or divided during execution trace} \}$. Recurrence denominators follow the actual executed arithmetic graph:
 $$\boxed{D_{\text{rec}}(P) = \operatorname{lcm}\left(\{ \operatorname{den}_{\text{red}}(q) : q \in P_{\text{recurrence\_arithmetic}} \}\right).}$$
 
 Evaluation point denominator for canonical fraction $x = c/r$ ($\gcd(c,r)=1, r>0$):
@@ -240,8 +252,8 @@ $$\boxed{D_{\text{norm}}(P, Q) = \operatorname{lcm}\{\text{rational denominators
 The zonal finite-field backend excludes $D_{\text{norm}}$ explicitly:
 $$\boxed{\texttt{ZonalFiniteFieldBackend} \cap D_{\text{norm}}(P, \texttt{ZONAL}) = \varnothing.}$$
 
-Overall denominator nonlocality product:
-$$\boxed{D_{\text{den}} = \operatorname{lcm}(D_{\text{rec}}(P), D_{\text{norm}}(P, Q), D_{\text{eval}}).}$$
+Aggregate excluded-denominator modulus:
+$$\boxed{D_{\text{den}} = \operatorname{lcm}(D_{\text{rec}}(P), D_{\text{norm}}(P, Q), D_{\text{eval}}), \qquad \text{with empty LCM convention } \operatorname{lcm}(\varnothing) = 1.}$$
 
 ### VII-D. Explicit Canonical Preconditions & Semantically Exact Bad Zonal Prime Predicate
 Canonical reduced fraction representation preconditions:
