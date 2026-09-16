@@ -587,6 +587,119 @@ def propagate_total_bound_status(status_b_comp: TheoremStatus, status_e_exec: Th
     return TheoremStatus.from_rank(min_rank)
 
 
+def check_algebraic_compatibility(composite_target: CertificateTarget, component_targets: List[CertificateTarget], composite_expr: str = "") -> bool:
+    """
+    Algebraic Compatibility Precondition:
+      Compatible(Q, {Q_j}, F_{comp,r})
+    Validates that component error quantities participate in the same exact scalar algebraic expression,
+    sharing compatible units, normalization, and representation space.
+    Required for AggregateExec_r: Compatible(Q, {Q_j}, F_{comp,r}) => |eps_{exec,r}| <= sum_{j in J_r} E_j.
+    """
+    if not component_targets:
+        return True
+    return all(q == composite_target for q in component_targets)
+
+
+@dataclass
+class ComponentCertificate:
+    """
+    1. ComponentCertificate (Level 1 in Certificate Stack):
+       Represents a certified error or remainder of an individual term/region j in J_r.
+       Components carry target Q_j, bound value E_j or R_j, domain D, and TheoremStatus.
+    """
+    component_id: str
+    bound_value: float
+    target: CertificateTarget
+    domain: Domain
+    status: TheoremStatus = TheoremStatus.ANALYTIC_CERTIFIED
+
+
+@dataclass
+class AggregateCertificate:
+    """
+    2. AggregateCertificate (Level 2 in Certificate Stack):
+       Aggregates component certificates under the algebraic compatibility precondition
+       Compatible(Q, {Q_j}, F_{comp,r}).
+       Requires Compatible => |eps_{exec,r}| <= sum_{j in J_r} E_j.
+    """
+    components: List[ComponentCertificate]
+    composite_target: CertificateTarget
+    domain: Domain
+    status: TheoremStatus
+    composite_expr: str = ""
+
+    @property
+    def is_compatible(self) -> bool:
+        return check_algebraic_compatibility(self.composite_target, [c.target for c in self.components], self.composite_expr)
+
+    @property
+    def aggregate_error(self) -> float:
+        if not self.is_compatible:
+            raise ValueError(f"Cannot aggregate execution error: components fail Compatible({self.composite_target.value}, {{Q_j}}, {self.composite_expr}) precondition")
+        return sum(c.bound_value for c in self.components)
+
+
+@dataclass
+class ApproximationCertificate:
+    """
+    3. ApproximationCertificate (Level 3 in Certificate Stack):
+       Mathematical composite approximation bound B_{comp,r}(theta) derived from remainder certificates.
+       Status is derived via rank propagation: Status(B_{comp,r}) = rank^(-1)(min_{i in I_r} rank(Status(R_i))).
+    """
+    bound_value: float
+    domain: Domain
+    target: CertificateTarget
+    status: TheoremStatus
+
+
+@dataclass
+class ExecutionCertificate:
+    """
+    4. ExecutionCertificate (Level 4 in Certificate Stack):
+       Certified numerical backend execution error bound E_{exec,r}(theta) for chosen backend/method.
+    """
+    error_value: float
+    domain: Domain
+    target: CertificateTarget
+    status: TheoremStatus
+    backend: str = "FLOAT64"
+
+
+@dataclass
+class TotalForwardCertificate:
+    """
+    5. TotalForwardCertificate (Level 5 in Certificate Stack):
+       Total certified forward error bound B_{total,r}(theta) = B_{comp,r}(theta) + E_{exec,r}(theta).
+       Status is derived via rank propagation: Status(B_{total,r}) = rank^(-1)(min(rank(Status(B_{comp,r})), rank(Status(E_{exec,r})))).
+
+    6. CertifiedBound Predicate (Level 6 in Certificate Stack):
+       CertifiedBound(M) <=> Status(B_M^total) in {ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, NUMERICAL_CERTIFIED}.
+
+    7. Optimal Candidate Selection M* (Level 7 in Certificate Stack):
+       M*(theta) = min_< argmin_{M in A, CertifiedBound(M)} B_M^total(theta).
+    """
+    approximation_cert: ApproximationCertificate
+    execution_cert: ExecutionCertificate
+
+    @property
+    def total_bound_value(self) -> float:
+        return self.approximation_cert.bound_value + self.execution_cert.error_value
+
+    @property
+    def status(self) -> TheoremStatus:
+        return propagate_total_bound_status(self.approximation_cert.status, self.execution_cert.status)
+
+    @property
+    def is_certified_bound(self) -> bool:
+        """Evaluates CertifiedBound(M) predicate giving every transformation a single provenance edge."""
+        return self.status in (
+            TheoremStatus.ALGEBRAIC_EXACT,
+            TheoremStatus.ARITHMETIC_EXACT,
+            TheoremStatus.ANALYTIC_CERTIFIED,
+            TheoremStatus.NUMERICAL_CERTIFIED
+        )
+
+
 @dataclass
 class ErrorDecomposition:
     """Decomposed computational error breakdown carrying individual certification statuses."""

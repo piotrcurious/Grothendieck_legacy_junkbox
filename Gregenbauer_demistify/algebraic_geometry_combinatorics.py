@@ -489,8 +489,13 @@ def inv_obstruction(q: Union[int, Fraction, float]) -> int:
     """
     Computes InvObstruction(q) = |num_red(q) * den_red(q)| for non-zero rational q = a/b in reduced form.
     Requires execution invariant INVERT(q) => q != 0 (P_inv c Q^*).
-    For any finite-field inversion INVERT(q) = b/a to exist in F_p, p must satisfy gcd(p, InvObstruction(q)) == 1
-    (i.e. p nmid a and p nmid b).
+
+    Typed Definition:
+      Embed_p(a / b) = a * b^(-1) in F_p
+      Inv_p(Embed_p(q)) = b * a^(-1) in F_p  under p nmid a * b.
+
+    For any finite-field inversion Inv_p(Embed_p(q)) = b/a to exist in F_p, p must satisfy
+    gcd(p, InvObstruction(q)) == 1 (i.e. p nmid a and p nmid b).
     """
     q_frac = Fraction(q)
     if q_frac == 0:
@@ -536,7 +541,11 @@ def get_algorithm_denominator_lcm(n: int, lambda_val: Union[int, Fraction]) -> i
 
 
 def get_parameter_denominator(lambda_val: Union[int, Fraction, float]) -> int:
-    """Computes D_lambda = den_red(lambda) for parameter specialization in F_p. For physical lambda = (d-2)/2, D_lambda = 2."""
+    """
+    Computes D_lambda = b_lambda for general rational analytic parameter lambda = a_lambda / b_lambda in F_p.
+    For the physical sphere specialization where lambda = (d-2)/2:
+      D_lambda = den_red((d-2)/2) = 2 (if d is odd) or 1 (if d is even).
+    """
     return Fraction(lambda_val).denominator
 
 
@@ -610,6 +619,12 @@ def canonical_zonal_admissible(p: int, degree: int, point: Union[int, Fraction],
     CanonicalZonalAdmissible predicate for the canonical rationalization backend:
       CanonicalZonalAdmissible(p, P, n, x, lambda) <=> Prime(p) and p nmid D_adm_zonal and p nmid u_n * v_n.
     Where D_adm_zonal = lcm(D_inv, D_eval, D_lambda) and C_n^(lambda)(1) = u_n / v_n.
+
+    Explicit Canonical Normalization Equation:
+      C_n^(lambda)(1) = u_n / v_n  =>  phi_n(x) = C_n^(lambda)(x) * INVERT(u_n / v_n).
+    Since INVERT(u_n / v_n) = v_n / u_n, field existence in F_p requires:
+      p nmid u_n and p nmid v_n  <=>  p nmid u_n * v_n.
+    Thus CanonicalZonalAdmissible => p nmid u_n * v_n is directly derived from the canonical normalization execution trace.
     Note: CanonicalZonalAdmissible requires canonical rational representations u_n/v_n, c/r, a_lambda/b_lambda to embed in F_p.
     """
     if p <= 1:

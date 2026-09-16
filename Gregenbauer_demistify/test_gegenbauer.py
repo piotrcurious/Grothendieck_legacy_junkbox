@@ -27,6 +27,10 @@ from Gregenbauer_demistify.algebraic_geometry_combinatorics import (
     QuadricQuotientPolynomial,
     bad_zonal_prime,
     zonal_admissible,
+    canonical_zonal_admissible,
+    canonical_bad_zonal_prime,
+    get_parameter_denominator,
+    inv_obstruction,
     classify_parameter_domain,
     endpoint_class,
     exact_rational_gegenbauer,
@@ -56,6 +60,12 @@ from Gregenbauer_demistify.computational_layer import (
     AlgebraicPermutation,
     CertificateTarget,
     CertifiedSensitivity,
+    check_algebraic_compatibility,
+    ComponentCertificate,
+    AggregateCertificate,
+    ApproximationCertificate,
+    ExecutionCertificate,
+    TotalForwardCertificate,
     NumericalCertificate,
     Domain,
     ErrorBound,
@@ -1157,3 +1167,124 @@ def test_lazy_candidate_selector_integration():
     assert cand.lazy_node is not None
     assert cand.dag_weight > 0
     assert cand.name in (AlgebraicPermutation.MEHLER_HEINE_BESSEL.value, AlgebraicPermutation.INTERIOR_WKB_WEYL.value)
+
+
+def test_p0_canonical_zonal_normalization_equation():
+    """
+    Verifies P0 fix: CanonicalZonalAdmissible explicitly computes C_n^(lambda)(1) = u_n / v_n
+    and requires p nmid u_n and p nmid v_n in F_p due to phi_n(x) = C_n^(lambda)(x) * INVERT(u_n / v_n).
+    """
+    n = 3
+    lam = Fraction(3, 2)
+    x = Fraction(1, 2)
+    c1 = exact_rational_gegenbauer(n, lam, Fraction(1))
+    u_n = abs(c1.numerator)
+    v_n = c1.denominator
+
+    # Pick a prime p that divides u_n
+    p_bad = 7 if u_n % 7 == 0 else (5 if u_n % 5 == 0 else u_n)
+    if p_bad > 1:
+        assert not canonical_zonal_admissible(p_bad, n, x, lambda_val=lam)
+        assert canonical_bad_zonal_prime(p_bad, n, x, lambda_val=lam)
+
+    # Pick an admissible prime p=17
+    assert canonical_zonal_admissible(17, n, x, lambda_val=lam)
+
+
+def test_p1_parameter_domain_dependent_d_lambda():
+    """
+    Verifies P1 fix: D_lambda = b_lambda for general rational analytic parameters lambda = a_lambda / b_lambda,
+    and specializes to D_lambda = 2 (odd d) / 1 (even d) for physical spheres.
+    """
+    # General rational analytic parameters
+    assert get_parameter_denominator(Fraction(3, 7)) == 7
+    assert get_parameter_denominator(Fraction(5, 11)) == 11
+
+    # Physical sphere specialization lambda = (d - 2) / 2
+    d_odd = 3  # lambda = 1/2
+    lam_odd = Fraction(d_odd - 2, 2)
+    assert get_parameter_denominator(lam_odd) == 2
+
+    d_even = 4  # lambda = 1
+    lam_even = Fraction(d_even - 2, 2)
+    assert get_parameter_denominator(lam_even) == 1
+
+
+def test_p1_typed_finite_field_inversion():
+    """
+    Verifies P1 fix: Typed definition Embed_p(a/b) = a * b^(-1) in F_p and
+    Inv_p(Embed_p(q)) = b * a^(-1) in F_p under p nmid a * b.
+    """
+    p = 7
+    q = Fraction(2, 3)
+    inv_q_obs = inv_obstruction(q)  # |2 * 3| = 6
+    assert math.gcd(p, inv_q_obs) == 1  # 7 does not divide 6
+
+    # Embed_7(2/3) = 2 * 3^(-1) mod 7 = 2 * 5 mod 7 = 3 mod 7
+    embed_q = (q.numerator * pow(q.denominator, -1, p)) % p
+    assert embed_q == 3
+
+    # Inv_7(Embed_7(2/3)) = 3 * 2^(-1) mod 7 = 3 * 4 mod 7 = 5 mod 7
+    inv_embed_q = (q.denominator * pow(q.numerator, -1, p)) % p
+    assert inv_embed_q == 5
+    assert (embed_q * inv_embed_q) % p == 1
+
+
+def test_p0_aggregate_exec_compatibility_contract():
+    """
+    Verifies P0 fix: AggregateExec requires Compatible(Q, {Q_j}, F_{comp,r}) contract.
+    Components sharing target Q aggregate successfully; mismatched targets raise ValueError.
+    """
+    dom = Domain(name="test_dom", lower=0.0, upper=math.pi)
+    comp1 = ComponentCertificate(component_id="north", bound_value=1e-5, target=CertificateTarget.NODE, domain=dom)
+    comp2 = ComponentCertificate(component_id="interior", bound_value=2e-5, target=CertificateTarget.NODE, domain=dom)
+
+    # Compatible components
+    agg_cert = AggregateCertificate(
+        components=[comp1, comp2],
+        composite_target=CertificateTarget.NODE,
+        domain=dom,
+        status=TheoremStatus.ANALYTIC_CERTIFIED,
+        composite_expr="F_comp = F_N + F_I"
+    )
+    assert agg_cert.is_compatible
+    assert np.isclose(agg_cert.aggregate_error, 3e-5)
+
+    # Incompatible components (target mismatch)
+    comp_mismatch = ComponentCertificate(component_id="mismatch", bound_value=1e-5, target=CertificateTarget.WEIGHT, domain=dom)
+    agg_incompatible = AggregateCertificate(
+        components=[comp1, comp_mismatch],
+        composite_target=CertificateTarget.NODE,
+        domain=dom,
+        status=TheoremStatus.ANALYTIC_CERTIFIED,
+        composite_expr="F_comp = F_N + F_W"
+    )
+    assert not agg_incompatible.is_compatible
+    with pytest.raises(ValueError, match="Cannot aggregate execution error"):
+        _ = agg_incompatible.aggregate_error
+
+
+def test_certificate_stack_pipeline():
+    """
+    Verifies the explicit Certificate Stack pipeline giving every transformation a single provenance edge:
+    ComponentCertificate -> AggregateCertificate -> ApproximationCertificate -> ExecutionCertificate -> TotalForwardCertificate -> CertifiedBound -> M*
+    """
+    dom = Domain(name="pipeline_dom", lower=0.0, upper=math.pi)
+
+    # Level 1 & 2: Components & Aggregation
+    c1 = ComponentCertificate("N", 1e-6, CertificateTarget.NODE, dom, TheoremStatus.ANALYTIC_CERTIFIED)
+    c2 = ComponentCertificate("I", 2e-6, CertificateTarget.NODE, dom, TheoremStatus.ANALYTIC_CERTIFIED)
+    agg = AggregateCertificate([c1, c2], CertificateTarget.NODE, dom, TheoremStatus.ANALYTIC_CERTIFIED, "F_comp")
+    assert agg.is_compatible
+
+    # Level 3: Approximation Certificate
+    approx = ApproximationCertificate(bound_value=1e-4, domain=dom, target=CertificateTarget.NODE, status=TheoremStatus.ANALYTIC_CERTIFIED)
+
+    # Level 4: Execution Certificate
+    exec_cert = ExecutionCertificate(error_value=agg.aggregate_error, domain=dom, target=CertificateTarget.NODE, status=TheoremStatus.NUMERICAL_CERTIFIED, backend="FLOAT64")
+
+    # Level 5 & 6: Total Forward Certificate & CertifiedBound predicate
+    total_cert = TotalForwardCertificate(approximation_cert=approx, execution_cert=exec_cert)
+    assert np.isclose(total_cert.total_bound_value, 1.03e-4)
+    assert total_cert.status == TheoremStatus.NUMERICAL_CERTIFIED
+    assert total_cert.is_certified_bound
