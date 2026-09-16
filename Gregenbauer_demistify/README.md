@@ -52,14 +52,15 @@ This repository implements a mathematically closed, VIII-Layer unified architect
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, C_fixed, C_LNS; references VII-E Golub-Welsch certificate)
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x] ──symbolic rec──> C_n ──eval──> Q ──CRT/RNS──> integer residues)
-  ├── VII-C: Scalable RNS / CRT (N_max := metadata, Trace P_inv ⊂ Q^* with INVERT(q) ⟹ q ≠ 0, TraceComplete(P) invariant: DIV(a,b) := a * INVERT(b) in P_inv, D_inv(P) = lcm_{q ∈ P_inv} |num_red(q) den_red(q)|, Aggregate D_adm = lcm(D_inv, D_norm, D_eval, D_λ))
-  ├── VII-D1: Finite-Field Arithmetic (Prime(p) Precondition; InvObstruction(q) = |num_red(q) den_red(q)|; UsesNormalizationDenominators(P, ZONAL)=false; Canonical u_n/v_n, c/r; D_λ = den_red((d-2)/2) = 2 (d odd) / 1 (d even); PolyCertificate(p, P, n, λ) ⟺ Prime(p) ∧ gcd(p, D_inv) = 1 ∧ p ∤ D_λ; ZonalAdmissible(p, P, n, x, λ); Bad_zonal(p, P, n, x, λ) ⟺ p|r ∨ p|v_n ∨ p|u_n ∨ p|D_inv(P) ∨ p|D_λ)
+  ├── VII-C: Scalable RNS / CRT (N_max := metadata, Trace P_inv ⊂ Q^* with INVERT(q) ⟹ q ≠ 0, TraceComplete(P) invariant: DIV(a,b) := a * INVERT(b) in P_inv, D_inv(P) = lcm_{q ∈ P_inv} |num_red(q) den_red(q)|, Typed Inversion Inv_p(Embed_p(q))=b/a under p ∤ ab, Aggregate D_adm = lcm(D_inv, D_norm, D_eval, D_λ))
+  ├── VII-D1: Finite-Field Arithmetic (Prime(p) Precondition; InvObstruction(q) = |num_red(q) den_red(q)|; UsesNormalizationDenominators(P, ZONAL)=false; Canonical u_n/v_n, c/r; D_λ = b_λ (physical sphere specialization: D_λ = 2 for d odd / 1 for d even); PolyCertificate(p, P, n, λ) ⟺ Prime(p) ∧ gcd(p, D_inv) = 1 ∧ p ∤ D_λ; Canonical Zonal Normalization ϕ_n(x) = C_n^(λ)(x) * INVERT(u_n/v_n); CanonicalZonalAdmissible(p, P, n, x, λ) ⟹ p ∤ u_n v_n; Bad_zonal(p, P, n, x, λ) ⟺ p|r ∨ p|v_n ∨ p|u_n ∨ p|D_inv(P) ∨ p|D_λ)
   ├── VII-D2: NTT Acceleration Primitive (L_conv = L_1+L_2-1 ≤ L_NTT, L_NTT | (p-1))
   └── VII-E: Canonical Golub-Welsch Spectral Truncation Certificate (J_m = tridiag(α_0, ..., α_{m-2}), Typed Implication: CertSensitivity_{Q_spec}(A, κ_{Q_spec}) ∧ R_{Q_spec} ≤ B_back ∧ E_{Q_spec,conv} ≤ B_{Q_spec,conv} ⟹ E_{Q_spec,forward} ≤ κ_{Q_spec} B_back + B_{Q_spec,conv})
         │
         ▼
   Layer VIII. Typed Separation: ExactValue vs ErrorBound vs Residual & Provenance Optimizer
   First-Class Types: ExactValue != ErrorBound != Residual (TheoremStatus Enum: ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, NUMERICAL_CERTIFIED, MATCHING_SCHEMA, EMPIRICAL_DIAGNOSTIC)
+  Certificate Stack Pipeline: ComponentCertificate ──→ AggregateCertificate ──→ ApproximationCertificate ──→ ExecutionCertificate ──→ TotalForwardCertificate ──→ CertifiedBound ──→ M^*
   Extended Certificate Tuple Invariant: Every certificate carries (target Q, domain 𝒟, backend, status, validity_conditions)
   Residual != ErrorBound Invariant; Staged Perturbation Chain for Target Q: F_0(Q) ──E_0──> F_1(Q) ──E_1──> ... ──E_{k-1}──> F_k(Q) ⟹ |F_0(Q) - F_k(Q)| ≤ ∑_{i=0}^{k-1} E_i
   Canonical Test Matrix: d ∈ {3, 4, 5}, n ∈ {0, 1, 2, 3} validating initial data anchors, recurrences, and cheap invariants (norm isometry & parity/boundedness)
@@ -104,11 +105,14 @@ $$R(Q)_n \cong \operatorname{Sym}^n(\mathbb{C}^d) / q \operatorname{Sym}^{n-2}(\
 - **Jacobi Spectral Path:** Evaluates $J_m = \operatorname{tridiag}(\alpha_0, \dots, \alpha_{m-2}) \in \mathbb{R}^{m \times m}$ operating in algebraic extensions $\overline{\mathbb{Q}}$ due to $\alpha_n = \frac{1}{2}\sqrt{\frac{(n+1)(n+2\lambda)}{(n+\lambda)(n+\lambda+1)}} = \frac{1}{2} + \frac{\lambda(1-\lambda)}{4n^2} + O(n^{-3})$ as $n \to \infty$.
 
 ### Modular & RNS/CRT Admissibility Certificates
-- **Inversion Obstruction Invariant:** $\operatorname{INVERT}(q) \implies q \ne 0$ ($P_{\text{inv}} \subset \mathbb{Q}^\times$). Trace completeness invariant: $\texttt{TraceComplete}(P) \implies \text{every modular DIV/INVERT in } P \text{ occurs in } P_{\text{inv}}$.
-- **Split Denominators / Inversion Obstruction:** $D_{\text{inv}}(P) = \operatorname{lcm}_{q = a_q/b_q \in P_{\text{inv}}(P)} |a_q b_q|$, $D_{\text{norm}}^{\text{used}}(P, Q)$, $D_{\text{eval}} = r$, $D_\lambda = \operatorname{den}_{\text{red}}(\frac{d-2}{2}) = 2$ ($d$ odd) / $1$ ($d$ even).
+  - **Inversion Obstruction Invariant:** $\operatorname{INVERT}(q) \implies q \ne 0$ ($P_{\text{inv}} \subset \mathbb{Q}^\times$). Formally defined via typed embedding $\operatorname{Embed}_p(a/b) = a b^{-1} \in \mathbb{F}_p$ and inverse $\operatorname{Inv}_p(\operatorname{Embed}_p(q)) = b a^{-1}$. Trace completeness invariant: $\texttt{TraceComplete}(P) \implies \text{every modular DIV/INVERT in } P \text{ occurs in } P_{\text{inv}}$.
+  - **Split Denominators / Inversion Obstruction:** $D_{\text{inv}}(P) = \operatorname{lcm}_{q = a_q/b_q \in P_{\text{inv}}(P)} |a_q b_q|$, $D_{\text{norm}}^{\text{used}}(P, Q)$, $D_{\text{eval}} = r$, $D_\lambda = b_\lambda$ for general rational analytic $\lambda = a_\lambda / b_\lambda$ (specializing to $2$ for $d$ odd / $1$ for $d$ even in physical spheres).
 - **Aggregate Admissibility Modulus:** $D_{\text{adm}} = \operatorname{lcm}(D_{\text{inv}}(P), D_{\text{norm}}^{\text{used}}(P, Q), D_{\text{eval}}, D_\lambda)$ with $\operatorname{lcm}(\varnothing) = 1$.
 - **Canonical Reduced Fraction Preconditions:** $C_n^{(\lambda)}(1) = u_n/v_n$ with $\gcd(u_n, v_n)=1, v_n>0$, $x = c/r$ with $\gcd(c, r)=1, r>0$, and $\lambda = a_\lambda / b_\lambda$ with $\gcd(a_\lambda, b_\lambda) = 1, b_\lambda > 0$.
+  - **Explicit Canonical Zonal Normalization Inversion:** $\phi_n(x) = C_n^{(\lambda)}(x) \operatorname{INVERT}(u_n/v_n)$ requiring $p \nmid u_n \land p \nmid v_n \implies \operatorname{CanonicalZonalAdmissible} \implies p \nmid u_n v_n$.
 - **Bad Zonal Prime Predicate (under $\operatorname{Prime}(p)$):** $\operatorname{Bad}_{\text{zonal}}(p, P, n, x, \lambda) \iff p \mid r \lor p \mid v_n \lor p \mid u_n \lor p \mid D_{\text{inv}}(P) \lor p \mid D_\lambda$.
+  - **Execution Aggregation Contract:** $\operatorname{Compatible}(Q, \{Q_j\}, F_{\text{comp},r}) \implies |\varepsilon_{\text{exec},r}| \le \sum_{j \in J_r} E_j$.
+  - **Certificate Stack Pipeline:** $\texttt{ComponentCertificate} \rightarrow \texttt{AggregateCertificate} \rightarrow \texttt{ApproximationCertificate} \rightarrow \texttt{ExecutionCertificate} \rightarrow \texttt{TotalForwardCertificate} \rightarrow \texttt{CertifiedBound} \rightarrow M^*$.
 - **Finite-Field Certificates:**
   - $\texttt{PolyCertificate}(p, P, n, \lambda) \iff \operatorname{Prime}(p) \land \gcd(p, D_{\text{inv}}(P)) = 1 \land p \nmid D_\lambda$.
   - $\texttt{PointCertificate}(p, x) \iff \gcd(p, r) = 1$.
