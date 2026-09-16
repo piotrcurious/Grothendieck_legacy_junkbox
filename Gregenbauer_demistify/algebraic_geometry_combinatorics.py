@@ -12,10 +12,11 @@ for Gegenbauer polynomials and complex projective quadric hypersurfaces Q_{d-2} 
 5. Golub-Welsch Gauss-Gegenbauer Quadrature over m x m principal truncation J_m (sigma(J_m) = {x_1, ..., x_m})
 6. Normalized Gegenbauer _2F_1 Hypergeometric Expansion Coefficients
 7. EndpointClass Enum, EndpointBoundaryCondition, and Physical vs Analytic Continuation Parameter Domain Classifier
-8. Execution Metadata N_max & Split Algorithm/Point Denominators D_rec and D_eval
+8. Execution Metadata N_max & Split Algorithm Inversion-Obstruction Modulus D_inv(P) = lcm_{q in P_rec_inv} |a_q b_q|
+   and InvObstruction(q) = |num_red(q) * den_red(q)|
 9. PolyCertificate, PointCertificate, PolyEvaluationCertificate, and ZonalCertificate Admissibility
    with 3 distinct bad-prime failure modes:
-   - PointLocalizationFailure (p | r)
+   - PointLocalizationFailure (p | r or p | D_inv)
    - NormalizationRepresentationFailure (p | v_n)
    - NormalizationSingularityFailure (p | u_n)
 """
@@ -475,36 +476,51 @@ def exact_rational_bit_length(n: int, lambda_val: Union[int, Fraction], x: Union
     return bits_C, bits_phi
 
 
-def extract_plan_recurrence_denominator(execution_plan: object = None, degree: int = 0, lambda_val: Union[int, Fraction] = Fraction(1, 2)) -> int:
+def inv_obstruction(q: Union[int, Fraction, float]) -> int:
     """
-    Computes D_rec(P) = lcm({den_red(q) : q in P_recurrence_arithmetic}).
-    Plan-pure recurrence denominator extraction without extra b factor.
-    If execution_plan is an object with 'recurrence_arithmetic', extracts denominators from it.
-    Otherwise computes D_rec directly for degree n and parameter lambda.
+    Computes InvObstruction(q) = |num_red(q) * den_red(q)| for rational q = a/b in reduced form.
+    For any finite-field inversion INVERT(q) = b/a to exist in F_p, p must satisfy gcd(p, InvObstruction(q)) == 1
+    (i.e. p nmid a and p nmid b).
+    """
+    q_frac = Fraction(q)
+    return abs(q_frac.numerator * q_frac.denominator)
+
+
+def extract_plan_inversion_obstruction_modulus(execution_plan: object = None, degree: int = 0, lambda_val: Union[int, Fraction] = Fraction(1, 2)) -> int:
+    """
+    Computes D_inv(P) = lcm_{q in P_rec_inv} |a_q * b_q| where q = a_q / b_q in reduced form.
+    Inversion-obstruction modulus ensuring that for all q in execution trace INVERT(q),
+    q is non-zero and well-defined in F_p (i.e. p nmid a_q and p nmid b_q).
     """
     if execution_plan is not None and hasattr(execution_plan, 'recurrence_arithmetic'):
         lcm_val = 1
         for q in getattr(execution_plan, 'recurrence_arithmetic'):
-            lcm_val = math.lcm(lcm_val, Fraction(q).denominator)
+            q_frac = Fraction(q)
+            lcm_val = math.lcm(lcm_val, abs(q_frac.numerator * q_frac.denominator))
         return lcm_val
 
     lcm_val = 1
     for k in range(1, degree + 1):
         a_k, b_k = normalized_jacobi_coefficients(k, Fraction(lambda_val), exact=True)
-        lcm_val = math.lcm(lcm_val, Fraction(a_k).denominator)
-        lcm_val = math.lcm(lcm_val, Fraction(b_k).denominator)
+        a_k_frac, b_k_frac = Fraction(a_k), Fraction(b_k)
+        lcm_val = math.lcm(lcm_val, abs(a_k_frac.numerator * a_k_frac.denominator))
+        lcm_val = math.lcm(lcm_val, abs(b_k_frac.numerator * b_k_frac.denominator))
     return lcm_val
 
 
+def extract_plan_recurrence_denominator(execution_plan: object = None, degree: int = 0, lambda_val: Union[int, Fraction] = Fraction(1, 2)) -> int:
+    """Backward compatibility alias for extract_plan_inversion_obstruction_modulus."""
+    return extract_plan_inversion_obstruction_modulus(execution_plan=execution_plan, degree=degree, lambda_val=lambda_val)
+
+
 def get_recurrence_denominator_lcm(n: int, lambda_val: Union[int, Fraction]) -> int:
-    """
-    Computes D_rec = lcm({den_red(a_k), den_red(b_k) : k = 1..n} u {b}) for parameter lambda = a/b.
-    """
-    return extract_plan_recurrence_denominator(execution_plan=None, degree=n, lambda_val=lambda_val)
+    """Backward compatibility alias for get_recurrence_denominator_lcm."""
+    return extract_plan_inversion_obstruction_modulus(execution_plan=None, degree=n, lambda_val=lambda_val)
 
 
-# Alias for backward compatibility
-get_algorithm_denominator_lcm = get_recurrence_denominator_lcm
+def get_algorithm_denominator_lcm(n: int, lambda_val: Union[int, Fraction]) -> int:
+    """Backward compatibility alias for get_algorithm_denominator_lcm."""
+    return extract_plan_inversion_obstruction_modulus(execution_plan=None, degree=n, lambda_val=lambda_val)
 
 
 def get_normalization_denominator(n: int, lambda_val: Union[int, Fraction]) -> int:
@@ -525,17 +541,17 @@ def get_evaluation_denominator(x: Union[int, Fraction]) -> int:
 
 
 def get_excluded_primes_denominator(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction]) -> int:
-    """Computes D_excl = lcm(D_rec, D_norm, D_eval)."""
-    d_rec = get_recurrence_denominator_lcm(n, lambda_val)
+    """Computes D_excl = lcm(D_inv, D_norm, D_eval)."""
+    d_inv = extract_plan_inversion_obstruction_modulus(execution_plan=None, degree=n, lambda_val=lambda_val)
     d_norm = get_normalization_denominator(n, lambda_val)
     d_eval = get_evaluation_denominator(x)
-    return math.lcm(d_rec, math.lcm(d_norm, d_eval))
+    return math.lcm(d_inv, math.lcm(d_norm, d_eval))
 
 
 def check_c_n_admissibility(n: int, lambda_val: Union[int, Fraction], p: int, execution_plan: object = None) -> bool:
     """
     Admissibility certificate for unnormalized Gegenbauer polynomial C_n^(lambda)(x) in F_p (PolyCertificate):
-      PolyCertificate(p, P, n) requires Prime(p) and gcd(p, D_rec(P)) == 1.
+      PolyCertificate(p, P, n) requires Prime(p) and gcd(p, D_inv(P)) == 1.
     """
     if p <= 1:
         return False
@@ -544,8 +560,8 @@ def check_c_n_admissibility(n: int, lambda_val: Union[int, Fraction], p: int, ex
         if p % i == 0:
             return False
 
-    d_rec = extract_plan_recurrence_denominator(execution_plan=execution_plan, degree=n, lambda_val=lambda_val)
-    return (d_rec % p != 0)
+    d_inv = extract_plan_inversion_obstruction_modulus(execution_plan=execution_plan, degree=n, lambda_val=lambda_val)
+    return (d_inv % p != 0)
 
 
 def zonal_admissible(p: int, degree: int, point: Union[int, Fraction], lambda_val: Union[int, Fraction] = Fraction(1, 2), execution_plan: object = None) -> bool:
@@ -553,7 +569,7 @@ def zonal_admissible(p: int, degree: int, point: Union[int, Fraction], lambda_va
     Semantically exact ZonalAdmissible predicate over canonical reduced fractions
       C_n^(lambda)(1) = u_n / v_n with gcd(u_n, v_n) = 1, v_n > 0
       and x = c / r with gcd(c, r) = 1, r > 0:
-      ZonalAdmissible(p, P, n, x) <=> Prime(p) and gcd(p, D_rec(P)) == 1 and p nmid r and p nmid u_n * v_n.
+      ZonalAdmissible(p, P, n, x) <=> Prime(p) and gcd(p, D_inv(P)) == 1 and p nmid r and p nmid u_n * v_n.
     """
     if p <= 1:
         return False
@@ -566,10 +582,8 @@ def zonal_admissible(p: int, degree: int, point: Union[int, Fraction], lambda_va
     if r % p == 0:
         return False
 
-    d_rec = extract_plan_recurrence_denominator(execution_plan=execution_plan, degree=degree, lambda_val=lambda_val)
-    if d_rec % p != 0: # wait, if d_rec % p == 0 then p | d_rec, not admissible
-        pass
-    if d_rec % p == 0:
+    d_inv = extract_plan_inversion_obstruction_modulus(execution_plan=execution_plan, degree=degree, lambda_val=lambda_val)
+    if d_inv % p == 0:
         return False
 
     c1 = exact_rational_gegenbauer(degree, lambda_val, Fraction(1))
@@ -585,7 +599,7 @@ def zonal_admissible(p: int, degree: int, point: Union[int, Fraction], lambda_va
 def bad_zonal_prime(p: int, degree: int, point: Union[int, Fraction], lambda_val: Union[int, Fraction] = Fraction(1, 2), execution_plan: object = None) -> bool:
     """
     Semantically exact bad zonal prime predicate defined under precondition Prime(p):
-      Under Prime(p): Bad_zonal(p, P, n, x) <=> (p | r) or (p | v_n) or (p | u_n) or (p | D_rec(P))
+      Under Prime(p): Bad_zonal(p, P, n, x) <=> (p | r) or (p | v_n) or (p | u_n) or (p | D_inv(P))
       defined as logical negation: Bad_zonal := not ZonalAdmissible.
     """
     return not zonal_admissible(p=p, degree=degree, point=point, lambda_val=lambda_val, execution_plan=execution_plan)
@@ -614,7 +628,7 @@ def check_zonal_admissibility(p: int, execution_plan: object, degree: int, point
       ZonalCertificate(p, execution_plan, degree=n, point=x=c/r)
       Formal logical dependency: ZonalCertificate = PolyEvaluationCertificate and (p nmid v_n) and (C_n(1) != 0 mod p)
       Failure Mode Taxonomy:
-        1. PointLocalizationFailure (p | r or p divides D_rec): non-local in F_p.
+        1. PointLocalizationFailure (p | r or p divides D_inv): non-local in F_p or divides inversion obstruction.
         2. NormalizationRepresentationFailure (p | v_n): rational representation u_n/v_n of C_n(1) non-local in F_p (p | v_n).
         3. NormalizationSingularityFailure (p | u_n): C_n(1) == 0 mod p, normalization division by zero in F_p (p | u_n).
     """
@@ -622,7 +636,7 @@ def check_zonal_admissibility(p: int, execution_plan: object, degree: int, point
     x = point
 
     if not check_c_n_admissibility(n, lambda_val, p):
-        return False, "PointLocalizationFailure: p non-prime or divides recurrence denominator product D_rec"
+        return False, "PointLocalizationFailure: p non-prime or divides inversion obstruction product D_inv"
 
     if not check_point_admissibility(x, p):
         return False, "PointLocalizationFailure: p divides evaluation point denominator r"

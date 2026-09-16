@@ -709,13 +709,13 @@ def test_quadrature_exact_moments_beta_integral():
 def test_finite_field_bad_prime_normalization_check():
     """
     Verifies split finite-field certificates handling bad primes where p | u_n.
-    For C_10^(2)(1) = 286, prime p=13 divides u_n=286, causing phi_n normalization to fail in F_13 (NormalizationSingularityFailure).
+    For C_2^(13/2)(1) = 91, prime p=13 divides u_n=91, causing phi_n normalization to fail in F_13 (NormalizationSingularityFailure).
     """
-    valid_bad, msg_bad = check_phi_n_admissibility(10, Fraction(2), Fraction(1, 2), 13)
-    assert valid_bad is False  # Bad prime 13 divides C_10(1) = 286
+    valid_bad, msg_bad = check_phi_n_admissibility(2, Fraction(13, 2), Fraction(1, 2), 13)
+    assert valid_bad is False  # Bad prime 13 divides C_2^(13/2)(1) = 91
     assert "NormalizationSingularityFailure" in msg_bad
 
-    valid_ok, msg_ok = check_phi_n_admissibility(10, Fraction(2), Fraction(1, 2), 17)
+    valid_ok, msg_ok = check_phi_n_admissibility(2, Fraction(1), Fraction(1, 2), 13)
     assert valid_ok is True
     assert "Valid" in msg_ok
 
@@ -802,6 +802,40 @@ def test_semantically_exact_bad_zonal_prime_predicate():
     # p=17 is clean, Bad_zonal(17) is False and ZonalAdmissible is True
     assert bad_zonal_prime(17, degree=10, point=Fraction(1, 2), lambda_val=Fraction(2)) is False
     assert zonal_admissible(17, degree=10, point=Fraction(1, 2), lambda_val=Fraction(2)) is True
+
+
+def test_inversion_obstruction_modulus_and_bad_prime_two():
+    """
+    Verifies P0 fix: InvObstruction(q) = |num_red(q) * den_red(q)| and D_inv(P).
+    For q = 2/3, InvObstruction(2/3) = 6.
+    Excludes p=2 as a bad prime because 2/3 == 0 mod 2, making its inverse non-existent in F_2.
+    """
+    from Gregenbauer_demistify.algebraic_geometry_combinatorics import inv_obstruction, extract_plan_inversion_obstruction_modulus
+
+    assert inv_obstruction(Fraction(2, 3)) == 6
+
+    # For degree 1, lambda = 1/2: a_1 = 3/4 (obs=12), b_1 = 1/4 (obs=4) => D_inv = 12
+    # Primes 2 and 3 divide D_inv = 12
+    d_inv = extract_plan_inversion_obstruction_modulus(None, degree=1, lambda_val=Fraction(1, 2))
+    assert d_inv % 2 == 0 and d_inv % 3 == 0
+    assert check_c_n_admissibility(1, Fraction(1, 2), 2) is False  # p=2 excluded
+    assert check_c_n_admissibility(1, Fraction(1, 2), 3) is False  # p=3 excluded
+    assert check_c_n_admissibility(1, Fraction(1, 2), 5) is True   # p=5 admissible
+
+
+def test_certified_remainder_typed_status_propagation():
+    """
+    Verifies CertifiedRemainder object and status rank propagation:
+      Status(B_{comp,r}) = rank^(-1)( min_{i in I_r} rank(Status(R_i)) )
+    """
+    from Gregenbauer_demistify.computational_layer import CertifiedRemainder, propagate_composite_status
+
+    r1 = CertifiedRemainder(value=1e-5, bound=1e-4, status=TheoremStatus.ALGEBRAIC_EXACT)
+    r2 = CertifiedRemainder(value=1e-3, bound=1e-2, status=TheoremStatus.MATCHING_SCHEMA)
+
+    # Status of composite bound is min(5, 1) = 1 => MATCHING_SCHEMA
+    status_comp = propagate_composite_status([r1, r2])
+    assert status_comp == TheoremStatus.MATCHING_SCHEMA
 
 
 def test_selector_candidate_target_q_interface():
