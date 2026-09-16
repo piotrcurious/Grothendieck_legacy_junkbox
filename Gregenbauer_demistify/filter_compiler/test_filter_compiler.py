@@ -95,7 +95,7 @@ def test_bandpass_compilation():
 
 
 def test_qmf_pair_compilation():
-    """Tests QMF complementary filter bank synthesis and aliasing distortion metrics."""
+    """Tests QMF complementary filter bank synthesis, canonical mirror taps, and aliasing distortion metrics."""
     spec = FilterSpec(kind="qmf", order=64, cutoff=0.25)
     compiler = GegenbauerFilterCompiler(lam=1.25, solver="spectral_regularized", mu_reg=1e-4)
     result = compiler.compile(spec)
@@ -107,13 +107,44 @@ def test_qmf_pair_compilation():
     assert len(h0) == 64
     assert len(h1) == 64
 
-    # Verify mirror relationship: h1[n] = (-1)^n * h0[n]
+    # Verify canonical mirror relationship: h1[n] = (-1)^n * h0[N-1-n]
     sign_pattern = np.array([(-1.0)**n for n in range(64)])
-    np.testing.assert_allclose(h1, h0 * sign_pattern, atol=1e-12)
+    np.testing.assert_allclose(h1, sign_pattern * h0[::-1], atol=1e-12)
 
-    # Check QMF metrics computed
-    assert result.qmf_power_complementarity_max_db >= 0.0
-    assert isinstance(result.qmf_alias_distortion_max_db, float)
+    # Check QMF metrics: low power complementarity ripple and suppressed aliasing
+    assert result.qmf_power_complementarity_max_db < 1.0
+    assert result.qmf_alias_distortion_max_db < -30.0
+
+    # Verify certification flags
+    assert result.payload.qmf_power_complementary is True
+    assert result.payload.qmf_alias_cancellation is True
+    assert result.payload.is_certified is True
+
+
+def test_qmf_target_power_complementarity():
+    """Verifies that the QMF sine/cosine amplitude crossfade target yields exact power complementarity."""
+    spec = FilterSpec(kind="qmf", order=64, cutoff=0.25)
+    compiler = GegenbauerFilterCompiler(lam=1.25)
+    omega = np.linspace(0, np.pi, 2048)
+    D, W = compiler._build_spectral_target(spec, omega)
+
+    # Compute mirror target D_mirror(f) = D(0.5 - f)
+    f = omega / (2.0 * np.pi)
+    trans_mask = (f > spec.wp) & (f < spec.ws)
+    t = (f[trans_mask] - spec.wp) / (spec.ws - spec.wp)
+
+    D_trans = D[trans_mask]
+    D_mirror_trans = np.sin(0.5 * np.pi * t)
+
+    # Target power sum in transition: D(t)^2 + D_mirror(t)^2 == 1
+    target_power = D_trans**2 + D_mirror_trans**2
+    np.testing.assert_allclose(target_power, 1.0, atol=1e-12)
+
+
+def test_qmf_symmetric_transition_enforcement():
+    """Verifies that QMF requires symmetric transition edges wp + ws == 0.5."""
+    with pytest.raises(ValueError, match="QMF requires symmetric transition around fs/4"):
+        FilterSpec(kind="qmf", order=64, cutoff=0.25, wp=0.20, ws=0.40)
 
 
 def test_quantization_formats():
