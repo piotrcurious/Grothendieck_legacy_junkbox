@@ -45,16 +45,16 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   Layer VI. Two-Overlap Composite Uniform Asymptotic Schema & Quantified Selector
   Target Semantics: F_Q(θ) = TargetValue(Q, θ), F(θ) ≡ F_Q(θ) for fixed Q
   Global Coverage: 𝒟_north ∪ 𝒟_interior ∪ 𝒟_south = 𝒟_global
-  Piecewise Composite Evaluation: F_{comp,r}^{(K)}(θ) with exact region-dependent remainder identity Reconstruct_r(Q, θ): F_Q - F_{comp,r} = ∑_{i ∈ I_r(θ)} s_{r,i} R_i
-  Global Overlap Exact Identity: F - F_comp = R_I - R_{+O} - R_{-O} ⟹ B_comp = B_I + B_+O + B_-O; Valid: B_comp.valid ⟺ ⋀_{i ∈ I(θ)} Cert(R_i)
+  Finite Region Table Reconstruct_r: (exact identity, I_r, s_r, 𝒟_r) for NORTH, INTERIOR, SOUTH, NORTH_INTERIOR_OVERLAP, INTERIOR_SOUTH_OVERLAP, GLOBAL_OVERLAP
+  Status Lattice: Status(B_comp) = min_⪯ {Status(R_i) : i ∈ I_r}
   Selector Candidate Interface: Candidate { domain 𝒟_M, target Q, status, ErrorBound.valid, B_M(θ) } requiring target Q matching
         │
         ▼
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, C_fixed, C_LNS)
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x] ──symbolic rec──> C_n ──eval──> Q ──CRT/RNS──> integer residues)
-  ├── VII-C: Scalable RNS / CRT (N_max := metadata, Trace P_rec_arith, D_rec(P) = lcm{den_red(q)}, Aggregate D_den = lcm(D_rec, D_norm, D_eval) with lcm(∅)=1)
-  ├── VII-D1: Finite-Field Arithmetic (ZonalFFBackend ∩ D_norm(P, ZONAL) = ∅; Canonical u_n/v_n, c/r; ZonalAdmissible(p, P, n, x); Bad_zonal := ¬ZonalAdmissible)
+  ├── VII-C: Scalable RNS / CRT (N_max := metadata, Trace P_rec_inv, D_rec(P) = lcm_{q ∈ P_rec_inv} den_red(q), D_den = lcm(D_rec, D_norm, D_eval))
+  ├── VII-D1: Finite-Field Arithmetic (D_norm^{used}(P, ZONAL) = 1; Canonical u_n/v_n, c/r; ZonalAdmissible(p, P, n, x); Bad_zonal := ¬ZonalAdmissible)
   ├── VII-D2: NTT Acceleration Primitive (L_conv = L_1+L_2-1 ≤ L_NTT | (p-1))
   └── VII-E: Golub-Welsch Spectral Truncation (J_m = tridiag(α_0, ..., α_{m-2}), Typed Implication: CertSensitivity_Q(A, κ_Q) ∧ R_Q ≤ B_back ∧ E_{Q,conv} ≤ B_{Q,conv} ⟹ E_Q ≤ κ_Q B_back + B_{Q,conv})
         │
@@ -195,10 +195,8 @@ $$\boxed{F_Q(\theta) = \operatorname{TargetValue}(Q, \theta), \qquad F(\theta) \
 
 The piecewise composite uniform expression combines endpoint Bessel layers and interior WKB waves over global domain coverage:
 $$\boxed{\mathcal{D}_{\text{north}} \cup \mathcal{D}_{\text{interior}} \cup \mathcal{D}_{\text{south}} = \mathcal{D}_{\text{global}}.}$$
-The piecewise composite approximation schema in region $r$ is:
-$$F_{\text{comp},r}^{(K)} = F_{\text{north}}^{(K)}(z_+) + F_{\text{south}}^{(K)}(z_-) + F_{\text{interior}}^{(K)}(N_n, \theta) - F_{+O}^{(K)}(z_+) - F_{-O}^{(K)}(z_-).$$
 
-### 6.2 Certified Remainder Objects & Region-Dependent Reconstruction Identity
+### 6.2 Finite Region Table & Remainder Reconstruction Identities
 Define certified remainder objects $R_i$:
 $$\begin{aligned}
 R_{\text{north}} &= F - F_{\text{north}} \quad (\|R_{\text{north}}\| \le B_{\text{north}} \text{ on } \mathcal{D}_{\text{north}}), \\
@@ -208,18 +206,29 @@ R_{+O} &= F_{\text{north}} - F_{+O} \quad (\|R_{+O}\| \le B_{+O} \text{ on } \ma
 R_{-O} &= F_{\text{south}} - F_{-O} \quad (\|R_{-O}\| \le B_{-O} \text{ on } \mathcal{D}_{\text{south}} \cap \mathcal{D}_{\text{interior}}).
 \end{aligned}$$
 
-In the global overlap region where all three approximations are active, $F - F_{\text{comp}}$ obeys the exact global overlap identity:
-$$\boxed{F - F_{\text{comp}}^{(K)} = (F - F_{\text{interior}}) - (F_{\text{north}} - F_{+O}) - (F_{\text{south}} - F_{-O}) = R_{\text{interior}} - R_{+O} - R_{-O},}$$
-yielding the derived exact global overlap composite bound:
-$$\boxed{B_{\text{comp}}(\theta) = B_{\text{interior}}(\theta) + B_{+O}(\theta) + B_{-O}(\theta).}$$
+The region-dependent reconstruction rules are defined explicitly by a finite region table:
+$$\boxed{\operatorname{Reconstruct}_r = (\text{exact algebraic identity}, I_r, s_r, \mathcal{D}_r)}$$
 
-More generally, the region-dependent reconstruction identity $\operatorname{Reconstruct}_r(Q, \theta)$ expands the total difference $F_Q - F_{\text{comp},r}$ as a signed sum of active certified remainders:
-$$\boxed{\operatorname{Reconstruct}_r(Q, \theta): \quad F_Q(\theta) - F_{\text{comp},r}^{(K)}(\theta) = \sum_{i \in I_r(\theta)} s_{r,i} R_i(\theta), \qquad s_{r,i} \in \{-1, +1\},}$$
-where $I_r(\theta)$ is the set of active certified remainder terms valid in region $r$ at $\theta$. Applying the triangle inequality yields:
-$$\boxed{|F_Q(\theta) - F_{\text{comp},r}^{(K)}(\theta)| \le \sum_{i \in I_r(\theta)} B_i(\theta) =: B_{\text{comp}}(\theta).}$$
+$$\boxed{
+\begin{array}{l|l|l|c}
+\text{Region } r & \text{Domain } \mathcal{D}_r & \text{Exact Remainder Reconstruction Identity } F_Q - F_{\text{comp},r} & \text{Active Terms } I_r \\ \hline
+\texttt{NORTH} & \mathcal{D}_{\text{north}} \setminus \mathcal{D}_{\text{interior}} & F_Q - F_{\text{north}} = R_{\text{north}} & \{\text{north}\} \\[1.5mm]
+\texttt{INTERIOR} & \mathcal{D}_{\text{interior}} \setminus (\mathcal{D}_{\text{north}} \cup \mathcal{D}_{\text{south}}) & F_Q - F_{\text{interior}} = R_{\text{interior}} & \{\text{interior}\} \\[1.5mm]
+\texttt{SOUTH} & \mathcal{D}_{\text{south}} \setminus \mathcal{D}_{\text{interior}} & F_Q - F_{\text{south}} = R_{\text{south}} & \{\text{south}\} \\[1.5mm]
+\texttt{NORTH\_INTERIOR\_OVERLAP} & \mathcal{D}_{\text{north}} \cap \mathcal{D}_{\text{interior}} \setminus \mathcal{D}_{\text{south}} & F_Q - (F_{\text{north}} + F_{\text{interior}} - F_{+O}) = R_{\text{interior}} - R_{+O} & \{\text{interior}, +O\} \\[1.5mm]
+\texttt{INTERIOR\_SOUTH\_OVERLAP} & \mathcal{D}_{\text{interior}} \cap \mathcal{D}_{\text{south}} \setminus \mathcal{D}_{\text{north}} & F_Q - (F_{\text{interior}} + F_{\text{south}} - F_{-O}) = R_{\text{interior}} - R_{-O} & \{\text{interior}, -O\} \\[1.5mm]
+\texttt{GLOBAL\_OVERLAP} & \mathcal{D}_{\text{north}} \cap \mathcal{D}_{\text{interior}} \cap \mathcal{D}_{\text{south}} & F_Q - F_{\text{comp}} = R_{\text{interior}} - R_{+O} - R_{-O} & \{\text{interior}, +O, -O\}
+\end{array}
+}$$
 
-**Composite Certificate Status Propagation:**
-$$\boxed{\texttt{B\_comp.valid} \iff \bigwedge_{i \in I_r(\theta)} \texttt{Cert}(R_i).}$$
+Applying the triangle inequality to $\operatorname{Reconstruct}_r(Q, \theta)$ yields the region-dependent composite error bound:
+$$\boxed{|F_Q(\theta) - F_{\text{comp},r}^{(K)}(\theta)| \le \sum_{i \in I_r(\theta)} B_i(\theta) =: B_{\text{comp},r}(\theta).}$$
+
+**Status Lattice Minimum Rule:**
+The certification status of $B_{\text{comp},r}$ is determined by the lattice minimum across all active remainder terms in region $r$:
+$$\boxed{\operatorname{Status}(B_{\text{comp},r}) = \min_{\preceq} \{\operatorname{Status}(R_i) : i \in I_r\},}$$
+where status order is $\texttt{ALGEBRAIC\_EXACT} \succ \texttt{ARITHMETIC\_EXACT} \succ \texttt{ANALYTIC\_CERTIFIED} \succ \texttt{NUMERICAL\_CERTIFIED} \succ \texttt{EMPIRICAL\_DIAGNOSTIC}$.
+
 Under status $\texttt{MATCHING\_SCHEMA}$, the asymptotic growth exponent is declared as $\gamma_K := \text{unspecified}$. It is promoted to $\texttt{ANALYTIC\_CERTIFIED}$ only after proving the uniform majorant theorem:
 $$\boxed{G^\pm_{K, \lambda, Z_0, \delta}(z; N_n) \le C^\pm_{K, \lambda, Z_0, \delta} (1 + z)^{\gamma_K} \quad \text{uniformly for } N_n \ge N_0 \text{ and } Z_0 \le z \le \delta N_n.}$$
 
@@ -239,9 +248,9 @@ $$\boxed{M^*(\theta) = \arg\min_{\substack{M \\ \theta \in \mathcal{D}_M \\ \tex
   $$\boxed{\operatorname{CertifiedSensitivity}_Q(A, \kappa_Q) \land R_Q \le B_{\text{back}} \land E_{Q, \text{conv}} \le B_{Q, \text{conv}} \implies E_Q \le \kappa_Q B_{\text{back}} + B_{Q, \text{conv}} := B_{Q, \text{forward}},}$$
   where target $Q \in \{\texttt{NODE}, \texttt{WEIGHT}, \texttt{EIGENVECTOR}, \texttt{QUADRATURE}\}$ and $\kappa_Q$ is explicitly certified (including eigenvalue-gap conditioning for eigenvectors/weights).
 
-### VII-C. Execution-Trace Recurrence Denominators & Aggregate Excluded Modulus
-Define execution-trace arithmetic operations: $P_{\text{recurrence\_arithmetic}} = \{ q : q \text{ is an exact rational quantity inverted or divided during execution trace} \}$. Recurrence denominators follow the actual executed arithmetic graph:
-$$\boxed{D_{\text{rec}}(P) = \operatorname{lcm}\left(\{ \operatorname{den}_{\text{red}}(q) : q \in P_{\text{recurrence\_arithmetic}} \}\right).}$$
+### VII-C. Execution-Trace Recurrence Inversions & Backend Normalization Denominators
+Define execution-trace primitive inversions: $P_{\text{rec\_inv}}(P) = \{ q : \texttt{INVERT}(q) \text{ occurs in recurrence trace of } P \}$. Recurrence denominators follow the actual executed arithmetic graph:
+$$\boxed{D_{\text{rec}}(P) = \operatorname{lcm}_{q \in P_{\text{rec\_inv}}(P)} \operatorname{den}_{\text{red}}(q).}$$
 
 Evaluation point denominator for canonical fraction $x = c/r$ ($\gcd(c,r)=1, r>0$):
 $$\boxed{D_{\text{eval}} = r.}$$
@@ -249,8 +258,8 @@ $$\boxed{D_{\text{eval}} = r.}$$
 Backend normalization denominators are defined per plan $P$ and target $Q$:
 $$\boxed{D_{\text{norm}}(P, Q) = \operatorname{lcm}\{\text{rational denominators actually inverted by } P \text{ for target } Q\}.}$$
 
-The zonal finite-field backend excludes $D_{\text{norm}}$ explicitly:
-$$\boxed{\texttt{ZonalFiniteFieldBackend} \cap D_{\text{norm}}(P, \texttt{ZONAL}) = \varnothing.}$$
+The zonal finite-field backend excludes normalization denominators via typed predicate:
+$$\boxed{D_{\text{norm}}^{\text{used}}(P, \texttt{ZONAL}) = 1 \quad \iff \quad \operatorname{UsesNormalizationDenominators}(P, \texttt{ZONAL}) = \text{false}.}$$
 
 Aggregate excluded-denominator modulus:
 $$\boxed{D_{\text{den}} = \operatorname{lcm}(D_{\text{rec}}(P), D_{\text{norm}}(P, Q), D_{\text{eval}}), \qquad \text{with empty LCM convention } \operatorname{lcm}(\varnothing) = 1.}$$
