@@ -101,6 +101,19 @@ class TheoremStatus(Enum):
         ]
         return order.index(self)
 
+    @classmethod
+    def from_rank(cls, rank_val: int) -> 'TheoremStatus':
+        """Inverse status reconstruction map rank^(-1) mapping integer rank back to TheoremStatus."""
+        mapping = {
+            5: cls.ALGEBRAIC_EXACT,
+            4: cls.ARITHMETIC_EXACT,
+            3: cls.ANALYTIC_CERTIFIED,
+            2: cls.NUMERICAL_CERTIFIED,
+            1: cls.MATCHING_SCHEMA,
+            0: cls.EMPIRICAL_DIAGNOSTIC,
+        }
+        return mapping.get(rank_val, cls.EMPIRICAL_DIAGNOSTIC)
+
     def __gt__(self, other: 'TheoremStatus') -> bool:
         order = [
             TheoremStatus.EMPIRICAL_DIAGNOSTIC,

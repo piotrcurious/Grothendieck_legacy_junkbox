@@ -937,7 +937,7 @@ def test_global_overlap_exact_remainder_identity():
 
 def test_matching_schema_theorem_status_lattice_ordering():
     """
-    Verifies MATCHING_SCHEMA presence in TheoremStatus and status lattice ordering/ranks:
+    Verifies MATCHING_SCHEMA presence in TheoremStatus and status lattice ordering/ranks/inverse mapping:
       ALGEBRAIC_EXACT (5) > ARITHMETIC_EXACT (4) > ANALYTIC_CERTIFIED (3) > NUMERICAL_CERTIFIED (2) > MATCHING_SCHEMA (1) > EMPIRICAL_DIAGNOSTIC (0)
     """
     assert TheoremStatus.MATCHING_SCHEMA in TheoremStatus
@@ -948,8 +948,33 @@ def test_matching_schema_theorem_status_lattice_ordering():
     assert TheoremStatus.MATCHING_SCHEMA.rank == 1
     assert TheoremStatus.EMPIRICAL_DIAGNOSTIC.rank == 0
 
+    # Test inverse status reconstruction map rank^(-1)
+    assert TheoremStatus.from_rank(5) == TheoremStatus.ALGEBRAIC_EXACT
+    assert TheoremStatus.from_rank(4) == TheoremStatus.ARITHMETIC_EXACT
+    assert TheoremStatus.from_rank(3) == TheoremStatus.ANALYTIC_CERTIFIED
+    assert TheoremStatus.from_rank(2) == TheoremStatus.NUMERICAL_CERTIFIED
+    assert TheoremStatus.from_rank(1) == TheoremStatus.MATCHING_SCHEMA
+    assert TheoremStatus.from_rank(0) == TheoremStatus.EMPIRICAL_DIAGNOSTIC
+
     assert TheoremStatus.ALGEBRAIC_EXACT > TheoremStatus.ARITHMETIC_EXACT
     assert TheoremStatus.ARITHMETIC_EXACT > TheoremStatus.ANALYTIC_CERTIFIED
     assert TheoremStatus.ANALYTIC_CERTIFIED > TheoremStatus.NUMERICAL_CERTIFIED
     assert TheoremStatus.NUMERICAL_CERTIFIED > TheoremStatus.MATCHING_SCHEMA
     assert TheoremStatus.MATCHING_SCHEMA > TheoremStatus.EMPIRICAL_DIAGNOSTIC
+
+
+def test_compact_six_region_error_bounds():
+    """
+    Verifies compact 6-entry region error bounds:
+      B_N, B_I, B_S, B_NI = B_I + B_+O, B_IS = B_I + B_-O, B_global = B_I + B_+O + B_-O.
+    """
+    B_N, B_I, B_S = 1e-4, 1e-5, 1e-4
+    B_plus_O, B_minus_O = 1e-6, 1e-6
+
+    B_NI = B_I + B_plus_O
+    B_IS = B_I + B_minus_O
+    B_global = B_I + B_plus_O + B_minus_O
+
+    assert np.isclose(B_NI, 1.1e-5)
+    assert np.isclose(B_IS, 1.1e-5)
+    assert np.isclose(B_global, 1.2e-5)
