@@ -30,7 +30,8 @@ if PARENT_DIR not in sys.path:
 from filter_compiler.compiler import (
     GegenbauerFilterCompiler,
     FilterSpec,
-    FilterResult
+    FilterResult,
+    PrecisionType
 )
 from filter_compiler.audio_processor import (
     read_wav,
@@ -105,7 +106,22 @@ class GegenbauerFilterGUI(tk.Tk):
         self._build_display_notebook(right_frame)
 
     def _build_control_panel(self, parent):
-        spec_group = ttk.LabelFrame(parent, text="Filter Specifications", padding=10)
+        # Create a scrollable canvas for the control panel to fit all parameters comfortably
+        canvas = tk.Canvas(parent, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=canvas.yview)
+        scroll_content = ttk.Frame(canvas, padding=5)
+
+        scroll_content.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.create_window((0, 0), window=scroll_content, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        spec_group = ttk.LabelFrame(scroll_content, text="Filter Specifications", padding=10)
         spec_group.pack(fill=tk.X, pady=5)
         spec_group.columnconfigure(1, weight=1)
 
@@ -131,8 +147,38 @@ class GegenbauerFilterGUI(tk.Tk):
         self.sr_var = tk.IntVar(value=44100)
         ttk.Entry(spec_group, textvariable=self.sr_var, width=10).grid(row=3, column=1, sticky=tk.W, pady=3)
 
+        # Passband Edge wp
+        ttk.Label(spec_group, text="Passband Edge wp (f/fs):").grid(row=4, column=0, sticky=tk.W, pady=3)
+        self.wp_var = tk.StringVar(value="")
+        ttk.Entry(spec_group, textvariable=self.wp_var, width=10).grid(row=4, column=1, sticky=tk.W, pady=3)
+
+        # Stopband Edge ws
+        ttk.Label(spec_group, text="Stopband Edge ws (f/fs):").grid(row=5, column=0, sticky=tk.W, pady=3)
+        self.ws_var = tk.StringVar(value="")
+        ttk.Entry(spec_group, textvariable=self.ws_var, width=10).grid(row=5, column=1, sticky=tk.W, pady=3)
+
+        # Bandpass Upper Passband Edge wp2
+        ttk.Label(spec_group, text="Bandpass wp2 (f/fs):").grid(row=6, column=0, sticky=tk.W, pady=3)
+        self.wp2_var = tk.StringVar(value="")
+        ttk.Entry(spec_group, textvariable=self.wp2_var, width=10).grid(row=6, column=1, sticky=tk.W, pady=3)
+
+        # Bandpass Upper Stopband Edge ws2
+        ttk.Label(spec_group, text="Bandpass ws2 (f/fs):").grid(row=7, column=0, sticky=tk.W, pady=3)
+        self.ws2_var = tk.StringVar(value="")
+        ttk.Entry(spec_group, textvariable=self.ws2_var, width=10).grid(row=7, column=1, sticky=tk.W, pady=3)
+
+        # Passband Ripple dB
+        ttk.Label(spec_group, text="Passband Ripple Target (dB):").grid(row=8, column=0, sticky=tk.W, pady=3)
+        self.ripple_var = tk.DoubleVar(value=0.1)
+        ttk.Entry(spec_group, textvariable=self.ripple_var, width=10).grid(row=8, column=1, sticky=tk.W, pady=3)
+
+        # Stopband Attenuation dB
+        ttk.Label(spec_group, text="Stopband Atten Target (dB):").grid(row=9, column=0, sticky=tk.W, pady=3)
+        self.atten_var = tk.DoubleVar(value=60.0)
+        ttk.Entry(spec_group, textvariable=self.atten_var, width=10).grid(row=9, column=1, sticky=tk.W, pady=3)
+
         # Algorithmic Parameters Group
-        alg_group = ttk.LabelFrame(parent, text="Gegenbauer Framework Parameters", padding=10)
+        alg_group = ttk.LabelFrame(scroll_content, text="Gegenbauer Framework Parameters", padding=10)
         alg_group.pack(fill=tk.X, pady=5)
         alg_group.columnconfigure(1, weight=1)
 
@@ -141,18 +187,48 @@ class GegenbauerFilterGUI(tk.Tk):
         self.lambda_var = tk.DoubleVar(value=1.25)
         ttk.Entry(alg_group, textvariable=self.lambda_var, width=10).grid(row=0, column=1, sticky=tk.W, pady=3)
 
+        # Basis Terms
+        ttk.Label(alg_group, text="Basis Terms K (Auto=blank):").grid(row=1, column=0, sticky=tk.W, pady=3)
+        self.basis_terms_var = tk.StringVar(value="")
+        ttk.Entry(alg_group, textvariable=self.basis_terms_var, width=10).grid(row=1, column=1, sticky=tk.W, pady=3)
+
+        # Basis Type
+        ttk.Label(alg_group, text="Basis Type:").grid(row=2, column=0, sticky=tk.W, pady=3)
+        self.basis_type_var = tk.StringVar(value="normalized")
+        ttk.Combobox(alg_group, textvariable=self.basis_type_var, values=["normalized", "standard"], state="readonly").grid(row=2, column=1, sticky=tk.EW, pady=3)
+
         # Solver
-        ttk.Label(alg_group, text="Solver Algorithm:").grid(row=1, column=0, sticky=tk.W, pady=3)
+        ttk.Label(alg_group, text="Solver Algorithm:").grid(row=3, column=0, sticky=tk.W, pady=3)
         self.solver_var = tk.StringVar(value="spectral_regularized")
-        ttk.Combobox(alg_group, textvariable=self.solver_var, values=["spectral_regularized", "quadrature", "wls"], state="readonly").grid(row=1, column=1, sticky=tk.EW, pady=3)
+        ttk.Combobox(alg_group, textvariable=self.solver_var, values=["spectral_regularized", "quadrature", "wls"], state="readonly").grid(row=3, column=1, sticky=tk.EW, pady=3)
 
         # Regularization mu
-        ttk.Label(alg_group, text="Reg Weight (μ):").grid(row=2, column=0, sticky=tk.W, pady=3)
+        ttk.Label(alg_group, text="Reg Weight (μ):").grid(row=4, column=0, sticky=tk.W, pady=3)
         self.mu_var = tk.DoubleVar(value=1e-4)
-        ttk.Entry(alg_group, textvariable=self.mu_var, width=10).grid(row=2, column=1, sticky=tk.W, pady=3)
+        ttk.Entry(alg_group, textvariable=self.mu_var, width=10).grid(row=4, column=1, sticky=tk.W, pady=3)
+
+        # Reg Power
+        ttk.Label(alg_group, text="Reg Power p:").grid(row=5, column=0, sticky=tk.W, pady=3)
+        self.reg_power_var = tk.IntVar(value=1)
+        ttk.Spinbox(alg_group, from_=1, to=10, textvariable=self.reg_power_var, width=10).grid(row=5, column=1, sticky=tk.W, pady=3)
+
+        # Asymptotic Mode
+        ttk.Label(alg_group, text="Asymptotic Mode:").grid(row=6, column=0, sticky=tk.W, pady=3)
+        self.asymp_mode_var = tk.StringVar(value="auto")
+        ttk.Combobox(alg_group, textvariable=self.asymp_mode_var, values=["auto", "composite", "bessel", "wkb", "none"], state="readonly").grid(row=6, column=1, sticky=tk.EW, pady=3)
+
+        # Grid Samples
+        ttk.Label(alg_group, text="Grid Samples L:").grid(row=7, column=0, sticky=tk.W, pady=3)
+        self.grid_samples_var = tk.IntVar(value=2048)
+        ttk.Entry(alg_group, textvariable=self.grid_samples_var, width=10).grid(row=7, column=1, sticky=tk.W, pady=3)
+
+        # Precision
+        ttk.Label(alg_group, text="Precision Context:").grid(row=8, column=0, sticky=tk.W, pady=3)
+        self.precision_var = tk.StringVar(value="FLOAT64")
+        ttk.Combobox(alg_group, textvariable=self.precision_var, values=["FLOAT32", "FLOAT64", "LONGDOUBLE"], state="readonly").grid(row=8, column=1, sticky=tk.EW, pady=3)
 
         # Buttons Frame
-        btn_frame = ttk.Frame(parent, padding=5)
+        btn_frame = ttk.Frame(scroll_content, padding=5)
         btn_frame.pack(fill=tk.X, pady=10)
 
         self.compile_btn = ttk.Button(btn_frame, text="⚡ Compile Filter", command=self._on_compile)
@@ -162,11 +238,12 @@ class GegenbauerFilterGUI(tk.Tk):
         self.pareto_btn.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=2)
 
         # Summary Metrics Text Box
-        summary_group = ttk.LabelFrame(parent, text="Compilation Certification Summary", padding=5)
+        summary_group = ttk.LabelFrame(scroll_content, text="Compilation Certification Summary", padding=5)
         summary_group.pack(fill=tk.BOTH, expand=True, pady=5)
 
         self.summary_text = tk.Text(summary_group, wrap=tk.WORD, height=12, font=("Courier", 9), state=tk.DISABLED)
         self.summary_text.pack(fill=tk.BOTH, expand=True)
+
 
     def _build_display_notebook(self, parent):
         self.notebook = ttk.Notebook(parent)
@@ -275,15 +352,67 @@ class GegenbauerFilterGUI(tk.Tk):
         except Exception as e:
             sys.stderr.write(f"Kind change validation error: {e}\n")
 
+    def _read_spec_and_compiler_params(self):
+        kind = self.kind_var.get()
+        order = min(512, max(3, int(self.order_var.get())))
+        cutoff = float(self.cutoff_var.get())
+        sampling_rate = int(self.sr_var.get())
+
+        wp = float(self.wp_var.get()) if self.wp_var.get().strip() else None
+        ws = float(self.ws_var.get()) if self.ws_var.get().strip() else None
+        wp2 = float(self.wp2_var.get()) if self.wp2_var.get().strip() else None
+        ws2 = float(self.ws2_var.get()) if self.ws2_var.get().strip() else None
+
+        passband_ripple_db = float(self.ripple_var.get())
+        stopband_atten_db = float(self.atten_var.get())
+
+        spec = FilterSpec(
+            kind=kind,
+            order=order,
+            cutoff=cutoff,
+            wp=wp,
+            ws=ws,
+            wp2=wp2,
+            ws2=ws2,
+            sampling_rate=sampling_rate,
+            passband_ripple_db=passband_ripple_db,
+            stopband_atten_db=stopband_atten_db
+        )
+
+        lam = float(self.lambda_var.get())
+        basis_terms = int(self.basis_terms_var.get()) if self.basis_terms_var.get().strip() else None
+        basis_type = self.basis_type_var.get()
+        solver = self.solver_var.get()
+        mu_reg = float(self.mu_var.get())
+        reg_power = int(self.reg_power_var.get())
+        asymptotic_mode = self.asymp_mode_var.get()
+        grid_samples = int(self.grid_samples_var.get())
+
+        prec_str = self.precision_var.get().upper()
+        if prec_str == "FLOAT32":
+            precision = PrecisionType.FLOAT32
+        elif prec_str == "LONGDOUBLE":
+            precision = PrecisionType.LONGDOUBLE
+        else:
+            precision = PrecisionType.FLOAT64
+
+        compiler_kwargs = dict(
+            lam=lam,
+            basis_terms=basis_terms,
+            basis_type=basis_type,
+            solver=solver,
+            mu_reg=mu_reg,
+            reg_power=reg_power,
+            asymptotic_mode=asymptotic_mode,
+            grid_samples=grid_samples,
+            precision=precision
+        )
+
+        return spec, compiler_kwargs
+
     def _on_compile(self):
         try:
-            kind = self.kind_var.get()
-            order = min(512, max(3, int(self.order_var.get())))
-            cutoff = float(self.cutoff_var.get())
-            sampling_rate = int(self.sr_var.get())
-            lam = float(self.lambda_var.get())
-            solver = self.solver_var.get()
-            mu_reg = float(self.mu_var.get())
+            spec, compiler_kwargs = self._read_spec_and_compiler_params()
         except Exception as e:
             messagebox.showerror("Invalid Input", f"Please check input fields:\n{e}")
             return
@@ -293,17 +422,7 @@ class GegenbauerFilterGUI(tk.Tk):
 
         def worker():
             try:
-                spec = FilterSpec(
-                    kind=kind,
-                    order=order,
-                    cutoff=cutoff,
-                    sampling_rate=sampling_rate
-                )
-                compiler = GegenbauerFilterCompiler(
-                    lam=lam,
-                    solver=solver,
-                    mu_reg=mu_reg
-                )
+                compiler = GegenbauerFilterCompiler(**compiler_kwargs)
                 res = compiler.compile(spec)
                 res_q.put(("ok", res))
             except Exception as ex:
@@ -336,11 +455,7 @@ class GegenbauerFilterGUI(tk.Tk):
 
     def _on_pareto_search(self):
         try:
-            kind = self.kind_var.get()
-            order = min(512, max(3, int(self.order_var.get())))
-            cutoff = float(self.cutoff_var.get())
-            sampling_rate = int(self.sr_var.get())
-            solver = self.solver_var.get()
+            spec, compiler_kwargs = self._read_spec_and_compiler_params()
         except Exception as e:
             messagebox.showerror("Invalid Input", f"Please check input fields:\n{e}")
             return
@@ -350,14 +465,8 @@ class GegenbauerFilterGUI(tk.Tk):
 
         def worker():
             try:
-                spec = FilterSpec(
-                    kind=kind,
-                    order=order,
-                    cutoff=cutoff,
-                    sampling_rate=sampling_rate
-                )
-                compiler = GegenbauerFilterCompiler(solver=solver)
-                best_res = compiler.pareto_search(spec, solver=solver)
+                compiler = GegenbauerFilterCompiler(**compiler_kwargs)
+                best_res = compiler.pareto_search(spec, solver=compiler_kwargs['solver'])
                 res_q.put(("ok", best_res))
             except Exception as ex:
                 res_q.put(("err", ex))
