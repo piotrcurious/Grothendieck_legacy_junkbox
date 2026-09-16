@@ -44,9 +44,9 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
         ▼
   Layer VI. Two-Overlap Composite Uniform Asymptotic Schema & Quantified Selector
   Target Semantics: F_Q(θ) = TargetValue(Q, θ), F(θ) ≡ F_Q(θ) for fixed Q
-  Global Coverage: 𝒟_north ∪ 𝒟_interior ∪ 𝒟_south = 𝒟_global
+  Partition Axiom: 𝒟_north ∩ 𝒟_south ⊆ 𝒟_interior ⟹ ⋃_r 𝒟_r = 𝒟_global (Disjoint 6-region partition)
   Piecewise Composite Evaluator F_{comp,r}^{(K)}(θ) & Finite Region Table Reconstruct_r
-  Status Lattice Minimum: Status(B_comp,r) = min_⪯ {Status(R_i) : i ∈ I_r} with MATCHING_SCHEMA in lattice
+  Integer Status Rank: rank(B_{comp,r}) = min_{i ∈ I_r} rank(R_i) (Status: MATCHING_SCHEMA, γ_K := unspecified)
   Selector Candidate Interface: Candidate { domain 𝒟_M, target Q, status, ErrorBound.valid, B_M(θ) } requiring target Q matching
         │
         ▼
@@ -54,7 +54,7 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, C_fixed, C_LNS)
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x] ──symbolic rec──> C_n ──eval──> Q ──CRT/RNS──> integer residues)
   ├── VII-C: Scalable RNS / CRT (N_max := metadata, Trace P_rec_inv, D_rec(P) = lcm_{q ∈ P_rec_inv} den_red(q), Aggregate D_den = lcm(D_rec, D_norm, D_eval))
-  ├── VII-D1: Finite-Field Arithmetic (UsesNormalizationDenominators(P, ZONAL)=false; Canonical u_n/v_n, c/r; ZonalAdmissible(p, P, n, x); Bad_zonal := ¬ZonalAdmissible)
+  ├── VII-D1: Finite-Field Arithmetic (Prime(p) Precondition; UsesNormalizationDenominators(P, ZONAL)=false; Canonical u_n/v_n, c/r; Bad_zonal(p) ⟺ p|r ∨ p|v_n ∨ p|u_n ∨ p|D_rec(P))
   ├── VII-D2: NTT Acceleration Primitive (L_conv = L_1+L_2-1 ≤ L_NTT | (p-1))
   └── VII-E: Golub-Welsch Spectral Truncation (J_m = tridiag(α_0, ..., α_{m-2}), Typed Implication: CertSensitivity_Q(A, κ_Q) ∧ R_Q ≤ B_back ∧ E_{Q,conv} ≤ B_{Q,conv} ⟹ E_Q ≤ κ_Q B_back + B_{Q,conv})
         │
@@ -189,13 +189,15 @@ $$\boxed{\|J_m\| = \max_{v \in S^{m-1}} f(v) = f(v^*) < 1 \quad \text{for all } 
 
 ## 6. Layer V & VI: Asymptotic Schemas, Quantified Overlap Contract & Selector
 
-### 6.1 Target Semantics & Explicit Piecewise Composite Evaluator Map
+### 6.1 Target Semantics & Region Partition Axiom
 For a fixed target $Q$, the Layer VI exact target value is normalized:
 $$\boxed{F_Q(\theta) = \operatorname{TargetValue}(Q, \theta), \qquad F(\theta) \equiv F_Q(\theta).}$$
 
-Global domain coverage is complete:
-$$\boxed{\mathcal{D}_{\text{north}} \cup \mathcal{D}_{\text{interior}} \cup \mathcal{D}_{\text{south}} = \mathcal{D}_{\text{global}}.}$$
+Global domain coverage satisfies the geometric partition axiom:
+$$\boxed{\mathcal{D}_{\text{north}} \cap \mathcal{D}_{\text{south}} \subseteq \mathcal{D}_{\text{interior}} \implies \bigcup_r \mathcal{D}_r = \mathcal{D}_{\text{global}},}$$
+ensuring that the six region sets $\mathcal{D}_r$ are pairwise disjoint and exhaustively partition $\mathcal{D}_{\text{global}}$.
 
+### 6.2 Piecewise Composite Evaluator Map & Finite Region Table
 The explicit piecewise composite evaluator map $F_{\text{comp},r}^{(K)}(\theta)$ is defined for each region $r$:
 $$\boxed{
 F_{\text{comp},r}^{(K)}(\theta) =
@@ -209,7 +211,6 @@ F_{\text{north}}^{(K)}(\theta) + F_{\text{south}}^{(K)}(\theta) + F_{\text{inter
 \end{cases}
 }$$
 
-### 6.2 Certified Remainder Objects & Finite Region Table
 Define certified remainder objects $R_i$:
 $$\begin{aligned}
 R_{\text{north}} &= F - F_{\text{north}} \quad (\|R_{\text{north}}\| \le B_{\text{north}} \text{ on } \mathcal{D}_{\text{north}}), \\
@@ -237,13 +238,21 @@ $$\boxed{
 Applying the triangle inequality to $\operatorname{Reconstruct}_r(Q, \theta)$ yields the region-dependent composite error bound:
 $$\boxed{|F_Q(\theta) - F_{\text{comp},r}^{(K)}(\theta)| \le \sum_{i \in I_r(\theta)} B_i(\theta) =: B_{\text{comp},r}(\theta).}$$
 
-**Status Lattice Minimum Rule:**
-The certification status of $B_{\text{comp},r}$ is determined by the lattice minimum across all active remainder terms in region $r$:
-$$\boxed{\operatorname{Status}(B_{\text{comp},r}) = \min_{\preceq} \{\operatorname{Status}(R_i) : i \in I_r\},}$$
-where status order is $\texttt{ALGEBRAIC\_EXACT} \succ \texttt{ARITHMETIC\_EXACT} \succ \texttt{ANALYTIC\_CERTIFIED} \succ \texttt{NUMERICAL\_CERTIFIED} \succ \texttt{MATCHING\_SCHEMA} \succ \texttt{EMPIRICAL\_DIAGNOSTIC}$.
-
-Under status $\texttt{MATCHING\_SCHEMA}$, the asymptotic growth exponent is declared as $\gamma_K := \text{unspecified}$. It is promoted to $\texttt{ANALYTIC\_CERTIFIED}$ only after proving the uniform majorant theorem:
-$$\boxed{G^\pm_{K, \lambda, Z_0, \delta}(z; N_n) \le C^\pm_{K, \lambda, Z_0, \delta} (1 + z)^{\gamma_K} \quad \text{uniformly for } N_n \ge N_0 \text{ and } Z_0 \le z \le \delta N_n.}$$
+**Status Integer Rank Propagation Rule:**
+Define explicit status rank function $\operatorname{rank}: \text{TheoremStatus} \to \{0, 1, 2, 3, 4, 5\}$:
+$$\boxed{
+\operatorname{rank}:
+\begin{cases}
+\texttt{ALGEBRAIC\_EXACT} \mapsto 5, \\
+\texttt{ARITHMETIC\_EXACT} \mapsto 4, \\
+\texttt{ANALYTIC\_CERTIFIED} \mapsto 3, \\
+\texttt{NUMERICAL\_CERTIFIED} \mapsto 2, \\
+\texttt{MATCHING\_SCHEMA} \mapsto 1, \\
+\texttt{EMPIRICAL\_DIAGNOSTIC} \mapsto 0.
+\end{cases}
+}$$
+The certification status rank of $B_{\text{comp},r}$ is determined by the integer minimum across active remainders:
+$$\boxed{\operatorname{rank}(B_{\text{comp},r}) = \min_{i \in I_r} \operatorname{rank}(R_i).}$$
 
 ### 6.3 Certified Domain-Compatible Evaluation Selector ($M^*$)
 Candidate evaluation representations are defined by explicit Candidate interfaces:
@@ -281,7 +290,7 @@ $$\boxed{D_{\text{den}} = \operatorname{lcm}(D_{\text{rec}}(P), D_{\text{norm}}^
 Canonical reduced fraction representation preconditions:
 $$\boxed{C_n^{(\lambda)}(1) = \frac{u_n}{v_n}, \quad \gcd(u_n, v_n) = 1, \ v_n > 0; \qquad x = \frac{c}{r}, \ \gcd(c, r) = 1, \ r > 0.}$$
 
-Finite-field certificates and bad prime predicate:
+Finite-field certificates and bad prime predicate defined under precondition $\operatorname{Prime}(p)$:
 1. **Unnormalized Polynomial Certificate ($\texttt{PolyCertificate}$):**
    $$\boxed{\texttt{PolyCertificate}(p, P, n) \iff \operatorname{Prime}(p) \land \gcd(p, D_{\text{rec}}(P)) = 1.}$$
 2. **Point Evaluation Certificate ($\texttt{PointCertificate}$):**
@@ -290,10 +299,8 @@ Finite-field certificates and bad prime predicate:
    $$\boxed{\texttt{PolyEvaluationCertificate}(p, P, n, x) = \texttt{PolyCertificate}(p, P, n) \land \texttt{PointCertificate}(p, x).}$$
 4. **Normalized Zonal Admissibility ($\operatorname{ZonalAdmissible}$):**
    $$\boxed{\operatorname{ZonalAdmissible}(p, P, n, x) \iff \operatorname{Prime}(p) \land \gcd(p, D_{\text{rec}}(P)) = 1 \land p \nmid r \land p \nmid u_n v_n.}$$
-5. **Semantically Exact Bad Zonal Prime Predicate ($\operatorname{Bad}_{\text{zonal}}$):**
-   $$\boxed{\operatorname{Bad}_{\text{zonal}}(p, P, n, x) \iff \neg \operatorname{ZonalAdmissible}(p, P, n, x) \iff p \mid r \lor p \mid v_n \lor p \mid u_n \lor p \mid D_{\text{rec}}(P).}$$
-
-   Note explicit separation: $\text{Zonal finite-field certificate} \not\Rightarrow \text{orthonormal-basis certificate}$.
+5. **Semantically Exact Bad Zonal Prime Predicate ($\operatorname{Bad}_{\text{zonal}}$ under $\operatorname{Prime}(p)$):**
+   $$\boxed{\text{Under } \operatorname{Prime}(p): \quad \operatorname{Bad}_{\text{zonal}}(p, P, n, x) \iff \neg \operatorname{ZonalAdmissible}(p, P, n, x) \iff p \mid r \lor p \mid v_n \lor p \mid u_n \lor p \mid D_{\text{rec}}(P).}$$
 
 ---
 
@@ -302,11 +309,8 @@ Finite-field certificates and bad prime predicate:
 ### VIII-A. Typed Hierarchy & Extended Metadata Tuple Invariant
 Hard type separation: $\texttt{ExactValue} \neq \texttt{ErrorBound} \neq \texttt{Residual}$.
 
-`TheoremStatus` Enum with closed lattice:
+`TheoremStatus` Enum with closed rank lattice:
 $$\boxed{\{\texttt{ALGEBRAIC\_EXACT}, \texttt{ARITHMETIC\_EXACT}, \texttt{ANALYTIC\_CERTIFIED}, \texttt{NUMERICAL\_CERTIFIED}, \texttt{MATCHING\_SCHEMA}, \texttt{EMPIRICAL\_DIAGNOSTIC}\}}$$
-
-Lattice ordering:
-$$\boxed{\texttt{ALGEBRAIC\_EXACT} \succ \texttt{ARITHMETIC\_EXACT} \succ \texttt{ANALYTIC\_CERTIFIED} \succ \texttt{NUMERICAL\_CERTIFIED} \succ \texttt{MATCHING\_SCHEMA} \succ \texttt{EMPIRICAL\_DIAGNOSTIC}.}$$
 
 **Extended Certificate Metadata Tuple Invariant:**
 $$\boxed{\text{Every certificate carries } (\text{target } Q, \text{domain } \mathcal{D}, \text{backend}, \text{status}, \text{validity\_conditions}).}$$
