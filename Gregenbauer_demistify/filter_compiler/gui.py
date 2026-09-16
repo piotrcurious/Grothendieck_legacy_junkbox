@@ -262,6 +262,13 @@ class GegenbauerFilterGUI(tk.Tk):
         self.canvas_freq = FigureCanvasTkAgg(self.fig_freq, master=self.tab_freq)
         self.canvas_freq.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
+        self._draggable_lines = {}
+        self._dragging_param = None
+
+        self.canvas_freq.mpl_connect('button_press_event', self._on_freq_click)
+        self.canvas_freq.mpl_connect('motion_notify_event', self._on_freq_drag)
+        self.canvas_freq.mpl_connect('button_release_event', self._on_freq_release)
+
         # Tab 2: Taps & Quantization Noise
         self.tab_taps = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_taps, text="Taps & Quantization")
@@ -541,13 +548,33 @@ class GegenbauerFilterGUI(tk.Tk):
 
         self.ax_freq.clear()
         self.ax_pass.clear()
+        self._draggable_lines.clear()
 
         # Plot 1: Full Frequency Response
         self.ax_freq.plot(res.freq_grid, res.H0_response, 'b-', label='H0 (Lowpass)' if spec.kind == 'qmf' else '|H(e^{jw})|', linewidth=1.5)
         if res.H1_response is not None:
             self.ax_freq.plot(res.freq_grid, res.H1_response, 'r-', label='H1 (Highpass)', linewidth=1.5)
-        self.ax_freq.axvline(spec.cutoff, color='g', linestyle=':', label=f'Cutoff = {spec.cutoff}')
-        self.ax_freq.set_title(f"Frequency Response ({spec.kind.upper()}, N={spec.order}, λ={res.lam:.2f})")
+
+        # Draw interactive band limit lines depending on filter type
+        if spec.kind == "bandpass":
+            lines_spec = [
+                ("ws", spec.ws, 'r', '--', f'ws={spec.ws:.3f}'),
+                ("wp", spec.wp, 'b', '--', f'wp={spec.wp:.3f}'),
+                ("wp2", spec.wp2, 'b', '-.', f'wp2={spec.wp2:.3f}'),
+                ("ws2", spec.ws2, 'r', '-.', f'ws2={spec.ws2:.3f}'),
+            ]
+        else:
+            lines_spec = [("cutoff", spec.cutoff, 'g', ':', f'Cutoff={spec.cutoff:.3f}')]
+            if spec.wp is not None:
+                lines_spec.append(("wp", spec.wp, 'b', '--', f'wp={spec.wp:.3f}'))
+            if spec.ws is not None:
+                lines_spec.append(("ws", spec.ws, 'r', '--', f'ws={spec.ws:.3f}'))
+
+        for param_name, val, col, ls, lbl in lines_spec:
+            line = self.ax_freq.axvline(val, color=col, linestyle=ls, linewidth=2, label=lbl, picker=True)
+            self._draggable_lines[param_name] = (line, val)
+
+        self.ax_freq.set_title(f"Frequency Response ({spec.kind.upper()}, N={spec.order}, λ={res.lam:.2f}) [Drag vertical lines to adjust]")
         self.ax_freq.set_ylabel("Magnitude (dB)")
         self.ax_freq.set_ylim(-100, 5)
         self.ax_freq.grid(True)
@@ -570,6 +597,54 @@ class GegenbauerFilterGUI(tk.Tk):
 
         self.fig_freq.tight_layout(pad=2.0)
         self.canvas_freq.draw()
+
+    def _on_freq_click(self, event):
+        if event.inaxes != self.ax_freq or event.button != 1 or event.xdata is None:
+            return
+
+        click_x = event.xdata
+        best_param = None
+        min_dist = float('inf')
+
+        for param_name, (line, val) in self._draggable_lines.items():
+            dist = abs(click_x - val)
+            if dist < 0.03 and dist < min_dist:
+                min_dist = dist
+                best_param = param_name
+
+        if best_param is not None:
+            self._dragging_param = best_param
+
+    def _on_freq_drag(self, event):
+        if self._dragging_param is None or event.inaxes != self.ax_freq or event.xdata is None:
+            return
+
+        new_val = round(float(np.clip(event.xdata, 0.01, 0.49)), 3)
+        param_name = self._dragging_param
+
+        if param_name in self._draggable_lines:
+            line, _ = self._draggable_lines[param_name]
+            line.set_xdata([new_val, new_val])
+            self._draggable_lines[param_name] = (line, new_val)
+
+        # Update UI Entry Variable
+        if param_name == "cutoff":
+            self.cutoff_var.set(new_val)
+        elif param_name == "wp":
+            self.wp_var.set(str(new_val))
+        elif param_name == "ws":
+            self.ws_var.set(str(new_val))
+        elif param_name == "wp2":
+            self.wp2_var.set(str(new_val))
+        elif param_name == "ws2":
+            self.ws2_var.set(str(new_val))
+
+        self.canvas_freq.draw_idle()
+
+    def _on_freq_release(self, event):
+        if self._dragging_param is not None:
+            self._dragging_param = None
+            self._on_compile()
 
     def _update_taps_plots(self):
         if self.current_result is None:

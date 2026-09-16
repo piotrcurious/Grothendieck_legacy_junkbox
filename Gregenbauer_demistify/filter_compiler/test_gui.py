@@ -91,6 +91,29 @@ class TestAudioProcessor(unittest.TestCase):
         self.assertTrue(np.allclose(f_diff, f_h0 - f_h1))
         self.assertEqual(f_stereo.shape, (len(audio), 2))
 
+    def test_interactive_drag_band_limits(self):
+        app = GegenbauerFilterGUI()
+        spec = FilterSpec(kind="lowpass", order=31, cutoff=0.25)
+        comp = GegenbauerFilterCompiler()
+        app.current_result = comp.compile(spec)
+        app._update_freq_plots()
+
+        class FakeEvent:
+            def __init__(self, inaxes, button, xdata):
+                self.inaxes = inaxes
+                self.button = button
+                self.xdata = xdata
+
+        evt_click = FakeEvent(app.ax_freq, 1, 0.252)
+        app._on_freq_click(evt_click)
+        self.assertEqual(app._dragging_param, "cutoff")
+
+        evt_drag = FakeEvent(app.ax_freq, 1, 0.32)
+        app._on_freq_drag(evt_drag)
+        self.assertAlmostEqual(app.cutoff_var.get(), 0.32, places=2)
+
+        app.destroy()
+
     def test_audio_player_stub(self):
         player = AudioPlayer()
         self.assertFalse(player.is_playing())
