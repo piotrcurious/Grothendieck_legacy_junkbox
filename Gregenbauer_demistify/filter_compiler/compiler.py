@@ -537,12 +537,16 @@ class GegenbauerFilterCompiler:
         provenance = ErrorBoundProvenance(
             e_analytic=asymp_err,
             e_arithmetic=e_arithmetic,
-            e_conditioning=self.ctx.eps * 1.0,
+            e_conditioning=self.ctx.eps * 1.0,  # Input conditioning placeholder based on machine precision
             e_implementation=0.0
         )
 
+        # Rationale for certification thresholds:
+        # 1. Asymptotic approximation error bound must be below 0.05 for asymptotic matching certification.
+        # 2. Overall filter synthesis is certified if asymptotic error < 0.05, passband ripple is within 2x target,
+        #    and stopband attenuation achieves at least half target or 20 dB minimum.
         is_certified = (
-            asymp_err < 0.1 and
+            asymp_err < 0.05 and
             pass_ripple <= spec.passband_ripple_db * 2.0 and
             stop_atten >= min(spec.stopband_atten_db * 0.5, 20.0)
         )

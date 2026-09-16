@@ -7,8 +7,6 @@ and asynchronous Linux audio playback via standard system tools (aplay/ffmpeg).
 
 import os
 import wave
-import struct
-import math
 import subprocess
 import threading
 from typing import Tuple, Optional, List
