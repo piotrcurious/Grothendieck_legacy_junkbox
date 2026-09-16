@@ -863,9 +863,10 @@ def test_d_lambda_parity_and_invalid_parameter_classifier():
     assert classify_parameter_domain(0.5) == EndpointClass.CRITICAL_LC
 
 
-def test_selector_candidate_target_q_interface():
+def test_selector_candidate_target_q_interface_and_certified_status():
     """
-    Verifies SelectorCandidate interface target Q matching requirement.
+    Verifies SelectorCandidate interface target Q matching requirement
+    and explicit CertifiedStatus rejection of MATCHING_SCHEMA and EMPIRICAL_DIAGNOSTIC candidates.
     """
     dom = Domain(name="test_domain", lower=-1.0, upper=1.0)
     eb_node = ErrorBound(
@@ -887,6 +888,7 @@ def test_selector_candidate_target_q_interface():
         cost=1.0
     )
     assert cand_valid.is_valid_target_bound is True
+    assert cand_valid.is_certified_status is True
 
     cand_mismatch = SelectorCandidate(
         name="test_weight_cand",
@@ -897,6 +899,27 @@ def test_selector_candidate_target_q_interface():
         cost=1.0
     )
     assert cand_mismatch.is_valid_target_bound is False
+
+    # Uncertified status MATCHING_SCHEMA must be rejected
+    eb_matching = ErrorBound(
+        value=1e-5,
+        domain=dom,
+        source=BoundSource.EMPIRICAL_BENCHMARK,
+        status=TheoremStatus.MATCHING_SCHEMA,
+        decomposition=ErrorDecomposition(),
+        target=CertificateTarget.NODE,
+        valid=True
+    )
+    cand_matching = SelectorCandidate(
+        name="test_matching_schema_cand",
+        domain=dom,
+        target=CertificateTarget.NODE,
+        status=TheoremStatus.MATCHING_SCHEMA,
+        error_bound=eb_matching,
+        cost=1.0
+    )
+    assert cand_matching.is_certified_status is False
+    assert cand_matching.is_valid_target_bound is False
 
 
 def test_arbitrary_test_function_norm_isometry():

@@ -334,8 +334,27 @@ class SelectorCandidate:
     cost: float  # FLOPs or execution time
 
     @property
+    def is_certified_status(self) -> bool:
+        """
+        Explicit CertifiedStatus predicate:
+          CertifiedStatus(M) <=> Status(M) in {ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, NUMERICAL_CERTIFIED}.
+        Excludes MATCHING_SCHEMA and EMPIRICAL_DIAGNOSTIC candidates.
+        """
+        return self.status in (
+            TheoremStatus.ALGEBRAIC_EXACT,
+            TheoremStatus.ARITHMETIC_EXACT,
+            TheoremStatus.ANALYTIC_CERTIFIED,
+            TheoremStatus.NUMERICAL_CERTIFIED
+        ) and self.error_bound.status in (
+            TheoremStatus.ALGEBRAIC_EXACT,
+            TheoremStatus.ARITHMETIC_EXACT,
+            TheoremStatus.ANALYTIC_CERTIFIED,
+            TheoremStatus.NUMERICAL_CERTIFIED
+        )
+
+    @property
     def is_valid_target_bound(self) -> bool:
-        return self.error_bound.valid and self.error_bound.target == self.target
+        return self.error_bound.valid and self.error_bound.target == self.target and self.is_certified_status
 
 
 @dataclass
