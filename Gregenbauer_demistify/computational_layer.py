@@ -213,6 +213,36 @@ class ExactValue:
 
 
 @dataclass
+class CertifiedRemainder:
+    """
+    Certified Remainder Object for composite asymptotic reconstruction:
+      CertifiedRemainder { value: R_i, bound: B_i, status: TheoremStatus, target: CertificateTarget, domain: Domain, backend: str, validity_conditions: List[str] }
+    """
+    value: float
+    bound: float
+    status: TheoremStatus
+    target: CertificateTarget = CertificateTarget.NODE
+    domain: Optional[Domain] = None
+    backend: str = "FLOAT64"
+    validity_conditions: Optional[List[str]] = None
+
+    @property
+    def certificate_tuple(self) -> Tuple[CertificateTarget, Optional[Domain], str, TheoremStatus, List[str]]:
+        return (self.target, self.domain, self.backend, self.status, self.validity_conditions or [])
+
+
+def propagate_composite_status(remainders: List[CertifiedRemainder]) -> TheoremStatus:
+    """
+    Mechanically typed status rank propagation:
+      Status(B_{comp,r}) = rank^(-1)( min_{i in I_r} rank(Status(R_i)) ).
+    """
+    if not remainders:
+        return TheoremStatus.EMPIRICAL_DIAGNOSTIC
+    min_rank = min(r.status.rank for r in remainders)
+    return TheoremStatus.from_rank(min_rank)
+
+
+@dataclass
 class ErrorDecomposition:
     """Decomposed computational error breakdown carrying individual certification statuses."""
     e_analytic: float = 0.0
