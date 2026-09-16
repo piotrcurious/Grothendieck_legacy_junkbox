@@ -38,6 +38,7 @@ class EndpointClass(Enum):
     REGULAR = "REGULAR_ENDPOINT"
     LIMIT_CIRCLE = "LIMIT_CIRCLE"
     LIMIT_POINT = "LIMIT_POINT"
+    INVALID_PARAMETER = "INVALID_PARAMETER"
 
 
 @dataclass
@@ -65,6 +66,8 @@ def physical_classifier(lambda_val: Union[float, Fraction]) -> EndpointClass:
 def analytic_classifier(lambda_val: Union[float, Fraction]) -> EndpointClass:
     """Classifies parameters within AnalyticContinuationDomain (lambda > 0)."""
     lam = float(lambda_val)
+    if lam <= 0:
+        return EndpointClass.INVALID_PARAMETER
     if abs(lam - 0.5) < 1e-12:
         return EndpointClass.CRITICAL_LC
     elif abs(lam - 1.0) < 1e-12:
@@ -77,9 +80,15 @@ def analytic_classifier(lambda_val: Union[float, Fraction]) -> EndpointClass:
 
 def classify_parameter_domain(lambda_val: Union[float, Fraction], is_physical_domain: bool = True) -> EndpointClass:
     """
-    Explicit Classifier Precedence Function:
-      Classify(lambda) = PhysicalClassifier(lambda) if lambda in PhysicalSphereDomain else AnalyticClassifier(lambda)
+    Explicit 3-Way Classifier Precedence Function:
+      Classify(lambda) =
+        PhysicalClassifier(lambda) if lambda in PhysicalSphereDomain
+        AnalyticClassifier(lambda) if lambda in AnalyticContinuationDomain \\ PhysicalSphereDomain
+        INVALID_PARAMETER if lambda <= 0
     """
+    lam = float(lambda_val)
+    if lam <= 0:
+        return EndpointClass.INVALID_PARAMETER
     if is_physical_domain:
         return physical_classifier(lambda_val)
     else:
@@ -568,7 +577,7 @@ get_excluded_primes_denominator = get_admissibility_modulus
 def check_c_n_admissibility(n: int, lambda_val: Union[int, Fraction], p: int, execution_plan: object = None) -> bool:
     """
     Admissibility certificate for unnormalized Gegenbauer polynomial C_n^(lambda)(x) in F_p (PolyCertificate):
-      PolyCertificate(p, P, n) requires Prime(p) and gcd(p, D_inv(P)) == 1.
+      PolyCertificate(p, P, n, lambda) requires Prime(p) and gcd(p, D_inv(P)) == 1 and p nmid D_lambda.
     """
     if p <= 1:
         return False
@@ -576,6 +585,10 @@ def check_c_n_admissibility(n: int, lambda_val: Union[int, Fraction], p: int, ex
     for i in range(2, int(math.isqrt(p)) + 1):
         if p % i == 0:
             return False
+
+    d_lam = get_parameter_denominator(lambda_val)
+    if d_lam % p == 0:
+        return False
 
     d_inv = extract_plan_inversion_obstruction_modulus(execution_plan=execution_plan, degree=n, lambda_val=lambda_val)
     return (d_inv % p != 0)

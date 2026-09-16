@@ -242,6 +242,15 @@ def propagate_composite_status(remainders: List[CertifiedRemainder]) -> TheoremS
     return TheoremStatus.from_rank(min_rank)
 
 
+def propagate_total_bound_status(status_b_comp: TheoremStatus, status_e_exec: TheoremStatus) -> TheoremStatus:
+    """
+    Total Forward Error Bound Status Propagation Rule:
+      Status(B_{total,r}) = rank^(-1)( min( rank(Status(B_{comp,r})), rank(Status(E_{exec,r})) ) ).
+    """
+    min_rank = min(status_b_comp.rank, status_e_exec.rank)
+    return TheoremStatus.from_rank(min_rank)
+
+
 @dataclass
 class ErrorDecomposition:
     """Decomposed computational error breakdown carrying individual certification statuses."""
