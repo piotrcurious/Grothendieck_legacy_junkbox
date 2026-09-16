@@ -40,6 +40,7 @@ from filter_compiler.audio_processor import (
     generate_noise,
     generate_multitone,
     apply_filter,
+    apply_qmf_filtering,
     AudioPlayer
 )
 
@@ -298,9 +299,31 @@ class GegenbauerFilterGUI(tk.Tk):
         ttk.Button(gen_btn_frame, text="Multitone", command=lambda: self._generate_default_audio("multitone")).pack(side=tk.LEFT, padx=2)
         ttk.Button(gen_btn_frame, text="📁 Load WAV File...", command=self._on_load_wav_file).pack(side=tk.LEFT, padx=5)
 
+        # QMF Mixing Mode Controls Frame
+        qmf_frame = ttk.Frame(controls_frame, padding=2)
+        qmf_frame.grid(row=1, column=0, columnspan=4, sticky=tk.W, pady=5)
+
+        ttk.Label(qmf_frame, text="QMF Test / Subband Mixing Mode:").pack(side=tk.LEFT, padx=2)
+        self.qmf_mode_var = tk.StringVar(value="H0 (Lowpass)")
+        self.qmf_mode_cb = ttk.Combobox(
+            qmf_frame,
+            textvariable=self.qmf_mode_var,
+            values=[
+                "H0 (Lowpass)",
+                "H1 (Highpass)",
+                "H0 + H1 (Reconstruction Sum)",
+                "H0 - H1 (Subband Difference)",
+                "Stereo Split (L: H0, R: H1)"
+            ],
+            state="readonly",
+            width=30
+        )
+        self.qmf_mode_cb.pack(side=tk.LEFT, padx=5)
+        self.qmf_mode_cb.bind("<<ComboboxSelected>>", lambda e: self._apply_filter_to_current_audio())
+
         # Playback Controls
         play_frame = ttk.Frame(controls_frame, padding=5)
-        play_frame.grid(row=1, column=0, columnspan=4, sticky=tk.EW, pady=5)
+        play_frame.grid(row=2, column=0, columnspan=4, sticky=tk.EW, pady=5)
 
         ttk.Button(play_frame, text="▶ Play Original Audio", command=self._on_play_original).pack(side=tk.LEFT, padx=5)
         ttk.Button(play_frame, text="🔊 Play Filtered Audio", command=self._on_play_filtered).pack(side=tk.LEFT, padx=5)
@@ -642,8 +665,37 @@ class GegenbauerFilterGUI(tk.Tk):
         if self.loaded_audio_data is None or self.current_result is None:
             return
 
-        taps = self.current_result.h0_taps.float64_taps
-        self.filtered_audio_data = apply_filter(taps, self.loaded_audio_data)
+        spec = self.current_result.spec
+        h0_taps = self.current_result.h0_taps.float64_taps
+
+        if spec.kind == "qmf" and self.current_result.h1_taps is not None:
+            self.qmf_mode_cb.config(state="readonly")
+            h1_taps = self.current_result.h1_taps.float64_taps
+            qmf_selection = self.qmf_mode_var.get()
+
+            if "Lowpass" in qmf_selection:
+                mode_str = "lowpass"
+            elif "Highpass" in qmf_selection:
+                mode_str = "highpass"
+            elif "Reconstruction Sum" in qmf_selection:
+                mode_str = "reconstruction_sum"
+            elif "Subband Difference" in qmf_selection:
+                mode_str = "subband_diff"
+            elif "Stereo Split" in qmf_selection:
+                mode_str = "stereo_split"
+            else:
+                mode_str = "reconstruction_sum"
+
+            self.filtered_audio_data = apply_qmf_filtering(
+                h0_taps=h0_taps,
+                h1_taps=h1_taps,
+                audio_data=self.loaded_audio_data,
+                mode=mode_str
+            )
+        else:
+            self.qmf_mode_cb.config(state="disabled")
+            self.filtered_audio_data = apply_filter(h0_taps, self.loaded_audio_data)
+
         write_wav(self.filtered_wav_path, self.loaded_audio_sr, self.filtered_audio_data)
 
         self._update_audio_plots()
@@ -669,7 +721,13 @@ class GegenbauerFilterGUI(tk.Tk):
         # Waveform Display
         n_wave = min(1000, len(orig))
         self.ax_wave.plot(t[:n_wave], orig[:n_wave], 'b-', alpha=0.6, label='Original')
-        self.ax_wave.plot(t[:n_wave], filt[:n_wave], 'r-', alpha=0.8, label='Filtered')
+
+        if filt.ndim > 1 and filt.shape[1] == 2:
+            self.ax_wave.plot(t[:n_wave], filt[:n_wave, 0], 'r-', alpha=0.8, label='Filtered Left (H0)')
+            self.ax_wave.plot(t[:n_wave], filt[:n_wave, 1], 'm--', alpha=0.8, label='Filtered Right (H1)')
+        else:
+            self.ax_wave.plot(t[:n_wave], filt[:n_wave], 'r-', alpha=0.8, label='Filtered Output')
+
         self.ax_wave.set_title("Time Domain Waveform Comparison (First 1000 samples)")
         self.ax_wave.set_ylabel("Amplitude")
         self.ax_wave.grid(True)
@@ -678,13 +736,20 @@ class GegenbauerFilterGUI(tk.Tk):
         # Spectral Display via Welch's Power Spectral Density across full signal duration
         nperseg = min(2048, len(orig))
         f_orig, psd_orig = signal.welch(orig, fs=sr, nperseg=nperseg)
-        f_filt, psd_filt = signal.welch(filt, fs=sr, nperseg=nperseg)
-
         orig_db = 10 * np.log10(np.maximum(1e-12, psd_orig))
-        filt_db = 10 * np.log10(np.maximum(1e-12, psd_filt))
 
         self.ax_spec.plot(f_orig, orig_db, 'b-', alpha=0.6, label='Original PSD')
-        self.ax_spec.plot(f_filt, filt_db, 'r-', alpha=0.8, label='Filtered PSD')
+
+        if filt.ndim > 1 and filt.shape[1] == 2:
+            f_f0, psd_f0 = signal.welch(filt[:, 0], fs=sr, nperseg=nperseg)
+            f_f1, psd_f1 = signal.welch(filt[:, 1], fs=sr, nperseg=nperseg)
+            self.ax_spec.plot(f_f0, 10 * np.log10(np.maximum(1e-12, psd_f0)), 'r-', alpha=0.8, label='Filtered L (H0) PSD')
+            self.ax_spec.plot(f_f1, 10 * np.log10(np.maximum(1e-12, psd_f1)), 'm--', alpha=0.8, label='Filtered R (H1) PSD')
+        else:
+            f_filt, psd_filt = signal.welch(filt, fs=sr, nperseg=nperseg)
+            filt_db = 10 * np.log10(np.maximum(1e-12, psd_filt))
+            self.ax_spec.plot(f_filt, filt_db, 'r-', alpha=0.8, label='Filtered PSD')
+
         self.ax_spec.set_title("Welch Power Spectral Density Comparison (dB/Hz across full audio)")
         self.ax_spec.set_xlabel("Frequency (Hz)")
         self.ax_spec.set_ylabel("Power Density (dB/Hz)")
