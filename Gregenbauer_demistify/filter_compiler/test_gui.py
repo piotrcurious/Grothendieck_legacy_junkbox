@@ -20,6 +20,7 @@ from filter_compiler.audio_processor import (
     generate_noise,
     generate_multitone,
     apply_filter,
+    apply_qmf_filtering,
     AudioPlayer
 )
 from filter_compiler.compiler import (
@@ -68,6 +69,27 @@ class TestAudioProcessor(unittest.TestCase):
 
         self.assertEqual(len(audio), len(filtered))
         self.assertFalse(np.allclose(audio, filtered))
+
+    def test_qmf_filtering_modes(self):
+        spec = FilterSpec(kind="qmf", order=32, cutoff=0.25)
+        compiler = GegenbauerFilterCompiler(lam=1.25)
+        res = compiler.compile(spec)
+
+        h0 = res.h0_taps.float64_taps
+        h1 = res.h1_taps.float64_taps
+        sr, audio = generate_chirp(duration=0.5, sample_rate=8000)
+
+        f_h0 = apply_qmf_filtering(h0, h1, audio, mode="lowpass")
+        f_h1 = apply_qmf_filtering(h0, h1, audio, mode="highpass")
+        f_sum = apply_qmf_filtering(h0, h1, audio, mode="reconstruction_sum")
+        f_diff = apply_qmf_filtering(h0, h1, audio, mode="subband_diff")
+        f_stereo = apply_qmf_filtering(h0, h1, audio, mode="stereo_split")
+
+        self.assertEqual(len(f_h0), len(audio))
+        self.assertEqual(len(f_h1), len(audio))
+        self.assertTrue(np.allclose(f_sum, f_h0 + f_h1))
+        self.assertTrue(np.allclose(f_diff, f_h0 - f_h1))
+        self.assertEqual(f_stereo.shape, (len(audio), 2))
 
     def test_audio_player_stub(self):
         player = AudioPlayer()

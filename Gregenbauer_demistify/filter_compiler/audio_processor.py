@@ -129,6 +129,42 @@ def apply_filter(taps: np.ndarray, audio_data: np.ndarray) -> np.ndarray:
     return filtered
 
 
+def apply_qmf_filtering(
+    h0_taps: np.ndarray,
+    h1_taps: np.ndarray,
+    audio_data: np.ndarray,
+    mode: str = "reconstruction_sum"
+) -> np.ndarray:
+    """
+    Applies QMF subband filtering and mixing options:
+    - "lowpass" / "h0": Lowpass branch (H0)
+    - "highpass" / "h1": Highpass branch (H1)
+    - "reconstruction_sum": Reconstruction sum (H0 + H1)
+    - "subband_diff": Subband difference (H0 - H1)
+    - "stereo_split": Stereo output with L = H0(audio), R = H1(audio)
+    """
+    filt_h0 = apply_filter(h0_taps, audio_data)
+    filt_h1 = apply_filter(h1_taps, audio_data)
+
+    mode = mode.lower()
+    if mode in ("lowpass", "h0"):
+        return filt_h0
+    elif mode in ("highpass", "h1"):
+        return filt_h1
+    elif mode == "reconstruction_sum":
+        return filt_h0 + filt_h1
+    elif mode == "subband_diff":
+        return filt_h0 - filt_h1
+    elif mode == "stereo_split":
+        if filt_h0.ndim == 1:
+            return np.column_stack([filt_h0, filt_h1])
+        else:
+            # If input is already stereo/multichannel, take channel 0 for L: H0 and R: H1
+            return np.column_stack([filt_h0[:, 0], filt_h1[:, 0]])
+    else:
+        raise ValueError(f"Unknown QMF mixing mode: '{mode}'")
+
+
 class AudioPlayer:
     """Non-blocking audio player supporting Linux ALSA (aplay) and process management."""
 
