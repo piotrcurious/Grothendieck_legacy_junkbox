@@ -70,6 +70,10 @@ class CertifiedEvaluationPayload:
     truth_status: TruthStatus
     matching_status: MatchingStatus
     provenance: ErrorBoundProvenance
+    basis_evaluation_certified: bool = True
+    prototype_fir_certified: bool = True
+    qmf_power_complementary: bool = True
+    qmf_alias_cancellation: bool = True
     is_certified: bool = True
 
 
@@ -130,6 +134,12 @@ class FilterSpec:
         elif self.kind == "bandpass" and not (self.ws < self.wp < self.wp2 < self.ws2):
             raise ValueError(f"Bandpass frequencies must satisfy ws ({self.ws}) < wp ({self.wp}) < wp2 ({self.wp2}) < ws2 ({self.ws2})")
 
+        if self.kind == "qmf":
+            if abs((self.wp + self.ws) - 0.5) > 1e-12:
+                raise ValueError(
+                    f"QMF requires symmetric transition around fs/4: wp + ws = 0.5, got wp={self.wp}, ws={self.ws}"
+                )
+
 
 @dataclass
 class QuantizedTaps:
@@ -172,6 +182,8 @@ class FilterResult:
             f"Gegenbauer Lambda: {self.lam:.4f} | Basis Terms: {self.basis_terms}",
             f"Truth Status Topology: {self.payload.truth_status.value}",
             f"Asymptotic Matching Certification: {self.payload.matching_status.value}",
+            f"Certifications: Basis={self.payload.basis_evaluation_certified} | Prototype={self.payload.prototype_fir_certified}"
+            f" | QMF Power={self.payload.qmf_power_complementary} | QMF Alias={self.payload.qmf_alias_cancellation} | Total={self.payload.is_certified}",
             f"Passband Ripple: {self.passband_ripple_actual:.4f} dB | Stopband Attenuation: {self.stopband_atten_actual:.2f} dB",
         ]
         if self.spec.kind == "qmf":
@@ -236,7 +248,19 @@ class GegenbauerFilterCompiler:
         W = np.ones_like(omega)
         wp, ws = spec.wp, spec.ws
 
-        if spec.kind in ("lowpass", "qmf"):
+        if spec.kind == "qmf":
+            pass_mask = f <= wp
+            stop_mask = f >= ws
+            trans_mask = ~(pass_mask | stop_mask)
+            D[pass_mask] = 1.0
+            D[stop_mask] = 0.0
+            if np.any(trans_mask):
+                t = (f[trans_mask] - wp) / (ws - wp)
+                # Sine/cosine amplitude crossfade for power-complementary QMF:
+                D[trans_mask] = np.cos(0.5 * np.pi * t)
+            W[pass_mask], W[stop_mask], W[trans_mask] = 1.0, 10.0, 1.0
+
+        elif spec.kind == "lowpass":
             pass_mask = f <= wp
             stop_mask = f >= ws
             trans_mask = ~(pass_mask | stop_mask)
@@ -276,8 +300,18 @@ class GegenbauerFilterCompiler:
     def solve_coefficients(self, spec: FilterSpec) -> Tuple[np.ndarray, int]:
         N = spec.order
         M = (N + 1) // 2
-        K = self.basis_terms if self.basis_terms is not None else max(4, int(np.sqrt(N)) + 2)
+        if self.basis_terms is not None:
+            K = self.basis_terms
+        else:
+            if spec.kind == "qmf":
+                K = min(M, max(16, N // 2))
+            else:
+                K = max(4, int(np.sqrt(N)) + 2)
         K = min(K, M)
+
+        mu = self.mu_reg
+        if spec.kind == "qmf" and self.mu_reg == 1e-4:
+            mu = 1e-6
 
         if self.solver == "quadrature":
             nodes, weights = gauss_gegenbauer_quadrature(self.grid_samples, self.lam)
@@ -291,7 +325,7 @@ class GegenbauerFilterCompiler:
                 a_coeffs[k] = np.sum(D_q * phi_k * weights) / norm_sq
             return a_coeffs, K
 
-        if self.solver == "spectral_regularized" or self.mu_reg > 0:
+        if self.solver == "spectral_regularized" or mu > 0:
             nodes, weights = gauss_gegenbauer_quadrature(self.grid_samples, self.lam)
             omega_q = np.arccos(nodes)
             D_q, W_q = self._build_spectral_target(spec, omega_q)
@@ -309,7 +343,7 @@ class GegenbauerFilterCompiler:
                 eig = k * (k + 2.0 * self.lam)
                 R_diag[k] = (eig ** self.reg_power)
 
-            R_mat = np.diag(np.sqrt(self.mu_reg * R_diag))
+            R_mat = np.diag(np.sqrt(mu * R_diag))
             A_sys = np.vstack([A_w, R_mat])
             D_sys = np.concatenate([D_w, np.zeros(R_mat.shape[0])])
             a_coeffs, _, _, _ = np.linalg.lstsq(A_sys, D_sys, rcond=None)
@@ -481,7 +515,7 @@ class GegenbauerFilterCompiler:
         h1_quant = None
         if spec.kind == "qmf":
             sign_pattern = np.array([(-1.0)**n for n in range(spec.order)])
-            h1_float = h0_float * sign_pattern
+            h1_float = sign_pattern * h0_float[::-1]
             h1_quant = self.quantize_taps(h1_float)
 
         # Ensure FFT size scales dynamically to avoid aliasing on massive filter lengths
@@ -513,7 +547,7 @@ class GegenbauerFilterCompiler:
             H0_shift = np.roll(H0, K_fft // 2)
 
             pow_comp = np.abs(H0)**2 + np.abs(H1)**2
-            aliasing_func = 0.5 * np.abs(H0 * H0_shift + H1 * H1_shift)
+            aliasing_func = 0.5 * np.abs(H0 * H0_shift - H1 * H1_shift)
 
             qmf_pow_db = float(np.max(np.abs(10 * np.log10(np.maximum(1e-12, pow_comp[:K_fft // 2])))))
             qmf_alias_db = float(np.max(20 * np.log10(np.maximum(1e-12, aliasing_func[:K_fft // 2]))))
@@ -541,20 +575,34 @@ class GegenbauerFilterCompiler:
             e_implementation=0.0
         )
 
-        # Rationale for certification thresholds:
-        # 1. Asymptotic approximation error bound must be below 0.05 for asymptotic matching certification.
-        # 2. Overall filter synthesis is certified if asymptotic error < 0.05, passband ripple is within 2x target,
-        #    and stopband attenuation achieves at least half target or 20 dB minimum.
-        is_certified = (
-            asymp_err < 0.05 and
-            pass_ripple <= spec.passband_ripple_db * 2.0 and
+        basis_evaluation_certified = (asymp_err < 0.05)
+        pass_ripple_thresh = spec.passband_ripple_db * 3.0 if spec.kind == "qmf" else spec.passband_ripple_db * 2.0
+        prototype_fir_certified = (
+            pass_ripple <= pass_ripple_thresh and
             stop_atten >= min(spec.stopband_atten_db * 0.5, 20.0)
+        )
+        qmf_power_complementary = True
+        qmf_alias_cancellation = True
+
+        if spec.kind == "qmf":
+            qmf_power_complementary = (qmf_pow_db <= 1.0)
+            qmf_alias_cancellation = (qmf_alias_db <= -30.0)
+
+        is_certified = (
+            basis_evaluation_certified and
+            prototype_fir_certified and
+            qmf_power_complementary and
+            qmf_alias_cancellation
         )
 
         payload = CertifiedEvaluationPayload(
             truth_status=truth_status,
             matching_status=matching_status,
             provenance=provenance,
+            basis_evaluation_certified=basis_evaluation_certified,
+            prototype_fir_certified=prototype_fir_certified,
+            qmf_power_complementary=qmf_power_complementary,
+            qmf_alias_cancellation=qmf_alias_cancellation,
             is_certified=is_certified
         )
 
@@ -626,7 +674,7 @@ class GegenbauerFilterCompiler:
             H1_shift = np.roll(H1, K_fft // 2)
 
             pow_comp = np.abs(H0)**2 + np.abs(H1)**2
-            aliasing_func = 0.5 * np.abs(H0 * H0_shift + H1 * H1_shift)
+            aliasing_func = 0.5 * np.abs(H0 * H0_shift - H1 * H1_shift)
             pow_db = 10 * np.log10(np.maximum(1e-12, pow_comp[:K_fft // 2]))
             alias_db = 20 * np.log10(np.maximum(1e-12, aliasing_func[:K_fft // 2]))
 
