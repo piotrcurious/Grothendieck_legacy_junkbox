@@ -45,22 +45,22 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   Layer VI. Two-Overlap Composite Uniform Asymptotic Schema & Quantified Selector
   Target Semantics: F_Q(θ) = TargetValue(Q, θ), F(θ) ≡ F_Q(θ) for fixed Q
   Global Coverage: 𝒟_north ∪ 𝒟_interior ∪ 𝒟_south = 𝒟_global
-  Finite Region Table Reconstruct_r: (exact identity, I_r, s_r, 𝒟_r) for NORTH, INTERIOR, SOUTH, NORTH_INTERIOR_OVERLAP, INTERIOR_SOUTH_OVERLAP, GLOBAL_OVERLAP
-  Status Lattice: Status(B_comp) = min_⪯ {Status(R_i) : i ∈ I_r}
+  Piecewise Composite Evaluator F_{comp,r}^{(K)}(θ) & Finite Region Table Reconstruct_r
+  Status Lattice Minimum: Status(B_comp,r) = min_⪯ {Status(R_i) : i ∈ I_r} with MATCHING_SCHEMA in lattice
   Selector Candidate Interface: Candidate { domain 𝒟_M, target Q, status, ErrorBound.valid, B_M(θ) } requiring target Q matching
         │
         ▼
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, C_fixed, C_LNS)
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x] ──symbolic rec──> C_n ──eval──> Q ──CRT/RNS──> integer residues)
-  ├── VII-C: Scalable RNS / CRT (N_max := metadata, Trace P_rec_inv, D_rec(P) = lcm_{q ∈ P_rec_inv} den_red(q), D_den = lcm(D_rec, D_norm, D_eval))
-  ├── VII-D1: Finite-Field Arithmetic (D_norm^{used}(P, ZONAL) = 1; Canonical u_n/v_n, c/r; ZonalAdmissible(p, P, n, x); Bad_zonal := ¬ZonalAdmissible)
+  ├── VII-C: Scalable RNS / CRT (N_max := metadata, Trace P_rec_inv, D_rec(P) = lcm_{q ∈ P_rec_inv} den_red(q), Aggregate D_den = lcm(D_rec, D_norm, D_eval))
+  ├── VII-D1: Finite-Field Arithmetic (UsesNormalizationDenominators(P, ZONAL)=false; Canonical u_n/v_n, c/r; ZonalAdmissible(p, P, n, x); Bad_zonal := ¬ZonalAdmissible)
   ├── VII-D2: NTT Acceleration Primitive (L_conv = L_1+L_2-1 ≤ L_NTT | (p-1))
   └── VII-E: Golub-Welsch Spectral Truncation (J_m = tridiag(α_0, ..., α_{m-2}), Typed Implication: CertSensitivity_Q(A, κ_Q) ∧ R_Q ≤ B_back ∧ E_{Q,conv} ≤ B_{Q,conv} ⟹ E_Q ≤ κ_Q B_back + B_{Q,conv})
         │
         ▼
   Layer VIII. Typed Separation: ExactValue vs ErrorBound vs Residual & Provenance Optimizer
-  First-Class Types: ExactValue != ErrorBound != Residual (TheoremStatus Enum: ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, NUMERICAL_CERTIFIED, EMPIRICAL_DIAGNOSTIC)
+  First-Class Types: ExactValue != ErrorBound != Residual (TheoremStatus Enum: ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, NUMERICAL_CERTIFIED, MATCHING_SCHEMA, EMPIRICAL_DIAGNOSTIC)
   Extended Certificate Tuple Invariant: Every certificate carries (target Q, domain 𝒟, backend, status, validity_conditions)
   Residual != ErrorBound Invariant; Staged Perturbation Chain for Target Q: F_0(Q) ──E_0──> F_1(Q) ──E_1──> ... ──E_{k-1}──> F_k(Q) ⟹ |F_0(Q) - F_k(Q)| ≤ ∑_{i=0}^{k-1} E_i
   Canonical Test Matrix: d ∈ {3, 4, 5}, n ∈ {0, 1, 2, 3} validating initial data anchors, recurrences, and cheap invariants (norm isometry & parity/boundedness)
@@ -189,14 +189,27 @@ $$\boxed{\|J_m\| = \max_{v \in S^{m-1}} f(v) = f(v^*) < 1 \quad \text{for all } 
 
 ## 6. Layer V & VI: Asymptotic Schemas, Quantified Overlap Contract & Selector
 
-### 6.1 Target Semantics & Piecewise Composite Approximation Schema
+### 6.1 Target Semantics & Explicit Piecewise Composite Evaluator Map
 For a fixed target $Q$, the Layer VI exact target value is normalized:
 $$\boxed{F_Q(\theta) = \operatorname{TargetValue}(Q, \theta), \qquad F(\theta) \equiv F_Q(\theta).}$$
 
-The piecewise composite uniform expression combines endpoint Bessel layers and interior WKB waves over global domain coverage:
+Global domain coverage is complete:
 $$\boxed{\mathcal{D}_{\text{north}} \cup \mathcal{D}_{\text{interior}} \cup \mathcal{D}_{\text{south}} = \mathcal{D}_{\text{global}}.}$$
 
-### 6.2 Finite Region Table & Remainder Reconstruction Identities
+The explicit piecewise composite evaluator map $F_{\text{comp},r}^{(K)}(\theta)$ is defined for each region $r$:
+$$\boxed{
+F_{\text{comp},r}^{(K)}(\theta) =
+\begin{cases}
+F_{\text{north}}^{(K)}(\theta), & r = \texttt{NORTH}, \\
+F_{\text{interior}}^{(K)}(\theta), & r = \texttt{INTERIOR}, \\
+F_{\text{south}}^{(K)}(\theta), & r = \texttt{SOUTH}, \\
+F_{\text{north}}^{(K)}(\theta) + F_{\text{interior}}^{(K)}(\theta) - F_{+O}^{(K)}(\theta), & r = \texttt{NORTH\_INTERIOR\_OVERLAP}, \\
+F_{\text{interior}}^{(K)}(\theta) + F_{\text{south}}^{(K)}(\theta) - F_{-O}^{(K)}(\theta), & r = \texttt{INTERIOR\_SOUTH\_OVERLAP}, \\
+F_{\text{north}}^{(K)}(\theta) + F_{\text{south}}^{(K)}(\theta) + F_{\text{interior}}^{(K)}(\theta) - F_{+O}^{(K)}(\theta) - F_{-O}^{(K)}(\theta), & r = \texttt{GLOBAL\_OVERLAP}.
+\end{cases}
+}$$
+
+### 6.2 Certified Remainder Objects & Finite Region Table
 Define certified remainder objects $R_i$:
 $$\begin{aligned}
 R_{\text{north}} &= F - F_{\text{north}} \quad (\|R_{\text{north}}\| \le B_{\text{north}} \text{ on } \mathcal{D}_{\text{north}}), \\
@@ -227,7 +240,7 @@ $$\boxed{|F_Q(\theta) - F_{\text{comp},r}^{(K)}(\theta)| \le \sum_{i \in I_r(\th
 **Status Lattice Minimum Rule:**
 The certification status of $B_{\text{comp},r}$ is determined by the lattice minimum across all active remainder terms in region $r$:
 $$\boxed{\operatorname{Status}(B_{\text{comp},r}) = \min_{\preceq} \{\operatorname{Status}(R_i) : i \in I_r\},}$$
-where status order is $\texttt{ALGEBRAIC\_EXACT} \succ \texttt{ARITHMETIC\_EXACT} \succ \texttt{ANALYTIC\_CERTIFIED} \succ \texttt{NUMERICAL\_CERTIFIED} \succ \texttt{EMPIRICAL\_DIAGNOSTIC}$.
+where status order is $\texttt{ALGEBRAIC\_EXACT} \succ \texttt{ARITHMETIC\_EXACT} \succ \texttt{ANALYTIC\_CERTIFIED} \succ \texttt{NUMERICAL\_CERTIFIED} \succ \texttt{MATCHING\_SCHEMA} \succ \texttt{EMPIRICAL\_DIAGNOSTIC}$.
 
 Under status $\texttt{MATCHING\_SCHEMA}$, the asymptotic growth exponent is declared as $\gamma_K := \text{unspecified}$. It is promoted to $\texttt{ANALYTIC\_CERTIFIED}$ only after proving the uniform majorant theorem:
 $$\boxed{G^\pm_{K, \lambda, Z_0, \delta}(z; N_n) \le C^\pm_{K, \lambda, Z_0, \delta} (1 + z)^{\gamma_K} \quad \text{uniformly for } N_n \ge N_0 \text{ and } Z_0 \le z \le \delta N_n.}$$
@@ -248,21 +261,21 @@ $$\boxed{M^*(\theta) = \arg\min_{\substack{M \\ \theta \in \mathcal{D}_M \\ \tex
   $$\boxed{\operatorname{CertifiedSensitivity}_Q(A, \kappa_Q) \land R_Q \le B_{\text{back}} \land E_{Q, \text{conv}} \le B_{Q, \text{conv}} \implies E_Q \le \kappa_Q B_{\text{back}} + B_{Q, \text{conv}} := B_{Q, \text{forward}},}$$
   where target $Q \in \{\texttt{NODE}, \texttt{WEIGHT}, \texttt{EIGENVECTOR}, \texttt{QUADRATURE}\}$ and $\kappa_Q$ is explicitly certified (including eigenvalue-gap conditioning for eigenvectors/weights).
 
-### VII-C. Execution-Trace Recurrence Inversions & Backend Normalization Denominators
+### VII-C. Execution-Trace Recurrence Denominators & Backend Normalization Denominators
 Define execution-trace primitive inversions: $P_{\text{rec\_inv}}(P) = \{ q : \texttt{INVERT}(q) \text{ occurs in recurrence trace of } P \}$. Recurrence denominators follow the actual executed arithmetic graph:
 $$\boxed{D_{\text{rec}}(P) = \operatorname{lcm}_{q \in P_{\text{rec\_inv}}(P)} \operatorname{den}_{\text{red}}(q).}$$
 
 Evaluation point denominator for canonical fraction $x = c/r$ ($\gcd(c,r)=1, r>0$):
 $$\boxed{D_{\text{eval}} = r.}$$
 
-Backend normalization denominators are defined per plan $P$ and target $Q$:
-$$\boxed{D_{\text{norm}}(P, Q) = \operatorname{lcm}\{\text{rational denominators actually inverted by } P \text{ for target } Q\}.}$$
+Define execution-trace normalization inversions: $P_{\text{norm\_inv}}(P, Q) = \{ q : \texttt{INVERT}(q) \text{ occurs for normalization in plan } P \text{ target } Q \}$. Backend normalization denominators are defined:
+$$\boxed{D_{\text{norm}}^{\text{used}}(P, Q) = \operatorname{lcm}_{q \in P_{\text{norm\_inv}}(P, Q)} \operatorname{den}_{\text{red}}(q), \qquad \text{with empty LCM convention } \operatorname{lcm}(\varnothing) = 1.}$$
 
-The zonal finite-field backend excludes normalization denominators via typed predicate:
-$$\boxed{D_{\text{norm}}^{\text{used}}(P, \texttt{ZONAL}) = 1 \quad \iff \quad \operatorname{UsesNormalizationDenominators}(P, \texttt{ZONAL}) = \text{false}.}$$
+The zonal finite-field backend excludes normalization denominators via direct predicate:
+$$\boxed{\operatorname{UsesNormalizationDenominators}(P, \texttt{ZONAL}) = \text{false} \implies D_{\text{norm}}^{\text{used}}(P, \texttt{ZONAL}) = 1.}$$
 
 Aggregate excluded-denominator modulus:
-$$\boxed{D_{\text{den}} = \operatorname{lcm}(D_{\text{rec}}(P), D_{\text{norm}}(P, Q), D_{\text{eval}}), \qquad \text{with empty LCM convention } \operatorname{lcm}(\varnothing) = 1.}$$
+$$\boxed{D_{\text{den}} = \operatorname{lcm}(D_{\text{rec}}(P), D_{\text{norm}}^{\text{used}}(P, Q), D_{\text{eval}}), \qquad \operatorname{lcm}(\varnothing) = 1.}$$
 
 ### VII-D. Explicit Canonical Preconditions & Semantically Exact Bad Zonal Prime Predicate
 Canonical reduced fraction representation preconditions:
@@ -289,8 +302,11 @@ Finite-field certificates and bad prime predicate:
 ### VIII-A. Typed Hierarchy & Extended Metadata Tuple Invariant
 Hard type separation: $\texttt{ExactValue} \neq \texttt{ErrorBound} \neq \texttt{Residual}$.
 
-`TheoremStatus` Enum:
-$$\boxed{\{\texttt{ALGEBRAIC\_EXACT}, \texttt{ARITHMETIC\_EXACT}, \texttt{ANALYTIC\_CERTIFIED}, \texttt{NUMERICAL\_CERTIFIED}, \texttt{EMPIRICAL\_DIAGNOSTIC}\}}$$
+`TheoremStatus` Enum with closed lattice:
+$$\boxed{\{\texttt{ALGEBRAIC\_EXACT}, \texttt{ARITHMETIC\_EXACT}, \texttt{ANALYTIC\_CERTIFIED}, \texttt{NUMERICAL\_CERTIFIED}, \texttt{MATCHING\_SCHEMA}, \texttt{EMPIRICAL\_DIAGNOSTIC}\}}$$
+
+Lattice ordering:
+$$\boxed{\texttt{ALGEBRAIC\_EXACT} \succ \texttt{ARITHMETIC\_EXACT} \succ \texttt{ANALYTIC\_CERTIFIED} \succ \texttt{NUMERICAL\_CERTIFIED} \succ \texttt{MATCHING\_SCHEMA} \succ \texttt{EMPIRICAL\_DIAGNOSTIC}.}$$
 
 **Extended Certificate Metadata Tuple Invariant:**
 $$\boxed{\text{Every certificate carries } (\text{target } Q, \text{domain } \mathcal{D}, \text{backend}, \text{status}, \text{validity\_conditions}).}$$

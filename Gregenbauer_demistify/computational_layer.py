@@ -76,12 +76,37 @@ except ModuleNotFoundError:
 
 
 class TheoremStatus(Enum):
-    """Layer VIII Formal Provenance Verification Status Hierarchy."""
+    """
+    Layer VIII Formal Provenance Verification Status Hierarchy.
+    Lattice ordering:
+      ALGEBRAIC_EXACT > ARITHMETIC_EXACT > ANALYTIC_CERTIFIED > NUMERICAL_CERTIFIED > MATCHING_SCHEMA > EMPIRICAL_DIAGNOSTIC
+    """
     ALGEBRAIC_EXACT = "ALGEBRAIC_EXACT"
     ARITHMETIC_EXACT = "ARITHMETIC_EXACT"
     ANALYTIC_CERTIFIED = "ANALYTIC_CERTIFIED"
     NUMERICAL_CERTIFIED = "NUMERICAL_CERTIFIED"
+    MATCHING_SCHEMA = "MATCHING_SCHEMA"
     EMPIRICAL_DIAGNOSTIC = "EMPIRICAL_DIAGNOSTIC"
+
+    def __gt__(self, other: 'TheoremStatus') -> bool:
+        order = [
+            TheoremStatus.EMPIRICAL_DIAGNOSTIC,
+            TheoremStatus.MATCHING_SCHEMA,
+            TheoremStatus.NUMERICAL_CERTIFIED,
+            TheoremStatus.ANALYTIC_CERTIFIED,
+            TheoremStatus.ARITHMETIC_EXACT,
+            TheoremStatus.ALGEBRAIC_EXACT,
+        ]
+        return order.index(self) > order.index(other)
+
+    def __ge__(self, other: 'TheoremStatus') -> bool:
+        return self == other or self > other
+
+    def __lt__(self, other: 'TheoremStatus') -> bool:
+        return not (self >= other)
+
+    def __le__(self, other: 'TheoremStatus') -> bool:
+        return not (self > other)
 
 
 class CertificateTarget(Enum):

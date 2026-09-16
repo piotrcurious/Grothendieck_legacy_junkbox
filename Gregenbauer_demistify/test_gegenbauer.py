@@ -933,3 +933,16 @@ def test_global_overlap_exact_remainder_identity():
     diff_derived = R_I - R_plus_O - R_minus_O
 
     assert np.isclose(diff_actual, diff_derived)
+
+
+def test_matching_schema_theorem_status_lattice_ordering():
+    """
+    Verifies MATCHING_SCHEMA presence in TheoremStatus and status lattice ordering:
+      ALGEBRAIC_EXACT > ARITHMETIC_EXACT > ANALYTIC_CERTIFIED > NUMERICAL_CERTIFIED > MATCHING_SCHEMA > EMPIRICAL_DIAGNOSTIC
+    """
+    assert TheoremStatus.MATCHING_SCHEMA in TheoremStatus
+    assert TheoremStatus.ALGEBRAIC_EXACT > TheoremStatus.ARITHMETIC_EXACT
+    assert TheoremStatus.ARITHMETIC_EXACT > TheoremStatus.ANALYTIC_CERTIFIED
+    assert TheoremStatus.ANALYTIC_CERTIFIED > TheoremStatus.NUMERICAL_CERTIFIED
+    assert TheoremStatus.NUMERICAL_CERTIFIED > TheoremStatus.MATCHING_SCHEMA
+    assert TheoremStatus.MATCHING_SCHEMA > TheoremStatus.EMPIRICAL_DIAGNOSTIC
