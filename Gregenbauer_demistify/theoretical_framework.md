@@ -10,7 +10,7 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
 
 ```
   Layer I. Representation Geometry & Fischer Decomposition
-  G = SO(d), K = SO(d-1), Sym^n(ℂ^d) = ℋ_n(ℂ^d) ⊕ q Sym^{n-2}(ℂ^d), Q^{d-2} ⊂ ℙ^{d-1}, R(Q)_n ≅ ℋ_n(ℂ^d) [Fischer Equivariant Map], Res_S: ℋ_n(ℂ^d) ──∼──→ 𝒴_n^ℂ(S^{d-1})
+  G = SO(d), K = SO(d-1), Sym^n(ℂ^d) = ℋ_n(ℂ^d) ⊕ q Sym^{n-2}(ℂ^d), Q^{d-2} ⊂ ℙ^{d-1}, R(Q) = ℂ[z_1,...,z_d]/(q) homogeneous coordinate ring, Res_S: ℋ_n(ℂ^d) ──∼──→ 𝒴_n^ℂ(S^{d-1})
         │
         ▼
   Layer II. Spherical Fixed Line, Rank-One Projector & Bi-K-Invariance
@@ -50,9 +50,9 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   Typed Execution Bounds: target(E_{exec,r}) = target(B_{comp,r}) = Q; Cert(E_{exec,r}) = (Q, 𝒟_r, backend, Status, validity_conditions)
   Region Execution Error Matching: E_{exec,NI} = E_N + E_I + E_{+O}, E_{exec,IS} = E_I + E_S + E_{-O}, E_{exec,global} = E_N + E_I + E_S + E_{+O} + E_{-O}
   Compact 6-Entry Certificate Table (B_N, B_I, B_S, B_NI, B_IS, B_global)
-  Mechanically Typed Status Rank: rank(B_{comp,r}) = min_{i ∈ I_r} rank(Status(R_i)); Status(B_{total,r}) = rank^{-1}( min( rank(Status(B_{comp,r})), rank(Status(E_{exec,r})) ) )
-  Certified Candidate Selection: CertifiedStatus(M) ⟺ Status(M) ∈ {ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, NUMERICAL_CERTIFIED}
-  Deterministic Candidate Selector: M^*(θ) = min_≺ argmin_{M ∈ 𝒜(θ,Q) ∧ CertifiedStatus(M)} B_M^{total}(θ)
+  Derived Total Bound Status: Status(B_M^total) = rank^{-1}( min( rank(Status(B_M^approx)), rank(Status(E_M^exec)) ) )
+  Certified Bound Selection: CertifiedBound(M) ⟺ Status(B_M^total) ∈ {ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, NUMERICAL_CERTIFIED}
+  Deterministic Candidate Selector: M^*(θ) = min_≺ argmin_{M ∈ 𝒜(θ,Q) ∧ CertifiedBound(M)} B_M^{total}(θ)
         │
         ▼
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
@@ -60,7 +60,7 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x] ──symbolic rec──> C_n ──eval──> Q ──CRT/RNS──> integer residues)
   ├── VII-C: Scalable RNS / CRT (N_max := metadata, Trace P_inv ⊂ Q^* with INVERT(q) ⟹ q ≠ 0, TraceComplete(P) invariant: ∀ INVERT(q) ∨ DIV(a,q) in P, q ∈ P_inv(P), D_inv(P) = lcm_{q ∈ P_inv} |num_red(q) den_red(q)|, Aggregate D_adm = lcm(D_inv, D_norm, D_eval, D_λ))
   ├── VII-D1: Finite-Field Arithmetic (Prime(p) Precondition; InvObstruction(q) = |num_red(q) den_red(q)|; UsesNormalizationDenominators(P, ZONAL)=false; Canonical u_n/v_n, c/r; D_λ = den_red((d-2)/2) = 2 (d odd) / 1 (d even); PolyCertificate(p, P, n, λ) ⟺ Prime(p) ∧ gcd(p, D_inv) = 1 ∧ p ∤ D_λ; CanonicalZonalAdmissible(p, P, n, x, λ) for canonical rationalization backend; Bad_zonal(p, P, n, x, λ) ⟺ p|r ∨ p|v_n ∨ p|u_n ∨ p|D_inv(P) ∨ p|D_λ)
-  ├── VII-D2: NTT Acceleration Primitive (L_conv = L_1+L_2-1 ≤ L_NTT, L_NTT | (p-1), ∃ ω ∈ 𝔽_p^* : ord(ω) = L_NTT)
+  ├── VII-D2: NTT Acceleration Primitive (L_conv = L_1+L_2-1 ≤ L_NTT, L_NTT | (p-1) guaranteeing primitive root witness ω ∈ 𝔽_p^*)
   └── VII-E: Canonical Golub-Welsch Spectral Truncation Certificate (J_m = tridiag(α_0, ..., α_{m-2}), Typed Implication: CertSensitivity_{Q_spec}(A, κ_{Q_spec}) ∧ R_{Q_spec} ≤ B_back ∧ E_{Q_spec,conv} ≤ B_{Q_spec,conv} ⟹ E_{Q_spec,forward} ≤ κ_{Q_spec} B_back + B_{Q_spec,conv})
         │
         ▼
@@ -78,7 +78,7 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
 Let $G = SO(d)$ act transitively on $S^{d-1} \subset \mathbb{R}^d$ with isotropy subgroup $K = SO(d-1)$, so that $S^{d-1} \cong G/K$. For ambient Euclidean dimension $d \ge 3$, the complexified null quadric $Q^{d-2} \subset \mathbb{P}^{d-1}$ is defined by:
 $$Q^{d-2} = \{ [z] \in \mathbb{P}^{d-1} : q(z) = z_1^2 + \dots + z_d^2 = 0 \}.$$
 
-The coordinate ring of the projective quadric $Q^{d-2}$ is $R(Q) = \mathbb{C}[z_1, \dots, z_d] / (q)$. In graded degree $n$:
+The homogeneous coordinate ring of the projective quadric $Q^{d-2}$ is $R(Q) = \mathbb{C}[z_1, \dots, z_d] / (q)$. In graded degree $n$:
 $$R(Q)_n = \operatorname{Sym}^n(\mathbb{C}^d) / q \operatorname{Sym}^{n-2}(\mathbb{C}^d).$$
 Via the Fischer decomposition on polynomial spaces $\operatorname{Sym}^n(\mathbb{C}^d) = \mathcal{H}_n(\mathbb{C}^d) \oplus q \operatorname{Sym}^{n-2}(\mathbb{C}^d)$ associated with Euclidean quadratic form $q(z) = \sum z_i^2$, Fischer decomposition supplies a canonical $SO(d)$-equivariant harmonic representative isomorphism:
 $$\boxed{R(Q)_n \xrightarrow{\,\,\sim\,\,} \mathcal{H}_n(\mathbb{C}^d).}$$
@@ -306,12 +306,12 @@ $$\boxed{G^\pm_{K, \lambda, Z_0, \delta}(z; N_n) \le C^\pm_{K, \lambda, Z_0, \de
 ### 6.4 Deterministic Domain-Compatible Evaluation Selector ($M^*$)
 Candidate evaluation representations are defined by explicit Candidate interfaces carrying total bounds $B_M^{\text{total}}(\theta) = B_M^{\text{approx}}(\theta) + E_M^{\text{exec}}(\theta) \in \mathbb{R}_{\ge 0}$:
 $$\boxed{\text{Candidate } \{ \text{domain } \mathcal{D}_M, \text{ target } Q, \text{ status}, \texttt{ErrorBound.valid}, B_M^{\text{total}}(\theta) \in \mathbb{R}_{\ge 0} \}.}$$
-Define the explicit certification predicate $\operatorname{CertifiedStatus}(M)$:
-$$\boxed{\operatorname{CertifiedStatus}(M) \iff \operatorname{Status}(M) \in \{\texttt{ALGEBRAIC\_EXACT}, \texttt{ARITHMETIC\_EXACT}, \texttt{ANALYTIC\_CERTIFIED}, \texttt{NUMERICAL\_CERTIFIED}\}.}$$
+Define the explicit total bound certification predicate $\operatorname{CertifiedBound}(M)$:
+$$\boxed{\operatorname{CertifiedBound}(M) \iff \operatorname{Status}(B_M^{\text{total}}) \in \{\texttt{ALGEBRAIC\_EXACT}, \texttt{ARITHMETIC\_EXACT}, \texttt{ANALYTIC\_CERTIFIED}, \texttt{NUMERICAL\_CERTIFIED}\}.}$$
 
 To resolve set-valued ties when multiple candidate representations yield identical total error bounds, the selector employs a fixed candidate priority ordering $\prec$:
-$$\boxed{M^*(\theta) = \min_{\prec} \operatorname*{argmin}_{\substack{M \in \mathcal{A}(\theta, Q) \\ \text{Candidate}_M.\text{target} = Q \\ \texttt{ErrorBound}_M\text{.valid} \\ \operatorname{CertifiedStatus}(M)}} B_M^{\text{total}}(\theta),}$$
-where $\mathcal{A}(\theta, Q)$ is the admissible set of domain-compatible representations for target $Q$ at $\theta$, and $\prec$ is the deterministic candidate ordering ($\texttt{RECURRENCE} \prec \texttt{QUOTIENT\_RING} \prec \texttt{HYPERGEOMETRIC} \prec \texttt{COMPOSITE\_MATCHED}$). Candidates with $\texttt{MATCHING\_SCHEMA}$ or $\texttt{EMPIRICAL\_DIAGNOSTIC}$ are strictly excluded.
+$$\boxed{M^*(\theta) = \min_{\prec} \operatorname*{argmin}_{\substack{M \in \mathcal{A}(\theta, Q) \\ \text{Candidate}_M.\text{target} = Q \\ \texttt{ErrorBound}_M\text{.valid} \\ \operatorname{CertifiedBound}(M)}} B_M^{\text{total}}(\theta),}$$
+where $\mathcal{A}(\theta, Q)$ is the admissible set of domain-compatible representations for target $Q$ at $\theta$, and $\prec$ is the deterministic candidate ordering ($\texttt{RECURRENCE} \prec \texttt{QUOTIENT\_RING} \prec \texttt{HYPERGEOMETRIC} \prec \texttt{COMPOSITE\_MATCHED}$). Candidates with total bound status $\texttt{MATCHING\_SCHEMA}$ or $\texttt{EMPIRICAL\_DIAGNOSTIC}$ are strictly excluded.
 
 ---
 
@@ -371,9 +371,9 @@ Finite-field certificates and bad prime predicate defined under precondition $\o
    Note explicit semantics distinction: $\texttt{CanonicalRepresentationAdmissible}$ requires canonical fractions $u_n/v_n, c/r, a_\lambda/b_\lambda$ to embed in $\mathbb{F}_p$, whereas $\texttt{ExecutionAdmissible}$ requires only the quantities actually inverted by trace $P$ to remain non-zero and local modulo $p$.
 
 ### VII-D2. NTT Acceleration Primitive
-The number-theoretic transform (NTT) length $L_{\text{NTT}}$ satisfies explicit length, field divisibility, and primitive root conditions:
-$$\boxed{L_{\text{conv}} = L_1 + L_2 - 1 \le L_{\text{NTT}}, \qquad L_{\text{NTT}} \mid (p - 1), \qquad \exists \omega \in \mathbb{F}_p^\times : \operatorname{ord}(\omega) = L_{\text{NTT}}.}$$
-For radix-2 NTT acceleration, $L_{\text{NTT}} = 2^k \implies 2^k \mid (p - 1)$ is additionally required.
+The number-theoretic transform (NTT) length $L_{\text{NTT}}$ satisfies explicit length and field divisibility conditions:
+$$\boxed{L_{\text{conv}} = L_1 + L_2 - 1 \le L_{\text{NTT}}, \qquad L_{\text{NTT}} \mid (p - 1).}$$
+For prime fields $\mathbb{F}_p$, cyclicity of $\mathbb{F}_p^\times$ guarantees the existence of a primitive $L_{\text{NTT}}$-th root of unity witness $\omega \in \mathbb{F}_p^\times$ with $\operatorname{ord}(\omega) = L_{\text{NTT}}$. For radix-2 NTT acceleration, $L_{\text{NTT}} = 2^k \implies 2^k \mid (p - 1)$ is required.
 
 ### VII-E. Canonical Golub-Welsch Spectral Truncation Certificate
 Eigendecomposition of symmetric tridiagonal $J_m = \operatorname{tridiag}(\alpha_0, \dots, \alpha_{m-2}) \in \mathbb{R}^{m \times m}$ produces eigenvalues $\sigma(J_m)$ and eigenvectors $v_k$. When backed by a backward-stable eigensolver with validated residual bounds, status is `NUMERICAL_CERTIFIED` via a canonical target-specific `NumericalCertificate` using explicit typed implication with certified sensitivity hypothesis:

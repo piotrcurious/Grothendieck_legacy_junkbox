@@ -334,18 +334,23 @@ class SelectorCandidate:
     cost: float  # FLOPs or execution time
 
     @property
-    def is_certified_status(self) -> bool:
+    def total_bound_status(self) -> TheoremStatus:
         """
-        Explicit CertifiedStatus predicate:
-          CertifiedStatus(M) <=> Status(M) in {ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, NUMERICAL_CERTIFIED}.
-        Excludes MATCHING_SCHEMA and EMPIRICAL_DIAGNOSTIC candidates.
+        Explicit total bound status derivation:
+          Status(B_M^total) = rank^(-1)( min( rank(Status(B_M^approx)), rank(Status(E_M^exec)) ) ).
         """
-        return self.status in (
-            TheoremStatus.ALGEBRAIC_EXACT,
-            TheoremStatus.ARITHMETIC_EXACT,
-            TheoremStatus.ANALYTIC_CERTIFIED,
-            TheoremStatus.NUMERICAL_CERTIFIED
-        ) and self.error_bound.status in (
+        exec_status = self.status  # Backend execution status
+        approx_status = self.error_bound.status  # Approximation status
+        return propagate_total_bound_status(approx_status, exec_status)
+
+    @property
+    def is_certified_bound(self) -> bool:
+        """
+        Explicit CertifiedBound predicate evaluating the status of B_M^total:
+          CertifiedBound(M) <=> Status(B_M^total) in {ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, NUMERICAL_CERTIFIED}.
+        Excludes candidates whose total bound status is MATCHING_SCHEMA or EMPIRICAL_DIAGNOSTIC.
+        """
+        return self.total_bound_status in (
             TheoremStatus.ALGEBRAIC_EXACT,
             TheoremStatus.ARITHMETIC_EXACT,
             TheoremStatus.ANALYTIC_CERTIFIED,
@@ -353,8 +358,13 @@ class SelectorCandidate:
         )
 
     @property
+    def is_certified_status(self) -> bool:
+        """Alias for is_certified_bound for backward compatibility."""
+        return self.is_certified_bound
+
+    @property
     def is_valid_target_bound(self) -> bool:
-        return self.error_bound.valid and self.error_bound.target == self.target and self.is_certified_status
+        return self.error_bound.valid and self.error_bound.target == self.target and self.is_certified_bound
 
 
 @dataclass
