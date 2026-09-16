@@ -12,7 +12,7 @@ import tempfile
 import threading
 import queue
 import traceback
-from typing import Optional, List, Tuple
+from typing import Optional
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import numpy as np
@@ -466,8 +466,15 @@ class GegenbauerFilterGUI(tk.Tk):
         err_q15 = np.abs(h_float - h_q15_recon)
         err_q31 = np.abs(h_float - h_q31_recon)
 
-        self.ax_quant.semilogy(range(spec.order), np.maximum(1e-16, err_q15), 'r-o', label='h0 Q15 Quant Error', markersize=4)
-        self.ax_quant.semilogy(range(spec.order), np.maximum(1e-16, err_q31), 'g-s', label='h0 Q31 Quant Error', markersize=4)
+        self.ax_quant.semilogy(range(spec.order), np.maximum(1e-16, err_q15), 'r-o', label='h0 Q15 Error', markersize=4)
+        self.ax_quant.semilogy(range(spec.order), np.maximum(1e-16, err_q31), 'g-s', label='h0 Q31 Error', markersize=4)
+
+        if spec.kind == "qmf" and res.h1_taps is not None:
+            h1_float = res.h1_taps.float64_taps
+            h1_q15_recon = res.h1_taps.q15_taps / res.h1_taps.q15_scale
+            err_h1_q15 = np.abs(h1_float - h1_q15_recon)
+            self.ax_quant.semilogy(range(spec.order), np.maximum(1e-16, err_h1_q15), 'm--x', label='h1 Q15 Error', markersize=4)
+
         self.ax_quant.set_title("Fixed-Point Quantization Noise per Tap")
         self.ax_quant.set_xlabel("Tap Index n")
         self.ax_quant.set_ylabel("Absolute Error")
