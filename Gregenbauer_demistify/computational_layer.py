@@ -962,10 +962,25 @@ class GegenbauerComputationalSolver:
                 raise ValueError(f"No algebraic permutation satisfies max_flop_budget={max_flop_budget}")
             pareto_candidates = filtered
 
+        # Deterministic candidate ordering for set-valued tie breaking
+        # M*(theta) = min_< argmin_{M in A} B_M(theta) where < is fixed ordering
+        candidate_priority = [
+            AlgebraicPermutation.NORMALIZED_RECURRENCE,
+            AlgebraicPermutation.QUOTIENT_RING_NORMAL_FORM,
+            AlgebraicPermutation.HYPERGEOMETRIC_2F1,
+            AlgebraicPermutation.COMPOSITE_MATCHED,
+            AlgebraicPermutation.MEHLER_HEINE_BESSEL,
+            AlgebraicPermutation.INTERIOR_WKB_WEYL,
+        ]
+
         if max_error_tol is not None:
-            best = min(pareto_candidates, key=lambda m: m.exec_time_sec)
+            min_cost = min(m.exec_time_sec for m in pareto_candidates)
+            tied = [m for m in pareto_candidates if abs(m.exec_time_sec - min_cost) < 1e-12]
+            best = min(tied, key=lambda m: candidate_priority.index(m.permutation))
         else:
-            best = min(pareto_candidates, key=lambda m: m.max_mixed_error)
+            min_err = min(m.max_mixed_error for m in pareto_candidates)
+            tied = [m for m in pareto_candidates if abs(m.max_mixed_error - min_err) < 1e-15]
+            best = min(tied, key=lambda m: candidate_priority.index(m.permutation))
 
         return best
 

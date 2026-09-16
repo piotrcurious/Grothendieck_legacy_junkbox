@@ -478,11 +478,14 @@ def exact_rational_bit_length(n: int, lambda_val: Union[int, Fraction], x: Union
 
 def inv_obstruction(q: Union[int, Fraction, float]) -> int:
     """
-    Computes InvObstruction(q) = |num_red(q) * den_red(q)| for rational q = a/b in reduced form.
+    Computes InvObstruction(q) = |num_red(q) * den_red(q)| for non-zero rational q = a/b in reduced form.
+    Requires execution invariant INVERT(q) => q != 0 (P_inv c Q^*).
     For any finite-field inversion INVERT(q) = b/a to exist in F_p, p must satisfy gcd(p, InvObstruction(q)) == 1
     (i.e. p nmid a and p nmid b).
     """
     q_frac = Fraction(q)
+    if q_frac == 0:
+        raise ValueError("INVERT(0) is illegal: cannot invert zero element in field Q")
     return abs(q_frac.numerator * q_frac.denominator)
 
 
@@ -523,16 +526,21 @@ def get_algorithm_denominator_lcm(n: int, lambda_val: Union[int, Fraction]) -> i
     return extract_plan_inversion_obstruction_modulus(execution_plan=None, degree=n, lambda_val=lambda_val)
 
 
+def get_parameter_denominator(lambda_val: Union[int, Fraction, float]) -> int:
+    """Computes D_lambda = den_red(lambda) for parameter specialization in F_p. For physical lambda = (d-2)/2, D_lambda = 2."""
+    return Fraction(lambda_val).denominator
+
+
 def get_normalization_denominator(n: int, lambda_val: Union[int, Fraction]) -> int:
     """
-    Computes D_norm = den(C_n^(lambda)(1)) * den(||phi_n||_lambda^2).
+    Computes D_norm using InvObstruction semantics |num_red(q) * den_red(q)| for normalization inversions.
     """
     c1 = exact_rational_gegenbauer(n, lambda_val, Fraction(1))
-    v_n = c1.denominator
-    # den(h_n^2) = den(||phi_n||_lambda^2)
+    c1_obs = inv_obstruction(c1)
     norm_sq = phi_norm_squared(n, float(lambda_val))
     norm_frac = Fraction(norm_sq).limit_denominator(1000000)
-    return v_n * norm_frac.denominator
+    norm_obs = inv_obstruction(norm_frac) if norm_frac != 0 else 1
+    return math.lcm(c1_obs, norm_obs)
 
 
 def get_evaluation_denominator(x: Union[int, Fraction]) -> int:
@@ -540,12 +548,21 @@ def get_evaluation_denominator(x: Union[int, Fraction]) -> int:
     return Fraction(x).denominator
 
 
-def get_excluded_primes_denominator(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction]) -> int:
-    """Computes D_excl = lcm(D_inv, D_norm, D_eval)."""
-    d_inv = extract_plan_inversion_obstruction_modulus(execution_plan=None, degree=n, lambda_val=lambda_val)
+def get_admissibility_modulus(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], execution_plan: object = None) -> int:
+    """
+    Computes total finite-field admissibility modulus:
+      D_adm = lcm(D_inv, D_norm_used, D_eval, D_lambda)
+    where D_lambda = den_red(lambda) (D_lambda = 2 for physical half-integer lambda).
+    """
+    d_inv = extract_plan_inversion_obstruction_modulus(execution_plan=execution_plan, degree=n, lambda_val=lambda_val)
     d_norm = get_normalization_denominator(n, lambda_val)
     d_eval = get_evaluation_denominator(x)
-    return math.lcm(d_inv, math.lcm(d_norm, d_eval))
+    d_lam = get_parameter_denominator(lambda_val)
+    return math.lcm(d_inv, math.lcm(d_norm, math.lcm(d_eval, d_lam)))
+
+
+# Alias for backward compatibility
+get_excluded_primes_denominator = get_admissibility_modulus
 
 
 def check_c_n_admissibility(n: int, lambda_val: Union[int, Fraction], p: int, execution_plan: object = None) -> bool:
