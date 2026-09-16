@@ -41,19 +41,19 @@ This repository implements a mathematically closed, VIII-Layer unified architect
   Layer VI. Two-Overlap Composite Uniform Asymptotic Schema & Quantified Selector
   Target Semantics: F_Q(θ) = TargetValue(Q, θ), F(θ) ≡ F_Q(θ) for fixed Q
   Partition Axiom: 𝒟_north ∩ 𝒟_south ⊆ 𝒟_interior ⟹ ⋃_r 𝒟_r = 𝒟_global (Disjoint 6-region partition)
-  Piecewise Evaluator F_{comp,r}^{(K)}(θ) & Finite Region Table Reconstruct_r
+  Piecewise Evaluator F_{comp,r}^{(K)}(θ) & Execution Bounds: |F_Q - F_{comp}| ≤ B_{comp}, F_hat_{comp} = F_{comp} + ε_{exec} ⟹ |F_Q - F_hat_{comp}| ≤ B_{comp} + E_{exec}
   Provenance Chain: MATCHING_SCHEMA ⟹ contract ⟹ |R_{±O}| ≤ N_n^{-K} G^\pm ⟹ B_{±O} = N_n^{-K} G^\pm
   Mechanically Typed Status Rank: rank(B_{comp,r}) = min_{i ∈ I_r} rank(Status(R_i))
-  Selector Candidate Interface: Candidate { domain 𝒟_M, target Q, status, ErrorBound.valid, B_M(θ) } requiring target Q matching
+  Deterministic Candidate Selector: M^*(θ) = min_≺ argmin_{M ∈ 𝒜(θ,Q)} B_M(θ) with B_M(θ) ∈ ℝ_{≥0}
         │
         ▼
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
-  ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, C_fixed, C_LNS)
+  ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, C_fixed, C_LNS; references VII-E Golub-Welsch certificate)
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x] ──symbolic rec──> C_n ──eval──> Q ──CRT/RNS──> integer residues)
-  ├── VII-C: Scalable RNS / CRT (N_max := metadata, Trace P_rec_inv, D_inv(P) = lcm_{q ∈ P_rec_inv} |a_q b_q|, Aggregate D_den = lcm(D_inv, D_norm, D_eval))
-  ├── VII-D1: Finite-Field Arithmetic (Prime(p) Precondition; InvObstruction(q) = |num_red(q) den_red(q)|; UsesNormalizationDenominators(P, ZONAL)=false; Canonical u_n/v_n, c/r; Bad_zonal(p) ⟺ p|r ∨ p|v_n ∨ p|u_n ∨ p|D_inv(P); Golub-Welsch Implication: CertSensitivity_{Q_spec}(A, κ_{Q_spec}) ∧ R_{Q_spec} ≤ B_back ∧ E_{Q_spec,conv} ≤ B_{Q_spec,conv} ⟹ E_{Q_spec,forward} ≤ κ_{Q_spec} B_back + B_{Q_spec,conv})
-  ├── VII-D2: NTT Acceleration Primitive (L_conv = L_1+L_2-1 ≤ L_NTT | (p-1))
-  └── VII-E: Golub-Welsch Spectral Truncation (J_m = tridiag(α_0, ..., α_{m-2}), Typed Implication: CertSensitivity_{Q_spec}(A, κ_{Q_spec}) ∧ R_{Q_spec} ≤ B_back ∧ E_{Q_spec,conv} ≤ B_{Q_spec,conv} ⟹ E_{Q_spec,forward} ≤ κ_{Q_spec} B_back + B_{Q_spec,conv})
+  ├── VII-C: Scalable RNS / CRT (N_max := metadata, Trace P_inv ⊂ Q^* with INVERT(q) ⟹ q ≠ 0, D_inv(P) = lcm_{q ∈ P_inv} |num_red(q) den_red(q)|, Aggregate D_adm = lcm(D_inv, D_norm, D_eval, D_λ))
+  ├── VII-D1: Finite-Field Arithmetic (Prime(p) Precondition; InvObstruction(q) = |num_red(q) den_red(q)|; UsesNormalizationDenominators(P, ZONAL)=false; Canonical u_n/v_n, c/r; D_λ = den_red(λ); Bad_zonal(p) ⟺ p|r ∨ p|v_n ∨ p|u_n ∨ p|D_inv(P) ∨ p|D_λ; NTT: L_conv ≤ L_NTT, L_NTT | (p-1); Golub-Welsch Implication: CertSensitivity_{Q_spec}(A, κ_{Q_spec}) ∧ R_{Q_spec} ≤ B_back ∧ E_{Q_spec,conv} ≤ B_{Q_spec,conv} ⟹ E_{Q_spec,forward} ≤ κ_{Q_spec} B_back + B_{Q_spec,conv})
+  ├── VII-D2: NTT Acceleration Primitive (L_conv = L_1+L_2-1 ≤ L_NTT, L_NTT | (p-1))
+  └── VII-E: Canonical Golub-Welsch Spectral Truncation Certificate (J_m = tridiag(α_0, ..., α_{m-2}), Typed Implication: CertSensitivity_{Q_spec}(A, κ_{Q_spec}) ∧ R_{Q_spec} ≤ B_back ∧ E_{Q_spec,conv} ≤ B_{Q_spec,conv} ⟹ E_{Q_spec,forward} ≤ κ_{Q_spec} B_back + B_{Q_spec,conv})
         │
         ▼
   Layer VIII. Typed Separation: ExactValue vs ErrorBound vs Residual & Provenance Optimizer
@@ -81,7 +81,7 @@ Gregenbauer_demistify/
 ├── algebraic_geometry_combinatorics.py   # Quotient algebra R(Q), exact Q[λ,x], RNS/CRT, Golub-Welsch
 ├── gegenbauer_asymptotics.py             # Scaled recurrence, WKB, Bessel, phase map classifier
 ├── computational_layer.py                # Pareto optimization solver across bases, capability certs, and precisions
-└── test_gegenbauer.py                    # Pytest test suite (49 unit tests & Prolog bridge)
+└── test_gegenbauer.py                    # Pytest test suite (51 unit tests & Prolog bridge)
 ```
 
 ---
@@ -102,15 +102,17 @@ $$R(Q)_n \cong \operatorname{Sym}^n(\mathbb{C}^d) / q \operatorname{Sym}^{n-2}(\
 - **Jacobi Spectral Path:** Evaluates $J_m = \operatorname{tridiag}(\alpha_0, \dots, \alpha_{m-2}) \in \mathbb{R}^{m \times m}$ operating in algebraic extensions $\overline{\mathbb{Q}}$ due to $\alpha_n = \frac{1}{2}\sqrt{\frac{(n+1)(n+2\lambda)}{(n+\lambda)(n+\lambda+1)}} = \frac{1}{2} + \frac{\lambda(1-\lambda)}{4n^2} + O(n^{-3})$ as $n \to \infty$.
 
 ### Modular & RNS/CRT Admissibility Certificates
-- **Split Denominators / Inversion Obstruction:** $D_{\text{inv}}(P) = \operatorname{lcm}_{q = a_q/b_q \in P_{\text{rec\_inv}}(P)} |a_q b_q|$, $D_{\text{norm}}(P, Q)$, $D_{\text{eval}} = r$. Aggregate excluded-denominator modulus: $D_{\text{den}} = \operatorname{lcm}(D_{\text{inv}}(P), D_{\text{norm}}^{\text{used}}(P, Q), D_{\text{eval}})$ with $\operatorname{lcm}(\varnothing) = 1$.
-- **Canonical Reduced Fraction Preconditions:** $C_n^{(\lambda)}(1) = u_n/v_n$ with $\gcd(u_n, v_n)=1, v_n>0$, and $x = c/r$ with $\gcd(c, r)=1, r>0$.
-- **Bad Zonal Prime Predicate (under $\operatorname{Prime}(p)$):** $\operatorname{Bad}_{\text{zonal}}(p) \iff p \mid r \lor p \mid v_n \lor p \mid u_n \lor p \mid D_{\text{inv}}(P)$.
+- **Inversion Obstruction Invariant:** $\operatorname{INVERT}(q) \implies q \ne 0$ ($P_{\text{inv}} \subset \mathbb{Q}^\times$). Elementwise: $\operatorname{InvObstruction}(q) = |\operatorname{num}_{\text{red}}(q) \operatorname{den}_{\text{red}}(q)|$.
+- **Split Denominators / Inversion Obstruction:** $D_{\text{inv}}(P) = \operatorname{lcm}_{q = a_q/b_q \in P_{\text{inv}}(P)} |a_q b_q|$, $D_{\text{norm}}^{\text{used}}(P, Q)$, $D_{\text{eval}} = r$, $D_\lambda = \operatorname{den}_{\text{red}}(\lambda)$.
+- **Aggregate Admissibility Modulus:** $D_{\text{adm}} = \operatorname{lcm}(D_{\text{inv}}(P), D_{\text{norm}}^{\text{used}}(P, Q), D_{\text{eval}}, D_\lambda)$ with $\operatorname{lcm}(\varnothing) = 1$.
+- **Canonical Reduced Fraction Preconditions:** $C_n^{(\lambda)}(1) = u_n/v_n$ with $\gcd(u_n, v_n)=1, v_n>0$, $x = c/r$ with $\gcd(c, r)=1, r>0$, and $\lambda = a_\lambda / b_\lambda$ with $\gcd(a_\lambda, b_\lambda) = 1, b_\lambda > 0$.
+- **Bad Zonal Prime Predicate (under $\operatorname{Prime}(p)$):** $\operatorname{Bad}_{\text{zonal}}(p) \iff p \mid r \lor p \mid v_n \lor p \mid u_n \lor p \mid D_{\text{inv}}(P) \lor p \mid D_\lambda$.
 - **Finite-Field Certificates:**
   - $\texttt{PolyCertificate}(p, P, n) \iff \operatorname{Prime}(p) \land \gcd(p, D_{\text{inv}}(P)) = 1$.
   - $\texttt{PointCertificate}(p, x) \iff \gcd(p, r) = 1$.
   - $\texttt{PolyEvaluationCertificate}(p, P, n, x) = \texttt{PolyCertificate}(p, P, n) \land \texttt{PointCertificate}(p, x)$.
   - $\texttt{ZonalCertificate}(p, P, n, x) \iff \neg \operatorname{Bad}_{\text{zonal}}(p)$.
-- **Typed Separation:** `ExactValue` != `ErrorBound` != `Residual`. Total error $E_{\text{total}} \le E_{\text{analytic}} + E_{\text{arithmetic}} + E_{\text{conditioning}} + E_{\text{implementation}}$ with $E_{\text{conditioning}} \le \kappa \cdot E_{\text{input}}$.
+- **Typed Separation:** `ExactValue` != `ErrorBound` != `Residual`. Total error $E_{\text{total}} \le E_{\text{analytic}} + E_{\text{arithmetic}} + E_{\text{conditioning}} + E_{\text{implementation}}$ with $E_{\text{conditioning}} \le \kappa \cdot E_{\text{input}}$. Total forward error bound $B_{\text{total\_forward}} = B_{\text{comp}} + E_{\text{exec}}$.
 
 ---
 
@@ -123,7 +125,7 @@ swipl -g "consult('Gregenbauer_demistify/gegenbauer_proof.pl'), run_all_proofs, 
 ```
 
 ### Python Unit Test Suite
-To run the 49 pytest unit tests covering Prolog assertions, quotient ring normal forms, Hilbert series growth, exact test anchors ($S^2, S^3, S^4$), phase diagram map selection, high-precision reference convergence ($p_{\text{ref}} \ge 384$ bits), exact rational bit-lengths, RNS/CRT integer recovery, cheap invariants (random function norm isometry & parity/boundedness), bad zonal prime predicates, and Pareto optimization solver:
+To run the 51 pytest unit tests covering Prolog assertions, quotient ring normal forms, Hilbert series growth, exact test anchors ($S^2, S^3, S^4$), phase diagram map selection, high-precision reference convergence ($p_{\text{ref}} \ge 384$ bits), exact rational bit-lengths, RNS/CRT integer recovery, cheap invariants (random function norm isometry & parity/boundedness), bad zonal prime predicates, inversion obstruction modulus, and Pareto optimization solver:
 ```bash
 PYTHONPATH=. python3 -m pytest Gregenbauer_demistify/test_gegenbauer.py
 ```
