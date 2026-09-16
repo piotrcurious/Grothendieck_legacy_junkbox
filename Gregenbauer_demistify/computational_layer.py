@@ -79,7 +79,7 @@ class TheoremStatus(Enum):
     """
     Layer VIII Formal Provenance Verification Status Hierarchy.
     Lattice ordering:
-      ALGEBRAIC_EXACT > ARITHMETIC_EXACT > ANALYTIC_CERTIFIED > NUMERICAL_CERTIFIED > MATCHING_SCHEMA > EMPIRICAL_DIAGNOSTIC
+      ALGEBRAIC_EXACT (5) > ARITHMETIC_EXACT (4) > ANALYTIC_CERTIFIED (3) > NUMERICAL_CERTIFIED (2) > MATCHING_SCHEMA (1) > EMPIRICAL_DIAGNOSTIC (0)
     """
     ALGEBRAIC_EXACT = "ALGEBRAIC_EXACT"
     ARITHMETIC_EXACT = "ARITHMETIC_EXACT"
@@ -87,6 +87,19 @@ class TheoremStatus(Enum):
     NUMERICAL_CERTIFIED = "NUMERICAL_CERTIFIED"
     MATCHING_SCHEMA = "MATCHING_SCHEMA"
     EMPIRICAL_DIAGNOSTIC = "EMPIRICAL_DIAGNOSTIC"
+
+    @property
+    def rank(self) -> int:
+        """Explicit status rank mapping."""
+        order = [
+            TheoremStatus.EMPIRICAL_DIAGNOSTIC,
+            TheoremStatus.MATCHING_SCHEMA,
+            TheoremStatus.NUMERICAL_CERTIFIED,
+            TheoremStatus.ANALYTIC_CERTIFIED,
+            TheoremStatus.ARITHMETIC_EXACT,
+            TheoremStatus.ALGEBRAIC_EXACT,
+        ]
+        return order.index(self)
 
     def __gt__(self, other: 'TheoremStatus') -> bool:
         order = [

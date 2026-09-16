@@ -584,8 +584,9 @@ def zonal_admissible(p: int, degree: int, point: Union[int, Fraction], lambda_va
 
 def bad_zonal_prime(p: int, degree: int, point: Union[int, Fraction], lambda_val: Union[int, Fraction] = Fraction(1, 2), execution_plan: object = None) -> bool:
     """
-    Semantically exact bad zonal prime predicate defined as the logical negation:
-      Bad_zonal := not ZonalAdmissible.
+    Semantically exact bad zonal prime predicate defined under precondition Prime(p):
+      Under Prime(p): Bad_zonal(p, P, n, x) <=> (p | r) or (p | v_n) or (p | u_n) or (p | D_rec(P))
+      defined as logical negation: Bad_zonal := not ZonalAdmissible.
     """
     return not zonal_admissible(p=p, degree=degree, point=point, lambda_val=lambda_val, execution_plan=execution_plan)
 

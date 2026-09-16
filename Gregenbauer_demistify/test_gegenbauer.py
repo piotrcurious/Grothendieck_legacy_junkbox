@@ -937,10 +937,17 @@ def test_global_overlap_exact_remainder_identity():
 
 def test_matching_schema_theorem_status_lattice_ordering():
     """
-    Verifies MATCHING_SCHEMA presence in TheoremStatus and status lattice ordering:
-      ALGEBRAIC_EXACT > ARITHMETIC_EXACT > ANALYTIC_CERTIFIED > NUMERICAL_CERTIFIED > MATCHING_SCHEMA > EMPIRICAL_DIAGNOSTIC
+    Verifies MATCHING_SCHEMA presence in TheoremStatus and status lattice ordering/ranks:
+      ALGEBRAIC_EXACT (5) > ARITHMETIC_EXACT (4) > ANALYTIC_CERTIFIED (3) > NUMERICAL_CERTIFIED (2) > MATCHING_SCHEMA (1) > EMPIRICAL_DIAGNOSTIC (0)
     """
     assert TheoremStatus.MATCHING_SCHEMA in TheoremStatus
+    assert TheoremStatus.ALGEBRAIC_EXACT.rank == 5
+    assert TheoremStatus.ARITHMETIC_EXACT.rank == 4
+    assert TheoremStatus.ANALYTIC_CERTIFIED.rank == 3
+    assert TheoremStatus.NUMERICAL_CERTIFIED.rank == 2
+    assert TheoremStatus.MATCHING_SCHEMA.rank == 1
+    assert TheoremStatus.EMPIRICAL_DIAGNOSTIC.rank == 0
+
     assert TheoremStatus.ALGEBRAIC_EXACT > TheoremStatus.ARITHMETIC_EXACT
     assert TheoremStatus.ARITHMETIC_EXACT > TheoremStatus.ANALYTIC_CERTIFIED
     assert TheoremStatus.ANALYTIC_CERTIFIED > TheoremStatus.NUMERICAL_CERTIFIED
