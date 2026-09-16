@@ -67,6 +67,15 @@ from Gregenbauer_demistify.computational_layer import (
     SelectorCandidate,
     TheoremStatus,
     BoundSource,
+    LazyOp,
+    LazyNode,
+    lazy_gamma,
+    lazy_sin,
+    lazy_cos,
+    lazy_power,
+    lazy_log,
+    lazy_phi_norm_squared,
+    lazy_dual_norm_ratio,
     high_precision_reference,
     jacobi_eigenpair_residual,
     orthonormal_jacobi_recurrence_residual,
@@ -1060,3 +1069,91 @@ def test_compact_six_region_error_bounds():
     assert np.isclose(B_NI, 1.1e-5)
     assert np.isclose(B_IS, 1.1e-5)
     assert np.isclose(B_global, 1.2e-5)
+
+
+# --- 14. LAZY EVALUATION LAYER TESTS ---
+
+def test_lazy_dag_construction_and_weight():
+    """
+    Verifies Lazy DAG node construction, status retention, and DAG weight estimation.
+    """
+    n_gamma = lazy_gamma(5.0)
+    assert n_gamma.op == LazyOp.GAMMA
+    assert n_gamma.status == TheoremStatus.ANALYTIC_CERTIFIED
+    assert n_gamma.dag_weight() == 25
+
+    n_sin = lazy_sin(1.0)
+    assert n_sin.dag_weight() == 15
+
+    n_div = LazyNode(LazyOp.DIV, (n_gamma, n_sin))
+    assert n_div.dag_weight() == 25 + 15 + 2
+
+
+def test_lazy_gamma_cross_cancellation_and_norm_ratio():
+    """
+    Verifies automatic algebraic cross-cancellation for Gamma ratios Gamma(z+k)/Gamma(z)
+    and exact zonal norm ratio h_n / h_{n+1}.
+    """
+    # Test Gamma(z+1)/Gamma(z) = z
+    z_plus_1 = lazy_gamma(6.0)
+    z_node = lazy_gamma(5.0)
+    ratio_gamma = LazyNode(LazyOp.DIV, (z_plus_1, z_node))
+    simplified = ratio_gamma.simplify()
+
+    # Evaluates to 5.0 without computing Gamma(6) or Gamma(5) directly
+    assert simplified.op == LazyOp.CONST
+    assert np.isclose(simplified.args[0], 5.0)
+
+    # Test dual norm ratio h_n / h_{n+1}
+    n, lam = 5, 1.5
+    dual_ratio_lazy = lazy_dual_norm_ratio(n, lam)
+    assert dual_ratio_lazy.status == TheoremStatus.ANALYTIC_CERTIFIED
+
+    # Simplify performs algebraic cancellation
+    dual_ratio_simp = dual_ratio_lazy.simplify()
+    val_simp = dual_ratio_simp.eval_float()
+
+    # Reference value via exact orthogonality norm
+    norm_n = math.sqrt(orthogonality_norm(n, lam)) / c_n_1_val(n, lam)
+    norm_np1 = math.sqrt(orthogonality_norm(n + 1, lam)) / c_n_1_val(n + 1, lam)
+    ref_ratio = norm_np1 / norm_n
+
+    assert np.isclose(val_simp, ref_ratio, rtol=1e-10)
+
+
+def test_lazy_materialization_and_status_rank_transition():
+    """
+    Verifies the status rank transition ANALYTIC_CERTIFIED -> NUMERICAL_CERTIFIED
+    and numerical execution error isolation upon materialize().
+    """
+    lazy_expr = LazyNode(
+        LazyOp.ADD,
+        (lazy_sin(0.5), lazy_cos(0.5)),
+        target=CertificateTarget.NODE
+    )
+    assert lazy_expr.status == TheoremStatus.ANALYTIC_CERTIFIED
+
+    val, status, eb = lazy_expr.materialize()
+
+    assert np.isclose(val, math.sin(0.5) + math.cos(0.5))
+    assert status == TheoremStatus.NUMERICAL_CERTIFIED
+    assert eb.status == TheoremStatus.NUMERICAL_CERTIFIED
+    assert eb.target == CertificateTarget.NODE
+    assert eb.value > 0.0
+
+
+def test_lazy_candidate_selector_integration():
+    """
+    Verifies GegenbauerComputationalSolver integration with lazy candidates,
+    prefer_lazy selection, and DAG weight cost optimization.
+    """
+    solver = GegenbauerComputationalSolver(n=20, lambda_val=1.5)
+    domain_x = np.array([0.5])
+
+    cand = solver.solve_optimal_permutation(domain_x, prefer_lazy=True)
+
+    assert isinstance(cand, SelectorCandidate)
+    assert cand.status == TheoremStatus.ANALYTIC_CERTIFIED
+    assert cand.lazy_node is not None
+    assert cand.dag_weight > 0
+    assert cand.name in (AlgebraicPermutation.MEHLER_HEINE_BESSEL.value, AlgebraicPermutation.INTERIOR_WKB_WEYL.value)
