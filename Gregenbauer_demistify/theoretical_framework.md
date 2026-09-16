@@ -45,22 +45,22 @@ This document presents an architecturally closed VIII-Layer framework for Gegenb
   Layer VI. Two-Overlap Composite Uniform Asymptotic Schema & Quantified Selector
   Composite Approximation Schema: F_comp = F_north + F_south + F_interior - F_{+O} - F_{-O} (Status: MATCHING_SCHEMA, γ_K := unspecified)
   Global Coverage: 𝒟_north ∪ 𝒟_interior ∪ 𝒟_south = 𝒟_global
-  Active-Domain Derived Composite Error: ∀θ ∈ 𝒟_global: ValidTerm_i(θ) ∀i ∈ I(θ) ⟹ |F - F_comp^{(K)}| ≤ ∑_{i ∈ I(θ)} B_i(θ) =: B_comp(θ)
+  Remainder Reconstruction Identity: F_Q - F_comp = ∑_{i ∈ I(θ)} s_i R_i (s_i ∈ {-1, +1}) ⟹ |F - F_comp^{(K)}| ≤ ∑_{i ∈ I(θ)} B_i(θ) =: B_comp(θ)
   Selector Candidate Interface: Candidate { domain 𝒟_M, target Q, status, ErrorBound.valid, B_M(θ) } requiring target Q matching
         │
         ▼
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, C_fixed, C_LNS)
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x] ──symbolic rec──> C_n ──eval──> Q ──CRT/RNS──> integer residues)
-  ├── VII-C: Scalable RNS / CRT (N_max := metadata, D_rec(P) = lcm{den_red(q) : q ∈ P_rec_arithmetic}, D_eval = r, D_norm(P, Q))
-  ├── VII-D1: Finite-Field Arithmetic (Canonical u_n/v_n, c/r; ZonalAdmissible(p, P, n, x) ⟺ Prime(p) ∧ gcd(p, D_rec(P))=1 ∧ p ∤ r ∧ p ∤ u_n v_n; Bad_zonal := ¬ZonalAdmissible)
+  ├── VII-C: Scalable RNS / CRT (N_max := metadata, Execution Trace P_rec_arith, D_rec(P) = lcm{den_red(q)}, D_den = lcm(D_rec, D_norm, D_eval))
+  ├── VII-D1: Finite-Field Arithmetic (ZonalFFBackend ∩ D_norm(P, ZONAL) = ∅; Canonical u_n/v_n, c/r; ZonalAdmissible(p, P, n, x); Bad_zonal := ¬ZonalAdmissible)
   ├── VII-D2: NTT Acceleration Primitive (L_conv = L_1+L_2-1 ≤ L_NTT | (p-1))
   └── VII-E: Golub-Welsch Spectral Truncation (J_m = tridiag(α_0, ..., α_{m-2}), Typed Implication: CertSensitivity_Q(A, κ_Q) ∧ R_Q ≤ B_back ∧ E_{Q,conv} ≤ B_{Q,conv} ⟹ E_Q ≤ κ_Q B_back + B_{Q,conv})
         │
         ▼
   Layer VIII. Typed Separation: ExactValue vs ErrorBound vs Residual & Provenance Optimizer
   First-Class Types: ExactValue != ErrorBound != Residual (TheoremStatus Enum: ALGEBRAIC_EXACT, ARITHMETIC_EXACT, ANALYTIC_CERTIFIED, NUMERICAL_CERTIFIED, EMPIRICAL_DIAGNOSTIC)
-  Certificate Invariant: Every certificate carries (target Q, domain 𝒟, backend, status)
+  Extended Certificate Tuple Invariant: Every certificate carries (target Q, domain 𝒟, backend, status, validity_conditions)
   Residual != ErrorBound Invariant; Staged Perturbation Chain for Target Q: F_0(Q) ──E_0──> F_1(Q) ──E_1──> ... ──E_{k-1}──> F_k(Q) ⟹ |F_0(Q) - F_k(Q)| ≤ ∑_{i=0}^{k-1} E_i
   Canonical Test Matrix: d ∈ {3, 4, 5}, n ∈ {0, 1, 2, 3} validating initial data anchors, recurrences, and cheap invariants (norm isometry & parity/boundedness)
 ```
@@ -188,23 +188,25 @@ $$\boxed{\|J_m\| = \max_{v \in S^{m-1}} f(v) = f(v^*) < 1 \quad \text{for all } 
 
 ## 6. Layer V & VI: Asymptotic Schemas, Quantified Overlap Contract & Selector
 
-### 6.1 Composite Approximation Schema & Active-Domain Derived Composite Bound
+### 6.1 Composite Approximation Schema & Region-Dependent Remainder Reconstruction
 The composite uniform expression combines endpoint Bessel layers and interior WKB waves over global domain coverage:
 $$\boxed{\mathcal{D}_{\text{north}} \cup \mathcal{D}_{\text{interior}} \cup \mathcal{D}_{\text{south}} = \mathcal{D}_{\text{global}}.}$$
 The composite approximation schema is:
 $$F_{\text{comp}}^{(K)} = F_{\text{north}}^{(K)}(z_+) + F_{\text{south}}^{(K)}(z_-) + F_{\text{interior}}^{(K)}(N_n, \theta) - F_{+O}^{(K)}(z_+) - F_{-O}^{(K)}(z_-).$$
 
-The component certificates defining the proof obligations on their respective domains are:
+To rigorously close Layer VI logic, define explicit certified remainder objects $R_i$:
 $$\begin{aligned}
-|F - F_{\text{north}}| &\le B_{\text{north}} \quad \text{on } \mathcal{D}_{\text{north}}, \\
-|F - F_{\text{interior}}| &\le B_{\text{interior}} \quad \text{on } \mathcal{D}_{\text{interior}}, \\
-|F - F_{\text{south}}| &\le B_{\text{south}} \quad \text{on } \mathcal{D}_{\text{south}}, \\
-|F_{\text{north}} - F_{+O}| &\le B_{+O} \quad \text{on } \mathcal{D}_{\text{north}} \cap \mathcal{D}_{\text{interior}}, \\
-|F_{\text{south}} - F_{-O}| &\le B_{-O} \quad \text{on } \mathcal{D}_{\text{south}} \cap \mathcal{D}_{\text{interior}}.
+R_{\text{north}} &= F - F_{\text{north}} \quad (\|R_{\text{north}}\| \le B_{\text{north}} \text{ on } \mathcal{D}_{\text{north}}), \\
+R_{\text{interior}} &= F - F_{\text{interior}} \quad (\|R_{\text{interior}}\| \le B_{\text{interior}} \text{ on } \mathcal{D}_{\text{interior}}), \\
+R_{\text{south}} &= F - F_{\text{south}} \quad (\|R_{\text{south}}\| \le B_{\text{south}} \text{ on } \mathcal{D}_{\text{south}}), \\
+R_{+O} &= F_{\text{north}} - F_{+O} \quad (\|R_{+O}\| \le B_{+O} \text{ on } \mathcal{D}_{\text{north}} \cap \mathcal{D}_{\text{interior}}), \\
+R_{-O} &= F_{\text{south}} - F_{-O} \quad (\|R_{-O}\| \le B_{-O} \text{ on } \mathcal{D}_{\text{south}} \cap \mathcal{D}_{\text{interior}}).
 \end{aligned}$$
 
-For any point $\theta \in \mathcal{D}_{\text{global}}$, let $I(\theta) \subseteq \{\text{north}, \text{interior}, \text{south}, +O, -O\}$ denote the set of active valid terms at $\theta$. The active-domain derived full composite error certificate bounding the exact function $F(\theta)$ is:
-$$\boxed{\forall \theta \in \mathcal{D}_{\text{global}}: \quad \operatorname{ValidTerm}_i(\theta) \ \forall i \in I(\theta) \implies |F(\theta) - F_{\text{comp}}^{(K)}(\theta)| \le \sum_{i \in I(\theta)} B_i(\theta) =: B_{\text{comp}}(\theta).}$$
+The region-dependent reconstruction identity $\operatorname{Reconstruct}(Q, \theta)$ expands the total difference $F_Q - F_{\text{comp}}$ as a signed sum of certified remainders:
+$$\boxed{\operatorname{Reconstruct}(Q, \theta): \quad F_Q(\theta) - F_{\text{comp}}^{(K)}(\theta) = \sum_{i \in I(\theta)} s_i R_i(\theta), \qquad s_i \in \{-1, +1\},}$$
+where $I(\theta)$ is the set of active certified remainder terms valid at $\theta$. Applying the triangle inequality yields the mechanically generated composite error bound:
+$$\boxed{|F(\theta) - F_{\text{comp}}^{(K)}(\theta)| \le \sum_{i \in I(\theta)} B_i(\theta) =: B_{\text{comp}}(\theta).}$$
 
 Under status $\texttt{MATCHING\_SCHEMA}$, the asymptotic growth exponent is declared as $\gamma_K := \text{unspecified}$. It is promoted to $\texttt{ANALYTIC\_CERTIFIED}$ only after proving the uniform majorant theorem:
 $$\boxed{G^\pm_{K, \lambda, Z_0, \delta}(z; N_n) \le C^\pm_{K, \lambda, Z_0, \delta} (1 + z)^{\gamma_K} \quad \text{uniformly for } N_n \ge N_0 \text{ and } Z_0 \le z \le \delta N_n.}$$
@@ -221,19 +223,22 @@ $$\boxed{M^*(\theta) = \arg\min_{\substack{M \\ \theta \in \mathcal{D}_M \\ \tex
 
 ### VII-A & VII-B. Hardware & Exact Symbolic Sub-Backends
 - **Polynomial Path:** $\mathbb{Q}[\lambda, x] \to \mathbb{Q} \to \text{RNS/CRT}$ (truth class `ARITHMETIC_EXACT`).
-- **Jacobi Golub-Welsch Path:** Eigendecomposition of symmetric tridiagonal $J_m$. When backed by a backward-stable eigensolver with validated residual bounds, status is `NUMERICAL_CERTIFIED` via a formal target-specific `NumericalCertificate` using explicit typed implication with certified sensitivity:
+- **Jacobi Golub-Welsch Path:** Eigendecomposition of symmetric tridiagonal $J_m$. When backed by a backward-stable eigensolver with validated residual bounds, status is `NUMERICAL_CERTIFIED` via a formal target-specific `NumericalCertificate` using explicit typed implication with certified sensitivity hypothesis:
   $$\boxed{\operatorname{CertifiedSensitivity}_Q(A, \kappa_Q) \land R_Q \le B_{\text{back}} \land E_{Q, \text{conv}} \le B_{Q, \text{conv}} \implies E_Q \le \kappa_Q B_{\text{back}} + B_{Q, \text{conv}} := B_{Q, \text{forward}},}$$
   where target $Q \in \{\texttt{NODE}, \texttt{WEIGHT}, \texttt{EIGENVECTOR}, \texttt{QUADRATURE}\}$ and $\kappa_Q$ is explicitly certified (including eigenvalue-gap conditioning for eigenvectors/weights).
 
-### VII-C. Plan-Pure Recurrence Denominators & Backend Normalization Denominators
-The execution plan $P$ extracts recurrence arithmetic denominators dynamically from executed operations:
+### VII-C. Execution-Trace Recurrence Denominators & Backend Normalization Denominators
+The execution plan $P$ defines $P_{\text{recurrence\_arithmetic}} = \{ q : q \text{ is an exact rational quantity inverted or divided during execution trace} \}$. Recurrence denominators follow the actual executed arithmetic graph:
 $$\boxed{D_{\text{rec}}(P) = \operatorname{lcm}\left(\{ \operatorname{den}_{\text{red}}(q) : q \in P_{\text{recurrence\_arithmetic}} \}\right).}$$
 
-Evaluation point denominator for $x = c/r$:
+Evaluation point denominator for canonical fraction $x = c/r$ ($\gcd(c,r)=1, r>0$):
 $$\boxed{D_{\text{eval}} = r.}$$
 
 Backend normalization denominators are defined per plan $P$ and target $Q$:
 $$\boxed{D_{\text{norm}}(P, Q) = \operatorname{lcm}\{\text{rational denominators actually inverted by } P \text{ for target } Q\}.}$$
+
+The zonal finite-field backend excludes $D_{\text{norm}}$ explicitly:
+$$\boxed{\texttt{ZonalFiniteFieldBackend} \cap D_{\text{norm}}(P, \texttt{ZONAL}) = \varnothing.}$$
 
 Overall denominator nonlocality product:
 $$\boxed{D_{\text{den}} = \operatorname{lcm}(D_{\text{rec}}(P), D_{\text{norm}}(P, Q), D_{\text{eval}}).}$$
@@ -260,14 +265,14 @@ Finite-field certificates and bad prime predicate:
 
 ## 8. Layer VIII: Typed Separation, Executable Residuals & Provenance Optimizer
 
-### VIII-A. Typed Hierarchy & Metadata Tuple Invariant
+### VIII-A. Typed Hierarchy & Extended Metadata Tuple Invariant
 Hard type separation: $\texttt{ExactValue} \neq \texttt{ErrorBound} \neq \texttt{Residual}$.
 
 `TheoremStatus` Enum:
 $$\boxed{\{\texttt{ALGEBRAIC\_EXACT}, \texttt{ARITHMETIC\_EXACT}, \texttt{ANALYTIC\_CERTIFIED}, \texttt{NUMERICAL\_CERTIFIED}, \texttt{EMPIRICAL\_DIAGNOSTIC}\}}$$
 
-**General Certificate Metadata Tuple Invariant:**
-$$\boxed{\text{Every certificate carries } (\text{target } Q, \text{domain } \mathcal{D}, \text{backend}, \text{status}).}$$
+**Extended Certificate Metadata Tuple Invariant:**
+$$\boxed{\text{Every certificate carries } (\text{target } Q, \text{domain } \mathcal{D}, \text{backend}, \text{status}, \text{validity\_conditions}).}$$
 
 Provenance-aware total computational forward error decomposes across a target-specific staged perturbation chain $F_0(Q) \xrightarrow{E_0} F_1(Q) \xrightarrow{E_1} \dots \xrightarrow{E_{k-1}} F_k(Q)$:
 $$\boxed{|F_0(Q) - F_k(Q)| \le \sum_{i=0}^{k-1} |F_i(Q) - F_{i+1}(Q)| \le \sum_{i=0}^{k-1} E_i \quad \text{provided } \operatorname{Cert}(E_i) \text{ holds for target } Q.}$$

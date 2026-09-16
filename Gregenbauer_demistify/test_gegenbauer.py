@@ -887,3 +887,27 @@ def test_golub_welsch_typed_certified_sensitivity():
     )
     assert cert.conditioning_kappa == 2.5
     assert np.isclose(cert.forward_bound, 2.5 * 1e-12 + 1e-15)
+
+
+def test_extended_certificate_tuple_invariant():
+    """
+    Verifies extended certificate metadata tuple (target Q, domain D, backend, status, validity_conditions).
+    """
+    dom = Domain(name="test_dom", lower=-1.0, upper=1.0)
+    eb = ErrorBound(
+        value=1e-6,
+        domain=dom,
+        source=BoundSource.THEOREM_PROVED,
+        status=TheoremStatus.ALGEBRAIC_EXACT,
+        decomposition=ErrorDecomposition(),
+        target=CertificateTarget.NODE,
+        backend="FLOAT64",
+        validity_conditions=["domain_contained", "target_matched"],
+        valid=True
+    )
+    target_q, d, backend, status, conds = eb.certificate_tuple
+    assert target_q == CertificateTarget.NODE
+    assert d == dom
+    assert backend == "FLOAT64"
+    assert status == TheoremStatus.ALGEBRAIC_EXACT
+    assert conds == ["domain_contained", "target_matched"]
