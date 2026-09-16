@@ -50,7 +50,7 @@ This repository implements a mathematically closed, VIII-Layer unified architect
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, C_fixed, C_LNS)
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x] ──symbolic rec──> C_n ──eval──> Q ──CRT/RNS──> integer residues)
   ├── VII-C: Scalable RNS / CRT (N_max := metadata, Trace P_rec_inv, D_rec(P) = lcm_{q ∈ P_rec_inv} den_red(q), Aggregate D_den = lcm(D_rec, D_norm, D_eval))
-  ├── VII-D1: Finite-Field Arithmetic (Prime(p) Precondition; UsesNormalizationDenominators(P, ZONAL)=false; Canonical u_n/v_n, c/r; Bad_zonal(p) ⟺ p|r ∨ p|v_n ∨ p|u_n ∨ p|D_rec(P); Golub-Welsch Implication: CertSensitivity_Q(A, κ_Q) ∧ R_Q ≤ B_back ⟹ E_Q ≤ κ_Q R_Q + B_{Q,conv})
+  ├── VII-D1: Finite-Field Arithmetic (Prime(p) Precondition; UsesNormalizationDenominators(P, ZONAL)=false; Canonical u_n/v_n, c/r; Bad_zonal(p) ⟺ p|r ∨ p|v_n ∨ p|u_n ∨ p|D_rec(P); Golub-Welsch Implication: CertSensitivity_Q(A, κ_Q) ∧ R_Q ≤ B_back ∧ E_{Q,conv} ≤ B_{Q,conv} ⟹ E_Q ≤ κ_Q B_back + B_{Q,conv})
   ├── VII-D2: NTT Acceleration Primitive (L_conv = L_1+L_2-1 ≤ L_NTT | (p-1))
   └── VII-E: Golub-Welsch Spectral Truncation (J_m = tridiag(α_0, ..., α_{m-2}), Typed Implication: CertSensitivity_Q(A, κ_Q) ∧ R_Q ≤ B_back ∧ E_{Q,conv} ≤ B_{Q,conv} ⟹ E_Q ≤ κ_Q B_back + B_{Q,conv})
         │
@@ -80,7 +80,7 @@ Gregenbauer_demistify/
 ├── algebraic_geometry_combinatorics.py   # Quotient algebra R(Q), exact Q[λ,x], RNS/CRT, Golub-Welsch
 ├── gegenbauer_asymptotics.py             # Scaled recurrence, WKB, Bessel, phase map classifier
 ├── computational_layer.py                # Pareto optimization solver across bases, capability certs, and precisions
-└── test_gegenbauer.py                    # Pytest test suite (48 unit tests & Prolog bridge)
+└── test_gegenbauer.py                    # Pytest test suite (49 unit tests & Prolog bridge)
 ```
 
 ---
@@ -122,7 +122,7 @@ swipl -g "consult('Gregenbauer_demistify/gegenbauer_proof.pl'), run_all_proofs, 
 ```
 
 ### Python Unit Test Suite
-To run the 48 pytest unit tests covering Prolog assertions, quotient ring normal forms, Hilbert series growth, exact test anchors ($S^2, S^3, S^4$), phase diagram map selection, high-precision reference convergence ($p_{\text{ref}} \ge 384$ bits), exact rational bit-lengths, RNS/CRT integer recovery, cheap invariants (random function norm isometry & parity/boundedness), bad zonal prime predicates, and Pareto optimization solver:
+To run the 49 pytest unit tests covering Prolog assertions, quotient ring normal forms, Hilbert series growth, exact test anchors ($S^2, S^3, S^4$), phase diagram map selection, high-precision reference convergence ($p_{\text{ref}} \ge 384$ bits), exact rational bit-lengths, RNS/CRT integer recovery, cheap invariants (random function norm isometry & parity/boundedness), bad zonal prime predicates, and Pareto optimization solver:
 ```bash
 PYTHONPATH=. python3 -m pytest Gregenbauer_demistify/test_gegenbauer.py
 ```
