@@ -13,8 +13,6 @@ from enum import Enum
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional
 import numpy as np
-import matplotlib
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -28,7 +26,6 @@ from algebraic_geometry_combinatorics import (
 from gegenbauer_asymptotics import (
     normalized_phi_recurrence,
     endpoint_bessel_leading,
-    south_pole_bessel_leading,
     interior_wkb_approx,
     composite_matched_approx,
     c_n_1_val
@@ -152,6 +149,7 @@ class FilterResult:
     spec: FilterSpec
     lam: float
     basis_terms: int
+    mu_reg: float
     h0_taps: QuantizedTaps
     payload: CertifiedEvaluationPayload
     h1_taps: Optional[QuantizedTaps] = None
@@ -345,7 +343,6 @@ class GegenbauerFilterCompiler:
 
         h = np.zeros(N, dtype=np.float64)
         mid = (N - 1) / 2.0
-        d_omega = np.pi / (grid_L - 1)
 
         trapz_fn = np.trapezoid if hasattr(np, 'trapezoid') else np.trapz
         for n in range(N):
@@ -532,7 +529,7 @@ class GegenbauerFilterCompiler:
             phi_asymp = self._eval_asymptotic_basis(n_eval, omega_sample)
             asymp_err = float(np.max(np.abs(phi_exact - phi_asymp)))
 
-            if spec.order > K and self.lam > 0:
+            if asymp_err < 0.05 and self.lam > 0:
                 matching_status = MatchingStatus.ANALYTICALLY_CERTIFIED_MATCHING
 
         # Arithmetic quantization error provenance based on Q15 target
@@ -544,11 +541,17 @@ class GegenbauerFilterCompiler:
             e_implementation=0.0
         )
 
+        is_certified = (
+            asymp_err < 0.1 and
+            pass_ripple <= spec.passband_ripple_db * 2.0 and
+            stop_atten >= min(spec.stopband_atten_db * 0.5, 20.0)
+        )
+
         payload = CertifiedEvaluationPayload(
             truth_status=truth_status,
             matching_status=matching_status,
             provenance=provenance,
-            is_certified=True
+            is_certified=is_certified
         )
 
         prov_err = float(np.max(mixed_error(h0_quant.float64_taps, h0_quant.q15_taps / h0_quant.q15_scale)))
@@ -557,6 +560,7 @@ class GegenbauerFilterCompiler:
             spec=spec,
             lam=self.lam,
             basis_terms=K,
+            mu_reg=self.mu_reg,
             h0_taps=h0_quant,
             payload=payload,
             h1_taps=h1_quant,
@@ -577,7 +581,7 @@ class GegenbauerFilterCompiler:
     def plot_response(self, result: FilterResult, output_path: str):
         """Generates comprehensive multi-panel verification plots."""
         spec = result.spec
-        fig = plt.figure(figsize=(16, 12))
+        plt.figure(figsize=(16, 12))
 
         # Subplot 1: Frequency Response (dB)
         plt.subplot(2, 2, 1)
@@ -665,7 +669,8 @@ class GegenbauerFilterCompiler:
         self,
         spec: FilterSpec,
         lambda_candidates: List[float] = [0.5, 1.0, 1.25, 1.5, 2.0, 2.5],
-        mu_candidates: List[float] = [0.0, 1e-6, 1e-4, 1e-2]
+        mu_candidates: List[float] = [0.0, 1e-6, 1e-4, 1e-2],
+        solver: Optional[str] = None
     ) -> FilterResult:
         """
         Searches over (lambda, mu) parameter space to find the Pareto-optimal design
@@ -673,10 +678,11 @@ class GegenbauerFilterCompiler:
         """
         best_res = None
         best_score = float('inf')
+        use_solver = solver if solver is not None else self.solver
 
         for lam in lambda_candidates:
             for mu in mu_candidates:
-                compiler = GegenbauerFilterCompiler(lam=lam, mu_reg=mu)
+                compiler = GegenbauerFilterCompiler(lam=lam, mu_reg=mu, solver=use_solver)
                 res = compiler.compile(spec)
 
                 score = res.passband_ripple_actual * 10.0 - res.stopband_atten_actual

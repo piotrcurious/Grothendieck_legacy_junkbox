@@ -5,6 +5,7 @@ Unit and Integration Tests for Gegenbauer Filter Compiler GUI & Audio Processor
 
 import os
 import sys
+import time
 import unittest
 import numpy as np
 
@@ -75,9 +76,13 @@ class TestAudioProcessor(unittest.TestCase):
 
 
 class TestGUIIntegration(unittest.TestCase):
-    def test_gui_creation_and_compile(self):
+    def test_gui_async_compile_and_pareto(self):
         app = GegenbauerFilterGUI()
-        app.update()
+
+        # Wait for initial async compile to complete
+        for _ in range(40):
+            app.update()
+            time.sleep(0.05)
 
         self.assertIsNotNone(app.current_result)
         self.assertEqual(app.current_result.spec.kind, "lowpass")
@@ -86,11 +91,25 @@ class TestGUIIntegration(unittest.TestCase):
         app.kind_var.set("highpass")
         app.order_var.set(65)
         app._on_compile()
-        app.update()
+
+        for _ in range(40):
+            app.update()
+            time.sleep(0.05)
 
         self.assertEqual(app.current_result.spec.kind, "highpass")
 
-        # Test audio test trigger
+        # Test Pareto search async execution
+        app.solver_var.set("spectral_regularized")
+        app._on_pareto_search()
+
+        for _ in range(100):
+            app.update()
+            time.sleep(0.05)
+
+        self.assertIsNotNone(app.current_result)
+        self.assertEqual(app.mu_var.get(), app.current_result.mu_reg)
+
+        # Test audio test trigger and WAV sampling rate sync
         app._generate_default_audio("pink")
         self.assertIsNotNone(app.loaded_audio_data)
         self.assertIsNotNone(app.filtered_audio_data)
