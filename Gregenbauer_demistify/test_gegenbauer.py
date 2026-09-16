@@ -827,8 +827,9 @@ def test_certified_remainder_typed_status_propagation():
     """
     Verifies CertifiedRemainder object and status rank propagation:
       Status(B_{comp,r}) = rank^(-1)( min_{i in I_r} rank(Status(R_i)) )
+      Status(B_{total,r}) = rank^(-1)( min( rank(Status(B_{comp,r})), rank(Status(E_{exec,r})) ) )
     """
-    from Gregenbauer_demistify.computational_layer import CertifiedRemainder, propagate_composite_status
+    from Gregenbauer_demistify.computational_layer import CertifiedRemainder, propagate_composite_status, propagate_total_bound_status
 
     r1 = CertifiedRemainder(value=1e-5, bound=1e-4, status=TheoremStatus.ALGEBRAIC_EXACT)
     r2 = CertifiedRemainder(value=1e-3, bound=1e-2, status=TheoremStatus.MATCHING_SCHEMA)
@@ -836,6 +837,30 @@ def test_certified_remainder_typed_status_propagation():
     # Status of composite bound is min(5, 1) = 1 => MATCHING_SCHEMA
     status_comp = propagate_composite_status([r1, r2])
     assert status_comp == TheoremStatus.MATCHING_SCHEMA
+
+    # Status of total bound is min(1, 4) = 1 => MATCHING_SCHEMA
+    status_tot = propagate_total_bound_status(status_comp, TheoremStatus.ARITHMETIC_EXACT)
+    assert status_tot == TheoremStatus.MATCHING_SCHEMA
+
+
+def test_d_lambda_parity_and_invalid_parameter_classifier():
+    """
+    Verifies physical sphere parameter parity for D_lambda = den_red((d-2)/2):
+      - Odd d=3 (lambda=1/2) => D_lambda = 2
+      - Even d=4 (lambda=1) => D_lambda = 1
+      - Even d=6 (lambda=2) => D_lambda = 1
+    And verifies 3-way parameter domain classification:
+      - lambda <= 0 => EndpointClass.INVALID_PARAMETER
+    """
+    from Gregenbauer_demistify.algebraic_geometry_combinatorics import get_parameter_denominator, lambda_for_sphere, classify_parameter_domain
+
+    assert get_parameter_denominator(lambda_for_sphere(3)) == 2  # d=3 => lambda=1/2
+    assert get_parameter_denominator(lambda_for_sphere(4)) == 1  # d=4 => lambda=1
+    assert get_parameter_denominator(lambda_for_sphere(6)) == 1  # d=6 => lambda=2
+
+    assert classify_parameter_domain(-0.5) == EndpointClass.INVALID_PARAMETER
+    assert classify_parameter_domain(0.0) == EndpointClass.INVALID_PARAMETER
+    assert classify_parameter_domain(0.5) == EndpointClass.CRITICAL_LC
 
 
 def test_selector_candidate_target_q_interface():

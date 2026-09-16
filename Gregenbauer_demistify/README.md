@@ -18,7 +18,7 @@ This repository implements a mathematically closed, VIII-Layer unified architect
   Layer III. Exact Differential Operators, Normalization Types & Dual Recurrences
   Types: C_n^{(λ)}(x) [Poly] | ϕ_n(x) = C_n/C_n(1) [Zonal, ϕ_n(1)=1] | e_n(x) = h_n ϕ_n(x) [Orthonormal, ||e_n||_λ=1]
   Unitary Map: L^2((0,π), (sin θ)^{2λ} dθ) ──u=(sin θ)^λ ϕ──> L^2(0,π)  |  H_λ u_n = N_n^2 u_n  |  ||T_λ S_λ f||_{L^2(0,π)} = ||f||_{ℋ_λ}
-  Precedence Classifier: Classify(λ) = PhysicalClassifier(λ) if λ ∈ PhysicalSphereDomain else AnalyticClassifier(λ)
+  3-Way Classifier: Classify(λ) = PhysicalClassifier(λ) if λ ∈ PhysicalSphereDomain else (AnalyticClassifier(λ) if λ > 0 else INVALID_PARAMETER)
   Physical Sphere Family: d ≥ 3 ⟹ λ ∈ {1/2, 1, 3/2, 2, ...}. Invariants: ϕ_n(-x) = (-1)^n ϕ_n(x), |ϕ_n(x)| ≤ 1
   SL Friedrichs Extension (selecting exponent max(λ, 1-λ) = 1/2 + |λ - 1/2|):
     - Critical λ=1/2 (d=3): u ~ A θ^{1/2} + B θ^{1/2} log θ (Friedrichs B=0 ⟹ u ~ A θ^{1/2})
@@ -41,17 +41,18 @@ This repository implements a mathematically closed, VIII-Layer unified architect
   Layer VI. Two-Overlap Composite Uniform Asymptotic Schema & Quantified Selector
   Target Semantics: F_Q(θ) = TargetValue(Q, θ), F(θ) ≡ F_Q(θ) for fixed Q
   Partition Axiom: 𝒟_north ∩ 𝒟_south ⊆ 𝒟_interior ⟹ ⋃_r 𝒟_r = 𝒟_global (Disjoint 6-region partition)
-  Piecewise Evaluator F_{comp,r}^{(K)}(θ) & Execution Bounds: |F_Q - F_{comp}| ≤ B_{comp}, F_hat_{comp} = F_{comp} + ε_{exec} ⟹ |F_Q - F_hat_{comp}| ≤ B_{comp} + E_{exec}
+  Piecewise Evaluator F_{comp,r}^{(K)}(θ) & Execution Bounds: |F_Q - F_{comp,r}| ≤ B_{comp,r}, F_hat_{comp,r} = F_{comp,r} + ε_{exec,r} ⟹ |F_Q - F_hat_{comp,r}| ≤ B_{comp,r} + E_{exec,r} = B_{total,r}
+  Region Execution Error Matching: E_{exec,NI} = E_N + E_I + E_{+O}, E_{exec,IS} = E_I + E_S + E_{-O}, E_{exec,global} = E_N + E_I + E_S + E_{+O} + E_{-O}
   Provenance Chain: MATCHING_SCHEMA ⟹ contract ⟹ |R_{±O}| ≤ N_n^{-K} G^\pm ⟹ B_{±O} = N_n^{-K} G^\pm
-  Mechanically Typed Status Rank: rank(B_{comp,r}) = min_{i ∈ I_r} rank(Status(R_i))
+  Mechanically Typed Status Rank: rank(B_{comp,r}) = min_{i ∈ I_r} rank(Status(R_i)); Status(B_{total,r}) = rank^{-1}( min( rank(Status(B_{comp,r})), rank(Status(E_{exec,r})) ) )
   Deterministic Candidate Selector: M^*(θ) = min_≺ argmin_{M ∈ 𝒜(θ,Q)} B_M(θ) with B_M(θ) ∈ ℝ_{≥0}
         │
         ▼
   Layer VII. Modular & Multi-Backend Arithmetic Execution Layer
   ├── VII-A: Floating-Point & Fixed-Point (FLOAT32, FLOAT64, LONGDOUBLE, C_fixed, C_LNS; references VII-E Golub-Welsch certificate)
   ├── VII-B: Exact Rational Symbolic Algebra (Q[λ, x] ──symbolic rec──> C_n ──eval──> Q ──CRT/RNS──> integer residues)
-  ├── VII-C: Scalable RNS / CRT (N_max := metadata, Trace P_inv ⊂ Q^* with INVERT(q) ⟹ q ≠ 0, D_inv(P) = lcm_{q ∈ P_inv} |num_red(q) den_red(q)|, Aggregate D_adm = lcm(D_inv, D_norm, D_eval, D_λ))
-  ├── VII-D1: Finite-Field Arithmetic (Prime(p) Precondition; InvObstruction(q) = |num_red(q) den_red(q)|; UsesNormalizationDenominators(P, ZONAL)=false; Canonical u_n/v_n, c/r; D_λ = den_red(λ); Bad_zonal(p) ⟺ p|r ∨ p|v_n ∨ p|u_n ∨ p|D_inv(P) ∨ p|D_λ; NTT: L_conv ≤ L_NTT, L_NTT | (p-1); Golub-Welsch Implication: CertSensitivity_{Q_spec}(A, κ_{Q_spec}) ∧ R_{Q_spec} ≤ B_back ∧ E_{Q_spec,conv} ≤ B_{Q_spec,conv} ⟹ E_{Q_spec,forward} ≤ κ_{Q_spec} B_back + B_{Q_spec,conv})
+  ├── VII-C: Scalable RNS / CRT (N_max := metadata, Trace P_inv ⊂ Q^* with INVERT(q) ⟹ q ≠ 0, TraceComplete(P) invariant, D_inv(P) = lcm_{q ∈ P_inv} |num_red(q) den_red(q)|, Aggregate D_adm = lcm(D_inv, D_norm, D_eval, D_λ))
+  ├── VII-D1: Finite-Field Arithmetic (Prime(p) Precondition; InvObstruction(q) = |num_red(q) den_red(q)|; UsesNormalizationDenominators(P, ZONAL)=false; Canonical u_n/v_n, c/r; D_λ = den_red((d-2)/2) = 2 (d odd) / 1 (d even); PolyCertificate(p, P, n, λ) ⟺ Prime(p) ∧ gcd(p, D_inv) = 1 ∧ p ∤ D_λ; Bad_zonal(p) ⟺ p|r ∨ p|v_n ∨ p|u_n ∨ p|D_inv(P) ∨ p|D_λ)
   ├── VII-D2: NTT Acceleration Primitive (L_conv = L_1+L_2-1 ≤ L_NTT, L_NTT | (p-1))
   └── VII-E: Canonical Golub-Welsch Spectral Truncation Certificate (J_m = tridiag(α_0, ..., α_{m-2}), Typed Implication: CertSensitivity_{Q_spec}(A, κ_{Q_spec}) ∧ R_{Q_spec} ≤ B_back ∧ E_{Q_spec,conv} ≤ B_{Q_spec,conv} ⟹ E_{Q_spec,forward} ≤ κ_{Q_spec} B_back + B_{Q_spec,conv})
         │
@@ -103,14 +104,14 @@ $$R(Q)_n \cong \operatorname{Sym}^n(\mathbb{C}^d) / q \operatorname{Sym}^{n-2}(\
 
 ### Modular & RNS/CRT Admissibility Certificates
 - **Inversion Obstruction Invariant:** $\operatorname{INVERT}(q) \implies q \ne 0$ ($P_{\text{inv}} \subset \mathbb{Q}^\times$). Elementwise: $\operatorname{InvObstruction}(q) = |\operatorname{num}_{\text{red}}(q) \operatorname{den}_{\text{red}}(q)|$.
-- **Split Denominators / Inversion Obstruction:** $D_{\text{inv}}(P) = \operatorname{lcm}_{q = a_q/b_q \in P_{\text{inv}}(P)} |a_q b_q|$, $D_{\text{norm}}^{\text{used}}(P, Q)$, $D_{\text{eval}} = r$, $D_\lambda = \operatorname{den}_{\text{red}}(\lambda)$.
+- **Split Denominators / Inversion Obstruction:** $D_{\text{inv}}(P) = \operatorname{lcm}_{q = a_q/b_q \in P_{\text{inv}}(P)} |a_q b_q|$, $D_{\text{norm}}^{\text{used}}(P, Q)$, $D_{\text{eval}} = r$, $D_\lambda = \operatorname{den}_{\text{red}}(\frac{d-2}{2}) = 2$ ($d$ odd) / $1$ ($d$ even).
 - **Aggregate Admissibility Modulus:** $D_{\text{adm}} = \operatorname{lcm}(D_{\text{inv}}(P), D_{\text{norm}}^{\text{used}}(P, Q), D_{\text{eval}}, D_\lambda)$ with $\operatorname{lcm}(\varnothing) = 1$.
 - **Canonical Reduced Fraction Preconditions:** $C_n^{(\lambda)}(1) = u_n/v_n$ with $\gcd(u_n, v_n)=1, v_n>0$, $x = c/r$ with $\gcd(c, r)=1, r>0$, and $\lambda = a_\lambda / b_\lambda$ with $\gcd(a_\lambda, b_\lambda) = 1, b_\lambda > 0$.
 - **Bad Zonal Prime Predicate (under $\operatorname{Prime}(p)$):** $\operatorname{Bad}_{\text{zonal}}(p) \iff p \mid r \lor p \mid v_n \lor p \mid u_n \lor p \mid D_{\text{inv}}(P) \lor p \mid D_\lambda$.
 - **Finite-Field Certificates:**
-  - $\texttt{PolyCertificate}(p, P, n) \iff \operatorname{Prime}(p) \land \gcd(p, D_{\text{inv}}(P)) = 1$.
+  - $\texttt{PolyCertificate}(p, P, n, \lambda) \iff \operatorname{Prime}(p) \land \gcd(p, D_{\text{inv}}(P)) = 1 \land p \nmid D_\lambda$.
   - $\texttt{PointCertificate}(p, x) \iff \gcd(p, r) = 1$.
-  - $\texttt{PolyEvaluationCertificate}(p, P, n, x) = \texttt{PolyCertificate}(p, P, n) \land \texttt{PointCertificate}(p, x)$.
+  - $\texttt{PolyEvaluationCertificate}(p, P, n, x, \lambda) = \texttt{PolyCertificate}(p, P, n, \lambda) \land \texttt{PointCertificate}(p, x)$.
   - $\texttt{ZonalCertificate}(p, P, n, x) \iff \neg \operatorname{Bad}_{\text{zonal}}(p)$.
 - **Typed Separation:** `ExactValue` != `ErrorBound` != `Residual`. Total error $E_{\text{total}} \le E_{\text{analytic}} + E_{\text{arithmetic}} + E_{\text{conditioning}} + E_{\text{implementation}}$ with $E_{\text{conditioning}} \le \kappa \cdot E_{\text{input}}$. Total forward error bound $B_{\text{total\_forward}} = B_{\text{comp}} + E_{\text{exec}}$.
 
