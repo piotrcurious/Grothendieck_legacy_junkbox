@@ -911,3 +911,25 @@ def test_extended_certificate_tuple_invariant():
     assert backend == "FLOAT64"
     assert status == TheoremStatus.ALGEBRAIC_EXACT
     assert conds == ["domain_contained", "target_matched"]
+
+
+def test_global_overlap_exact_remainder_identity():
+    """
+    Verifies Layer VI exact global overlap remainder identity:
+      F - F_comp = R_I - R_+O - R_-O
+    where R_I = F - F_I, R_+O = F_N - F_+O, R_-O = F_S - F_-O.
+    """
+    F = 0.5
+    F_N, F_S, F_I = 0.52, 0.48, 0.51
+    F_plus_O, F_minus_O = 0.515, 0.485
+
+    F_comp = F_N + F_S + F_I - F_plus_O - F_minus_O
+
+    R_I = F - F_I
+    R_plus_O = F_N - F_plus_O
+    R_minus_O = F_S - F_minus_O
+
+    diff_actual = F - F_comp
+    diff_derived = R_I - R_plus_O - R_minus_O
+
+    assert np.isclose(diff_actual, diff_derived)
