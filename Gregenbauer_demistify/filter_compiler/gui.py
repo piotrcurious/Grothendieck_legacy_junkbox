@@ -9,14 +9,18 @@ import os
 import sys
 import shutil
 import tempfile
+import threading
+import queue
+import traceback
 from typing import Optional, List, Tuple
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import numpy as np
+from scipy import signal
 
 import matplotlib
 matplotlib.use('TkAgg')
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
 PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -103,6 +107,7 @@ class GegenbauerFilterGUI(tk.Tk):
     def _build_control_panel(self, parent):
         spec_group = ttk.LabelFrame(parent, text="Filter Specifications", padding=10)
         spec_group.pack(fill=tk.X, pady=5)
+        spec_group.columnconfigure(1, weight=1)
 
         # Filter Kind
         ttk.Label(spec_group, text="Filter Type:").grid(row=0, column=0, sticky=tk.W, pady=3)
@@ -129,6 +134,7 @@ class GegenbauerFilterGUI(tk.Tk):
         # Algorithmic Parameters Group
         alg_group = ttk.LabelFrame(parent, text="Gegenbauer Framework Parameters", padding=10)
         alg_group.pack(fill=tk.X, pady=5)
+        alg_group.columnconfigure(1, weight=1)
 
         # Lambda
         ttk.Label(alg_group, text="Lambda (λ > -0.5):").grid(row=0, column=0, sticky=tk.W, pady=3)
@@ -149,17 +155,17 @@ class GegenbauerFilterGUI(tk.Tk):
         btn_frame = ttk.Frame(parent, padding=5)
         btn_frame.pack(fill=tk.X, pady=10)
 
-        compile_btn = ttk.Button(btn_frame, text="⚡ Compile Filter", command=self._on_compile)
-        compile_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        self.compile_btn = ttk.Button(btn_frame, text="⚡ Compile Filter", command=self._on_compile)
+        self.compile_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
 
-        pareto_btn = ttk.Button(btn_frame, text="🔍 Pareto Search", command=self._on_pareto_search)
-        pareto_btn.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=2)
+        self.pareto_btn = ttk.Button(btn_frame, text="🔍 Pareto Search", command=self._on_pareto_search)
+        self.pareto_btn.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=2)
 
         # Summary Metrics Text Box
         summary_group = ttk.LabelFrame(parent, text="Compilation Certification Summary", padding=5)
         summary_group.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        self.summary_text = tk.Text(summary_group, wrap=tk.WORD, height=12, font=("Courier", 9))
+        self.summary_text = tk.Text(summary_group, wrap=tk.WORD, height=12, font=("Courier", 9), state=tk.DISABLED)
         self.summary_text.pack(fill=tk.BOTH, expand=True)
 
     def _build_display_notebook(self, parent):
@@ -240,7 +246,7 @@ class GegenbauerFilterGUI(tk.Tk):
         ttk.Button(top_bar, text="📋 Copy to Clipboard", command=self._on_copy_header).pack(side=tk.LEFT, padx=5)
         ttk.Button(top_bar, text="💾 Save Header (.h)...", command=self._on_save_header_file).pack(side=tk.LEFT, padx=5)
 
-        self.header_text = tk.Text(parent, wrap=tk.NONE, font=("Courier", 10))
+        self.header_text = tk.Text(parent, wrap=tk.NONE, font=("Courier", 10), state=tk.DISABLED)
         scroll_y = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=self.header_text.yview)
         scroll_x = ttk.Scrollbar(parent, orient=tk.HORIZONTAL, command=self.header_text.xview)
         self.header_text.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
@@ -249,89 +255,150 @@ class GegenbauerFilterGUI(tk.Tk):
         scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
         self.header_text.pack(fill=tk.BOTH, expand=True)
 
+    def _set_busy(self, busy: bool):
+        state = tk.DISABLED if busy else tk.NORMAL
+        cursor = "watch" if busy else ""
+        self.config(cursor=cursor)
+        self.compile_btn.config(state=state)
+        self.pareto_btn.config(state=state)
+
     def _on_kind_changed(self, event=None):
-        kind = self.kind_var.get()
-        order = self.order_var.get()
-        if kind == "highpass" and order % 2 == 0:
-            self.order_var.set(order + 1)
-        elif kind == "qmf" and order % 2 != 0:
-            self.order_var.set(order + 1 if order > 3 else 4)
+        try:
+            kind = self.kind_var.get()
+            order = min(512, max(3, int(self.order_var.get())))
+            if kind == "highpass" and order % 2 == 0:
+                self.order_var.set(min(512, order + 1))
+            elif kind == "qmf" and order % 2 != 0:
+                self.order_var.set(min(512, order + 1 if order > 3 else 4))
+            else:
+                self.order_var.set(order)
+        except Exception as e:
+            sys.stderr.write(f"Kind change validation error: {e}\n")
 
     def _on_compile(self):
         try:
             kind = self.kind_var.get()
-            order = int(self.order_var.get())
+            order = min(512, max(3, int(self.order_var.get())))
             cutoff = float(self.cutoff_var.get())
             sampling_rate = int(self.sr_var.get())
-
             lam = float(self.lambda_var.get())
             solver = self.solver_var.get()
             mu_reg = float(self.mu_var.get())
-
-            spec = FilterSpec(
-                kind=kind,
-                order=order,
-                cutoff=cutoff,
-                sampling_rate=sampling_rate
-            )
-
-            compiler = GegenbauerFilterCompiler(
-                lam=lam,
-                solver=solver,
-                mu_reg=mu_reg
-            )
-
-            result = compiler.compile(spec)
-            self.current_result = result
-
-            self._update_summary_display()
-            self._update_freq_plots()
-            self._update_taps_plots()
-            self._update_header_display()
-
-            if self.loaded_audio_data is not None:
-                self._apply_filter_to_current_audio()
-
         except Exception as e:
-            messagebox.showerror("Compilation Error", str(e))
+            messagebox.showerror("Invalid Input", f"Please check input fields:\n{e}")
+            return
+
+        self._set_busy(True)
+        res_q = queue.Queue()
+
+        def worker():
+            try:
+                spec = FilterSpec(
+                    kind=kind,
+                    order=order,
+                    cutoff=cutoff,
+                    sampling_rate=sampling_rate
+                )
+                compiler = GegenbauerFilterCompiler(
+                    lam=lam,
+                    solver=solver,
+                    mu_reg=mu_reg
+                )
+                res = compiler.compile(spec)
+                res_q.put(("ok", res))
+            except Exception as ex:
+                res_q.put(("err", ex))
+
+        threading.Thread(target=worker, daemon=True).start()
+        self.after(50, self._poll_compile_result, res_q)
+
+    def _poll_compile_result(self, q: queue.Queue):
+        try:
+            status, payload = q.get_nowait()
+        except queue.Empty:
+            self.after(50, self._poll_compile_result, q)
+            return
+
+        self._set_busy(False)
+        if status == "err":
+            sys.stderr.write(f"Compilation error:\n{traceback.format_exc()}\n")
+            messagebox.showerror("Compilation Error", str(payload))
+            return
+
+        self.current_result = payload
+        self._update_summary_display()
+        self._update_freq_plots()
+        self._update_taps_plots()
+        self._update_header_display()
+
+        if self.loaded_audio_data is not None:
+            self._apply_filter_to_current_audio()
 
     def _on_pareto_search(self):
         try:
             kind = self.kind_var.get()
-            order = int(self.order_var.get())
+            order = min(512, max(3, int(self.order_var.get())))
             cutoff = float(self.cutoff_var.get())
             sampling_rate = int(self.sr_var.get())
-
-            spec = FilterSpec(
-                kind=kind,
-                order=order,
-                cutoff=cutoff,
-                sampling_rate=sampling_rate
-            )
-
-            compiler = GegenbauerFilterCompiler()
-            best_res = compiler.pareto_search(spec)
-            self.current_result = best_res
-
-            self.lambda_var.set(best_res.lam)
-            self._update_summary_display()
-            self._update_freq_plots()
-            self._update_taps_plots()
-            self._update_header_display()
-
-            if self.loaded_audio_data is not None:
-                self._apply_filter_to_current_audio()
-
-            messagebox.showinfo("Pareto Optimization", f"Found Pareto-Optimal Lambda = {best_res.lam:.4f}")
-
+            solver = self.solver_var.get()
         except Exception as e:
-            messagebox.showerror("Pareto Search Error", str(e))
+            messagebox.showerror("Invalid Input", f"Please check input fields:\n{e}")
+            return
+
+        self._set_busy(True)
+        res_q = queue.Queue()
+
+        def worker():
+            try:
+                spec = FilterSpec(
+                    kind=kind,
+                    order=order,
+                    cutoff=cutoff,
+                    sampling_rate=sampling_rate
+                )
+                compiler = GegenbauerFilterCompiler(solver=solver)
+                best_res = compiler.pareto_search(spec, solver=solver)
+                res_q.put(("ok", best_res))
+            except Exception as ex:
+                res_q.put(("err", ex))
+
+        threading.Thread(target=worker, daemon=True).start()
+        self.after(50, self._poll_pareto_result, res_q)
+
+    def _poll_pareto_result(self, q: queue.Queue):
+        try:
+            status, payload = q.get_nowait()
+        except queue.Empty:
+            self.after(50, self._poll_pareto_result, q)
+            return
+
+        self._set_busy(False)
+        if status == "err":
+            sys.stderr.write(f"Pareto search error:\n{traceback.format_exc()}\n")
+            messagebox.showerror("Pareto Search Error", str(payload))
+            return
+
+        self.current_result = payload
+        self.lambda_var.set(payload.lam)
+        self.mu_var.set(payload.mu_reg)
+
+        self._update_summary_display()
+        self._update_freq_plots()
+        self._update_taps_plots()
+        self._update_header_display()
+
+        if self.loaded_audio_data is not None:
+            self._apply_filter_to_current_audio()
+
+        messagebox.showinfo("Pareto Optimization", f"Found Pareto-Optimal Lambda = {payload.lam:.4f}, μ = {payload.mu_reg:.2e}")
 
     def _update_summary_display(self):
         if self.current_result is None:
             return
+        self.summary_text.config(state=tk.NORMAL)
         self.summary_text.delete("1.0", tk.END)
         self.summary_text.insert(tk.END, self.current_result.summary())
+        self.summary_text.config(state=tk.DISABLED)
 
     def _update_freq_plots(self):
         if self.current_result is None:
@@ -348,7 +415,7 @@ class GegenbauerFilterGUI(tk.Tk):
         if res.H1_response is not None:
             self.ax_freq.plot(res.freq_grid, res.H1_response, 'r-', label='H1 (Highpass)', linewidth=1.5)
         self.ax_freq.axvline(spec.cutoff, color='g', linestyle=':', label=f'Cutoff = {spec.cutoff}')
-        self.ax_freq.set_title(f"Frequency Response ({spec.kind.upper()}, N={spec.order}, λ={res.lam})")
+        self.ax_freq.set_title(f"Frequency Response ({spec.kind.upper()}, N={spec.order}, λ={res.lam:.2f})")
         self.ax_freq.set_ylabel("Magnitude (dB)")
         self.ax_freq.set_ylim(-100, 5)
         self.ax_freq.grid(True)
@@ -383,7 +450,10 @@ class GegenbauerFilterGUI(tk.Tk):
         self.ax_quant.clear()
 
         # Stem Plot of Taps
-        self.ax_stem.stem(range(spec.order), res.h0_taps.float64_taps, linefmt='b-', markerfmt='bo', basefmt='r-')
+        self.ax_stem.stem(range(spec.order), res.h0_taps.float64_taps, linefmt='b-', markerfmt='bo', basefmt='r-', label='h0 taps')
+        if spec.kind == "qmf" and res.h1_taps is not None:
+            self.ax_stem.stem(range(spec.order), res.h1_taps.float64_taps, linefmt='r--', markerfmt='rx', basefmt='r-', label='h1 taps')
+            self.ax_stem.legend(fontsize=8)
         self.ax_stem.set_title("Impulse Response Taps h[n]")
         self.ax_stem.set_ylabel("Amplitude")
         self.ax_stem.grid(True)
@@ -396,8 +466,8 @@ class GegenbauerFilterGUI(tk.Tk):
         err_q15 = np.abs(h_float - h_q15_recon)
         err_q31 = np.abs(h_float - h_q31_recon)
 
-        self.ax_quant.semilogy(range(spec.order), np.maximum(1e-16, err_q15), 'r-o', label='Q15 Quant Error', markersize=4)
-        self.ax_quant.semilogy(range(spec.order), np.maximum(1e-16, err_q31), 'g-s', label='Q31 Quant Error', markersize=4)
+        self.ax_quant.semilogy(range(spec.order), np.maximum(1e-16, err_q15), 'r-o', label='h0 Q15 Quant Error', markersize=4)
+        self.ax_quant.semilogy(range(spec.order), np.maximum(1e-16, err_q31), 'g-s', label='h0 Q31 Quant Error', markersize=4)
         self.ax_quant.set_title("Fixed-Point Quantization Noise per Tap")
         self.ax_quant.set_xlabel("Tap Index n")
         self.ax_quant.set_ylabel("Absolute Error")
@@ -410,8 +480,10 @@ class GegenbauerFilterGUI(tk.Tk):
     def _update_header_display(self):
         if self.current_result is None:
             return
+        self.header_text.config(state=tk.NORMAL)
         self.header_text.delete("1.0", tk.END)
         self.header_text.insert(tk.END, self.current_result.header_code)
+        self.header_text.config(state=tk.DISABLED)
 
     def _generate_default_audio(self, signal_type: str):
         sr = self.sr_var.get()
@@ -444,6 +516,7 @@ class GegenbauerFilterGUI(tk.Tk):
             sr, data = read_wav(filepath)
             self.loaded_audio_sr = sr
             self.loaded_audio_data = data
+            self.sr_var.set(sr)
             write_wav(self.original_wav_path, sr, data)
             self._apply_filter_to_current_audio()
         except Exception as e:
@@ -478,24 +551,27 @@ class GegenbauerFilterGUI(tk.Tk):
         self.ax_spec.clear()
 
         # Waveform Display
-        self.ax_wave.plot(t[:1000], orig[:1000], 'b-', alpha=0.6, label='Original')
-        self.ax_wave.plot(t[:1000], filt[:1000], 'r-', alpha=0.8, label='Filtered')
+        n_wave = min(1000, len(orig))
+        self.ax_wave.plot(t[:n_wave], orig[:n_wave], 'b-', alpha=0.6, label='Original')
+        self.ax_wave.plot(t[:n_wave], filt[:n_wave], 'r-', alpha=0.8, label='Filtered')
         self.ax_wave.set_title("Time Domain Waveform Comparison (First 1000 samples)")
         self.ax_wave.set_ylabel("Amplitude")
         self.ax_wave.grid(True)
         self.ax_wave.legend(loc="upper right", fontsize=8)
 
-        # Spectral Display (FFT spectrum)
-        n_fft = min(8192, len(orig))
-        freqs = np.fft.rfftfreq(n_fft, d=1.0/sr)
-        orig_spec = 20 * np.log10(np.maximum(1e-6, np.abs(np.fft.rfft(orig[:n_fft]))))
-        filt_spec = 20 * np.log10(np.maximum(1e-6, np.abs(np.fft.rfft(filt[:n_fft]))))
+        # Spectral Display via Welch's Power Spectral Density across full signal duration
+        nperseg = min(2048, len(orig))
+        f_orig, psd_orig = signal.welch(orig, fs=sr, nperseg=nperseg)
+        f_filt, psd_filt = signal.welch(filt, fs=sr, nperseg=nperseg)
 
-        self.ax_spec.plot(freqs, orig_spec, 'b-', alpha=0.6, label='Original Spectrum')
-        self.ax_spec.plot(freqs, filt_spec, 'r-', alpha=0.8, label='Filtered Spectrum')
-        self.ax_spec.set_title("Magnitude Spectrum Comparison (dB)")
+        orig_db = 10 * np.log10(np.maximum(1e-12, psd_orig))
+        filt_db = 10 * np.log10(np.maximum(1e-12, psd_filt))
+
+        self.ax_spec.plot(f_orig, orig_db, 'b-', alpha=0.6, label='Original PSD')
+        self.ax_spec.plot(f_filt, filt_db, 'r-', alpha=0.8, label='Filtered PSD')
+        self.ax_spec.set_title("Welch Power Spectral Density Comparison (dB/Hz across full audio)")
         self.ax_spec.set_xlabel("Frequency (Hz)")
-        self.ax_spec.set_ylabel("Magnitude (dB)")
+        self.ax_spec.set_ylabel("Power Density (dB/Hz)")
         self.ax_spec.grid(True)
         self.ax_spec.legend(loc="lower left", fontsize=8)
 
@@ -535,13 +611,17 @@ class GegenbauerFilterGUI(tk.Tk):
             messagebox.showinfo("Export Success", f"Filtered WAV audio successfully saved to:\n{filepath}")
 
     def _on_copy_header(self):
+        self.header_text.config(state=tk.NORMAL)
         code = self.header_text.get("1.0", tk.END)
+        self.header_text.config(state=tk.DISABLED)
         self.clipboard_clear()
         self.clipboard_append(code)
         messagebox.showinfo("Clipboard", "C/C++ Header code copied to clipboard!")
 
     def _on_save_header_file(self):
+        self.header_text.config(state=tk.NORMAL)
         code = self.header_text.get("1.0", tk.END)
+        self.header_text.config(state=tk.DISABLED)
         filepath = filedialog.asksaveasfilename(
             title="Save C/C++ Header File",
             defaultextension=".h",
