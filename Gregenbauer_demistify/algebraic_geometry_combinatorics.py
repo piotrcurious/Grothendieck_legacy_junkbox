@@ -557,6 +557,17 @@ def get_evaluation_denominator(x: Union[int, Fraction]) -> int:
     return Fraction(x).denominator
 
 
+def get_zonal_admissibility_modulus(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], execution_plan: object = None) -> int:
+    """
+    Computes zonal admissibility modulus for the canonical rationalization backend:
+      D_adm_zonal = lcm(D_inv, D_eval, D_lambda)
+    """
+    d_inv = extract_plan_inversion_obstruction_modulus(execution_plan=execution_plan, degree=n, lambda_val=lambda_val)
+    d_eval = get_evaluation_denominator(x)
+    d_lam = get_parameter_denominator(lambda_val)
+    return math.lcm(d_inv, math.lcm(d_eval, d_lam))
+
+
 def get_admissibility_modulus(n: int, lambda_val: Union[int, Fraction], x: Union[int, Fraction], execution_plan: object = None) -> int:
     """
     Computes total finite-field admissibility modulus:
@@ -594,12 +605,12 @@ def check_c_n_admissibility(n: int, lambda_val: Union[int, Fraction], p: int, ex
     return (d_inv % p != 0)
 
 
-def zonal_admissible(p: int, degree: int, point: Union[int, Fraction], lambda_val: Union[int, Fraction] = Fraction(1, 2), execution_plan: object = None) -> bool:
+def canonical_zonal_admissible(p: int, degree: int, point: Union[int, Fraction], lambda_val: Union[int, Fraction] = Fraction(1, 2), execution_plan: object = None) -> bool:
     """
-    Semantically exact ZonalAdmissible predicate over canonical reduced fractions
-      C_n^(lambda)(1) = u_n / v_n with gcd(u_n, v_n) = 1, v_n > 0
-      and x = c / r with gcd(c, r) = 1, r > 0:
-      ZonalAdmissible(p, P, n, x) <=> Prime(p) and gcd(p, D_inv(P)) == 1 and p nmid r and p nmid u_n * v_n.
+    CanonicalZonalAdmissible predicate for the canonical rationalization backend:
+      CanonicalZonalAdmissible(p, P, n, x, lambda) <=> Prime(p) and p nmid D_adm_zonal and p nmid u_n * v_n.
+    Where D_adm_zonal = lcm(D_inv, D_eval, D_lambda) and C_n^(lambda)(1) = u_n / v_n.
+    Note: CanonicalZonalAdmissible requires canonical rational representations u_n/v_n, c/r, a_lambda/b_lambda to embed in F_p.
     """
     if p <= 1:
         return False
@@ -607,13 +618,8 @@ def zonal_admissible(p: int, degree: int, point: Union[int, Fraction], lambda_va
         if p % i == 0:
             return False
 
-    r_frac = Fraction(point)
-    c, r = r_frac.numerator, r_frac.denominator
-    if r % p == 0:
-        return False
-
-    d_inv = extract_plan_inversion_obstruction_modulus(execution_plan=execution_plan, degree=degree, lambda_val=lambda_val)
-    if d_inv % p == 0:
+    d_adm_zonal = get_zonal_admissibility_modulus(n=degree, lambda_val=lambda_val, x=point, execution_plan=execution_plan)
+    if d_adm_zonal % p == 0:
         return False
 
     c1 = exact_rational_gegenbauer(degree, lambda_val, Fraction(1))
@@ -626,13 +632,18 @@ def zonal_admissible(p: int, degree: int, point: Union[int, Fraction], lambda_va
     return True
 
 
-def bad_zonal_prime(p: int, degree: int, point: Union[int, Fraction], lambda_val: Union[int, Fraction] = Fraction(1, 2), execution_plan: object = None) -> bool:
+def canonical_bad_zonal_prime(p: int, degree: int, point: Union[int, Fraction], lambda_val: Union[int, Fraction] = Fraction(1, 2), execution_plan: object = None) -> bool:
     """
-    Semantically exact bad zonal prime predicate defined under precondition Prime(p):
-      Under Prime(p): Bad_zonal(p, P, n, x) <=> (p | r) or (p | v_n) or (p | u_n) or (p | D_inv(P))
-      defined as logical negation: Bad_zonal := not ZonalAdmissible.
+    CanonicalBadZonalPrime predicate for the canonical rationalization backend defined under precondition Prime(p):
+      Under Prime(p): CanonicalBadZonalPrime(p, P, n, x, lambda) <=> p | r or p | v_n or p | u_n or p | D_inv(P) or p | D_lambda
+      defined as logical negation: CanonicalBadZonalPrime := not CanonicalZonalAdmissible.
     """
-    return not zonal_admissible(p=p, degree=degree, point=point, lambda_val=lambda_val, execution_plan=execution_plan)
+    return not canonical_zonal_admissible(p=p, degree=degree, point=point, lambda_val=lambda_val, execution_plan=execution_plan)
+
+
+# Aliases for backward compatibility
+zonal_admissible = canonical_zonal_admissible
+bad_zonal_prime = canonical_bad_zonal_prime
 
 
 def check_point_admissibility(x: Union[int, Fraction], p: int) -> bool:
