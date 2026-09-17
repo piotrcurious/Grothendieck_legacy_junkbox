@@ -80,7 +80,7 @@ class CertifiedEvaluationPayload:
     truth_status: TruthStatus
     matching_status: MatchingStatus
     provenance: ErrorBoundProvenance
-    basis_evaluation_certified: bool = True
+    basis_asymptotic_validated: bool = True
     prototype_fir_certified: bool = True
     qmf_power_complementary: bool = True
     qmf_alias_cancellation: bool = True
@@ -96,11 +96,11 @@ def determine_truth_status(lam: float) -> TruthStatus:
 
 
 def qmf_alias_transfer(H0: np.ndarray, H1: np.ndarray) -> np.ndarray:
-    """Computes CQF/QMF alias transfer function A(e^{j\\omega}) = 0.5 * |H0(\\omega) H0(\\omega+\\pi) - H1(\\omega) H1(\\omega+\\pi)|."""
+    """Computes complex CQF/QMF alias transfer function A(e^{j\\omega}) = 0.5 * (H0(\\omega) H0(\\omega+\\pi) - H1(\\omega) H1(\\omega+\\pi))."""
     K_fft = len(H0)
     H0_shift = np.roll(H0, K_fft // 2)
     H1_shift = np.roll(H1, K_fft // 2)
-    return 0.5 * np.abs(H0 * H0_shift - H1 * H1_shift)
+    return 0.5 * (H0 * H0_shift - H1 * H1_shift)
 
 
 @dataclass
@@ -204,7 +204,7 @@ class FilterResult:
             f"Gegenbauer Lambda: {self.lam:.4f} | Basis Terms: {self.basis_terms}",
             f"Truth Status Topology: {self.payload.truth_status.value}",
             f"Asymptotic Matching Certification: {self.payload.matching_status.value}",
-            f"Certifications: Basis={self.payload.basis_evaluation_certified} | Prototype={self.payload.prototype_fir_certified}"
+            f"Certifications: Basis={self.payload.basis_asymptotic_validated} | Prototype={self.payload.prototype_fir_certified}"
             f" | QMF Power={self.payload.qmf_power_complementary} | QMF Alias={self.payload.qmf_alias_cancellation} | Total={self.payload.is_certified}",
             f"Passband Ripple: {self.passband_ripple_actual:.4f} dB | Stopband Attenuation: {self.stopband_atten_actual:.2f} dB",
         ]
@@ -396,7 +396,7 @@ class GegenbauerFilterCompiler:
                 cond_val = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 1e-12 else np.inf
                 return a_coeffs, K, cond_val
 
-        if self.solver == "spectral_regularized" or mu > 0:
+        elif self.solver == "spectral_regularized":
             nodes, weights = gauss_gegenbauer_quadrature(self.grid_samples, self.lam)
             omega_q = np.arccos(nodes)
             D_q, W_q = self._build_spectral_target(spec, omega_q)
@@ -418,26 +418,29 @@ class GegenbauerFilterCompiler:
             A_sys = np.vstack([A_w, R_mat])
             D_sys = np.concatenate([D_w, np.zeros(R_mat.shape[0])])
             a_coeffs, _, _, _ = np.linalg.lstsq(A_sys, D_sys, rcond=None)
-            s_vals = np.linalg.svd(A_w, compute_uv=False)
+            s_vals = np.linalg.svd(A_sys, compute_uv=False)
             cond_val = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 1e-12 else np.inf
             return a_coeffs, K, cond_val
 
-        omega = np.linspace(0, np.pi, self.grid_samples)
-        x = np.cos(omega)
-        D, W = self._build_spectral_target(spec, omega)
+        elif self.solver == "least_squares":
+            omega = np.linspace(0, np.pi, self.grid_samples)
+            x = np.cos(omega)
+            D, W = self._build_spectral_target(spec, omega)
 
-        A = np.zeros((self.grid_samples, K))
-        for k in range(K):
-            A[:, k] = self._eval_basis(k, x, symmetry=sym)
+            A = np.zeros((self.grid_samples, K))
+            for k in range(K):
+                A[:, k] = self._eval_basis(k, x, symmetry=sym)
 
-        sqrt_W = np.sqrt(W)
-        A_w = A * sqrt_W[:, np.newaxis]
-        D_w = D * sqrt_W
-        a_coeffs, _, _, _ = np.linalg.lstsq(A_w, D_w, rcond=None)
-        s_vals = np.linalg.svd(A_w, compute_uv=False)
-        cond_val = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 1e-12 else np.inf
+            sqrt_W = np.sqrt(W)
+            A_w = A * sqrt_W[:, np.newaxis]
+            D_w = D * sqrt_W
+            a_coeffs, _, _, _ = np.linalg.lstsq(A_w, D_w, rcond=None)
+            s_vals = np.linalg.svd(A_w, compute_uv=False)
+            cond_val = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 1e-12 else np.inf
 
-        return a_coeffs, K, cond_val
+            return a_coeffs, K, cond_val
+
+        raise ValueError(f"Unknown solver: '{self.solver}'")
 
     def transform_to_taps(self, a_coeffs: np.ndarray, spec: FilterSpec) -> np.ndarray:
         N = spec.order
@@ -692,14 +695,26 @@ class GegenbauerFilterCompiler:
             pass_ripple_h1 = float(np.max(H1_db[pass_idx_h1]) - np.min(H1_db[pass_idx_h1])) if np.any(pass_idx_h1) else 0.0
             stop_atten_h1 = float(-np.max(H1_db[stop_idx_h1])) if np.any(stop_idx_h1) else 0.0
 
-            H1_shift = np.roll(H1, K_fft // 2)
-            H0_shift = np.roll(H0, K_fft // 2)
+            # Multi-format QMF response checks (float64, q15, q23, q31)
+            qmf_pow_db_list = []
+            qmf_alias_db_list = []
 
-            pow_comp = np.abs(H0)**2 + np.abs(H1)**2
-            aliasing_func = 0.5 * np.abs(H0 * H0_shift - H1 * H1_shift)
+            formats_to_check = [
+                (h0_quant.float64_taps, h1_quant.float64_taps),
+                (h0_quant.q15_taps / h0_quant.q15_scale, h1_quant.q15_taps / h1_quant.q15_scale),
+                (h0_quant.q23_taps / h0_quant.q23_scale, h1_quant.q23_taps / h1_quant.q23_scale),
+                (h0_quant.q31_taps / h0_quant.q31_scale, h1_quant.q31_taps / h1_quant.q31_scale),
+            ]
+            for h0_arr, h1_arr in formats_to_check:
+                H0_k = np.fft.fft(h0_arr, K_fft)
+                H1_k = np.fft.fft(h1_arr, K_fft)
+                pow_comp_k = np.abs(H0_k)**2 + np.abs(H1_k)**2
+                alias_k = np.abs(qmf_alias_transfer(H0_k, H1_k))
+                qmf_pow_db_list.append(float(np.max(np.abs(10 * np.log10(np.maximum(1e-12, pow_comp_k[:K_fft // 2]))))))
+                qmf_alias_db_list.append(float(np.max(20 * np.log10(np.maximum(1e-12, alias_k[:K_fft // 2])))))
 
-            qmf_pow_db = float(np.max(np.abs(10 * np.log10(np.maximum(1e-12, pow_comp[:K_fft // 2])))))
-            qmf_alias_db = float(np.max(20 * np.log10(np.maximum(1e-12, aliasing_func[:K_fft // 2]))))
+            qmf_pow_db = max(qmf_pow_db_list)
+            qmf_alias_db = max(qmf_alias_db_list)
 
         reg_energy = sum((c ** 2) * ((k * (k + 2.0 * self.lam)) ** self.reg_power) for k, c in enumerate(a_coeffs))
 
@@ -724,7 +739,7 @@ class GegenbauerFilterCompiler:
             e_implementation=0.0
         )
 
-        basis_evaluation_certified = (self.asymptotic_mode != "none" and asymp_err < 0.05)
+        basis_asymptotic_validated = (self.asymptotic_mode != "none" and asymp_err < 0.05)
         pass_ripple_thresh = spec.passband_ripple_db * 3.0 if spec.kind == "qmf" else spec.passband_ripple_db * 2.0
         prototype_fir_certified = (
             pass_ripple <= pass_ripple_thresh and
@@ -744,7 +759,7 @@ class GegenbauerFilterCompiler:
             qmf_alias_cancellation = (qmf_alias_db <= -20.0)
 
         is_certified = (
-            basis_evaluation_certified and
+            basis_asymptotic_validated and
             prototype_fir_certified and
             qmf_power_complementary and
             qmf_alias_cancellation
@@ -754,7 +769,7 @@ class GegenbauerFilterCompiler:
             truth_status=truth_status,
             matching_status=matching_status,
             provenance=provenance,
-            basis_evaluation_certified=basis_evaluation_certified,
+            basis_asymptotic_validated=basis_asymptotic_validated,
             prototype_fir_certified=prototype_fir_certified,
             qmf_power_complementary=qmf_power_complementary,
             qmf_alias_cancellation=qmf_alias_cancellation,

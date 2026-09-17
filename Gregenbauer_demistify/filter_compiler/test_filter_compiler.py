@@ -183,6 +183,39 @@ def test_asymmetric_qmf_compilation():
     assert result.payload.qmf_alias_cancellation is True
 
 
+def test_qmf_alias_transfer_and_haar_anchor():
+    """Verifies qmf_alias_transfer complex transfer function against 2-tap Haar wavelet CQF anchor."""
+    from filter_compiler.compiler import qmf_alias_transfer
+
+    # Haar wavelet 2-tap CQF filters
+    H0_taps = np.array([1.0 / np.sqrt(2), 1.0 / np.sqrt(2)])
+    H1_taps = np.array([1.0 / np.sqrt(2), -1.0 / np.sqrt(2)])
+
+    K_fft = 1024
+    H0 = np.fft.fft(H0_taps, K_fft)
+    H1 = np.fft.fft(H1_taps, K_fft)
+
+    alias_complex = qmf_alias_transfer(H0, H1)
+    np.testing.assert_allclose(np.abs(alias_complex), 0.0, atol=1e-15)
+
+
+def test_solver_dispatch_modes():
+    """Verifies that solve_coefficients correctly dispatches between least_squares and spectral_regularized."""
+    spec = FilterSpec(kind="lowpass", order=15, cutoff=0.25)
+
+    # least_squares solver
+    comp_ls = GegenbauerFilterCompiler(lam=1.5, solver="least_squares", mu_reg=1e-4)
+    a_ls, K_ls, cond_ls = comp_ls.solve_coefficients(spec)
+
+    # spectral_regularized solver
+    comp_reg = GegenbauerFilterCompiler(lam=1.5, solver="spectral_regularized", mu_reg=1e-4)
+    a_reg, K_reg, cond_reg = comp_reg.solve_coefficients(spec)
+
+    assert K_ls == K_reg
+    # Regularized solution must differ from unregularized LS solution
+    assert not np.allclose(a_ls, a_reg)
+
+
 def test_qmf_target_power_complementarity():
     """Verifies that the QMF sine/cosine amplitude crossfade target yields exact power complementarity."""
     spec = FilterSpec(kind="qmf", order=64, cutoff=0.25)
