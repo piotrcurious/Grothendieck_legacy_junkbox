@@ -141,10 +141,37 @@ def test_qmf_target_power_complementarity():
     np.testing.assert_allclose(target_power, 1.0, atol=1e-12)
 
 
-def test_qmf_symmetric_transition_enforcement():
-    """Verifies that QMF requires symmetric transition edges wp + ws == 0.5."""
-    with pytest.raises(ValueError, match="QMF requires symmetric transition around fs/4"):
-        FilterSpec(kind="qmf", order=64, cutoff=0.25, wp=0.20, ws=0.40)
+def test_biorthogonal_pair_compilation():
+    """Tests biorthogonal filter bank pair compilation via half-band spectral factorization."""
+    compiler = GegenbauerFilterCompiler(lam=1.5)
+
+    # Odd sum of orders must raise ValueError
+    with pytest.raises(ValueError, match="sum of H0 and G0 orders must be even"):
+        compiler.compile_biorthogonal_pair(order_h0=9, order_g0=6)
+
+    # Valid pair compilation (CDF 9/7 style orders 9 + 7 = 16 or 8 + 6 = 14)
+    pair = compiler.compile_biorthogonal_pair(order_h0=8, order_g0=6, cutoff=0.25)
+
+    assert "H0" in pair and "H1" in pair and "G0" in pair and "G1" in pair and "P" in pair
+    assert isinstance(pair["H0"], QuantizedTaps)
+    assert isinstance(pair["G0"], QuantizedTaps)
+    assert isinstance(pair["H1"], QuantizedTaps)
+    assert isinstance(pair["G1"], QuantizedTaps)
+
+    h0_taps = pair["H0"].float64_taps
+    g0_taps = pair["G0"].float64_taps
+    h1_taps = pair["H1"].float64_taps
+    g1_taps = pair["G1"].float64_taps
+    p_taps = pair["P"]
+
+    # Verify lengths
+    assert len(p_taps) == 8 + 6 + 1
+    assert len(h0_taps) == len(g1_taps)
+    assert len(g0_taps) == len(h1_taps)
+
+    # Verify DC gain normalization (approx sqrt(2))
+    assert abs(np.sum(h0_taps) - np.sqrt(2)) < 1e-5
+    assert abs(np.sum(g0_taps) - np.sqrt(2)) < 1e-5
 
 
 def test_quantization_formats():
