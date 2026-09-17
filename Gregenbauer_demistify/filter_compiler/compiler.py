@@ -149,6 +149,10 @@ class FilterSpec:
             if abs((self.wp + self.ws) - 0.5) > 1e-6:
                 raise ValueError(f"QMF filter pair requires symmetric transition band around fs/4 (wp + ws == 0.5), got wp={self.wp}, ws={self.ws}")
 
+        if self.kind == "asymmetric_qmf":
+            if not (0.0 < self.wp < 0.25 < self.ws < 0.5):
+                raise ValueError(f"Asymmetric QMF requires transition band straddling fs/4 (0 < wp < 0.25 < ws < 0.5), got wp={self.wp}, ws={self.ws}")
+
         if self.kind in ("lowpass", "qmf", "asymmetric_qmf"):
             if not (0.0 < self.wp < self.ws < 0.5):
                 raise ValueError(f"Frequency edges must satisfy 0 < wp ({self.wp}) < ws ({self.ws}) < 0.5")
@@ -199,8 +203,12 @@ class FilterResult:
     stopband_atten_actual: float = 0.0
     qmf_power_complementarity_max_db: float = 0.0
     qmf_alias_distortion_max_db: float = 0.0
+    qmf_power_error_linear: float = 0.0
+    qmf_alias_error_linear: float = 0.0
     regularization_energy: float = 0.0
     fit_residual: float = 0.0
+    data_fit_residual: float = 0.0
+    regularization_residual: float = 0.0
     asymptotic_error_bound: float = 0.0
     provenance_mixed_error: float = 0.0
     header_code: str = ""
@@ -377,10 +385,64 @@ class GegenbauerFilterCompiler:
 
         return D, W
 
-    def solve_coefficients(self, spec: FilterSpec) -> Tuple[np.ndarray, int, float, float]:
+    def solve_qmf_power_coefficients(self, spec: FilterSpec) -> Tuple[np.ndarray, int, float, float, float, float]:
+        """
+        Solves for QMF power response P(x) = 0.5 + R_odd(x) using odd Gegenbauer basis terms C_{2k+1}^(lambda)(x).
+        Structurally guarantees P(x) + P(-x) = 1 (power complementarity) at the representation level.
+        """
+        N = spec.order
+        M = self._independent_dimension(spec)
+        K = min(M, max(16, N // 2))
+
+        nodes, weights = gauss_gegenbauer_quadrature(self.grid_samples, self.lam)
+        omega_q = np.arccos(nodes)
+
+        # Target R_odd(x) = D_q(x)^2 - 0.5 where D_q(x) is amplitude target
+        D_q, W_q = self._build_spectral_target(spec, omega_q)
+        R_target = np.abs(D_q)**2 - 0.5
+
+        # Odd basis matrix A_odd containing C_{2k+1}^(lambda)(x)
+        A_odd = np.zeros((self.grid_samples, K))
+        for k in range(K):
+            n_odd = 2 * k + 1
+            A_odd[:, k] = self._eval_basis(n_odd, nodes, symmetry=SymmetryClass.TYPE_I)
+
+        sqrt_W = np.sqrt(W_q * weights)
+        A_w = A_odd * sqrt_W[:, np.newaxis]
+        D_w = R_target * sqrt_W
+
+        mu = self.mu_reg
+        R_diag = np.zeros(K)
+        for k in range(K):
+            n_odd = 2 * k + 1
+            eig = n_odd * (n_odd + 2.0 * self.lam)
+            R_diag[k] = (eig ** self.reg_power)
+
+        R_mat = np.diag(np.sqrt(mu * R_diag))
+        A_sys = np.vstack([A_w, R_mat])
+        D_sys = np.concatenate([D_w, np.zeros(R_mat.shape[0])])
+
+        a_odd, _, _, _ = np.linalg.lstsq(A_sys, D_sys, rcond=None)
+        s_vals = np.linalg.svd(A_sys, compute_uv=False)
+        cond_val = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 1e-12 else np.inf
+
+        res_aug = float(np.linalg.norm(A_sys @ a_odd - D_sys) / max(np.linalg.norm(D_sys), 1e-15))
+        res_data = float(np.linalg.norm(A_w @ a_odd - D_w) / max(np.linalg.norm(D_w), 1e-15))
+        res_reg = float(np.linalg.norm(R_mat @ a_odd) / max(np.linalg.norm(D_w), 1e-15))
+
+        # Reconstruct full coefficient array mapping odd indices
+        a_coeffs = np.zeros(2 * K)
+        for k in range(K):
+            a_coeffs[2 * k + 1] = a_odd[k]
+
+        return a_coeffs, K, cond_val, res_aug, res_data, res_reg
+
+    def solve_coefficients(self, spec: FilterSpec) -> Tuple[np.ndarray, int, float, float, float, float]:
         N = spec.order
         M = self._independent_dimension(spec)
         if self.basis_terms is not None:
+            if self.basis_terms > M:
+                raise ValueError(f"basis_terms={self.basis_terms} exceeds the independent dimension M={M} for {spec.symmetry_class.value}")
             K = self.basis_terms
         else:
             if spec.kind in ("qmf", "asymmetric_qmf"):
@@ -411,8 +473,8 @@ class GegenbauerFilterCompiler:
                 A_w = A * sqrt_w[:, np.newaxis]
                 s_vals = np.linalg.svd(A_w, compute_uv=False)
                 cond_val = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 1e-12 else np.inf
-                res_norm = float(np.linalg.norm(sqrt_w * (A @ a_coeffs - D_q)) / max(np.linalg.norm(sqrt_w * D_q), 1e-15))
-                return a_coeffs, K, cond_val, res_norm
+                res_data = float(np.linalg.norm(sqrt_w * (A @ a_coeffs - D_q)) / max(np.linalg.norm(sqrt_w * D_q), 1e-15))
+                return a_coeffs, K, cond_val, res_data, res_data, 0.0
             else:
                 # For non-Type-I wrapped bases, compute the exact Gram matrix G_ij = sum_q w_q B_i(x_q) B_j(x_q)
                 A = np.zeros((self.grid_samples, K))
@@ -425,8 +487,8 @@ class GegenbauerFilterCompiler:
                 a_coeffs, _, _, _ = np.linalg.lstsq(G_mat, b_sys, rcond=None)
                 s_vals = np.linalg.svd(A_w, compute_uv=False)
                 cond_val = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 1e-12 else np.inf
-                res_norm = float(np.linalg.norm(A_w @ a_coeffs - D_q * sqrt_w) / max(np.linalg.norm(D_q * sqrt_w), 1e-15))
-                return a_coeffs, K, cond_val, res_norm
+                res_data = float(np.linalg.norm(A_w @ a_coeffs - D_q * sqrt_w) / max(np.linalg.norm(D_q * sqrt_w), 1e-15))
+                return a_coeffs, K, cond_val, res_data, res_data, 0.0
 
         elif self.solver == "spectral_regularized":
             nodes, weights = gauss_gegenbauer_quadrature(self.grid_samples, self.lam)
@@ -452,8 +514,10 @@ class GegenbauerFilterCompiler:
             a_coeffs, _, _, _ = np.linalg.lstsq(A_sys, D_sys, rcond=None)
             s_vals = np.linalg.svd(A_sys, compute_uv=False)
             cond_val = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 1e-12 else np.inf
-            res_norm = float(np.linalg.norm(A_sys @ a_coeffs - D_sys) / max(np.linalg.norm(D_sys), 1e-15))
-            return a_coeffs, K, cond_val, res_norm
+            res_aug = float(np.linalg.norm(A_sys @ a_coeffs - D_sys) / max(np.linalg.norm(D_sys), 1e-15))
+            res_data = float(np.linalg.norm(A_w @ a_coeffs - D_w) / max(np.linalg.norm(D_w), 1e-15))
+            res_reg = float(np.linalg.norm(R_mat @ a_coeffs) / max(np.linalg.norm(D_w), 1e-15))
+            return a_coeffs, K, cond_val, res_aug, res_data, res_reg
 
         elif self.solver == "least_squares":
             omega = np.linspace(0, np.pi, self.grid_samples)
@@ -470,9 +534,9 @@ class GegenbauerFilterCompiler:
             a_coeffs, _, _, _ = np.linalg.lstsq(A_w, D_w, rcond=None)
             s_vals = np.linalg.svd(A_w, compute_uv=False)
             cond_val = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 1e-12 else np.inf
-            res_norm = float(np.linalg.norm(A_w @ a_coeffs - D_w) / max(np.linalg.norm(D_w), 1e-15))
+            res_data = float(np.linalg.norm(A_w @ a_coeffs - D_w) / max(np.linalg.norm(D_w), 1e-15))
 
-            return a_coeffs, K, cond_val, res_norm
+            return a_coeffs, K, cond_val, res_data, res_data, 0.0
 
         raise ValueError(f"Unknown solver: '{self.solver}'")
 
@@ -664,7 +728,7 @@ class GegenbauerFilterCompiler:
     def compile(self, spec: FilterSpec) -> FilterResult:
         truth_status = determine_truth_status(self.lam)
 
-        a_coeffs, K, cond_val, res_norm = self.solve_coefficients(spec)
+        a_coeffs, K, cond_val, res_aug, res_data, res_reg = self.solve_coefficients(spec)
         h0_float = self.transform_to_taps(a_coeffs, spec)
         h0_quant = self.quantize_taps(h0_float)
 
@@ -715,6 +779,9 @@ class GegenbauerFilterCompiler:
         stop_atten_h1 = 0.0
         qmf_pow_db = 0.0
         qmf_alias_db = 0.0
+        qmf_pow_lin = 0.0
+        qmf_alias_lin = 0.0
+
         if spec.kind in ("qmf", "asymmetric_qmf") and h1_quant is not None:
             H1 = np.fft.fft(h1_quant.float64_taps, K_fft)
             H1_db = 20 * np.log10(np.maximum(1e-12, np.abs(H1[:K_fft // 2 + 1])))
@@ -731,6 +798,8 @@ class GegenbauerFilterCompiler:
             # Multi-format QMF response checks (float64, q15, q23, q31)
             qmf_pow_db_list = []
             qmf_alias_db_list = []
+            qmf_pow_lin_list = []
+            qmf_alias_lin_list = []
 
             formats_to_check = [
                 (h0_quant.float64_taps, h1_quant.float64_taps),
@@ -743,11 +812,19 @@ class GegenbauerFilterCompiler:
                 H1_k = np.fft.fft(h1_arr, K_fft)
                 pow_comp_k = np.abs(H0_k)**2 + np.abs(H1_k)**2
                 alias_k = np.abs(qmf_alias_transfer(H0_k, H1_k))
+
+                pow_err_lin_k = float(np.max(np.abs(pow_comp_k - 1.0)))
+                alias_err_lin_k = float(np.max(alias_k))
+
+                qmf_pow_lin_list.append(pow_err_lin_k)
+                qmf_alias_lin_list.append(alias_err_lin_k)
                 qmf_pow_db_list.append(float(np.max(np.abs(10 * np.log10(np.maximum(1e-12, pow_comp_k[:K_fft // 2 + 1]))))))
                 qmf_alias_db_list.append(float(np.max(20 * np.log10(np.maximum(1e-12, alias_k[:K_fft // 2 + 1])))))
 
             qmf_pow_db = max(qmf_pow_db_list)
             qmf_alias_db = max(qmf_alias_db_list)
+            qmf_pow_lin = max(qmf_pow_lin_list)
+            qmf_alias_lin = max(qmf_alias_lin_list)
 
         reg_energy = sum((c ** 2) * ((k * (k + 2.0 * self.lam)) ** self.reg_power) for k, c in enumerate(a_coeffs))
 
@@ -830,8 +907,12 @@ class GegenbauerFilterCompiler:
             stopband_atten_actual=float(stop_atten),
             qmf_power_complementarity_max_db=qmf_pow_db,
             qmf_alias_distortion_max_db=qmf_alias_db,
+            qmf_power_error_linear=qmf_pow_lin,
+            qmf_alias_error_linear=qmf_alias_lin,
             regularization_energy=float(reg_energy),
-            fit_residual=res_norm,
+            fit_residual=res_aug,
+            data_fit_residual=res_data,
+            regularization_residual=res_reg,
             asymptotic_error_bound=asymp_err,
             provenance_mixed_error=prov_err
         )
@@ -858,7 +939,7 @@ class GegenbauerFilterCompiler:
         )
 
         # Solve for P(z) taps using the existing Gegenbauer spectral solver
-        a_coeffs, _, _, _ = self.solve_coefficients(p_spec)
+        a_coeffs, _, _, _, _, _ = self.solve_coefficients(p_spec)
         p_taps = self.transform_to_taps(a_coeffs, p_spec)
 
         # Force strict half-band time-domain constraints (zero out non-center even taps)
@@ -867,8 +948,9 @@ class GegenbauerFilterCompiler:
             if abs(n - center) % 2 == 0 and n != center:
                 p_taps[n] = 0.0
 
-        # Normalize center tap to 0.5 for half-band constraint
-        p_taps /= (2.0 * p_taps[center])
+        # Normalize center tap to 1.0 for P(z) + P(-z) = 2 z^-d delay scaling
+        if abs(p_taps[center]) > 1e-12:
+            p_taps /= p_taps[center]
 
         # 2. Spectral Factorization
         roots = np.roots(p_taps)
@@ -946,7 +1028,10 @@ class GegenbauerFilterCompiler:
         h1_taps = np.array([g0_taps[n] * ((-1)**n) for n in range(len(g0_taps))])[::-1]
         g1_taps = np.array([g1_sign * h0_taps[n] * ((-1)**n) for n in range(len(h0_taps))])[::-1]
 
-        # 6. Verify Polyphase Perfect Reconstruction (PR) Condition: H0(z)G0(z) + H1(z)G1(z) = 2 z^-d
+        # 6. Verify Factor Product Residual and Polyphase Perfect Reconstruction (PR) Condition: H0(z)G0(z) + H1(z)G1(z) = 2 z^-d
+        h0_conv_g0 = np.convolve(h0_taps, g0_taps)
+        product_residual = float(np.max(np.abs(h0_conv_g0 - p_taps))) if len(h0_conv_g0) == len(p_taps) else float('nan')
+
         K_fft = 4096
         omega = 2.0 * np.pi * np.arange(K_fft) / float(K_fft)
         expected_pr = 2.0 * np.exp(-1j * omega * delay)
@@ -965,6 +1050,7 @@ class GegenbauerFilterCompiler:
             "G0": self.quantize_taps(g0_taps), # Synthesis Lowpass
             "G1": self.quantize_taps(g1_taps), # Synthesis Highpass
             "P": p_taps,                        # Product Half-band
+            "product_residual": product_residual,
             "pr_error": pr_error
         }
 
