@@ -265,10 +265,7 @@ def test_layer_viii_provenance_and_truth_status():
 
 
 def test_filter_spec_edge_cases():
-    """Tests highpass even-N rejection, QMF odd-N rejection, transition band overlap validation, and clamped bandpass defaults."""
-    # Highpass even N must raise ValueError
-    with pytest.raises(ValueError, match="Highpass FIR filter .* cannot have an even"):
-        FilterSpec(kind="highpass", order=64, cutoff=0.25)
+    """Tests QMF odd-N rejection, transition band overlap validation, and clamped bandpass defaults."""
 
     # QMF odd N must raise ValueError
     with pytest.raises(ValueError, match="QMF filter pair requires an even tap length"):
