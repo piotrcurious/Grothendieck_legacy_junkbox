@@ -42,7 +42,7 @@ def test_basis_to_fir_roundtrip():
     ]
 
     for spec in specs:
-        a_coeffs, _, _ = compiler.solve_coefficients(spec)
+        a_coeffs, _, _, _ = compiler.solve_coefficients(spec)
         taps = compiler.transform_to_taps(a_coeffs, spec)
 
         # Evaluate target basis sum A(omega)
@@ -205,11 +205,11 @@ def test_solver_dispatch_modes():
 
     # least_squares solver
     comp_ls = GegenbauerFilterCompiler(lam=1.5, solver="least_squares", mu_reg=1e-4)
-    a_ls, K_ls, cond_ls = comp_ls.solve_coefficients(spec)
+    a_ls, K_ls, cond_ls, res_ls = comp_ls.solve_coefficients(spec)
 
     # spectral_regularized solver
     comp_reg = GegenbauerFilterCompiler(lam=1.5, solver="spectral_regularized", mu_reg=1e-4)
-    a_reg, K_reg, cond_reg = comp_reg.solve_coefficients(spec)
+    a_reg, K_reg, cond_reg, res_reg = comp_reg.solve_coefficients(spec)
 
     assert K_ls == K_reg
     # Regularized solution must differ from unregularized LS solution
