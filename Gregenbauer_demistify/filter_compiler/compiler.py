@@ -95,6 +95,14 @@ def determine_truth_status(lam: float) -> TruthStatus:
     return TruthStatus.ANALYTIC_CONTINUATION
 
 
+def qmf_alias_transfer(H0: np.ndarray, H1: np.ndarray) -> np.ndarray:
+    """Computes CQF/QMF alias transfer function A(e^{j\\omega}) = 0.5 * |H0(\\omega) H0(\\omega+\\pi) - H1(\\omega) H1(\\omega+\\pi)|."""
+    K_fft = len(H0)
+    H0_shift = np.roll(H0, K_fft // 2)
+    H1_shift = np.roll(H1, K_fft // 2)
+    return 0.5 * np.abs(H0 * H0_shift - H1 * H1_shift)
+
+
 @dataclass
 class FilterSpec:
     """Specification of target DSP filter."""
@@ -200,7 +208,7 @@ class FilterResult:
             f" | QMF Power={self.payload.qmf_power_complementary} | QMF Alias={self.payload.qmf_alias_cancellation} | Total={self.payload.is_certified}",
             f"Passband Ripple: {self.passband_ripple_actual:.4f} dB | Stopband Attenuation: {self.stopband_atten_actual:.2f} dB",
         ]
-        if self.spec.kind == "qmf":
+        if self.spec.kind in ("qmf", "asymmetric_qmf"):
             lines.append(f"QMF Power Complementarity Peak Ripple: {self.qmf_power_complementarity_max_db:.4f} dB")
             lines.append(f"QMF Peak Alias Distortion: {self.qmf_alias_distortion_max_db:.2f} dB")
         lines.append(f"Sturm-Liouville Regularization Energy: {self.regularization_energy:.6e}")
@@ -535,7 +543,7 @@ class GegenbauerFilterCompiler:
             "// Provenance Error Bound: E_total <= E_analytic + E_arithmetic + kappa * E_input + E_impl",
             f"//   E_analytic = {p.e_analytic:.6e} | E_arithmetic = {p.e_arithmetic:.6e} | E_total = {p.total:.6e}"
         ]
-        if spec.kind == "qmf":
+        if spec.kind in ("qmf", "asymmetric_qmf"):
             header.append(f"// QMF Metrics: Max Power Ripple = {result.qmf_power_complementarity_max_db:.4f} dB | Max Alias Dist = {result.qmf_alias_distortion_max_db:.2f} dB")
 
         header.extend([
@@ -566,50 +574,50 @@ class GegenbauerFilterCompiler:
             ""
         ])
 
-        header.append(f"const double h0_geg_float64[{spec.order}] = {{")
+        header.append(f"static const double h0_geg_float64[{spec.order}] = {{")
         header.append("    " + ", ".join(f"{val:.12e}" for val in h0.float64_taps))
         header.append("};")
         header.append("")
 
-        header.append(f"const float h0_geg_float32[{spec.order}] = {{")
+        header.append(f"static const float h0_geg_float32[{spec.order}] = {{")
         header.append("    " + ", ".join(f"{val:.8e}f" for val in h0.float64_taps))
         header.append("};")
         header.append("")
 
-        header.append(f"const int16_t h0_geg_q15[{spec.order}] PROGMEM = {{")
+        header.append(f"static const int16_t h0_geg_q15[{spec.order}] PROGMEM = {{")
         header.append("    " + ", ".join(str(int(val)) for val in h0.q15_taps))
         header.append("};")
         header.append("")
 
-        header.append(f"const int32_t h0_geg_q23[{spec.order}] PROGMEM = {{")
+        header.append(f"static const int32_t h0_geg_q23[{spec.order}] PROGMEM = {{")
         header.append("    " + ", ".join(str(int(val)) for val in h0.q23_taps))
         header.append("};")
         header.append("")
 
-        header.append(f"const int32_t h0_geg_q31[{spec.order}] PROGMEM = {{")
+        header.append(f"static const int32_t h0_geg_q31[{spec.order}] PROGMEM = {{")
         header.append("    " + ", ".join(str(int(val)) for val in h0.q31_taps))
         header.append("};")
         header.append("")
 
         if h1 is not None:
             header.append("// Highpass / Complementary Mirror QMF Pair Taps (h1)")
-            header.append(f"const double h1_geg_float64[{spec.order}] = {{")
+            header.append(f"static const double h1_geg_float64[{spec.order}] = {{")
             header.append("    " + ", ".join(f"{val:.12e}" for val in h1.float64_taps))
             header.append("};")
             header.append("")
-            header.append(f"const float h1_geg_float32[{spec.order}] = {{")
+            header.append(f"static const float h1_geg_float32[{spec.order}] = {{")
             header.append("    " + ", ".join(f"{val:.8e}f" for val in h1.float64_taps))
             header.append("};")
             header.append("")
-            header.append(f"const int16_t h1_geg_q15[{spec.order}] PROGMEM = {{")
+            header.append(f"static const int16_t h1_geg_q15[{spec.order}] PROGMEM = {{")
             header.append("    " + ", ".join(str(int(val)) for val in h1.q15_taps))
             header.append("};")
             header.append("")
-            header.append(f"const int32_t h1_geg_q23[{spec.order}] PROGMEM = {{")
+            header.append(f"static const int32_t h1_geg_q23[{spec.order}] PROGMEM = {{")
             header.append("    " + ", ".join(str(int(val)) for val in h1.q23_taps))
             header.append("};")
             header.append("")
-            header.append(f"const int32_t h1_geg_q31[{spec.order}] PROGMEM = {{")
+            header.append(f"static const int32_t h1_geg_q31[{spec.order}] PROGMEM = {{")
             header.append("    " + ", ".join(str(int(val)) for val in h1.q31_taps))
             header.append("};")
             header.append("")
@@ -864,6 +872,9 @@ class GegenbauerFilterCompiler:
             else:
                 g0_roots.extend(group)
 
+        if len(h0_roots) != order_h0 or len(g0_roots) != order_g0:
+            raise ValueError(f"Unable to partition roots into exact target orders order_h0={order_h0} and order_g0={order_g0} while preserving symmetric quadruplet/conjugate grouping. Got order_h0={len(h0_roots)}, order_g0={len(g0_roots)}.")
+
         # 4. Reconstruct Filter Taps from Roots
         h0_taps = np.poly(h0_roots).real if len(h0_roots) > 0 else np.array([1.0])
         g0_taps = np.poly(g0_roots).real if len(g0_roots) > 0 else np.array([1.0])
@@ -910,7 +921,7 @@ class GegenbauerFilterCompiler:
 
         # Subplot 1: Frequency Response (dB)
         plt.subplot(2, 2, 1)
-        plt.plot(result.freq_grid, result.H0_response, 'b-', label='H0 (Lowpass)' if spec.kind == 'qmf' else 'H(e^{jw})', linewidth=2)
+        plt.plot(result.freq_grid, result.H0_response, 'b-', label='H0 (Lowpass)' if spec.kind in ('qmf', 'asymmetric_qmf') else 'H(e^{jw})', linewidth=2)
         if result.H1_response is not None:
             plt.plot(result.freq_grid, result.H1_response, 'r-', label='H1 (Highpass)', linewidth=2)
         plt.axvline(spec.cutoff, color='g', linestyle=':', label=f'Cutoff = {spec.cutoff}')
@@ -939,7 +950,7 @@ class GegenbauerFilterCompiler:
 
         # Subplot 3: QMF / Impulse Response
         plt.subplot(2, 2, 3)
-        if spec.kind == "qmf" and result.h1_taps is not None:
+        if spec.kind in ("qmf", "asymmetric_qmf") and result.h1_taps is not None:
             K_fft = len(result.freq_grid) * 2
             H0 = np.fft.fft(result.h0_taps.float64_taps, K_fft)
             H1 = np.fft.fft(result.h1_taps.float64_taps, K_fft)
@@ -1017,7 +1028,7 @@ class GegenbauerFilterCompiler:
                 res = compiler.compile(spec)
 
                 score = res.passband_ripple_actual * 10.0 - res.stopband_atten_actual
-                if res.spec.kind == "qmf":
+                if res.spec.kind in ("qmf", "asymmetric_qmf"):
                     score += res.qmf_power_complementarity_max_db * 20.0 + res.qmf_alias_distortion_max_db
 
                 score += res.payload.provenance.total * 100.0

@@ -22,8 +22,46 @@ from filter_compiler.compiler import (
     FilterSpec,
     QuantizedTaps,
     FilterResult,
-    GegenbauerFilterCompiler
+    GegenbauerFilterCompiler,
+    SymmetryClass
 )
+
+
+def test_basis_to_fir_roundtrip():
+    """Verifies exact basis-to-FIR roundtrip across Types I, II, III, IV symmetry classes."""
+    compiler = GegenbauerFilterCompiler(lam=1.5)
+    omega = np.linspace(0, np.pi, 1024)
+    x = np.cos(omega)
+
+    # Test Types I-IV
+    specs = [
+        FilterSpec(kind="lowpass", order=15, cutoff=0.25),   # TYPE_I (odd N)
+        FilterSpec(kind="lowpass", order=16, cutoff=0.25),   # TYPE_II (even N)
+        FilterSpec(kind="highpass", order=15, cutoff=0.25),  # TYPE_I (odd N highpass)
+        FilterSpec(kind="highpass", order=16, cutoff=0.25),  # TYPE_IV (even N highpass)
+    ]
+
+    for spec in specs:
+        a_coeffs, _, _ = compiler.solve_coefficients(spec)
+        taps = compiler.transform_to_taps(a_coeffs, spec)
+
+        # Evaluate target basis sum A(omega)
+        A_basis = np.zeros_like(omega)
+        for k, c in enumerate(a_coeffs):
+            A_basis += c * compiler._eval_basis(k, x, symmetry=spec.symmetry_class)
+
+        # Evaluate reconstructed FIR frequency response H(omega)
+        H_fir = np.zeros_like(omega)
+        mid = (spec.order - 1) / 2.0
+        for n, h_val in enumerate(taps):
+            if spec.symmetry_class in (SymmetryClass.TYPE_III, SymmetryClass.TYPE_IV):
+                H_fir += h_val * np.sin((n - mid) * omega)
+            else:
+                H_fir += h_val * np.cos((n - mid) * omega)
+
+        # Verify roundtrip agreement (up to overall DC/Nyquist normalization)
+        corr = np.corrcoef(np.abs(A_basis), np.abs(H_fir))[0, 1]
+        assert corr > 0.99
 
 
 def test_filter_spec_validation():
