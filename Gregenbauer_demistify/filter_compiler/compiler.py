@@ -272,14 +272,24 @@ class GegenbauerFilterCompiler:
             return np.sqrt(np.maximum(0.0, 0.5 * (1.0 - x_arr))) * P_k
         return P_k
 
-    def _eval_asymptotic_basis(self, n: int, omega: np.ndarray) -> np.ndarray:
+    def _eval_asymptotic_basis(self, n: int, omega: np.ndarray, symmetry: SymmetryClass = SymmetryClass.TYPE_I) -> np.ndarray:
         theta = omega
         if self.asymptotic_mode == "bessel":
-            return endpoint_bessel_leading(n, self.lam, theta)
+            phi_asymp = endpoint_bessel_leading(n, self.lam, theta)
         elif self.asymptotic_mode == "wkb":
-            return interior_wkb_approx(n, self.lam, theta)
+            phi_asymp = interior_wkb_approx(n, self.lam, theta)
         else:
-            return composite_matched_approx(n, self.lam, theta)
+            phi_asymp = composite_matched_approx(n, self.lam, theta)
+
+        if symmetry == SymmetryClass.TYPE_I:
+            return phi_asymp
+        elif symmetry == SymmetryClass.TYPE_II:
+            return np.cos(0.5 * omega) * phi_asymp
+        elif symmetry == SymmetryClass.TYPE_III:
+            return np.sin(omega) * phi_asymp
+        elif symmetry == SymmetryClass.TYPE_IV:
+            return np.sin(0.5 * omega) * phi_asymp
+        return phi_asymp
 
     def _build_spectral_target(self, spec: FilterSpec, omega: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         f = omega / (2.0 * np.pi)
@@ -298,18 +308,6 @@ class GegenbauerFilterCompiler:
                 D[trans_mask] = np.cos(0.5 * np.pi * t)
             W[pass_mask], W[stop_mask], W[trans_mask] = 1.0, 10.0, 1.0
 
-        elif spec.kind == "qmf_h1":
-            # Complementary sine-based highpass target for asymmetric QMF
-            pass_mask = f <= wp
-            stop_mask = f >= ws
-            trans_mask = ~(pass_mask | stop_mask)
-            D[pass_mask] = 0.0
-            D[stop_mask] = 1.0
-            if np.any(trans_mask):
-                t = (f[trans_mask] - wp) / (ws - wp)
-                D[trans_mask] = np.sin(0.5 * np.pi * t)
-            # W[pass_mask] is the low-freq stopband, needs high penalty
-            W[pass_mask], W[stop_mask], W[trans_mask] = 10.0, 1.0, 1.0
 
         elif spec.kind == "lowpass":
             pass_mask = f <= wp
@@ -387,7 +385,7 @@ class GegenbauerFilterCompiler:
                 G_mat = np.dot(A_w.T, A_w)
                 a_coeffs, _, _, _ = np.linalg.lstsq(G_mat, b_sys, rcond=None)
                 s_vals = np.linalg.svd(A_w, compute_uv=False)
-                cond_val = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 0 else 1.0
+                cond_val = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 1e-12 else np.inf
                 return a_coeffs, K, cond_val
 
         if self.solver == "spectral_regularized" or mu > 0:
@@ -413,7 +411,7 @@ class GegenbauerFilterCompiler:
             D_sys = np.concatenate([D_w, np.zeros(R_mat.shape[0])])
             a_coeffs, _, _, _ = np.linalg.lstsq(A_sys, D_sys, rcond=None)
             s_vals = np.linalg.svd(A_w, compute_uv=False)
-            cond_val = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 0 else 1.0
+            cond_val = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 1e-12 else np.inf
             return a_coeffs, K, cond_val
 
         omega = np.linspace(0, np.pi, self.grid_samples)
@@ -429,7 +427,7 @@ class GegenbauerFilterCompiler:
         D_w = D * sqrt_W
         a_coeffs, _, _, _ = np.linalg.lstsq(A_w, D_w, rcond=None)
         s_vals = np.linalg.svd(A_w, compute_uv=False)
-        cond_val = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 0 else 1.0
+        cond_val = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 1e-12 else np.inf
 
         return a_coeffs, K, cond_val
 
@@ -583,6 +581,11 @@ class GegenbauerFilterCompiler:
         header.append("};")
         header.append("")
 
+        header.append(f"const int32_t h0_geg_q23[{spec.order}] PROGMEM = {{")
+        header.append("    " + ", ".join(str(int(val)) for val in h0.q23_taps))
+        header.append("};")
+        header.append("")
+
         header.append(f"const int32_t h0_geg_q31[{spec.order}] PROGMEM = {{")
         header.append("    " + ", ".join(str(int(val)) for val in h0.q31_taps))
         header.append("};")
@@ -590,12 +593,24 @@ class GegenbauerFilterCompiler:
 
         if h1 is not None:
             header.append("// Highpass / Complementary Mirror QMF Pair Taps (h1)")
+            header.append(f"const double h1_geg_float64[{spec.order}] = {{")
+            header.append("    " + ", ".join(f"{val:.12e}" for val in h1.float64_taps))
+            header.append("};")
+            header.append("")
             header.append(f"const float h1_geg_float32[{spec.order}] = {{")
             header.append("    " + ", ".join(f"{val:.8e}f" for val in h1.float64_taps))
             header.append("};")
             header.append("")
             header.append(f"const int16_t h1_geg_q15[{spec.order}] PROGMEM = {{")
             header.append("    " + ", ".join(str(int(val)) for val in h1.q15_taps))
+            header.append("};")
+            header.append("")
+            header.append(f"const int32_t h1_geg_q23[{spec.order}] PROGMEM = {{")
+            header.append("    " + ", ".join(str(int(val)) for val in h1.q23_taps))
+            header.append("};")
+            header.append("")
+            header.append(f"const int32_t h1_geg_q31[{spec.order}] PROGMEM = {{")
+            header.append("    " + ", ".join(str(int(val)) for val in h1.q31_taps))
             header.append("};")
             header.append("")
 
@@ -685,8 +700,9 @@ class GegenbauerFilterCompiler:
         if self.asymptotic_mode != "none":
             omega_sample = np.linspace(0.001, np.pi - 0.001, 100)
             n_eval = max(1, K - 1)
-            phi_exact = self._eval_basis(n_eval, np.cos(omega_sample))
-            phi_asymp = self._eval_asymptotic_basis(n_eval, omega_sample)
+            sym = spec.symmetry_class
+            phi_exact = self._eval_basis(n_eval, np.cos(omega_sample), symmetry=sym)
+            phi_asymp = self._eval_asymptotic_basis(n_eval, omega_sample, symmetry=sym)
             asymp_err = float(np.max(np.abs(phi_exact - phi_asymp)))
 
             if asymp_err < 0.05 and self.lam > 0:
@@ -859,13 +875,16 @@ class GegenbauerFilterCompiler:
             g0_taps *= np.sqrt(2) / np.sum(g0_taps)
 
         # 5. Generate Highpass Filters using alternating sign rule
+        # H1(z) = G0(-z) z^-d_g0, G1(z) = (-1)^(delay+1) H0(-z) z^-d_h0
+        delay = (order_h0 + order_g0) // 2
+        g1_sign = -1.0 if delay % 2 == 0 else 1.0
+
         h1_taps = np.array([g0_taps[n] * ((-1)**n) for n in range(len(g0_taps))])[::-1]
-        g1_taps = np.array([-h0_taps[n] * ((-1)**n) for n in range(len(h0_taps))])[::-1]
+        g1_taps = np.array([g1_sign * h0_taps[n] * ((-1)**n) for n in range(len(h0_taps))])[::-1]
 
         # 6. Verify Polyphase Perfect Reconstruction (PR) Condition: H0(z)G0(z) + H1(z)G1(z) = 2 z^-d
         K_fft = 4096
         omega = 2.0 * np.pi * np.arange(K_fft) / float(K_fft)
-        delay = (len(h0_taps) + len(g0_taps)) // 2 - 1
         expected_pr = 2.0 * np.exp(-1j * omega * delay)
 
         H0_f = np.fft.fft(h0_taps, K_fft)
