@@ -149,12 +149,15 @@ class FilterSpec:
             if abs((self.wp + self.ws) - 0.5) > 1e-6:
                 raise ValueError(f"QMF filter pair requires symmetric transition band around fs/4 (wp + ws == 0.5), got wp={self.wp}, ws={self.ws}")
 
-        if self.kind in ("lowpass", "qmf", "asymmetric_qmf") and self.wp >= self.ws:
-            raise ValueError(f"Passband edge wp ({self.wp}) must be < stopband edge ws ({self.ws})")
-        elif self.kind == "highpass" and self.ws >= self.wp:
-            raise ValueError(f"Stopband edge ws ({self.ws}) must be < passband edge wp ({self.wp})")
-        elif self.kind == "bandpass" and not (self.ws < self.wp < self.wp2 < self.ws2):
-            raise ValueError(f"Bandpass frequencies must satisfy ws ({self.ws}) < wp ({self.wp}) < wp2 ({self.wp2}) < ws2 ({self.ws2})")
+        if self.kind in ("lowpass", "qmf", "asymmetric_qmf"):
+            if not (0.0 < self.wp < self.ws < 0.5):
+                raise ValueError(f"Frequency edges must satisfy 0 < wp ({self.wp}) < ws ({self.ws}) < 0.5")
+        elif self.kind == "highpass":
+            if not (0.0 < self.ws < self.wp < 0.5):
+                raise ValueError(f"Frequency edges must satisfy 0 < ws ({self.ws}) < wp ({self.wp}) < 0.5")
+        elif self.kind == "bandpass":
+            if not (0.0 < self.ws < self.wp < self.wp2 < self.ws2 < 0.5):
+                raise ValueError(f"Bandpass frequencies must satisfy 0 < ws ({self.ws}) < wp ({self.wp}) < wp2 ({self.wp2}) < ws2 ({self.ws2}) < 0.5")
 
     @property
     def symmetry_class(self) -> SymmetryClass:
@@ -240,6 +243,8 @@ class GegenbauerFilterCompiler:
     ):
         if lam <= -0.5:
             raise ValueError(f"Lambda parameter must be > -0.5, got {lam}")
+        if basis_terms is not None and basis_terms < 1:
+            raise ValueError(f"basis_terms must be >= 1, got {basis_terms}")
         if mu_reg < 0.0:
             raise ValueError(f"mu_reg must be >= 0.0, got {mu_reg}")
         if reg_power < 0:
@@ -372,7 +377,7 @@ class GegenbauerFilterCompiler:
 
         return D, W
 
-    def solve_coefficients(self, spec: FilterSpec) -> Tuple[np.ndarray, int, float]:
+    def solve_coefficients(self, spec: FilterSpec) -> Tuple[np.ndarray, int, float, float]:
         N = spec.order
         M = self._independent_dimension(spec)
         if self.basis_terms is not None:
