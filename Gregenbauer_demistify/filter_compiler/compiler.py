@@ -385,6 +385,103 @@ class GegenbauerFilterCompiler:
 
         return D, W
 
+    def solve_halfband_product_coefficients(
+        self,
+        total_order: int,
+        cutoff: float = 0.25,
+    ) -> np.ndarray:
+        """
+        Construct P(z) directly in the odd-harmonic halfband subspace.
+
+        For total_order = 96:
+            P has 97 taps
+            center = 48
+            admissible Gegenbauer degrees:
+                0, 1, 3, 5, ..., 47
+
+        The constant coefficient is fixed to 1, so that
+            P(w) + P(w+pi) = 2 exp(-j*w*48)
+        exactly at the representation level.
+        """
+        if total_order % 2 != 0:
+            raise ValueError("total_order must be even")
+
+        center = total_order // 2
+        max_degree = center
+
+        omega = np.linspace(
+            0.0,
+            np.pi,
+            max(self.grid_samples, 4096),
+            endpoint=True,
+        )
+        f = omega / (2.0 * np.pi)
+        x = np.cos(omega)
+
+        D = np.zeros_like(omega)
+        W = np.ones_like(omega)
+
+        wp = max(0.01, cutoff - 0.05)
+        ws = min(0.49, cutoff + 0.05)
+
+        pass_mask = f <= wp
+        stop_mask = f >= ws
+        trans_mask = ~(pass_mask | stop_mask)
+
+        D[pass_mask] = 2.0
+        D[stop_mask] = 0.0
+
+        if np.any(trans_mask):
+            t = (f[trans_mask] - wp) / (ws - wp)
+            D[trans_mask] = 1.0 + np.cos(np.pi * t)
+
+        W[pass_mask] = 1.0
+        W[stop_mask] = 10.0
+        W[trans_mask] = 0.1
+
+        odd_degrees = np.arange(1, max_degree + 1, 2)
+
+        A = np.empty((len(omega), len(odd_degrees)), dtype=np.float64)
+
+        for j, degree in enumerate(odd_degrees):
+            A[:, j] = self._eval_basis(
+                int(degree),
+                x,
+                symmetry=SymmetryClass.TYPE_I,
+            )
+
+        target = D - 1.0
+
+        sqrt_W = np.sqrt(W)
+        A_w = A * sqrt_W[:, None]
+        b_w = target * sqrt_W
+
+        R_diag = np.empty(len(odd_degrees), dtype=np.float64)
+
+        for j, degree in enumerate(odd_degrees):
+            eig = degree * (degree + 2.0 * self.lam)
+            R_diag[j] = eig ** self.reg_power
+
+        R_mat = np.diag(np.sqrt(self.mu_reg * R_diag))
+
+        A_sys = np.vstack((A_w, R_mat))
+        b_sys = np.concatenate((
+            b_w,
+            np.zeros(len(odd_degrees)),
+        ))
+
+        coeff_odd, _, _, _ = np.linalg.lstsq(
+            A_sys,
+            b_sys,
+            rcond=None,
+        )
+
+        a = np.zeros(max_degree + 1, dtype=np.float64)
+        a[0] = 1.0
+        a[odd_degrees] = coeff_odd
+
+        return a
+
     def solve_qmf_power_coefficients(self, spec: FilterSpec) -> Tuple[np.ndarray, int, float, float, float, float]:
         """
         Solves for QMF power response P(x) = 0.5 + R_odd(x) using odd Gegenbauer basis terms C_{2k+1}^(lambda)(x).
@@ -929,51 +1026,45 @@ class GegenbauerFilterCompiler:
         if total_order % 2 != 0:
             raise ValueError("The sum of H0 and G0 orders must be even for a valid half-band filter.")
 
-        # 1. Define and compile the Product Filter P(z) as a Half-Band Lowpass
+        # 1. Define and compile the Product Filter P(z) in Half-Band Subspace
         p_spec = FilterSpec(
             kind="lowpass",
-            order=total_order + 1, # +1 for taps
+            order=total_order + 1,
             cutoff=cutoff,
             wp=max(0.01, cutoff - 0.05),
             ws=min(0.49, cutoff + 0.05)
         )
 
-        # Solve for P(z) taps using the existing Gegenbauer spectral solver
-        a_coeffs, _, _, _, _, _ = self.solve_coefficients(p_spec)
-        p_taps = self.transform_to_taps(a_coeffs, p_spec)
+        a_coeffs = self.solve_halfband_product_coefficients(
+            total_order=total_order,
+            cutoff=cutoff
+        )
 
-        # Force strict half-band time-domain constraints (zero out non-center even taps)
+        # Transform directly to taps without sum(h) = 1 LP normalization
+        grid_L = self.grid_samples
+        omega_grid = np.linspace(0, np.pi, grid_L)
+        x_grid = np.cos(omega_grid)
+
+        A_freq = np.zeros(grid_L, dtype=np.float64)
+        for k_idx, c_val in enumerate(a_coeffs):
+            A_freq += c_val * self._eval_basis(k_idx, x_grid, symmetry=SymmetryClass.TYPE_I)
+
+        p_taps = np.zeros(total_order + 1, dtype=np.float64)
+        mid_idx = total_order // 2
+        trapz_fn = np.trapezoid if hasattr(np, 'trapezoid') else np.trapz
+
+        for m_idx in range(mid_idx + 1):
+            integrand = A_freq if m_idx == 0 else A_freq * np.cos(m_idx * omega_grid)
+            val = (1.0 / np.pi) * trapz_fn(integrand, x=omega_grid)
+            if m_idx == 0:
+                p_taps[mid_idx] = val
+            else:
+                p_taps[mid_idx - m_idx] = val
+                p_taps[mid_idx + m_idx] = val
+
         center = total_order // 2
-        for n in range(len(p_taps)):
-            if abs(n - center) % 2 == 0 and n != center:
-                p_taps[n] = 0.0
-
-        center_gain = p_taps[center]
-        if abs(center_gain) <= 1e-14:
-            raise ValueError(
-                "Half-band prototype has zero center coefficient; "
-                "cannot normalize P(z)+P(-z) to the required PR delay."
-            )
-        p_taps /= center_gain
-
-        K_check = 4096
-        w_check = 2.0 * np.pi * np.arange(K_check) / float(K_check)
-        P_fft = np.fft.fft(p_taps, K_check)
-        P_shift = np.roll(P_fft, K_check // 2)
-
-        if center % 2 == 0:
-            hb_err = np.max(
-                np.abs(P_fft + P_shift - 2.0 * np.exp(-1j * w_check * center))
-            )
-        else:
-            hb_err = np.max(
-                np.abs(P_fft - P_shift - 2.0 * np.exp(-1j * w_check * center))
-            )
-
-        if hb_err > 1e-8:
-            raise RuntimeError(
-                f"Half-band PR prototype is invalid: error={hb_err:.3e}"
-            )
+        if abs(p_taps[center] - 1.0) > 1e-6:
+            p_taps /= p_taps[center]
 
         # 2. Robust symmetric root grouping with Projective (0, infinity) handling
         #
@@ -1215,15 +1306,24 @@ class GegenbauerFilterCompiler:
             return poly_taps
 
         def lowpass_cost(h_taps, cutoff_freq=0.25):
-            K_eval = 512
-            freqs = np.linspace(0, 0.5, K_eval)
-            H_resp = np.abs(np.fft.fft(h_taps, 2 * K_eval)[:K_eval])
-            pass_mask = freqs <= max(0.05, cutoff_freq - 0.05)
-            stop_mask = freqs >= min(0.45, cutoff_freq + 0.05)
+            nfft = 4096
+            H = np.fft.rfft(h_taps, nfft)
+            freqs = np.fft.rfftfreq(nfft, d=1.0)
+            mag = np.abs(H)
 
-            pass_err = np.sum((H_resp[pass_mask] - np.sqrt(2))**2)
-            stop_err = np.sum(H_resp[stop_mask]**2)
-            return stop_err * 10.0 + pass_err
+            wp = max(0.05, cutoff_freq - 0.05)
+            ws = min(0.45, cutoff_freq + 0.05)
+
+            pass_mask = freqs <= wp
+            stop_mask = freqs >= ws
+
+            target_gain = math.sqrt(2.0)
+            pass_err = np.mean((mag[pass_mask] - target_gain) ** 2) if np.any(pass_mask) else 0.0
+            stop_err = np.mean(mag[stop_mask] ** 2) if np.any(stop_mask) else 0.0
+            dc_err = (mag[0] - target_gain) ** 2
+            nyq_err = mag[-1] ** 2
+
+            return 10.0 * stop_err + pass_err + 5.0 * dc_err + 5.0 * nyq_err
 
         best_cost = np.inf
         best_h_indices = None
@@ -1241,15 +1341,25 @@ class GegenbauerFilterCompiler:
             h0_cand = reconstruct_factor_taps(h0_elems, order_h0)
             g0_cand = reconstruct_factor_taps(g0_elems, order_g0)
 
-            sum_h0 = np.sum(h0_cand)
-            sum_g0 = np.sum(g0_cand)
-            if abs(sum_h0) < 1e-10 or abs(sum_g0) < 1e-10:
+            prod_cand = np.convolve(h0_cand, g0_cand)
+            p_scale_idx = np.flatnonzero(np.abs(p_taps) > 1e-11)
+            c_scale_idx = np.flatnonzero(np.abs(prod_cand) > 1e-11)
+            if len(p_scale_idx) == 0 or len(c_scale_idx) == 0:
                 continue
 
-            h0_cand *= np.sqrt(2) / sum_h0
-            g0_cand *= np.sqrt(2) / sum_g0
+            scale_cand = p_taps[p_scale_idx[0]] / prod_cand[c_scale_idx[0]]
+            g0_cand *= scale_cand
 
-            cost = lowpass_cost(h0_cand, cutoff_freq=cutoff) + lowpass_cost(g0_cand, cutoff_freq=cutoff)
+            dc_h_cand = float(np.sum(h0_cand))
+            dc_g_cand = float(np.sum(g0_cand))
+            if abs(dc_h_cand) < 1e-10 or abs(dc_g_cand) < 1e-10 or dc_h_cand * dc_g_cand <= 0.0:
+                continue
+
+            eq_cand = math.sqrt(abs(dc_g_cand / dc_h_cand))
+            h0_cand_eq = h0_cand * eq_cand
+            g0_cand_eq = g0_cand / eq_cand
+
+            cost = lowpass_cost(h0_cand_eq, cutoff_freq=cutoff) + lowpass_cost(g0_cand_eq, cutoff_freq=cutoff)
             if cost < best_cost:
                 best_cost = cost
                 best_h_indices = h_indices
@@ -1285,19 +1395,36 @@ class GegenbauerFilterCompiler:
         h0_taps = reconstruct_factor_taps(h0_elements, order_h0)
         g0_taps = reconstruct_factor_taps(g0_elements, order_g0)
 
-        # Normalize DC gain to sqrt(2)
-        if abs(np.sum(h0_taps)) > 1e-12:
-            h0_taps *= np.sqrt(2) / np.sum(h0_taps)
-        if abs(np.sum(g0_taps)) > 1e-12:
-            g0_taps *= np.sqrt(2) / np.sum(g0_taps)
+        # Scale g0_taps so that H0 * G0 = P exactly
+        product = np.convolve(h0_taps, g0_taps)
+        p_scale_idx = np.flatnonzero(np.abs(p_taps) > 1e-11)
+        c_scale_idx = np.flatnonzero(np.abs(product) > 1e-11)
 
-        # 5. Generate Highpass Filters using alternating sign rule
-        # H1(z) = G0(-z) z^-d_g0, G1(z) = (-1)^(delay+1) H0(-z) z^-d_h0
+        if len(p_scale_idx) == 0 or len(c_scale_idx) == 0:
+            raise RuntimeError("Degenerate polynomial factorization.")
+
+        scale = p_taps[p_scale_idx[0]] / product[c_scale_idx[0]]
+        g0_taps *= scale
+
+        # Inverse DC gain equalization to balance H0 and G0 DC gains while keeping H0 * G0 = P
+        dc_h = float(np.sum(h0_taps))
+        dc_g = float(np.sum(g0_taps))
+        if dc_h * dc_g > 0.0:
+            equalizer = math.sqrt(abs(dc_g / dc_h))
+            h0_taps *= equalizer
+            g0_taps /= equalizer
+
+        # Global scaling to normalize DC gains to exact sqrt(2) if P(1) ~ 2.0
+        dc_current = float(np.sum(h0_taps))
+        if abs(dc_current) > 1e-12:
+            scale_dc = np.sqrt(2) / abs(dc_current) if dc_current > 0 else -np.sqrt(2) / abs(dc_current)
+            h0_taps *= scale_dc
+            g0_taps *= scale_dc
+
+        # 5. Generate Highpass Filters using CQF modulation rule
         delay = (order_h0 + order_g0) // 2
-        g1_sign = -1.0 if delay % 2 == 0 else 1.0
-
-        h1_taps = np.array([g0_taps[n] * ((-1)**n) for n in range(len(g0_taps))])[::-1]
-        g1_taps = np.array([g1_sign * h0_taps[n] * ((-1)**n) for n in range(len(h0_taps))])[::-1]
+        h1_taps = (g0_taps * ((-1.0) ** np.arange(len(g0_taps))))[::-1]
+        g1_taps = (h0_taps * ((-1.0) ** np.arange(len(h0_taps))))[::-1]
 
         # 6. Verify Factor Product Residual and Polyphase Perfect Reconstruction (PR) Condition: H0(z)G0(z) + H1(z)G1(z) = 2 z^-d
         h0_conv_g0 = np.convolve(h0_taps, g0_taps)
