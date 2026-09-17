@@ -953,32 +953,57 @@ class GegenbauerFilterCompiler:
         if abs(sum_p) > 1e-12:
             p_taps *= (2.0 / sum_p)
 
-        # 2. Robust symmetric root grouping
+        # 2. Robust symmetric root grouping with Projective (0, infinity) handling
         #
-        # A real linear-phase factor needs conjugate pairs.
-        # Symmetric FIR factors additionally have reciprocal-conjugate
-        # structure.  Do NOT classify roots by a hard unit-circle split:
-        # numerical roots may lie just inside/outside |z| = 1.
-        #
-        # Groups are therefore constructed as:
-        #   • real root at +/-1              -> singleton
-        #   • real reciprocal pair           -> 2 roots
-        #   • unit-circle conjugate pair     -> 2 roots
-        #   • off-circle reciprocal quartet  -> 4 roots
+        # Strip leading and trailing zero coefficients resulting from half-band zeroing.
+        # Leading zeros represent roots at infinity (degree reduction in z);
+        # Trailing zeros represent roots at z = 0.
+        leading_zeros = 0
+        for v in p_taps:
+            if abs(v) <= 1e-12:
+                leading_zeros += 1
+            else:
+                break
 
-        roots = np.asarray(np.roots(p_taps), dtype=np.complex128)
+        trailing_zeros = 0
+        for v in p_taps[::-1]:
+            if abs(v) <= 1e-12:
+                trailing_zeros += 1
+            else:
+                break
 
-        if len(roots) != total_order:
+        p_trimmed = p_taps[leading_zeros : len(p_taps) - trailing_zeros] if (leading_zeros + trailing_zeros) < len(p_taps) else p_taps
+        roots = np.asarray(np.roots(p_trimmed), dtype=np.complex128)
+
+        finite_degree = len(p_trimmed) - 1
+        if len(roots) != finite_degree:
             raise RuntimeError(
                 f"Spectral factorization returned {len(roots)} roots "
-                f"for polynomial degree {total_order}."
+                f"for trimmed polynomial degree {finite_degree}."
             )
 
         root_tol = 1e-5
         real_tol = 1e-7
 
+        # Projective reciprocal pairs (0, infinity)
+        # Each leading zero (root at inf) pairs with a trailing zero (root at 0) as a 2-root group.
+        # If un-paired, single zero or inf roots act as singletons or delay factors.
+        projective_pairs = min(leading_zeros, trailing_zeros)
+        extra_leading = leading_zeros - projective_pairs
+        extra_trailing = trailing_zeros - projective_pairs
+
+        # Represent projective groups using dummy marker objects/dicts or special group structures
+        # Group element: ('FINITE', complex_val) or ('PROJECTIVE_ZERO',) or ('PROJECTIVE_INF',)
         unused = set(range(len(roots)))
         atomic_groups = []
+
+        # Represent projective 2-root pairs (0, inf) as atomic groups of size 2
+        for _ in range(projective_pairs):
+            atomic_groups.append([('PROJECTIVE_ZERO',), ('PROJECTIVE_INF',)])
+        for _ in range(extra_trailing):
+            atomic_groups.append([('PROJECTIVE_ZERO',)])
+        for _ in range(extra_leading):
+            atomic_groups.append([('PROJECTIVE_INF',)])
 
         def rel_dist(a: complex, b: complex) -> float:
             scale = max(1.0, abs(a), abs(b))
@@ -1111,10 +1136,8 @@ class GegenbauerFilterCompiler:
             used_groups.add(gi)
             used_groups.add(j)
 
-        atomic_groups = [
-            [roots[i] for i in group]
-            for group in reciprocal_groups
-        ]
+        for group in reciprocal_groups:
+            atomic_groups.append([('FINITE', roots[i]) for i in group])
 
         # Sanity check: every root must belong to exactly one group.
         grouped_count = sum(len(g) for g in atomic_groups)
@@ -1164,28 +1187,49 @@ class GegenbauerFilterCompiler:
 
         h_group_indices = set(dp[target])
 
-        h0_roots = []
-        g0_roots = []
+        h0_elements = []
+        g0_elements = []
 
         for gi, group in enumerate(atomic_groups):
             if gi in h_group_indices:
-                h0_roots.extend(group)
+                h0_elements.extend(group)
             else:
-                g0_roots.extend(group)
+                g0_elements.extend(group)
 
         if (
-            len(h0_roots) != order_h0
-            or len(g0_roots) != order_g0
+            len(h0_elements) != order_h0
+            or len(g0_elements) != order_g0
         ):
             raise RuntimeError(
                 "Internal root partition inconsistency: "
-                f"H0={len(h0_roots)}/{order_h0}, "
-                f"G0={len(g0_roots)}/{order_g0}."
+                f"H0={len(h0_elements)}/{order_h0}, "
+                f"G0={len(g0_elements)}/{order_g0}."
             )
 
-        # 4. Reconstruct Filter Taps from Roots
-        h0_taps = np.poly(h0_roots).real if len(h0_roots) > 0 else np.array([1.0])
-        g0_taps = np.poly(g0_roots).real if len(g0_roots) > 0 else np.array([1.0])
+        # 4. Reconstruct Filter Taps from Finite and Projective Roots
+        def reconstruct_factor_taps(elements, nominal_order):
+            finite_roots = [elem[1] for elem in elements if elem[0] == 'FINITE']
+            zero_count = sum(1 for elem in elements if elem[0] == 'PROJECTIVE_ZERO')
+            inf_count = sum(1 for elem in elements if elem[0] == 'PROJECTIVE_INF')
+
+            poly_taps = np.poly(finite_roots).real if len(finite_roots) > 0 else np.array([1.0])
+
+            # Apply trailing zero factor z^-zero_count (append zero_count zeros to poly_taps)
+            if zero_count > 0:
+                poly_taps = np.pad(poly_taps, (0, zero_count), mode='constant')
+
+            # Apply leading zero factor (roots at infinity reduce degree/lead with zero)
+            if inf_count > 0:
+                poly_taps = np.pad(poly_taps, (inf_count, 0), mode='constant')
+
+            # Ensure final tap length matches nominal_order + 1
+            if len(poly_taps) < nominal_order + 1:
+                poly_taps = np.pad(poly_taps, (0, nominal_order + 1 - len(poly_taps)), mode='constant')
+
+            return poly_taps
+
+        h0_taps = reconstruct_factor_taps(h0_elements, order_h0)
+        g0_taps = reconstruct_factor_taps(g0_elements, order_g0)
 
         # Normalize DC gain to sqrt(2)
         if abs(np.sum(h0_taps)) > 1e-12:
