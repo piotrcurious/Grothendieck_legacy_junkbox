@@ -256,11 +256,11 @@ def test_layer_viii_provenance_and_truth_status():
     assert res_ac.payload.truth_status == TruthStatus.ANALYTIC_CONTINUATION
 
     # Matching status certification
-    assert res_phys.payload.matching_status == MatchingStatus.ANALYTICALLY_CERTIFIED_MATCHING
+    assert res_phys.payload.matching_status == MatchingStatus.SAMPLED_ASYMPTOTIC_MATCHING
 
     # Header macro checks
     assert '#define GEG_TRUTH_STATUS "PHYSICAL_SPHERE_GEOMETRY"' in res_phys.header_code
-    assert '#define GEG_MATCHING_STATUS "ANALYTICALLY_CERTIFIED_MATCHING"' in res_phys.header_code
+    assert '#define GEG_MATCHING_STATUS "SAMPLED_ASYMPTOTIC_MATCHING"' in res_phys.header_code
     assert 'GEG_E_TOTAL_BOUND' in res_phys.header_code
 
 

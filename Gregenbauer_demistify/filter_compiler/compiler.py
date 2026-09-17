@@ -133,6 +133,10 @@ class FilterSpec:
             if self.ws is None:
                 self.ws = max(0.01, self.cutoff - 0.05) if self.kind == "highpass" else min(0.49, self.cutoff + 0.05)
 
+        if self.kind == "qmf":
+            if abs((self.wp + self.ws) - 0.5) > 1e-6:
+                raise ValueError(f"QMF filter pair requires symmetric transition band around fs/4 (wp + ws == 0.5), got wp={self.wp}, ws={self.ws}")
+
         if self.kind in ("lowpass", "qmf") and self.wp >= self.ws:
             raise ValueError(f"Passband edge wp ({self.wp}) must be < stopband edge ws ({self.ws})")
         elif self.kind == "highpass" and self.ws >= self.wp:
@@ -344,35 +348,47 @@ class GegenbauerFilterCompiler:
 
         return D, W
 
-    def solve_coefficients(self, spec: FilterSpec) -> Tuple[np.ndarray, int]:
+    def solve_coefficients(self, spec: FilterSpec) -> Tuple[np.ndarray, int, float]:
         N = spec.order
         M = (N + 1) // 2
         if self.basis_terms is not None:
             K = self.basis_terms
         else:
-            if spec.kind in ("qmf", "qmf_h1"):
+            if spec.kind == "qmf":
                 K = min(M, max(16, N // 2))
             else:
                 K = max(4, int(np.sqrt(N)) + 2)
         K = min(K, M)
 
         mu = self.mu_reg
-        if spec.kind in ("qmf", "qmf_h1") and self.mu_reg == 1e-4:
-            mu = 1e-6
-
         sym = spec.symmetry_class
+
         if self.solver == "quadrature":
             nodes, weights = gauss_gegenbauer_quadrature(self.grid_samples, self.lam)
             omega_q = np.arccos(nodes)
             D_q, _ = self._build_spectral_target(spec, omega_q)
 
-            a_coeffs = np.zeros(K)
-            for k in range(K):
-                phi_k = self._eval_basis(k, nodes, symmetry=sym)
-                c1 = float(c_n_1_val(k, self.lam))
-                norm_sq = phi_norm_squared(k, self.lam) / (c1 ** 2) if self.basis_type == "normalized" else phi_norm_squared(k, self.lam)
-                a_coeffs[k] = np.sum(D_q * phi_k * weights) / norm_sq
-            return a_coeffs, K
+            if sym == SymmetryClass.TYPE_I:
+                a_coeffs = np.zeros(K)
+                for k in range(K):
+                    phi_k = self._eval_basis(k, nodes, symmetry=sym)
+                    c1 = float(c_n_1_val(k, self.lam))
+                    norm_sq = phi_norm_squared(k, self.lam) / (c1 ** 2) if self.basis_type == "normalized" else phi_norm_squared(k, self.lam)
+                    a_coeffs[k] = np.sum(D_q * phi_k * weights) / norm_sq
+                return a_coeffs, K, 1.0
+            else:
+                # For non-Type-I wrapped bases, compute the exact Gram matrix G_ij = sum_q w_q B_i(x_q) B_j(x_q)
+                A = np.zeros((self.grid_samples, K))
+                for k in range(K):
+                    A[:, k] = self._eval_basis(k, nodes, symmetry=sym)
+                sqrt_w = np.sqrt(weights)
+                A_w = A * sqrt_w[:, np.newaxis]
+                b_sys = np.dot(A_w.T, D_q * sqrt_w)
+                G_mat = np.dot(A_w.T, A_w)
+                a_coeffs, _, _, _ = np.linalg.lstsq(G_mat, b_sys, rcond=None)
+                s_vals = np.linalg.svd(A_w, compute_uv=False)
+                cond_val = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 0 else 1.0
+                return a_coeffs, K, cond_val
 
         if self.solver == "spectral_regularized" or mu > 0:
             nodes, weights = gauss_gegenbauer_quadrature(self.grid_samples, self.lam)
@@ -397,8 +413,8 @@ class GegenbauerFilterCompiler:
             D_sys = np.concatenate([D_w, np.zeros(R_mat.shape[0])])
             a_coeffs, _, _, _ = np.linalg.lstsq(A_sys, D_sys, rcond=None)
             s_vals = np.linalg.svd(A_w, compute_uv=False)
-            self.last_cond = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 0 else 1.0
-            return a_coeffs, K
+            cond_val = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 0 else 1.0
+            return a_coeffs, K, cond_val
 
         omega = np.linspace(0, np.pi, self.grid_samples)
         x = np.cos(omega)
@@ -412,8 +428,10 @@ class GegenbauerFilterCompiler:
         A_w = A * sqrt_W[:, np.newaxis]
         D_w = D * sqrt_W
         a_coeffs, _, _, _ = np.linalg.lstsq(A_w, D_w, rcond=None)
+        s_vals = np.linalg.svd(A_w, compute_uv=False)
+        cond_val = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 0 else 1.0
 
-        return a_coeffs, K
+        return a_coeffs, K, cond_val
 
     def transform_to_taps(self, a_coeffs: np.ndarray, spec: FilterSpec) -> np.ndarray:
         N = spec.order
@@ -591,7 +609,7 @@ class GegenbauerFilterCompiler:
     def compile(self, spec: FilterSpec) -> FilterResult:
         truth_status = determine_truth_status(self.lam)
 
-        a_coeffs, K = self.solve_coefficients(spec)
+        a_coeffs, K, cond_val = self.solve_coefficients(spec)
         h0_float = self.transform_to_taps(a_coeffs, spec)
         h0_quant = self.quantize_taps(h0_float)
 
@@ -600,7 +618,24 @@ class GegenbauerFilterCompiler:
             # Classic CQF/QMF pair construction: derive H1 directly via CQF modulation h1[n] = (-1)^n * h0[N-1-n]
             sign_pattern = np.array([(-1.0)**n for n in range(spec.order)])
             h1_float = sign_pattern * h0_float[::-1]
-            h1_quant = self.quantize_taps(h1_float)
+
+            # Derive fixed-point H1 taps directly from H0 fixed-point taps to preserve exact CQF relation in integer domain
+            q15_sign = np.array([(-1)**n for n in range(spec.order)], dtype=np.int32)
+            q31_sign = np.array([(-1)**n for n in range(spec.order)], dtype=np.int64)
+
+            h1_q15 = (q15_sign * h0_quant.q15_taps[::-1]).astype(np.int32)
+            h1_q23 = (q15_sign * h0_quant.q23_taps[::-1]).astype(np.int32)
+            h1_q31 = (q31_sign * h0_quant.q31_taps[::-1]).astype(np.int64)
+
+            h1_quant = QuantizedTaps(
+                float64_taps=h1_float,
+                q15_taps=h1_q15,
+                q23_taps=h1_q23,
+                q31_taps=h1_q31,
+                q15_scale=h0_quant.q15_scale,
+                q23_scale=h0_quant.q23_scale,
+                q31_scale=h0_quant.q31_scale
+            )
 
         K_fft = max(4096, 1 << (math.ceil(math.log2(spec.order)) + 3))
 
@@ -654,10 +689,9 @@ class GegenbauerFilterCompiler:
             asymp_err = float(np.max(np.abs(phi_exact - phi_asymp)))
 
             if asymp_err < 0.05 and self.lam > 0:
-                matching_status = MatchingStatus.ANALYTICALLY_CERTIFIED_MATCHING
+                matching_status = MatchingStatus.SAMPLED_ASYMPTOTIC_MATCHING
 
         e_arithmetic = float(np.max(np.abs(h0_quant.float64_taps - h0_quant.q15_taps / h0_quant.q15_scale)))
-        cond_val = getattr(self, 'last_cond', 1.0)
         provenance = ErrorBoundProvenance(
             e_analytic=asymp_err,
             e_arithmetic=e_arithmetic,
@@ -665,7 +699,7 @@ class GegenbauerFilterCompiler:
             e_implementation=0.0
         )
 
-        basis_evaluation_certified = (asymp_err < 0.05)
+        basis_evaluation_certified = (self.asymptotic_mode != "none" and asymp_err < 0.05)
         pass_ripple_thresh = spec.passband_ripple_db * 3.0 if spec.kind == "qmf" else spec.passband_ripple_db * 2.0
         prototype_fir_certified = (
             pass_ripple <= pass_ripple_thresh and
@@ -746,7 +780,7 @@ class GegenbauerFilterCompiler:
         )
 
         # Solve for P(z) taps using the existing Gegenbauer spectral solver
-        a_coeffs, _ = self.solve_coefficients(p_spec)
+        a_coeffs, _, _ = self.solve_coefficients(p_spec)
         p_taps = self.transform_to_taps(a_coeffs, p_spec)
 
         # Force strict half-band time-domain constraints (zero out non-center even taps)
@@ -831,12 +865,17 @@ class GegenbauerFilterCompiler:
 
         # 6. Verify Polyphase Perfect Reconstruction (PR) Condition: H0(z)G0(z) + H1(z)G1(z) = 2 z^-d
         K_fft = 4096
+        omega = 2.0 * np.pi * np.arange(K_fft) / float(K_fft)
+        delay = (len(h0_taps) + len(g0_taps)) // 2 - 1
+        expected_pr = 2.0 * np.exp(-1j * omega * delay)
+
         H0_f = np.fft.fft(h0_taps, K_fft)
         G0_f = np.fft.fft(g0_taps, K_fft)
         H1_f = np.fft.fft(h1_taps, K_fft)
         G1_f = np.fft.fft(g1_taps, K_fft)
-        pr_response = np.abs(H0_f * G0_f + H1_f * G1_f)
-        pr_error = float(np.max(np.abs(pr_response - 2.0)))
+
+        pr_complex = H0_f * G0_f + H1_f * G1_f
+        pr_error = float(np.max(np.abs(pr_complex - expected_pr)))
 
         return {
             "H0": self.quantize_taps(h0_taps), # Analysis Lowpass
