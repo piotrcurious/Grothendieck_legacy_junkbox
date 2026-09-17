@@ -407,8 +407,12 @@ class GegenbauerFilterCompiler:
                 A = np.zeros((self.grid_samples, K))
                 for k in range(K):
                     A[:, k] = self._eval_basis(k, nodes, symmetry=sym)
-                res_norm = float(np.linalg.norm(A @ a_coeffs - D_q) / max(np.linalg.norm(D_q), 1e-15))
-                return a_coeffs, K, 1.0, res_norm
+                sqrt_w = np.sqrt(weights)
+                A_w = A * sqrt_w[:, np.newaxis]
+                s_vals = np.linalg.svd(A_w, compute_uv=False)
+                cond_val = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 1e-12 else np.inf
+                res_norm = float(np.linalg.norm(sqrt_w * (A @ a_coeffs - D_q)) / max(np.linalg.norm(sqrt_w * D_q), 1e-15))
+                return a_coeffs, K, cond_val, res_norm
             else:
                 # For non-Type-I wrapped bases, compute the exact Gram matrix G_ij = sum_q w_q B_i(x_q) B_j(x_q)
                 A = np.zeros((self.grid_samples, K))
@@ -691,8 +695,8 @@ class GegenbauerFilterCompiler:
         K_fft = max(4096, 1 << (math.ceil(math.log2(spec.order)) + 3))
 
         H0 = np.fft.fft(h0_float, K_fft)
-        freq_grid = np.arange(K_fft // 2) / float(K_fft)
-        H0_db = 20 * np.log10(np.maximum(1e-12, np.abs(H0[:K_fft // 2])))
+        freq_grid = np.arange(K_fft // 2 + 1) / float(K_fft)
+        H0_db = 20 * np.log10(np.maximum(1e-12, np.abs(H0[:K_fft // 2 + 1])))
 
         if spec.kind in ("lowpass", "qmf", "asymmetric_qmf"):
             pass_idx = freq_grid <= spec.wp
@@ -713,7 +717,7 @@ class GegenbauerFilterCompiler:
         qmf_alias_db = 0.0
         if spec.kind in ("qmf", "asymmetric_qmf") and h1_quant is not None:
             H1 = np.fft.fft(h1_quant.float64_taps, K_fft)
-            H1_db = 20 * np.log10(np.maximum(1e-12, np.abs(H1[:K_fft // 2])))
+            H1_db = 20 * np.log10(np.maximum(1e-12, np.abs(H1[:K_fft // 2 + 1])))
 
             # For CQF/QMF, H1's transition mirror bounds are f >= 0.5 - wp (passband) and f <= 0.5 - ws (stopband)
             h1_pass_edge = 0.5 - spec.wp
@@ -739,8 +743,8 @@ class GegenbauerFilterCompiler:
                 H1_k = np.fft.fft(h1_arr, K_fft)
                 pow_comp_k = np.abs(H0_k)**2 + np.abs(H1_k)**2
                 alias_k = np.abs(qmf_alias_transfer(H0_k, H1_k))
-                qmf_pow_db_list.append(float(np.max(np.abs(10 * np.log10(np.maximum(1e-12, pow_comp_k[:K_fft // 2]))))))
-                qmf_alias_db_list.append(float(np.max(20 * np.log10(np.maximum(1e-12, alias_k[:K_fft // 2])))))
+                qmf_pow_db_list.append(float(np.max(np.abs(10 * np.log10(np.maximum(1e-12, pow_comp_k[:K_fft // 2 + 1]))))))
+                qmf_alias_db_list.append(float(np.max(20 * np.log10(np.maximum(1e-12, alias_k[:K_fft // 2 + 1])))))
 
             qmf_pow_db = max(qmf_pow_db_list)
             qmf_alias_db = max(qmf_alias_db_list)
@@ -821,7 +825,7 @@ class GegenbauerFilterCompiler:
             h1_taps=h1_quant,
             freq_grid=freq_grid,
             H0_response=H0_db,
-            H1_response=20 * np.log10(np.maximum(1e-12, np.abs(np.fft.fft(h1_quant.float64_taps, K_fft)[:K_fft // 2]))) if h1_quant else None,
+            H1_response=20 * np.log10(np.maximum(1e-12, np.abs(np.fft.fft(h1_quant.float64_taps, K_fft)[:K_fft // 2 + 1]))) if h1_quant else None,
             passband_ripple_actual=float(pass_ripple),
             stopband_atten_actual=float(stop_atten),
             qmf_power_complementarity_max_db=qmf_pow_db,
