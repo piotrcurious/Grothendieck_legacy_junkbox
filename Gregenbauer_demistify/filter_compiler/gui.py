@@ -27,12 +27,80 @@ PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
+from dataclasses import dataclass
 from filter_compiler.compiler import (
     GegenbauerFilterCompiler,
     FilterSpec,
     FilterResult,
+    QuantizedTaps,
     PrecisionType
 )
+
+
+def generate_biorthogonal_header(pair_dict: dict, order_h0: int, order_g0: int, cutoff: float, lam: float, sr: int) -> str:
+    h0 = pair_dict["H0"]
+    h1 = pair_dict["H1"]
+    g0 = pair_dict["G0"]
+    g1 = pair_dict["G1"]
+    p_res = pair_dict["product_residual"]
+    pr_err = pair_dict["pr_error"]
+
+    lines = [
+        "// Auto-generated Gegenbauer Biorthogonal Filter Bank Coefficients Header",
+        f"// Target Specification: BIORTHOGONAL | Order H0 = {order_h0} | Order G0 = {order_g0} | Cutoff = {cutoff} fs",
+        f"// Performance: Product Residual = {p_res:.6e} | PR Error = {pr_err:.6e}",
+        "",
+        "#ifndef GEGENBAUER_BIORTHOGONAL_FILTER_COEFFS_H",
+        "#define GEGENBAUER_BIORTHOGONAL_FILTER_COEFFS_H",
+        "",
+        "#include <stdint.h>",
+        f"#define GEG_ORDER_H0 {order_h0}",
+        f"#define GEG_ORDER_G0 {order_g0}",
+        f"#define GEG_CUTOFF {cutoff}f",
+        f"#define GEG_LAMBDA {lam}f",
+        f"#define GEG_PRODUCT_RESIDUAL {p_res}f",
+        f"#define GEG_PR_ERROR {pr_err}f",
+        f"#define GEG_SAMPLING_RATE {sr}",
+        "",
+        f"static const double h0_geg_float64[{len(h0.float64_taps)}] = {{ " + ", ".join(f"{val:.12e}" for val in h0.float64_taps) + " };",
+        f"static const double h1_geg_float64[{len(h1.float64_taps)}] = {{ " + ", ".join(f"{val:.12e}" for val in h1.float64_taps) + " };",
+        f"static const double g0_geg_float64[{len(g0.float64_taps)}] = {{ " + ", ".join(f"{val:.12e}" for val in g0.float64_taps) + " };",
+        f"static const double g1_geg_float64[{len(g1.float64_taps)}] = {{ " + ", ".join(f"{val:.12e}" for val in g1.float64_taps) + " };",
+        "",
+        f"static const int16_t h0_geg_q15[{len(h0.q15_taps)}] = {{ " + ", ".join(str(int(v)) for v in h0.q15_taps) + " };",
+        f"static const int16_t g0_geg_q15[{len(g0.q15_taps)}] = {{ " + ", ".join(str(int(v)) for v in g0.q15_taps) + " };",
+        "",
+        "#endif // GEGENBAUER_BIORTHOGONAL_FILTER_COEFFS_H"
+    ]
+    return "\n".join(lines)
+
+
+@dataclass
+class BiorthogonalResult:
+    order_h0: int
+    order_g0: int
+    cutoff: float
+    sampling_rate: int
+    lam: float
+    pair_dict: dict
+    freq_grid: np.ndarray
+    H0_response: np.ndarray
+    H1_response: np.ndarray
+    G0_response: np.ndarray
+    G1_response: np.ndarray
+    P_response: np.ndarray
+    header_code: str
+
+    def summary(self) -> str:
+        lines = [
+            "=== Gegenbauer Biorthogonal Filter Bank Execution Summary ===",
+            f"Filter Type: BIORTHOGONAL | Order H0: {self.order_h0} | Order G0: {self.order_g0} | Cutoff: {self.cutoff} fs",
+            f"Gegenbauer Lambda: {self.lam:.4f} | Sampling Rate: {self.sampling_rate} Hz",
+            f"Half-Band Product Residual: {self.pair_dict['product_residual']:.6e}",
+            f"Polyphase Perfect Reconstruction Error: {self.pair_dict['pr_error']:.6e}",
+            "Filter Bank Taps: H0 (Analysis LP), H1 (Analysis HP), G0 (Synthesis LP), G1 (Synthesis HP)"
+        ]
+        return "\n".join(lines)
 from filter_compiler.audio_processor import (
     read_wav,
     write_wav,
@@ -129,54 +197,59 @@ class GegenbauerFilterGUI(tk.Tk):
         # Filter Kind
         ttk.Label(spec_group, text="Filter Type:").grid(row=0, column=0, sticky=tk.W, pady=3)
         self.kind_var = tk.StringVar(value="lowpass")
-        kind_cb = ttk.Combobox(spec_group, textvariable=self.kind_var, values=["lowpass", "highpass", "bandpass", "qmf"], state="readonly")
+        kind_cb = ttk.Combobox(spec_group, textvariable=self.kind_var, values=["lowpass", "highpass", "bandpass", "qmf", "asymmetric_qmf", "biorthogonal"], state="readonly")
         kind_cb.grid(row=0, column=1, sticky=tk.EW, pady=3)
         kind_cb.bind("<<ComboboxSelected>>", self._on_kind_changed)
 
-        # Order N
-        ttk.Label(spec_group, text="Order N (taps):").grid(row=1, column=0, sticky=tk.W, pady=3)
+        # Order N / H0
+        ttk.Label(spec_group, text="Order N / H0:").grid(row=1, column=0, sticky=tk.W, pady=3)
         self.order_var = tk.IntVar(value=63)
         ttk.Spinbox(spec_group, from_=3, to=512, textvariable=self.order_var, width=10).grid(row=1, column=1, sticky=tk.W, pady=3)
 
+        # Order G0 (Biorthogonal)
+        ttk.Label(spec_group, text="Order G0 (Biorthg):").grid(row=2, column=0, sticky=tk.W, pady=3)
+        self.order_g0_var = tk.IntVar(value=6)
+        ttk.Spinbox(spec_group, from_=2, to=512, textvariable=self.order_g0_var, width=10).grid(row=2, column=1, sticky=tk.W, pady=3)
+
         # Cutoff Frequency
-        ttk.Label(spec_group, text="Cutoff (Normalized):").grid(row=2, column=0, sticky=tk.W, pady=3)
+        ttk.Label(spec_group, text="Cutoff (Normalized):").grid(row=3, column=0, sticky=tk.W, pady=3)
         self.cutoff_var = tk.DoubleVar(value=0.25)
-        ttk.Entry(spec_group, textvariable=self.cutoff_var, width=10).grid(row=2, column=1, sticky=tk.W, pady=3)
+        ttk.Entry(spec_group, textvariable=self.cutoff_var, width=10).grid(row=3, column=1, sticky=tk.W, pady=3)
 
         # Sampling Rate
-        ttk.Label(spec_group, text="Sampling Rate (Hz):").grid(row=3, column=0, sticky=tk.W, pady=3)
+        ttk.Label(spec_group, text="Sampling Rate (Hz):").grid(row=4, column=0, sticky=tk.W, pady=3)
         self.sr_var = tk.IntVar(value=44100)
-        ttk.Entry(spec_group, textvariable=self.sr_var, width=10).grid(row=3, column=1, sticky=tk.W, pady=3)
+        ttk.Entry(spec_group, textvariable=self.sr_var, width=10).grid(row=4, column=1, sticky=tk.W, pady=3)
 
         # Passband Edge wp
-        ttk.Label(spec_group, text="Passband Edge wp (f/fs):").grid(row=4, column=0, sticky=tk.W, pady=3)
+        ttk.Label(spec_group, text="Passband Edge wp (f/fs):").grid(row=5, column=0, sticky=tk.W, pady=3)
         self.wp_var = tk.StringVar(value="")
-        ttk.Entry(spec_group, textvariable=self.wp_var, width=10).grid(row=4, column=1, sticky=tk.W, pady=3)
+        ttk.Entry(spec_group, textvariable=self.wp_var, width=10).grid(row=5, column=1, sticky=tk.W, pady=3)
 
         # Stopband Edge ws
-        ttk.Label(spec_group, text="Stopband Edge ws (f/fs):").grid(row=5, column=0, sticky=tk.W, pady=3)
+        ttk.Label(spec_group, text="Stopband Edge ws (f/fs):").grid(row=6, column=0, sticky=tk.W, pady=3)
         self.ws_var = tk.StringVar(value="")
-        ttk.Entry(spec_group, textvariable=self.ws_var, width=10).grid(row=5, column=1, sticky=tk.W, pady=3)
+        ttk.Entry(spec_group, textvariable=self.ws_var, width=10).grid(row=6, column=1, sticky=tk.W, pady=3)
 
         # Bandpass Upper Passband Edge wp2
-        ttk.Label(spec_group, text="Bandpass wp2 (f/fs):").grid(row=6, column=0, sticky=tk.W, pady=3)
+        ttk.Label(spec_group, text="Bandpass wp2 (f/fs):").grid(row=7, column=0, sticky=tk.W, pady=3)
         self.wp2_var = tk.StringVar(value="")
-        ttk.Entry(spec_group, textvariable=self.wp2_var, width=10).grid(row=6, column=1, sticky=tk.W, pady=3)
+        ttk.Entry(spec_group, textvariable=self.wp2_var, width=10).grid(row=7, column=1, sticky=tk.W, pady=3)
 
         # Bandpass Upper Stopband Edge ws2
-        ttk.Label(spec_group, text="Bandpass ws2 (f/fs):").grid(row=7, column=0, sticky=tk.W, pady=3)
+        ttk.Label(spec_group, text="Bandpass ws2 (f/fs):").grid(row=8, column=0, sticky=tk.W, pady=3)
         self.ws2_var = tk.StringVar(value="")
-        ttk.Entry(spec_group, textvariable=self.ws2_var, width=10).grid(row=7, column=1, sticky=tk.W, pady=3)
+        ttk.Entry(spec_group, textvariable=self.ws2_var, width=10).grid(row=8, column=1, sticky=tk.W, pady=3)
 
         # Passband Ripple dB
-        ttk.Label(spec_group, text="Passband Ripple Target (dB):").grid(row=8, column=0, sticky=tk.W, pady=3)
+        ttk.Label(spec_group, text="Passband Ripple Target (dB):").grid(row=9, column=0, sticky=tk.W, pady=3)
         self.ripple_var = tk.DoubleVar(value=0.1)
-        ttk.Entry(spec_group, textvariable=self.ripple_var, width=10).grid(row=8, column=1, sticky=tk.W, pady=3)
+        ttk.Entry(spec_group, textvariable=self.ripple_var, width=10).grid(row=9, column=1, sticky=tk.W, pady=3)
 
         # Stopband Attenuation dB
-        ttk.Label(spec_group, text="Stopband Atten Target (dB):").grid(row=9, column=0, sticky=tk.W, pady=3)
+        ttk.Label(spec_group, text="Stopband Atten Target (dB):").grid(row=10, column=0, sticky=tk.W, pady=3)
         self.atten_var = tk.DoubleVar(value=60.0)
-        ttk.Entry(spec_group, textvariable=self.atten_var, width=10).grid(row=9, column=1, sticky=tk.W, pady=3)
+        ttk.Entry(spec_group, textvariable=self.atten_var, width=10).grid(row=10, column=1, sticky=tk.W, pady=3)
 
         # Algorithmic Parameters Group
         alg_group = ttk.LabelFrame(scroll_content, text="Gegenbauer Framework Parameters", padding=10)
@@ -196,12 +269,12 @@ class GegenbauerFilterGUI(tk.Tk):
         # Basis Type
         ttk.Label(alg_group, text="Basis Type:").grid(row=2, column=0, sticky=tk.W, pady=3)
         self.basis_type_var = tk.StringVar(value="normalized")
-        ttk.Combobox(alg_group, textvariable=self.basis_type_var, values=["normalized", "standard"], state="readonly").grid(row=2, column=1, sticky=tk.EW, pady=3)
+        ttk.Combobox(alg_group, textvariable=self.basis_type_var, values=["normalized", "unnormalized"], state="readonly").grid(row=2, column=1, sticky=tk.EW, pady=3)
 
         # Solver
         ttk.Label(alg_group, text="Solver Algorithm:").grid(row=3, column=0, sticky=tk.W, pady=3)
         self.solver_var = tk.StringVar(value="spectral_regularized")
-        ttk.Combobox(alg_group, textvariable=self.solver_var, values=["spectral_regularized", "quadrature", "wls"], state="readonly").grid(row=3, column=1, sticky=tk.EW, pady=3)
+        ttk.Combobox(alg_group, textvariable=self.solver_var, values=["spectral_regularized", "quadrature", "least_squares"], state="readonly").grid(row=3, column=1, sticky=tk.EW, pady=3)
 
         # Regularization mu
         ttk.Label(alg_group, text="Reg Weight (μ):").grid(row=4, column=0, sticky=tk.W, pady=3)
@@ -373,10 +446,14 @@ class GegenbauerFilterGUI(tk.Tk):
         try:
             kind = self.kind_var.get()
             order = min(512, max(3, int(self.order_var.get())))
+            order_g0 = min(512, max(2, int(self.order_g0_var.get())))
             if kind == "highpass" and order % 2 == 0:
                 self.order_var.set(min(512, order + 1))
-            elif kind == "qmf" and order % 2 != 0:
+            elif kind in ("qmf", "asymmetric_qmf") and order % 2 != 0:
                 self.order_var.set(min(512, order + 1 if order > 3 else 4))
+            elif kind == "biorthogonal":
+                if (order + order_g0) % 2 != 0:
+                    self.order_g0_var.set(min(512, order_g0 + 1))
             else:
                 self.order_var.set(order)
         except Exception as e:
@@ -384,30 +461,8 @@ class GegenbauerFilterGUI(tk.Tk):
 
     def _read_spec_and_compiler_params(self):
         kind = self.kind_var.get()
-        order = min(512, max(3, int(self.order_var.get())))
         cutoff = float(self.cutoff_var.get())
         sampling_rate = int(self.sr_var.get())
-
-        wp = float(self.wp_var.get()) if self.wp_var.get().strip() else None
-        ws = float(self.ws_var.get()) if self.ws_var.get().strip() else None
-        wp2 = float(self.wp2_var.get()) if self.wp2_var.get().strip() else None
-        ws2 = float(self.ws2_var.get()) if self.ws2_var.get().strip() else None
-
-        passband_ripple_db = float(self.ripple_var.get())
-        stopband_atten_db = float(self.atten_var.get())
-
-        spec = FilterSpec(
-            kind=kind,
-            order=order,
-            cutoff=cutoff,
-            wp=wp,
-            ws=ws,
-            wp2=wp2,
-            ws2=ws2,
-            sampling_rate=sampling_rate,
-            passband_ripple_db=passband_ripple_db,
-            stopband_atten_db=stopband_atten_db
-        )
 
         lam = float(self.lambda_var.get())
         basis_terms = int(self.basis_terms_var.get()) if self.basis_terms_var.get().strip() else None
@@ -438,11 +493,40 @@ class GegenbauerFilterGUI(tk.Tk):
             precision=precision
         )
 
+        if kind == "biorthogonal":
+            order_h0 = int(self.order_var.get())
+            order_g0 = int(self.order_g0_var.get())
+            if (order_h0 + order_g0) % 2 != 0:
+                raise ValueError(f"Sum of H0 ({order_h0}) and G0 ({order_g0}) orders must be even for Biorthogonal pairs.")
+            return "biorthogonal", order_h0, order_g0, cutoff, sampling_rate, compiler_kwargs
+
+        order = min(512, max(3, int(self.order_var.get())))
+        wp = float(self.wp_var.get()) if self.wp_var.get().strip() else None
+        ws = float(self.ws_var.get()) if self.ws_var.get().strip() else None
+        wp2 = float(self.wp2_var.get()) if self.wp2_var.get().strip() else None
+        ws2 = float(self.ws2_var.get()) if self.ws2_var.get().strip() else None
+
+        passband_ripple_db = float(self.ripple_var.get())
+        stopband_atten_db = float(self.atten_var.get())
+
+        spec = FilterSpec(
+            kind=kind,
+            order=order,
+            cutoff=cutoff,
+            wp=wp,
+            ws=ws,
+            wp2=wp2,
+            ws2=ws2,
+            sampling_rate=sampling_rate,
+            passband_ripple_db=passband_ripple_db,
+            stopband_atten_db=stopband_atten_db
+        )
+
         return spec, compiler_kwargs
 
     def _on_compile(self):
         try:
-            spec, compiler_kwargs = self._read_spec_and_compiler_params()
+            params = self._read_spec_and_compiler_params()
         except Exception as e:
             messagebox.showerror("Invalid Input", f"Please check input fields:\n{e}")
             return
@@ -452,9 +536,42 @@ class GegenbauerFilterGUI(tk.Tk):
 
         def worker():
             try:
-                compiler = GegenbauerFilterCompiler(**compiler_kwargs)
-                res = compiler.compile(spec)
-                res_q.put(("ok", res))
+                if params[0] == "biorthogonal":
+                    _, order_h0, order_g0, cutoff, sampling_rate, compiler_kwargs = params
+                    compiler = GegenbauerFilterCompiler(**compiler_kwargs)
+                    pair = compiler.compile_biorthogonal_pair(order_h0=order_h0, order_g0=order_g0, cutoff=cutoff)
+
+                    K_fft = 4096
+                    freq_grid = np.arange(K_fft // 2 + 1) / float(K_fft)
+                    H0_resp = 20 * np.log10(np.maximum(1e-12, np.abs(np.fft.fft(pair["H0"].float64_taps, K_fft)[:K_fft // 2 + 1])))
+                    H1_resp = 20 * np.log10(np.maximum(1e-12, np.abs(np.fft.fft(pair["H1"].float64_taps, K_fft)[:K_fft // 2 + 1])))
+                    G0_resp = 20 * np.log10(np.maximum(1e-12, np.abs(np.fft.fft(pair["G0"].float64_taps, K_fft)[:K_fft // 2 + 1])))
+                    G1_resp = 20 * np.log10(np.maximum(1e-12, np.abs(np.fft.fft(pair["G1"].float64_taps, K_fft)[:K_fft // 2 + 1])))
+                    P_resp = 20 * np.log10(np.maximum(1e-12, np.abs(np.fft.fft(pair["P"], K_fft)[:K_fft // 2 + 1])))
+
+                    hdr = generate_biorthogonal_header(pair, order_h0, order_g0, cutoff, compiler_kwargs["lam"], sampling_rate)
+
+                    biorthg_res = BiorthogonalResult(
+                        order_h0=order_h0,
+                        order_g0=order_g0,
+                        cutoff=cutoff,
+                        sampling_rate=sampling_rate,
+                        lam=compiler_kwargs["lam"],
+                        pair_dict=pair,
+                        freq_grid=freq_grid,
+                        H0_response=H0_resp,
+                        H1_response=H1_resp,
+                        G0_response=G0_resp,
+                        G1_response=G1_resp,
+                        P_response=P_resp,
+                        header_code=hdr
+                    )
+                    res_q.put(("ok", biorthg_res))
+                else:
+                    spec, compiler_kwargs = params
+                    compiler = GegenbauerFilterCompiler(**compiler_kwargs)
+                    res = compiler.compile(spec)
+                    res_q.put(("ok", res))
             except Exception as ex:
                 res_q.put(("err", ex))
 
@@ -485,7 +602,7 @@ class GegenbauerFilterGUI(tk.Tk):
 
     def _on_pareto_search(self):
         try:
-            spec, compiler_kwargs = self._read_spec_and_compiler_params()
+            params = self._read_spec_and_compiler_params()
         except Exception as e:
             messagebox.showerror("Invalid Input", f"Please check input fields:\n{e}")
             return
@@ -495,9 +612,59 @@ class GegenbauerFilterGUI(tk.Tk):
 
         def worker():
             try:
-                compiler = GegenbauerFilterCompiler(**compiler_kwargs)
-                best_res = compiler.pareto_search(spec, solver=compiler_kwargs['solver'])
-                res_q.put(("ok", best_res))
+                if params[0] == "biorthogonal":
+                    _, order_h0, order_g0, cutoff, sampling_rate, compiler_kwargs = params
+                    best_pair = None
+                    best_score = float('inf')
+                    best_lam = compiler_kwargs['lam']
+                    for lam in [0.5, 1.0, 1.25, 1.5, 2.0]:
+                        ck = dict(compiler_kwargs)
+                        ck['lam'] = lam
+                        compiler = GegenbauerFilterCompiler(**ck)
+                        try:
+                            pair = compiler.compile_biorthogonal_pair(order_h0=order_h0, order_g0=order_g0, cutoff=cutoff)
+                            score = pair['product_residual'] * 100.0 + pair['pr_error'] * 10.0
+                            if score < best_score:
+                                best_score = score
+                                best_pair = pair
+                                best_lam = lam
+                        except Exception:
+                            continue
+
+                    if best_pair is None:
+                        raise RuntimeError("Biorthogonal pareto search failed to find valid roots.")
+
+                    K_fft = 4096
+                    freq_grid = np.arange(K_fft // 2 + 1) / float(K_fft)
+                    H0_resp = 20 * np.log10(np.maximum(1e-12, np.abs(np.fft.fft(best_pair["H0"].float64_taps, K_fft)[:K_fft // 2 + 1])))
+                    H1_resp = 20 * np.log10(np.maximum(1e-12, np.abs(np.fft.fft(best_pair["H1"].float64_taps, K_fft)[:K_fft // 2 + 1])))
+                    G0_resp = 20 * np.log10(np.maximum(1e-12, np.abs(np.fft.fft(best_pair["G0"].float64_taps, K_fft)[:K_fft // 2 + 1])))
+                    G1_resp = 20 * np.log10(np.maximum(1e-12, np.abs(np.fft.fft(best_pair["G1"].float64_taps, K_fft)[:K_fft // 2 + 1])))
+                    P_resp = 20 * np.log10(np.maximum(1e-12, np.abs(np.fft.fft(best_pair["P"], K_fft)[:K_fft // 2 + 1])))
+
+                    hdr = generate_biorthogonal_header(best_pair, order_h0, order_g0, cutoff, best_lam, sampling_rate)
+
+                    biorthg_res = BiorthogonalResult(
+                        order_h0=order_h0,
+                        order_g0=order_g0,
+                        cutoff=cutoff,
+                        sampling_rate=sampling_rate,
+                        lam=best_lam,
+                        pair_dict=best_pair,
+                        freq_grid=freq_grid,
+                        H0_response=H0_resp,
+                        H1_response=H1_resp,
+                        G0_response=G0_resp,
+                        G1_response=G1_resp,
+                        P_response=P_resp,
+                        header_code=hdr
+                    )
+                    res_q.put(("ok", biorthg_res))
+                else:
+                    spec, compiler_kwargs = params
+                    compiler = GegenbauerFilterCompiler(**compiler_kwargs)
+                    best_res = compiler.pareto_search(spec, solver=compiler_kwargs['solver'])
+                    res_q.put(("ok", best_res))
             except Exception as ex:
                 res_q.put(("err", ex))
 
@@ -518,8 +685,10 @@ class GegenbauerFilterGUI(tk.Tk):
             return
 
         self.current_result = payload
-        self.lambda_var.set(payload.lam)
-        self.mu_var.set(payload.mu_reg)
+        if hasattr(payload, 'lam'):
+            self.lambda_var.set(payload.lam)
+        if hasattr(payload, 'mu_reg'):
+            self.mu_var.set(payload.mu_reg)
 
         self._update_summary_display()
         self._update_freq_plots()
@@ -529,7 +698,8 @@ class GegenbauerFilterGUI(tk.Tk):
         if self.loaded_audio_data is not None:
             self._apply_filter_to_current_audio()
 
-        messagebox.showinfo("Pareto Optimization", f"Found Pareto-Optimal Lambda = {payload.lam:.4f}, μ = {payload.mu_reg:.2e}")
+        msg_lam = payload.lam if hasattr(payload, 'lam') else 1.5
+        messagebox.showinfo("Pareto Optimization", f"Found Pareto-Optimal Lambda = {msg_lam:.4f}")
 
     def _update_summary_display(self):
         if self.current_result is None:
@@ -543,15 +713,43 @@ class GegenbauerFilterGUI(tk.Tk):
         if self.current_result is None:
             return
 
-        res = self.current_result
-        spec = res.spec
-
         self.ax_freq.clear()
         self.ax_pass.clear()
         self._draggable_lines.clear()
 
+        if isinstance(self.current_result, BiorthogonalResult):
+            res = self.current_result
+            self.ax_freq.plot(res.freq_grid, res.H0_response, 'b-', label='H0 (Analysis LP)', linewidth=1.5)
+            self.ax_freq.plot(res.freq_grid, res.H1_response, 'r--', label='H1 (Analysis HP)', linewidth=1.5)
+            self.ax_freq.plot(res.freq_grid, res.G0_response, 'g-', label='G0 (Synthesis LP)', linewidth=1.5)
+            self.ax_freq.plot(res.freq_grid, res.G1_response, 'm--', label='G1 (Synthesis HP)', linewidth=1.5)
+            self.ax_freq.plot(res.freq_grid, res.P_response, 'k:', label='Product Filter P(z)', linewidth=1.5)
+
+            line = self.ax_freq.axvline(res.cutoff, color='g', linestyle=':', linewidth=2, label=f'Cutoff={res.cutoff:.3f}', picker=True)
+            self._draggable_lines["cutoff"] = (line, res.cutoff)
+
+            self.ax_freq.set_title(f"Biorthogonal Filter Bank Frequency Response (H0={res.order_h0}, G0={res.order_g0}, λ={res.lam:.2f})")
+            self.ax_freq.set_ylabel("Magnitude (dB)")
+            self.ax_freq.set_ylim(-100, 5)
+            self.ax_freq.grid(True)
+            self.ax_freq.legend(loc="lower left", fontsize=8)
+
+            # Passband product P(z) detail
+            self.ax_pass.plot(res.freq_grid, res.P_response, 'k-', linewidth=1.5, label='P(z) Half-band')
+            self.ax_pass.set_title(f"Half-band Product Filter P(z) Response (Residual = {res.pair_dict['product_residual']:.2e})")
+            self.ax_pass.set_xlabel("Normalized Frequency (f/fs)")
+            self.ax_pass.set_ylabel("Magnitude (dB)")
+            self.ax_pass.set_ylim(-10, 5)
+            self.ax_pass.grid(True)
+            self.fig_freq.tight_layout(pad=2.0)
+            self.canvas_freq.draw()
+            return
+
+        res = self.current_result
+        spec = res.spec
+
         # Plot 1: Full Frequency Response
-        self.ax_freq.plot(res.freq_grid, res.H0_response, 'b-', label='H0 (Lowpass)' if spec.kind == 'qmf' else '|H(e^{jw})|', linewidth=1.5)
+        self.ax_freq.plot(res.freq_grid, res.H0_response, 'b-', label='H0 (Lowpass)' if spec.kind in ('qmf', 'asymmetric_qmf') else '|H(e^{jw})|', linewidth=1.5)
         if res.H1_response is not None:
             self.ax_freq.plot(res.freq_grid, res.H1_response, 'r-', label='H1 (Highpass)', linewidth=1.5)
 
@@ -650,15 +848,42 @@ class GegenbauerFilterGUI(tk.Tk):
         if self.current_result is None:
             return
 
-        res = self.current_result
-        spec = res.spec
-
         self.ax_stem.clear()
         self.ax_quant.clear()
 
+        if isinstance(self.current_result, BiorthogonalResult):
+            res = self.current_result
+            h0 = res.pair_dict["H0"]
+            g0 = res.pair_dict["G0"]
+
+            self.ax_stem.stem(range(len(h0.float64_taps)), h0.float64_taps, linefmt='b-', markerfmt='bo', basefmt='r-', label='h0 taps (Analysis LP)')
+            self.ax_stem.stem(range(len(g0.float64_taps)), g0.float64_taps, linefmt='g--', markerfmt='gs', basefmt='r-', label='g0 taps (Synthesis LP)')
+            self.ax_stem.set_title("Biorthogonal Filter Bank Impulse Response Taps")
+            self.ax_stem.set_ylabel("Amplitude")
+            self.ax_stem.grid(True)
+            self.ax_stem.legend(fontsize=8)
+
+            err_h0_q15 = np.abs(h0.float64_taps - h0.q15_taps / h0.q15_scale)
+            err_g0_q15 = np.abs(g0.float64_taps - g0.q15_taps / g0.q15_scale)
+
+            self.ax_quant.semilogy(range(len(h0.float64_taps)), np.maximum(1e-16, err_h0_q15), 'r-o', label='h0 Q15 Error', markersize=4)
+            self.ax_quant.semilogy(range(len(g0.float64_taps)), np.maximum(1e-16, err_g0_q15), 'm-s', label='g0 Q15 Error', markersize=4)
+            self.ax_quant.set_title("Fixed-Point Quantization Noise per Tap")
+            self.ax_quant.set_xlabel("Tap Index n")
+            self.ax_quant.set_ylabel("Absolute Error")
+            self.ax_quant.grid(True)
+            self.ax_quant.legend(fontsize=8)
+
+            self.fig_taps.tight_layout(pad=2.0)
+            self.canvas_taps.draw()
+            return
+
+        res = self.current_result
+        spec = res.spec
+
         # Stem Plot of Taps
         self.ax_stem.stem(range(spec.order), res.h0_taps.float64_taps, linefmt='b-', markerfmt='bo', basefmt='r-', label='h0 taps')
-        if spec.kind == "qmf" and res.h1_taps is not None:
+        if spec.kind in ("qmf", "asymmetric_qmf") and res.h1_taps is not None:
             self.ax_stem.stem(range(spec.order), res.h1_taps.float64_taps, linefmt='r--', markerfmt='rx', basefmt='r-', label='h1 taps')
             self.ax_stem.legend(fontsize=8)
         self.ax_stem.set_title("Impulse Response Taps h[n]")
@@ -676,7 +901,7 @@ class GegenbauerFilterGUI(tk.Tk):
         self.ax_quant.semilogy(range(spec.order), np.maximum(1e-16, err_q15), 'r-o', label='h0 Q15 Error', markersize=4)
         self.ax_quant.semilogy(range(spec.order), np.maximum(1e-16, err_q31), 'g-s', label='h0 Q31 Error', markersize=4)
 
-        if spec.kind == "qmf" and res.h1_taps is not None:
+        if spec.kind in ("qmf", "asymmetric_qmf") and res.h1_taps is not None:
             h1_float = res.h1_taps.float64_taps
             h1_q15_recon = res.h1_taps.q15_taps / res.h1_taps.q15_scale
             err_h1_q15 = np.abs(h1_float - h1_q15_recon)
@@ -740,10 +965,43 @@ class GegenbauerFilterGUI(tk.Tk):
         if self.loaded_audio_data is None or self.current_result is None:
             return
 
+        if isinstance(self.current_result, BiorthogonalResult):
+            self.qmf_mode_cb.config(state="readonly")
+            b_res = self.current_result
+            h0 = b_res.pair_dict["H0"].float64_taps
+            h1 = b_res.pair_dict["H1"].float64_taps
+            g0 = b_res.pair_dict["G0"].float64_taps
+            g1 = b_res.pair_dict["G1"].float64_taps
+
+            sel = self.qmf_mode_var.get()
+            if "Analysis Highpass" in sel or "H1" in sel:
+                self.filtered_audio_data = apply_filter(h1, self.loaded_audio_data)
+            elif "Synthesis Lowpass" in sel or "G0" in sel:
+                self.filtered_audio_data = apply_filter(g0, self.loaded_audio_data)
+            elif "Synthesis Highpass" in sel or "G1" in sel:
+                self.filtered_audio_data = apply_filter(g1, self.loaded_audio_data)
+            elif "Full PR" in sel or "Reconstruction" in sel:
+                sub0 = apply_filter(g0, apply_filter(h0, self.loaded_audio_data))
+                sub1 = apply_filter(g1, apply_filter(h1, self.loaded_audio_data))
+                self.filtered_audio_data = sub0 + sub1
+            elif "Stereo" in sel:
+                f_h0 = apply_filter(h0, self.loaded_audio_data)
+                f_h1 = apply_filter(h1, self.loaded_audio_data)
+                if self.loaded_audio_data.ndim > 1:
+                    f_h0 = f_h0[:, 0]
+                    f_h1 = f_h1[:, 0]
+                self.filtered_audio_data = np.column_stack([f_h0, f_h1])
+            else: # Analysis Lowpass H0 default
+                self.filtered_audio_data = apply_filter(h0, self.loaded_audio_data)
+
+            write_wav(self.filtered_wav_path, self.loaded_audio_sr, self.filtered_audio_data)
+            self._update_audio_plots()
+            return
+
         spec = self.current_result.spec
         h0_taps = self.current_result.h0_taps.float64_taps
 
-        if spec.kind == "qmf" and self.current_result.h1_taps is not None:
+        if spec.kind in ("qmf", "asymmetric_qmf") and self.current_result.h1_taps is not None:
             self.qmf_mode_cb.config(state="readonly")
             h1_taps = self.current_result.h1_taps.float64_taps
             qmf_selection = self.qmf_mode_var.get()
@@ -772,7 +1030,6 @@ class GegenbauerFilterGUI(tk.Tk):
             self.filtered_audio_data = apply_filter(h0_taps, self.loaded_audio_data)
 
         write_wav(self.filtered_wav_path, self.loaded_audio_sr, self.filtered_audio_data)
-
         self._update_audio_plots()
 
     def _update_audio_plots(self):

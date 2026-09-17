@@ -120,36 +120,42 @@ class TestAudioProcessor(unittest.TestCase):
         player.stop()
 
 
+def _wait_for_result(app, prev_res=None, timeout=5.0):
+    start = time.time()
+    while time.time() - start < timeout:
+        app.update()
+        if app.current_result is not None and app.current_result is not prev_res:
+            return True
+        time.sleep(0.02)
+    return False
+
+
 class TestGUIIntegration(unittest.TestCase):
     def test_gui_async_compile_and_pareto(self):
         app = GegenbauerFilterGUI()
 
         # Wait for initial async compile to complete
-        for _ in range(40):
-            app.update()
-            time.sleep(0.05)
+        _wait_for_result(app)
 
         self.assertIsNotNone(app.current_result)
         self.assertEqual(app.current_result.spec.kind, "lowpass")
 
         # Change kind to highpass and compile
+        prev_res = app.current_result
         app.kind_var.set("highpass")
         app.order_var.set(65)
         app._on_compile()
 
-        for _ in range(40):
-            app.update()
-            time.sleep(0.05)
+        _wait_for_result(app, prev_res)
 
         self.assertEqual(app.current_result.spec.kind, "highpass")
 
         # Test Pareto search async execution
+        prev_res = app.current_result
         app.solver_var.set("spectral_regularized")
         app._on_pareto_search()
 
-        for _ in range(100):
-            app.update()
-            time.sleep(0.05)
+        _wait_for_result(app, prev_res, timeout=10.0)
 
         self.assertIsNotNone(app.current_result)
         self.assertEqual(app.mu_var.get(), app.current_result.mu_reg)
@@ -157,6 +163,62 @@ class TestGUIIntegration(unittest.TestCase):
         # Test audio test trigger and WAV sampling rate sync
         app._generate_default_audio("pink")
         self.assertIsNotNone(app.loaded_audio_data)
+        self.assertIsNotNone(app.filtered_audio_data)
+
+        app.destroy()
+
+    def test_gui_asymmetric_qmf_compilation(self):
+        app = GegenbauerFilterGUI()
+
+        _wait_for_result(app)
+
+        prev_res = app.current_result
+        app.kind_var.set("asymmetric_qmf")
+        app.order_var.set(32)
+        app.cutoff_var.set(0.23)
+        app.wp_var.set("0.20")
+        app.ws_var.set("0.26")
+        app.solver_var.set("least_squares")
+        app.basis_type_var.set("unnormalized")
+        app._on_compile()
+
+        _wait_for_result(app, prev_res)
+
+        self.assertIsNotNone(app.current_result)
+        self.assertEqual(app.current_result.spec.kind, "asymmetric_qmf")
+
+        # Test live audio filtering in Reconstruction Sum mode
+        app.qmf_mode_var.set("H0 + H1 (Reconstruction Sum)")
+        app._apply_filter_to_current_audio()
+        self.assertIsNotNone(app.filtered_audio_data)
+
+        app.destroy()
+
+    def test_gui_biorthogonal_compilation_and_audio(self):
+        app = GegenbauerFilterGUI()
+
+        _wait_for_result(app)
+
+        prev_res = app.current_result
+        app.kind_var.set("biorthogonal")
+        app.order_var.set(8)
+        app.order_g0_var.set(6)
+        app.cutoff_var.set(0.25)
+        app.lambda_var.set(1.5)
+        app._on_compile()
+
+        _wait_for_result(app, prev_res)
+
+        from filter_compiler.gui import BiorthogonalResult
+        self.assertIsInstance(app.current_result, BiorthogonalResult)
+        self.assertEqual(app.current_result.order_h0, 8)
+        self.assertEqual(app.current_result.order_g0, 6)
+        self.assertIn("GEG_ORDER_H0 8", app.current_result.header_code)
+        self.assertIn("GEG_ORDER_G0 6", app.current_result.header_code)
+
+        # Test live audio PR reconstruction mode
+        app.qmf_mode_var.set("Full PR Reconstruction")
+        app._apply_filter_to_current_audio()
         self.assertIsNotNone(app.filtered_audio_data)
 
         app.destroy()
