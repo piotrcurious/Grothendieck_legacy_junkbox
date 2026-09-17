@@ -948,67 +948,240 @@ class GegenbauerFilterCompiler:
             if abs(n - center) % 2 == 0 and n != center:
                 p_taps[n] = 0.0
 
-        # Normalize center tap to 1.0 for P(z) + P(-z) = 2 z^-d delay scaling
-        if abs(p_taps[center]) > 1e-12:
-            p_taps /= p_taps[center]
+        # Scale P(z) so that P(1) = 2.0 (sum of taps = 2.0) for P(z) + P(-z) = 2 z^-d delay scaling
+        sum_p = np.sum(p_taps)
+        if abs(sum_p) > 1e-12:
+            p_taps *= (2.0 / sum_p)
 
-        # 2. Spectral Factorization
-        roots = np.roots(p_taps)
+        # 2. Robust symmetric root grouping
+        #
+        # A real linear-phase factor needs conjugate pairs.
+        # Symmetric FIR factors additionally have reciprocal-conjugate
+        # structure.  Do NOT classify roots by a hard unit-circle split:
+        # numerical roots may lie just inside/outside |z| = 1.
+        #
+        # Groups are therefore constructed as:
+        #   • real root at +/-1              -> singleton
+        #   • real reciprocal pair           -> 2 roots
+        #   • unit-circle conjugate pair     -> 2 roots
+        #   • off-circle reciprocal quartet  -> 4 roots
 
-        # Group roots into symmetric quadruplets / pairs to ensure real linear-phase factors
-        # A) Unit circle roots (stopband zeros) occurring in complex conjugate pairs
-        unit_circle_roots = []
-        other_roots = []
+        roots = np.asarray(np.roots(p_taps), dtype=np.complex128)
 
-        for r in roots:
-            if abs(abs(r) - 1.0) < 1e-3:
-                unit_circle_roots.append(r)
-            else:
-                other_roots.append(r)
+        if len(roots) != total_order:
+            raise RuntimeError(
+                f"Spectral factorization returned {len(roots)} roots "
+                f"for polynomial degree {total_order}."
+            )
 
-        # Sort unit circle roots by angle to group conjugate pairs
-        unit_circle_roots = sorted(unit_circle_roots, key=lambda x: (np.abs(np.angle(x)), np.angle(x)))
+        root_tol = 1e-5
+        real_tol = 1e-7
 
-        # Group off-unit-circle roots into reciprocal/conjugate quadruplets or real pairs
-        quads = []
-        visited = set()
-        for i, r in enumerate(other_roots):
-            if i in visited:
+        unused = set(range(len(roots)))
+        atomic_groups = []
+
+        def rel_dist(a: complex, b: complex) -> float:
+            scale = max(1.0, abs(a), abs(b))
+            return abs(a - b) / scale
+
+        def nearest_unused(target: complex, candidates: set):
+            if not candidates:
+                return None, np.inf
+
+            best_j = min(
+                candidates,
+                key=lambda j: rel_dist(roots[j], target)
+            )
+            return best_j, rel_dist(roots[best_j], target)
+
+        # First establish conjugate pairs.
+        conjugate_groups = []
+
+        while unused:
+            i = min(unused)
+            r = roots[i]
+            unused.remove(i)
+
+            # Numerically real root.
+            if abs(r.imag) <= real_tol * max(1.0, abs(r)):
+                conjugate_groups.append([i])
                 continue
-            # Find conjugate r*, reciprocal 1/r, and reciprocal conjugate 1/r*
-            group = [r]
-            visited.add(i)
-            for j, r2 in enumerate(other_roots):
-                if j in visited:
+
+            j, d = nearest_unused(np.conj(r), unused)
+
+            if j is None or d > root_tol:
+                raise ValueError(
+                    "Could not pair a complex root with its conjugate: "
+                    f"r={r}, nearest_distance={d:.3e}"
+                )
+
+            unused.remove(j)
+            conjugate_groups.append([i, j])
+
+        # Now pair conjugate groups through reciprocal symmetry.
+        reciprocal_groups = []
+        used_groups = set()
+
+        for gi, group in enumerate(conjugate_groups):
+            if gi in used_groups:
+                continue
+
+            # Singleton roots must be self-reciprocal (approximately +/-1)
+            # for a symmetric factor.
+            if len(group) == 1:
+                i = group[0]
+                r = roots[i]
+
+                if abs(abs(r) - 1.0) <= root_tol:
+                    reciprocal_groups.append(group)
+                    used_groups.add(gi)
                     continue
-                if abs(r2 - np.conj(r)) < 1e-3 or abs(r2 - 1.0/r) < 1e-3 or abs(r2 - 1.0/np.conj(r)) < 1e-3:
-                    group.append(r2)
-                    visited.add(j)
-            quads.append(group)
 
-        # 3. Distribute Roots to maintain Linear Phase & Requested Filter Orders
-        # Pair unit circle conjugate zeros into 2-root factors
-        uc_pairs = []
-        for i in range(0, len(unit_circle_roots) - 1, 2):
-            uc_pairs.append([unit_circle_roots[i], unit_circle_roots[i+1]])
-        if len(unit_circle_roots) % 2 != 0:
-            uc_pairs.append([unit_circle_roots[-1]])
+                # Real root away from unit circle: find reciprocal root.
+                j = None
+                best_d = np.inf
 
-        # Combine uc_pairs and quads into atomic symmetric root groups
-        atomic_groups = uc_pairs + quads
+                for gj, other_group in enumerate(conjugate_groups):
+                    if gj == gi or gj in used_groups:
+                        continue
+                    if len(other_group) != 1:
+                        continue
+
+                    candidate = roots[other_group[0]]
+                    d = rel_dist(candidate, 1.0 / r)
+
+                    if d < best_d:
+                        best_d = d
+                        j = gj
+
+                if j is None or best_d > root_tol:
+                    raise ValueError(
+                        "Could not find reciprocal partner for real root "
+                        f"r={r}; nearest reciprocal distance={best_d:.3e}"
+                    )
+
+                reciprocal_groups.append(
+                    group + conjugate_groups[j]
+                )
+                used_groups.add(gi)
+                used_groups.add(j)
+                continue
+
+            # Complex conjugate pair.
+            r = roots[group[0]]
+
+            # Unit-circle conjugate pair: reciprocal orbit is itself.
+            if abs(abs(r) - 1.0) <= root_tol:
+                reciprocal_groups.append(group)
+                used_groups.add(gi)
+                continue
+
+            reciprocal_target = 1.0 / r
+
+            j = None
+            best_d = np.inf
+
+            for gj, other_group in enumerate(conjugate_groups):
+                if gj == gi or gj in used_groups:
+                    continue
+                if len(other_group) != 2:
+                    continue
+
+                candidate_roots = roots[other_group]
+
+                # Match reciprocal of r against either member of pair.
+                d = min(
+                    rel_dist(candidate_roots[0], reciprocal_target),
+                    rel_dist(candidate_roots[1], reciprocal_target),
+                )
+
+                if d < best_d:
+                    best_d = d
+                    j = gj
+
+            if j is None or best_d > root_tol:
+                raise ValueError(
+                    "Could not complete reciprocal-conjugate root quartet "
+                    f"for r={r}; nearest group distance={best_d:.3e}"
+                )
+
+            reciprocal_groups.append(
+                group + conjugate_groups[j]
+            )
+            used_groups.add(gi)
+            used_groups.add(j)
+
+        atomic_groups = [
+            [roots[i] for i in group]
+            for group in reciprocal_groups
+        ]
+
+        # Sanity check: every root must belong to exactly one group.
+        grouped_count = sum(len(g) for g in atomic_groups)
+
+        if grouped_count != total_order:
+            raise RuntimeError(
+                f"Root grouping lost roots: grouped={grouped_count}, "
+                f"expected={total_order}, "
+                f"group_sizes={[len(g) for g in atomic_groups]}"
+            )
+
+        # 3. Exact partition of atomic groups
+        #
+        # Do not greedily fill H0.  Solve a bounded subset-sum problem
+        # over atomic symmetry groups so that:
+        #
+        #     sum(|group| for group in H0_groups) == order_h0
+        #
+        # and every remaining group belongs to G0.
+
+        target = int(order_h0)
+
+        # dp[degree] = list of group indices producing that degree
+        dp = {0: []}
+
+        for gi, group in enumerate(atomic_groups):
+            size = len(group)
+
+            # Reverse iteration prevents reusing the same group.
+            for degree in sorted(list(dp.keys()), reverse=True):
+                new_degree = degree + size
+
+                if new_degree > target:
+                    continue
+
+                if new_degree not in dp:
+                    dp[new_degree] = dp[degree] + [gi]
+
+        if target not in dp:
+            raise ValueError(
+                "Unable to partition roots into exact target orders "
+                f"order_h0={order_h0}, order_g0={order_g0}. "
+                f"Atomic root-group sizes="
+                f"{[len(g) for g in atomic_groups]}. "
+                "No symmetry-preserving subset has the requested H0 order."
+            )
+
+        h_group_indices = set(dp[target])
 
         h0_roots = []
         g0_roots = []
 
-        # Distribute atomic groups to match requested order_h0 exactly
-        for group in atomic_groups:
-            if len(h0_roots) + len(group) <= order_h0:
+        for gi, group in enumerate(atomic_groups):
+            if gi in h_group_indices:
                 h0_roots.extend(group)
             else:
                 g0_roots.extend(group)
 
-        if len(h0_roots) != order_h0 or len(g0_roots) != order_g0:
-            raise ValueError(f"Unable to partition roots into exact target orders order_h0={order_h0} and order_g0={order_g0} while preserving symmetric quadruplet/conjugate grouping. Got order_h0={len(h0_roots)}, order_g0={len(g0_roots)}.")
+        if (
+            len(h0_roots) != order_h0
+            or len(g0_roots) != order_g0
+        ):
+            raise RuntimeError(
+                "Internal root partition inconsistency: "
+                f"H0={len(h0_roots)}/{order_h0}, "
+                f"G0={len(g0_roots)}/{order_g0}."
+            )
 
         # 4. Reconstruct Filter Taps from Roots
         h0_taps = np.poly(h0_roots).real if len(h0_roots) > 0 else np.array([1.0])
