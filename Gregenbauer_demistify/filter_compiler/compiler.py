@@ -49,7 +49,16 @@ class TruthStatus(Enum):
 class MatchingStatus(Enum):
     """Layer VI Asymptotic Matching Certification Status."""
     MATCHING_SCHEMA = "MATCHING_SCHEMA"
+    SAMPLED_ASYMPTOTIC_MATCHING = "SAMPLED_ASYMPTOTIC_MATCHING"
     ANALYTICALLY_CERTIFIED_MATCHING = "ANALYTICALLY_CERTIFIED_MATCHING"
+
+
+class SymmetryClass(Enum):
+    """FIR Filter Symmetry Classes (Types I-IV)."""
+    TYPE_I = "TYPE_I"     # Odd N, symmetric
+    TYPE_II = "TYPE_II"   # Even N, symmetric
+    TYPE_III = "TYPE_III" # Odd N, anti-symmetric
+    TYPE_IV = "TYPE_IV"   # Even N, anti-symmetric
 
 
 @dataclass
@@ -102,16 +111,12 @@ class FilterSpec:
 
     def __post_init__(self):
         self.kind = self.kind.lower()
-        if self.kind not in ("lowpass", "highpass", "bandpass", "qmf", "qmf_h1"):
+        if self.kind not in ("lowpass", "highpass", "bandpass", "qmf"):
             raise ValueError(f"Unknown filter kind: '{self.kind}'")
         if self.order < 3:
             raise ValueError("Filter order must be >= 3")
         if not (0.0 < self.cutoff < 0.5):
             raise ValueError(f"Cutoff must be in (0.0, 0.5), got {self.cutoff}")
-
-        # Highpass FIR filters cannot have an even number of taps (Type II symmetric)
-        if self.kind == "highpass" and self.order % 2 == 0:
-            raise ValueError(f"Highpass FIR filter (Type II) cannot have an even length N={self.order} due to forced Nyquist zero. Filter length must be odd.")
 
         # QMF filter pairs require an even tap length
         if self.kind == "qmf" and self.order % 2 != 0:
@@ -128,12 +133,22 @@ class FilterSpec:
             if self.ws is None:
                 self.ws = max(0.01, self.cutoff - 0.05) if self.kind == "highpass" else min(0.49, self.cutoff + 0.05)
 
-        if self.kind in ("lowpass", "qmf", "qmf_h1") and self.wp >= self.ws:
+        if self.kind in ("lowpass", "qmf") and self.wp >= self.ws:
             raise ValueError(f"Passband edge wp ({self.wp}) must be < stopband edge ws ({self.ws})")
         elif self.kind == "highpass" and self.ws >= self.wp:
             raise ValueError(f"Stopband edge ws ({self.ws}) must be < passband edge wp ({self.wp})")
         elif self.kind == "bandpass" and not (self.ws < self.wp < self.wp2 < self.ws2):
             raise ValueError(f"Bandpass frequencies must satisfy ws ({self.ws}) < wp ({self.wp}) < wp2 ({self.wp2}) < ws2 ({self.ws2})")
+
+    @property
+    def symmetry_class(self) -> SymmetryClass:
+        """Determines the FIR symmetry class (Type I-IV) based on filter type and order N."""
+        is_even = (self.order % 2 == 0)
+        if self.kind == "highpass":
+            return SymmetryClass.TYPE_IV if is_even else SymmetryClass.TYPE_I
+        elif self.kind in ("lowpass", "bandpass", "qmf"):
+            return SymmetryClass.TYPE_II if is_even else SymmetryClass.TYPE_I
+        return SymmetryClass.TYPE_I
 
 
 @dataclass
@@ -208,6 +223,19 @@ class GegenbauerFilterCompiler:
     ):
         if lam <= -0.5:
             raise ValueError(f"Lambda parameter must be > -0.5, got {lam}")
+        if mu_reg < 0.0:
+            raise ValueError(f"mu_reg must be >= 0.0, got {mu_reg}")
+        if reg_power < 0:
+            raise ValueError(f"reg_power must be >= 0, got {reg_power}")
+        if basis_type not in ("normalized", "unnormalized"):
+            raise ValueError(f"Unknown basis_type: '{basis_type}'")
+        if solver not in ("spectral_regularized", "quadrature", "least_squares"):
+            raise ValueError(f"Unknown solver mode: '{solver}'")
+        if asymptotic_mode not in ("auto", "bessel", "wkb", "composite", "none"):
+            raise ValueError(f"Unknown asymptotic_mode: '{asymptotic_mode}'")
+        if grid_samples < 16:
+            raise ValueError(f"grid_samples must be >= 16, got {grid_samples}")
+
         self.lam = float(lam)
         self.basis_terms = basis_terms
         self.basis_type = basis_type
@@ -218,13 +246,27 @@ class GegenbauerFilterCompiler:
         self.grid_samples = grid_samples
         self.ctx = NumericalContext(precision=precision, base=NumericalBase.BASE_2)
 
-    def _eval_basis(self, n: int, x: np.ndarray) -> np.ndarray:
-        """Evaluates n-th basis function at array x in [-1, 1]."""
+    def _eval_basis(self, n: int, x: np.ndarray, symmetry: SymmetryClass = SymmetryClass.TYPE_I) -> np.ndarray:
+        """Evaluates n-th basis function at array x = cos(omega) in [-1, 1], multiplied by symmetry envelope."""
         x_arr = np.clip(np.asarray(x, dtype=np.float64), -1.0, 1.0)
         if self.basis_type == "normalized":
-            return normalized_phi_recurrence(n, self.lam, x_arr)
-        c1 = float(c_n_1_val(n, self.lam))
-        return c1 * normalized_phi_recurrence(n, self.lam, x_arr)
+            P_k = normalized_phi_recurrence(n, self.lam, x_arr)
+        else:
+            c1 = float(c_n_1_val(n, self.lam))
+            P_k = c1 * normalized_phi_recurrence(n, self.lam, x_arr)
+
+        if symmetry == SymmetryClass.TYPE_I:
+            return P_k
+        elif symmetry == SymmetryClass.TYPE_II:
+            # cos(omega/2) = sqrt((1 + x)/2)
+            return np.sqrt(0.5 * (1.0 + x_arr)) * P_k
+        elif symmetry == SymmetryClass.TYPE_III:
+            # sin(omega) = sqrt(1 - x^2)
+            return np.sqrt(np.maximum(0.0, 1.0 - x_arr**2)) * P_k
+        elif symmetry == SymmetryClass.TYPE_IV:
+            # sin(omega/2) = sqrt((1 - x)/2)
+            return np.sqrt(np.maximum(0.0, 0.5 * (1.0 - x_arr))) * P_k
+        return P_k
 
     def _eval_asymptotic_basis(self, n: int, omega: np.ndarray) -> np.ndarray:
         theta = omega
@@ -318,6 +360,7 @@ class GegenbauerFilterCompiler:
         if spec.kind in ("qmf", "qmf_h1") and self.mu_reg == 1e-4:
             mu = 1e-6
 
+        sym = spec.symmetry_class
         if self.solver == "quadrature":
             nodes, weights = gauss_gegenbauer_quadrature(self.grid_samples, self.lam)
             omega_q = np.arccos(nodes)
@@ -325,8 +368,9 @@ class GegenbauerFilterCompiler:
 
             a_coeffs = np.zeros(K)
             for k in range(K):
-                phi_k = self._eval_basis(k, nodes)
-                norm_sq = 1.0 if self.basis_type == "normalized" else phi_norm_squared(k, self.lam)
+                phi_k = self._eval_basis(k, nodes, symmetry=sym)
+                c1 = float(c_n_1_val(k, self.lam))
+                norm_sq = phi_norm_squared(k, self.lam) / (c1 ** 2) if self.basis_type == "normalized" else phi_norm_squared(k, self.lam)
                 a_coeffs[k] = np.sum(D_q * phi_k * weights) / norm_sq
             return a_coeffs, K
 
@@ -337,7 +381,7 @@ class GegenbauerFilterCompiler:
 
             A = np.zeros((self.grid_samples, K))
             for k in range(K):
-                A[:, k] = self._eval_basis(k, nodes)
+                A[:, k] = self._eval_basis(k, nodes, symmetry=sym)
 
             sqrt_W = np.sqrt(W_q * weights)
             A_w = A * sqrt_W[:, np.newaxis]
@@ -352,6 +396,8 @@ class GegenbauerFilterCompiler:
             A_sys = np.vstack([A_w, R_mat])
             D_sys = np.concatenate([D_w, np.zeros(R_mat.shape[0])])
             a_coeffs, _, _, _ = np.linalg.lstsq(A_sys, D_sys, rcond=None)
+            s_vals = np.linalg.svd(A_w, compute_uv=False)
+            self.last_cond = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 0 else 1.0
             return a_coeffs, K
 
         omega = np.linspace(0, np.pi, self.grid_samples)
@@ -360,7 +406,7 @@ class GegenbauerFilterCompiler:
 
         A = np.zeros((self.grid_samples, K))
         for k in range(K):
-            A[:, k] = self._eval_basis(k, x)
+            A[:, k] = self._eval_basis(k, x, symmetry=sym)
 
         sqrt_W = np.sqrt(W)
         A_w = A * sqrt_W[:, np.newaxis]
@@ -371,35 +417,63 @@ class GegenbauerFilterCompiler:
 
     def transform_to_taps(self, a_coeffs: np.ndarray, spec: FilterSpec) -> np.ndarray:
         N = spec.order
+        sym = spec.symmetry_class
         grid_L = self.grid_samples
         omega = np.linspace(0, np.pi, grid_L)
         x = np.cos(omega)
 
         A_freq = np.zeros(grid_L, dtype=np.float64)
         for k, c in enumerate(a_coeffs):
-            A_freq += c * self._eval_basis(k, x)
+            A_freq += c * self._eval_basis(k, x, symmetry=sym)
 
         h = np.zeros(N, dtype=np.float64)
-        mid = (N - 1) / 2.0
-
         trapz_fn = np.trapezoid if hasattr(np, 'trapezoid') else np.trapz
-        for n in range(N):
-            m = n - mid
-            integrand = A_freq * np.cos(m * omega)
-            h[n] = (1.0 / np.pi) * trapz_fn(integrand, x=omega)
 
-        if spec.kind == "qmf_h1" and N % 2 == 0:
-            # For even N highpass (Type IV anti-symmetric FIR), force anti-symmetry h[n] = -h[N-1-n]
-            h = 0.5 * (h - h[::-1])
-        else:
-            # Symmetric FIR h[n] = h[N-1-n]
-            h = 0.5 * (h + h[::-1])
+        if sym == SymmetryClass.TYPE_I: # N odd, symmetric
+            mid = (N - 1) // 2
+            # A_freq = h[mid] + 2 sum_{m=1}^{mid} h[mid-m] cos(m omega)
+            for m in range(mid + 1):
+                integrand = A_freq if m == 0 else 2.0 * A_freq * np.cos(m * omega)
+                val = (1.0 / np.pi) * trapz_fn(integrand, x=omega)
+                if m == 0:
+                    h[mid] = val
+                else:
+                    h[mid - m] = val
+                    h[mid + m] = val
+
+        elif sym == SymmetryClass.TYPE_II: # N even, symmetric
+            M = N // 2
+            # A_freq = sum_{m=1}^{M} 2 h[M-m] cos((m - 0.5) omega)
+            for m in range(1, M + 1):
+                integrand = 2.0 * A_freq * np.cos((m - 0.5) * omega)
+                val = (1.0 / np.pi) * trapz_fn(integrand, x=omega)
+                h[M - m] = val
+                h[M + m - 1] = val
+
+        elif sym == SymmetryClass.TYPE_III: # N odd, anti-symmetric
+            mid = (N - 1) // 2
+            # A_freq = sum_{m=1}^{mid} 2 h[mid-m] sin(m omega)
+            h[mid] = 0.0
+            for m in range(1, mid + 1):
+                integrand = 2.0 * A_freq * np.sin(m * omega)
+                val = (1.0 / np.pi) * trapz_fn(integrand, x=omega)
+                h[mid - m] = val
+                h[mid + m] = -val
+
+        elif sym == SymmetryClass.TYPE_IV: # N even, anti-symmetric
+            M = N // 2
+            # A_freq = sum_{m=1}^{M} 2 h[M-m] sin((m - 0.5) omega)
+            for m in range(1, M + 1):
+                integrand = 2.0 * A_freq * np.sin((m - 0.5) * omega)
+                val = (1.0 / np.pi) * trapz_fn(integrand, x=omega)
+                h[M - m] = val
+                h[M + m - 1] = -val
 
         if spec.kind in ("lowpass", "qmf"):
             sum_h = np.sum(h)
             if abs(sum_h) > 1e-12:
                 h /= sum_h
-        elif spec.kind in ("highpass", "qmf_h1"):
+        elif spec.kind == "highpass":
             nyq_gain = np.sum(h * np.array([(-1.0)**n for n in range(N)]))
             if abs(nyq_gain) > 1e-12:
                 h /= nyq_gain
@@ -523,27 +597,9 @@ class GegenbauerFilterCompiler:
 
         h1_quant = None
         if spec.kind == "qmf":
-            # Test for half-band symmetry constraint
-            if abs((spec.wp + spec.ws) - 0.5) < 1e-12:
-                # Classic symmetric half-band QMF: mathematically guaranteed alias cancellation shortcut
-                sign_pattern = np.array([(-1.0)**n for n in range(spec.order)])
-                h1_float = sign_pattern * h0_float[::-1]
-            else:
-                # Asymmetric QMF arbitrary split across fs:
-                # Explicitly compile the H1 pass by targeting the crossfaded sine complement target
-                spec_h1 = FilterSpec(
-                    kind="qmf_h1",
-                    order=spec.order,
-                    cutoff=spec.cutoff,
-                    wp=spec.wp,
-                    ws=spec.ws,
-                    sampling_rate=spec.sampling_rate,
-                    passband_ripple_db=spec.passband_ripple_db,
-                    stopband_atten_db=spec.stopband_atten_db
-                )
-                a_coeffs_h1, _ = self.solve_coefficients(spec_h1)
-                h1_float = self.transform_to_taps(a_coeffs_h1, spec_h1)
-                
+            # Classic CQF/QMF pair construction: derive H1 directly via CQF modulation h1[n] = (-1)^n * h0[N-1-n]
+            sign_pattern = np.array([(-1.0)**n for n in range(spec.order)])
+            h1_float = sign_pattern * h0_float[::-1]
             h1_quant = self.quantize_taps(h1_float)
 
         K_fft = max(4096, 1 << (math.ceil(math.log2(spec.order)) + 3))
@@ -601,10 +657,11 @@ class GegenbauerFilterCompiler:
                 matching_status = MatchingStatus.ANALYTICALLY_CERTIFIED_MATCHING
 
         e_arithmetic = float(np.max(np.abs(h0_quant.float64_taps - h0_quant.q15_taps / h0_quant.q15_scale)))
+        cond_val = getattr(self, 'last_cond', 1.0)
         provenance = ErrorBoundProvenance(
             e_analytic=asymp_err,
             e_arithmetic=e_arithmetic,
-            e_conditioning=self.ctx.eps * 1.0,
+            e_conditioning=self.ctx.eps * cond_val,
             e_implementation=0.0
         )
 
@@ -772,12 +829,22 @@ class GegenbauerFilterCompiler:
         h1_taps = np.array([g0_taps[n] * ((-1)**n) for n in range(len(g0_taps))])[::-1]
         g1_taps = np.array([-h0_taps[n] * ((-1)**n) for n in range(len(h0_taps))])[::-1]
 
+        # 6. Verify Polyphase Perfect Reconstruction (PR) Condition: H0(z)G0(z) + H1(z)G1(z) = 2 z^-d
+        K_fft = 4096
+        H0_f = np.fft.fft(h0_taps, K_fft)
+        G0_f = np.fft.fft(g0_taps, K_fft)
+        H1_f = np.fft.fft(h1_taps, K_fft)
+        G1_f = np.fft.fft(g1_taps, K_fft)
+        pr_response = np.abs(H0_f * G0_f + H1_f * G1_f)
+        pr_error = float(np.max(np.abs(pr_response - 2.0)))
+
         return {
             "H0": self.quantize_taps(h0_taps), # Analysis Lowpass
             "H1": self.quantize_taps(h1_taps), # Analysis Highpass
             "G0": self.quantize_taps(g0_taps), # Synthesis Lowpass
             "G1": self.quantize_taps(g1_taps), # Synthesis Highpass
-            "P": p_taps                        # Product Half-band
+            "P": p_taps,                        # Product Half-band
+            "pr_error": pr_error
         }
 
     def plot_response(self, result: FilterResult, output_path: str):
