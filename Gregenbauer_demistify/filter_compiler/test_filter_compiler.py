@@ -367,11 +367,11 @@ def test_filter_spec_edge_cases():
         FilterSpec(kind="qmf", order=63, cutoff=0.25)
 
     # Transition band overlap for lowpass (wp >= ws)
-    with pytest.raises(ValueError, match="Passband edge wp .* must be < stopband edge ws"):
+    with pytest.raises(ValueError, match="Frequency edges must satisfy 0 < wp"):
         FilterSpec(kind="lowpass", order=31, cutoff=0.25, wp=0.3, ws=0.2)
 
     # Transition band overlap for highpass (ws >= wp)
-    with pytest.raises(ValueError, match="Stopband edge ws .* must be < passband edge wp"):
+    with pytest.raises(ValueError, match="Frequency edges must satisfy 0 < ws"):
         FilterSpec(kind="highpass", order=31, cutoff=0.25, wp=0.2, ws=0.3)
 
     # Clamped bandpass upper bounds for cutoff near Nyquist
