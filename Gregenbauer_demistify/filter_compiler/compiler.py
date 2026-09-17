@@ -109,8 +109,8 @@ class FilterSpec:
         if not (0.0 < self.cutoff < 0.5):
             raise ValueError(f"Cutoff must be in (0.0, 0.5), got {self.cutoff}")
 
-        # Highpass FIR filters cannot have an even number of taps (Type II)
-        if self.kind in ("highpass", "qmf_h1") and self.order % 2 == 0:
+        # Highpass FIR filters cannot have an even number of taps (Type II symmetric)
+        if self.kind == "highpass" and self.order % 2 == 0:
             raise ValueError(f"Highpass FIR filter (Type II) cannot have an even length N={self.order} due to forced Nyquist zero. Filter length must be odd.")
 
         # QMF filter pairs require an even tap length
@@ -128,9 +128,9 @@ class FilterSpec:
             if self.ws is None:
                 self.ws = max(0.01, self.cutoff - 0.05) if self.kind == "highpass" else min(0.49, self.cutoff + 0.05)
 
-        if self.kind in ("lowpass", "qmf") and self.wp >= self.ws:
+        if self.kind in ("lowpass", "qmf", "qmf_h1") and self.wp >= self.ws:
             raise ValueError(f"Passband edge wp ({self.wp}) must be < stopband edge ws ({self.ws})")
-        elif self.kind in ("highpass", "qmf_h1") and self.ws >= self.wp:
+        elif self.kind == "highpass" and self.ws >= self.wp:
             raise ValueError(f"Stopband edge ws ({self.ws}) must be < passband edge wp ({self.wp})")
         elif self.kind == "bandpass" and not (self.ws < self.wp < self.wp2 < self.ws2):
             raise ValueError(f"Bandpass frequencies must satisfy ws ({self.ws}) < wp ({self.wp}) < wp2 ({self.wp2}) < ws2 ({self.ws2})")
@@ -308,14 +308,14 @@ class GegenbauerFilterCompiler:
         if self.basis_terms is not None:
             K = self.basis_terms
         else:
-            if spec.kind == "qmf":
+            if spec.kind in ("qmf", "qmf_h1"):
                 K = min(M, max(16, N // 2))
             else:
                 K = max(4, int(np.sqrt(N)) + 2)
         K = min(K, M)
 
         mu = self.mu_reg
-        if spec.kind == "qmf" and self.mu_reg == 1e-4:
+        if spec.kind in ("qmf", "qmf_h1") and self.mu_reg == 1e-4:
             mu = 1e-6
 
         if self.solver == "quadrature":
@@ -388,7 +388,12 @@ class GegenbauerFilterCompiler:
             integrand = A_freq * np.cos(m * omega)
             h[n] = (1.0 / np.pi) * trapz_fn(integrand, x=omega)
 
-        h = 0.5 * (h + h[::-1])
+        if spec.kind == "qmf_h1" and N % 2 == 0:
+            # For even N highpass (Type IV anti-symmetric FIR), force anti-symmetry h[n] = -h[N-1-n]
+            h = 0.5 * (h - h[::-1])
+        else:
+            # Symmetric FIR h[n] = h[N-1-n]
+            h = 0.5 * (h + h[::-1])
 
         if spec.kind in ("lowpass", "qmf"):
             sum_h = np.sum(h)
@@ -469,6 +474,9 @@ class GegenbauerFilterCompiler:
             f"#define GEG_LAMBDA {result.lam}f",
             f"#define GEG_BASIS_TERMS {result.basis_terms}",
             f"#define GEG_E_TOTAL_BOUND {p.total}f",
+            f"#define GEG_Q15_SCALE {h0.q15_scale}f",
+            f"#define GEG_Q23_SCALE {h0.q23_scale}f",
+            f"#define GEG_Q31_SCALE {h0.q31_scale}f",
             ""
         ])
 
@@ -523,8 +531,16 @@ class GegenbauerFilterCompiler:
             else:
                 # Asymmetric QMF arbitrary split across fs:
                 # Explicitly compile the H1 pass by targeting the crossfaded sine complement target
-                spec_h1 = copy.deepcopy(spec)
-                spec_h1.kind = "qmf_h1"
+                spec_h1 = FilterSpec(
+                    kind="qmf_h1",
+                    order=spec.order,
+                    cutoff=spec.cutoff,
+                    wp=spec.wp,
+                    ws=spec.ws,
+                    sampling_rate=spec.sampling_rate,
+                    passband_ripple_db=spec.passband_ripple_db,
+                    stopband_atten_db=spec.stopband_atten_db
+                )
                 a_coeffs_h1, _ = self.solve_coefficients(spec_h1)
                 h1_float = self.transform_to_taps(a_coeffs_h1, spec_h1)
                 
@@ -549,10 +565,18 @@ class GegenbauerFilterCompiler:
         pass_ripple = np.max(H0_db[pass_idx]) - np.min(H0_db[pass_idx]) if np.any(pass_idx) else 0.0
         stop_atten = -np.max(H0_db[stop_idx]) if np.any(stop_idx) else 0.0
 
+        pass_ripple_h1 = 0.0
+        stop_atten_h1 = 0.0
         qmf_pow_db = 0.0
         qmf_alias_db = 0.0
         if spec.kind == "qmf" and h1_quant is not None:
             H1 = np.fft.fft(h1_quant.float64_taps, K_fft)
+            H1_db = 20 * np.log10(np.maximum(1e-12, np.abs(H1[:K_fft // 2])))
+            pass_idx_h1 = freq_grid >= spec.ws
+            stop_idx_h1 = freq_grid <= spec.wp
+            pass_ripple_h1 = float(np.max(H1_db[pass_idx_h1]) - np.min(H1_db[pass_idx_h1])) if np.any(pass_idx_h1) else 0.0
+            stop_atten_h1 = float(-np.max(H1_db[stop_idx_h1])) if np.any(stop_idx_h1) else 0.0
+
             H1_shift = np.roll(H1, K_fft // 2)
             H0_shift = np.roll(H0, K_fft // 2)
 
@@ -590,18 +614,18 @@ class GegenbauerFilterCompiler:
             pass_ripple <= pass_ripple_thresh and
             stop_atten >= min(spec.stopband_atten_db * 0.5, 20.0)
         )
+        if spec.kind == "qmf" and h1_quant is not None:
+            prototype_fir_certified = prototype_fir_certified and (
+                pass_ripple_h1 <= pass_ripple_thresh and
+                stop_atten_h1 >= min(spec.stopband_atten_db * 0.5, 20.0)
+            )
         
         qmf_power_complementary = True
         qmf_alias_cancellation = True
 
         if spec.kind == "qmf":
             qmf_power_complementary = (qmf_pow_db <= 1.0)
-            if abs((spec.wp + spec.ws) - 0.5) < 1e-12:
-                qmf_alias_cancellation = (qmf_alias_db <= -30.0)
-            else:
-                # Alias cancellation depends strictly on symmetric half-band shifts structurally
-                # in a standard 2-channel maximally decimated filter bank. Waive the strict error constraint for arbitrary splits.
-                qmf_alias_cancellation = True
+            qmf_alias_cancellation = (qmf_alias_db <= -20.0)
 
         is_certified = (
             basis_evaluation_certified and
@@ -648,7 +672,8 @@ class GegenbauerFilterCompiler:
     def compile_biorthogonal_pair(self, order_h0: int, order_g0: int, cutoff: float = 0.25) -> dict:
         """
         Compiles a Biorthogonal filter bank pair (H0, G0) via half-band spectral factorization.
-        The sum of the orders must be even to form a valid half-band product filter.
+        The sum of the filter orders (degree = tap length - 1) must be even to form a valid half-band product filter.
+        Groupings keep conjugate and reciprocal quadruplets/pairs together to maintain exact linear phase symmetry.
         """
         total_order = order_h0 + order_g0
         if total_order % 2 != 0:
@@ -657,10 +682,10 @@ class GegenbauerFilterCompiler:
         # 1. Define and compile the Product Filter P(z) as a Half-Band Lowpass
         p_spec = FilterSpec(
             kind="lowpass",
-            order=total_order + 1, # +1 for taps (e.g. order 14 -> 15 taps)
+            order=total_order + 1, # +1 for taps
             cutoff=cutoff,
-            wp=cutoff - 0.05,
-            ws=cutoff + 0.05
+            wp=max(0.01, cutoff - 0.05),
+            ws=min(0.49, cutoff + 0.05)
         )
 
         # Solve for P(z) taps using the existing Gegenbauer spectral solver
@@ -677,53 +702,73 @@ class GegenbauerFilterCompiler:
         p_taps /= (2.0 * p_taps[center])
 
         # 2. Spectral Factorization
-        # Find the roots (zeros) of the polynomial defined by p_taps
         roots = np.roots(p_taps)
 
-        # Sort roots: unit circle roots (stopband zeros) vs real/complex pairs (passband shaping)
+        # Group roots into symmetric quadruplets / pairs to ensure real linear-phase factors
+        # A) Unit circle roots (stopband zeros) occurring in complex conjugate pairs
         unit_circle_roots = []
         other_roots = []
 
         for r in roots:
-            if abs(abs(r) - 1.0) < 1e-4:
+            if abs(abs(r) - 1.0) < 1e-3:
                 unit_circle_roots.append(r)
             else:
                 other_roots.append(r)
 
-        # Sort unit circle roots by angle to ensure we keep conjugate pairs together
-        unit_circle_roots = sorted(unit_circle_roots, key=lambda x: np.angle(x))
+        # Sort unit circle roots by angle to group conjugate pairs
+        unit_circle_roots = sorted(unit_circle_roots, key=lambda x: (np.abs(np.angle(x)), np.angle(x)))
 
-        # 3. Distribute Roots to maintain Linear Phase
-        # Biorthogonal filters require symmetric root distribution
-        # (if r is a root, 1/r must also be in the same filter if it's not on the unit circle)
+        # Group off-unit-circle roots into reciprocal/conjugate quadruplets or real pairs
+        quads = []
+        visited = set()
+        for i, r in enumerate(other_roots):
+            if i in visited:
+                continue
+            # Find conjugate r*, reciprocal 1/r, and reciprocal conjugate 1/r*
+            group = [r]
+            visited.add(i)
+            for j, r2 in enumerate(other_roots):
+                if j in visited:
+                    continue
+                if abs(r2 - np.conj(r)) < 1e-3 or abs(r2 - 1.0/r) < 1e-3 or abs(r2 - 1.0/np.conj(r)) < 1e-3:
+                    group.append(r2)
+                    visited.add(j)
+            quads.append(group)
+
+        # 3. Distribute Roots to maintain Linear Phase & Requested Filter Orders
         h0_roots = []
         g0_roots = []
 
-        # Assign stopband zeros (unit circle) based on desired lengths
-        # More zeros to the longer filter
-        num_h0_zeros = order_h0
-        h0_roots.extend(unit_circle_roots[:num_h0_zeros])
-        g0_roots.extend(unit_circle_roots[num_h0_zeros:])
+        # Assign unit circle zeros proportionally to match order_h0 and order_g0
+        num_h0_uc = min(order_h0, len(unit_circle_roots))
+        if num_h0_uc % 2 != 0 and num_h0_uc > 0:
+            num_h0_uc -= 1
 
-        # Distribute the remaining shaping roots
-        # For strict linear phase, roots inside the unit circle and their reciprocal
-        # outside the unit circle must stay together in the same filter.
-        # (Simplified assignment for demonstration - a robust implementation groups by 4s)
-        half_other = len(other_roots) // 2
-        h0_roots.extend(other_roots[:half_other])
-        g0_roots.extend(other_roots[half_other:])
+        h0_roots.extend(unit_circle_roots[:num_h0_uc])
+        g0_roots.extend(unit_circle_roots[num_h0_uc:])
+
+        # Assign root quadruplets/pairs
+        for group in quads:
+            if len(h0_roots) + len(group) <= order_h0:
+                h0_roots.extend(group)
+            else:
+                g0_roots.extend(group)
 
         # 4. Reconstruct Filter Taps from Roots
-        h0_taps = np.poly(h0_roots).real
-        g0_taps = np.poly(g0_roots).real
+        h0_taps = np.poly(h0_roots).real if len(h0_roots) > 0 else np.array([1.0])
+        g0_taps = np.poly(g0_roots).real if len(g0_roots) > 0 else np.array([1.0])
 
-        # Normalize DC gain to sqrt(2) (standard for wavelet/biorthogonal filters)
-        h0_taps *= np.sqrt(2) / np.sum(h0_taps)
-        g0_taps *= np.sqrt(2) / np.sum(g0_taps)
+        # Enforce exact time-domain symmetry for linear phase
+        h0_taps = 0.5 * (h0_taps + h0_taps[::-1])
+        g0_taps = 0.5 * (g0_taps + g0_taps[::-1])
 
-        # 5. Generate Highpass Filters using the alternating sign rule
-        # H1(z) = G0(-z) * z^-d
-        # G1(z) = -H0(-z) * z^-d
+        # Normalize DC gain to sqrt(2)
+        if abs(np.sum(h0_taps)) > 1e-12:
+            h0_taps *= np.sqrt(2) / np.sum(h0_taps)
+        if abs(np.sum(g0_taps)) > 1e-12:
+            g0_taps *= np.sqrt(2) / np.sum(g0_taps)
+
+        # 5. Generate Highpass Filters using alternating sign rule
         h1_taps = np.array([g0_taps[n] * ((-1)**n) for n in range(len(g0_taps))])[::-1]
         g1_taps = np.array([-h0_taps[n] * ((-1)**n) for n in range(len(h0_taps))])[::-1]
 
@@ -834,7 +879,17 @@ class GegenbauerFilterCompiler:
 
         for lam in lambda_candidates:
             for mu in mu_candidates:
-                compiler = GegenbauerFilterCompiler(lam=lam, mu_reg=mu, solver=use_solver)
+                compiler = GegenbauerFilterCompiler(
+                    lam=lam,
+                    basis_terms=self.basis_terms,
+                    basis_type=self.basis_type,
+                    solver=use_solver,
+                    mu_reg=mu,
+                    reg_power=self.reg_power,
+                    asymptotic_mode=self.asymptotic_mode,
+                    grid_samples=self.grid_samples,
+                    precision=self.ctx.precision
+                )
                 res = compiler.compile(spec)
 
                 score = res.passband_ripple_actual * 10.0 - res.stopband_atten_actual
