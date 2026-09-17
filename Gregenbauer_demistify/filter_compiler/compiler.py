@@ -111,7 +111,7 @@ class FilterSpec:
 
     def __post_init__(self):
         self.kind = self.kind.lower()
-        if self.kind not in ("lowpass", "highpass", "bandpass", "qmf"):
+        if self.kind not in ("lowpass", "highpass", "bandpass", "qmf", "asymmetric_qmf"):
             raise ValueError(f"Unknown filter kind: '{self.kind}'")
         if self.order < 3:
             raise ValueError("Filter order must be >= 3")
@@ -119,7 +119,7 @@ class FilterSpec:
             raise ValueError(f"Cutoff must be in (0.0, 0.5), got {self.cutoff}")
 
         # QMF filter pairs require an even tap length
-        if self.kind == "qmf" and self.order % 2 != 0:
+        if self.kind in ("qmf", "asymmetric_qmf") and self.order % 2 != 0:
             raise ValueError(f"QMF filter pair requires an even tap length N, got {self.order}.")
 
         if self.kind == "bandpass":
@@ -137,7 +137,7 @@ class FilterSpec:
             if abs((self.wp + self.ws) - 0.5) > 1e-6:
                 raise ValueError(f"QMF filter pair requires symmetric transition band around fs/4 (wp + ws == 0.5), got wp={self.wp}, ws={self.ws}")
 
-        if self.kind in ("lowpass", "qmf") and self.wp >= self.ws:
+        if self.kind in ("lowpass", "qmf", "asymmetric_qmf") and self.wp >= self.ws:
             raise ValueError(f"Passband edge wp ({self.wp}) must be < stopband edge ws ({self.ws})")
         elif self.kind == "highpass" and self.ws >= self.wp:
             raise ValueError(f"Stopband edge ws ({self.ws}) must be < passband edge wp ({self.wp})")
@@ -150,7 +150,7 @@ class FilterSpec:
         is_even = (self.order % 2 == 0)
         if self.kind == "highpass":
             return SymmetryClass.TYPE_IV if is_even else SymmetryClass.TYPE_I
-        elif self.kind in ("lowpass", "bandpass", "qmf"):
+        elif self.kind in ("lowpass", "bandpass", "qmf", "asymmetric_qmf"):
             return SymmetryClass.TYPE_II if is_even else SymmetryClass.TYPE_I
         return SymmetryClass.TYPE_I
 
@@ -287,7 +287,7 @@ class GegenbauerFilterCompiler:
         W = np.ones_like(omega)
         wp, ws = spec.wp, spec.ws
 
-        if spec.kind == "qmf":
+        if spec.kind in ("qmf", "asymmetric_qmf"):
             pass_mask = f <= wp
             stop_mask = f >= ws
             trans_mask = ~(pass_mask | stop_mask)
@@ -354,7 +354,7 @@ class GegenbauerFilterCompiler:
         if self.basis_terms is not None:
             K = self.basis_terms
         else:
-            if spec.kind == "qmf":
+            if spec.kind in ("qmf", "asymmetric_qmf"):
                 K = min(M, max(16, N // 2))
             else:
                 K = max(4, int(np.sqrt(N)) + 2)
@@ -449,9 +449,8 @@ class GegenbauerFilterCompiler:
 
         if sym == SymmetryClass.TYPE_I: # N odd, symmetric
             mid = (N - 1) // 2
-            # A_freq = h[mid] + 2 sum_{m=1}^{mid} h[mid-m] cos(m omega)
             for m in range(mid + 1):
-                integrand = A_freq if m == 0 else 2.0 * A_freq * np.cos(m * omega)
+                integrand = A_freq if m == 0 else A_freq * np.cos(m * omega)
                 val = (1.0 / np.pi) * trapz_fn(integrand, x=omega)
                 if m == 0:
                     h[mid] = val
@@ -461,28 +460,25 @@ class GegenbauerFilterCompiler:
 
         elif sym == SymmetryClass.TYPE_II: # N even, symmetric
             M = N // 2
-            # A_freq = sum_{m=1}^{M} 2 h[M-m] cos((m - 0.5) omega)
             for m in range(1, M + 1):
-                integrand = 2.0 * A_freq * np.cos((m - 0.5) * omega)
+                integrand = A_freq * np.cos((m - 0.5) * omega)
                 val = (1.0 / np.pi) * trapz_fn(integrand, x=omega)
                 h[M - m] = val
                 h[M + m - 1] = val
 
         elif sym == SymmetryClass.TYPE_III: # N odd, anti-symmetric
             mid = (N - 1) // 2
-            # A_freq = sum_{m=1}^{mid} 2 h[mid-m] sin(m omega)
             h[mid] = 0.0
             for m in range(1, mid + 1):
-                integrand = 2.0 * A_freq * np.sin(m * omega)
+                integrand = A_freq * np.sin(m * omega)
                 val = (1.0 / np.pi) * trapz_fn(integrand, x=omega)
                 h[mid - m] = val
                 h[mid + m] = -val
 
         elif sym == SymmetryClass.TYPE_IV: # N even, anti-symmetric
             M = N // 2
-            # A_freq = sum_{m=1}^{M} 2 h[M-m] sin((m - 0.5) omega)
             for m in range(1, M + 1):
-                integrand = 2.0 * A_freq * np.sin((m - 0.5) * omega)
+                integrand = A_freq * np.sin((m - 0.5) * omega)
                 val = (1.0 / np.pi) * trapz_fn(integrand, x=omega)
                 h[M - m] = val
                 h[M + m - 1] = -val
@@ -614,7 +610,7 @@ class GegenbauerFilterCompiler:
         h0_quant = self.quantize_taps(h0_float)
 
         h1_quant = None
-        if spec.kind == "qmf":
+        if spec.kind in ("qmf", "asymmetric_qmf"):
             # Classic CQF/QMF pair construction: derive H1 directly via CQF modulation h1[n] = (-1)^n * h0[N-1-n]
             sign_pattern = np.array([(-1.0)**n for n in range(spec.order)])
             h1_float = sign_pattern * h0_float[::-1]
@@ -643,7 +639,7 @@ class GegenbauerFilterCompiler:
         freq_grid = np.arange(K_fft // 2) / float(K_fft)
         H0_db = 20 * np.log10(np.maximum(1e-12, np.abs(H0[:K_fft // 2])))
 
-        if spec.kind in ("lowpass", "qmf", "qmf_h1"):
+        if spec.kind in ("lowpass", "qmf", "asymmetric_qmf"):
             pass_idx = freq_grid <= spec.wp
             stop_idx = freq_grid >= spec.ws
         elif spec.kind == "highpass":
@@ -660,11 +656,16 @@ class GegenbauerFilterCompiler:
         stop_atten_h1 = 0.0
         qmf_pow_db = 0.0
         qmf_alias_db = 0.0
-        if spec.kind == "qmf" and h1_quant is not None:
+        if spec.kind in ("qmf", "asymmetric_qmf") and h1_quant is not None:
             H1 = np.fft.fft(h1_quant.float64_taps, K_fft)
             H1_db = 20 * np.log10(np.maximum(1e-12, np.abs(H1[:K_fft // 2])))
-            pass_idx_h1 = freq_grid >= spec.ws
-            stop_idx_h1 = freq_grid <= spec.wp
+
+            # For CQF/QMF, H1's transition mirror bounds are f >= 0.5 - wp (passband) and f <= 0.5 - ws (stopband)
+            h1_pass_edge = 0.5 - spec.wp
+            h1_stop_edge = 0.5 - spec.ws
+            pass_idx_h1 = freq_grid >= h1_pass_edge
+            stop_idx_h1 = freq_grid <= h1_stop_edge
+
             pass_ripple_h1 = float(np.max(H1_db[pass_idx_h1]) - np.min(H1_db[pass_idx_h1])) if np.any(pass_idx_h1) else 0.0
             stop_atten_h1 = float(-np.max(H1_db[stop_idx_h1])) if np.any(stop_idx_h1) else 0.0
 
@@ -714,7 +715,7 @@ class GegenbauerFilterCompiler:
         qmf_power_complementary = True
         qmf_alias_cancellation = True
 
-        if spec.kind == "qmf":
+        if spec.kind in ("qmf", "asymmetric_qmf"):
             qmf_power_complementary = (qmf_pow_db <= 1.0)
             qmf_alias_cancellation = (qmf_alias_db <= -20.0)
 
@@ -827,19 +828,21 @@ class GegenbauerFilterCompiler:
             quads.append(group)
 
         # 3. Distribute Roots to maintain Linear Phase & Requested Filter Orders
+        # Pair unit circle conjugate zeros into 2-root factors
+        uc_pairs = []
+        for i in range(0, len(unit_circle_roots) - 1, 2):
+            uc_pairs.append([unit_circle_roots[i], unit_circle_roots[i+1]])
+        if len(unit_circle_roots) % 2 != 0:
+            uc_pairs.append([unit_circle_roots[-1]])
+
+        # Combine uc_pairs and quads into atomic symmetric root groups
+        atomic_groups = uc_pairs + quads
+
         h0_roots = []
         g0_roots = []
 
-        # Assign unit circle zeros proportionally to match order_h0 and order_g0
-        num_h0_uc = min(order_h0, len(unit_circle_roots))
-        if num_h0_uc % 2 != 0 and num_h0_uc > 0:
-            num_h0_uc -= 1
-
-        h0_roots.extend(unit_circle_roots[:num_h0_uc])
-        g0_roots.extend(unit_circle_roots[num_h0_uc:])
-
-        # Assign root quadruplets/pairs
-        for group in quads:
+        # Distribute atomic groups to match requested order_h0 exactly
+        for group in atomic_groups:
             if len(h0_roots) + len(group) <= order_h0:
                 h0_roots.extend(group)
             else:
@@ -848,10 +851,6 @@ class GegenbauerFilterCompiler:
         # 4. Reconstruct Filter Taps from Roots
         h0_taps = np.poly(h0_roots).real if len(h0_roots) > 0 else np.array([1.0])
         g0_taps = np.poly(g0_roots).real if len(g0_roots) > 0 else np.array([1.0])
-
-        # Enforce exact time-domain symmetry for linear phase
-        h0_taps = 0.5 * (h0_taps + h0_taps[::-1])
-        g0_taps = 0.5 * (g0_taps + g0_taps[::-1])
 
         # Normalize DC gain to sqrt(2)
         if abs(np.sum(h0_taps)) > 1e-12:

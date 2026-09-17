@@ -121,6 +121,30 @@ def test_qmf_pair_compilation():
     assert result.payload.is_certified is True
 
 
+def test_asymmetric_qmf_compilation():
+    """Tests asymmetric QMF filter synthesis with arbitrary passband and stopband edges."""
+    spec = FilterSpec(kind="asymmetric_qmf", order=64, cutoff=0.23, wp=0.20, ws=0.26)
+    compiler = GegenbauerFilterCompiler(lam=1.25, solver="spectral_regularized", mu_reg=1e-4)
+    result = compiler.compile(spec)
+
+    assert result.h1_taps is not None
+    h0 = result.h0_taps.float64_taps
+    h1 = result.h1_taps.float64_taps
+
+    assert len(h0) == 64
+    assert len(h1) == 64
+
+    # Verify CQF mirror relationship in float and fixed-point domains
+    sign_pattern = np.array([(-1.0)**n for n in range(64)])
+    np.testing.assert_allclose(h1, sign_pattern * h0[::-1], atol=1e-12)
+    q15_sign = np.array([(-1)**n for n in range(64)], dtype=np.int32)
+    np.testing.assert_array_equal(result.h1_taps.q15_taps, (q15_sign * result.h0_taps.q15_taps[::-1]).astype(np.int32))
+
+    # Check alias cancellation for asymmetric QMF
+    assert result.qmf_alias_distortion_max_db < -20.0
+    assert result.payload.qmf_alias_cancellation is True
+
+
 def test_qmf_target_power_complementarity():
     """Verifies that the QMF sine/cosine amplitude crossfade target yields exact power complementarity."""
     spec = FilterSpec(kind="qmf", order=64, cutoff=0.25)
