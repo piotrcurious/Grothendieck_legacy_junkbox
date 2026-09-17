@@ -42,7 +42,7 @@ def test_basis_to_fir_roundtrip():
     ]
 
     for spec in specs:
-        a_coeffs, _, _, _ = compiler.solve_coefficients(spec)
+        a_coeffs, _, _, _, _, _ = compiler.solve_coefficients(spec)
         taps = compiler.transform_to_taps(a_coeffs, spec)
 
         # Evaluate target basis sum A(omega)
@@ -62,6 +62,41 @@ def test_basis_to_fir_roundtrip():
         # Verify roundtrip agreement (up to overall DC/Nyquist normalization)
         corr = np.corrcoef(np.abs(A_basis), np.abs(H_fir))[0, 1]
         assert corr > 0.99
+
+
+def test_solve_qmf_power_coefficients():
+    """Verifies that solve_qmf_power_coefficients produces a power-complementary polynomial P(x) + P(-x) == 1."""
+    spec = FilterSpec(kind="qmf", order=32, cutoff=0.25)
+    compiler = GegenbauerFilterCompiler(lam=1.5)
+    a_coeffs, K, cond_val, res_aug, res_data, res_reg = compiler.solve_qmf_power_coefficients(spec)
+
+    assert K > 0
+    assert len(a_coeffs) == 2 * K
+    # Verify even-indexed coefficients are strictly 0
+    for k in range(K):
+        assert a_coeffs[2 * k] == 0.0
+
+    # Evaluate R_odd(x) = sum a_{2k+1} C_{2k+1}^(lambda)(x)
+    x_nodes = np.linspace(-0.99, 0.99, 100)
+    R_pos = np.zeros_like(x_nodes)
+    R_neg = np.zeros_like(x_nodes)
+
+    for k in range(K):
+        n_odd = 2 * k + 1
+        c_k = a_coeffs[n_odd]
+        R_pos += c_k * compiler._eval_basis(n_odd, x_nodes, symmetry=SymmetryClass.TYPE_I)
+        R_neg += c_k * compiler._eval_basis(n_odd, -x_nodes, symmetry=SymmetryClass.TYPE_I)
+
+    # Verify R_odd(-x) == -R_odd(x) => P(x) + P(-x) = (0.5 + R(x)) + (0.5 + R(-x)) == 1
+    np.testing.assert_allclose(R_pos + R_neg, 0.0, atol=1e-12)
+
+
+def test_basis_terms_exceeds_dimension_rejection():
+    """Verifies that basis_terms > M raises ValueError."""
+    spec = FilterSpec(kind="lowpass", order=15, cutoff=0.25) # M = 8
+    compiler = GegenbauerFilterCompiler(basis_terms=12)
+    with pytest.raises(ValueError, match="exceeds the independent dimension"):
+        compiler.solve_coefficients(spec)
 
 
 def test_filter_spec_validation():
@@ -205,11 +240,11 @@ def test_solver_dispatch_modes():
 
     # least_squares solver
     comp_ls = GegenbauerFilterCompiler(lam=1.5, solver="least_squares", mu_reg=1e-4)
-    a_ls, K_ls, cond_ls, res_ls = comp_ls.solve_coefficients(spec)
+    a_ls, K_ls, cond_ls, res_ls_aug, res_ls_data, res_ls_reg = comp_ls.solve_coefficients(spec)
 
     # spectral_regularized solver
     comp_reg = GegenbauerFilterCompiler(lam=1.5, solver="spectral_regularized", mu_reg=1e-4)
-    a_reg, K_reg, cond_reg, res_reg = comp_reg.solve_coefficients(spec)
+    a_reg, K_reg, cond_reg, res_reg_aug, res_reg_data, res_reg_reg = comp_reg.solve_coefficients(spec)
 
     assert K_ls == K_reg
     # Regularized solution must differ from unregularized LS solution
