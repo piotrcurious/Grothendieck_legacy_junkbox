@@ -275,12 +275,12 @@ def test_biorthogonal_pair_compilation():
     """Tests biorthogonal filter bank pair compilation via half-band spectral factorization."""
     compiler = GegenbauerFilterCompiler(lam=1.5)
 
-    # Odd sum of orders must raise ValueError
-    with pytest.raises(ValueError, match="sum of H0 and G0 orders must be even"):
-        compiler.compile_biorthogonal_pair(order_h0=9, order_g0=6)
+    # Invalid order sum (not congruent to 2 mod 4) must raise ValueError
+    with pytest.raises(ValueError, match=r"order_h0 \+ order_g0 must be congruent to 2 \(mod 4\)"):
+        compiler.compile_biorthogonal_pair(order_h0=8, order_g0=8)
 
-    # Valid pair compilation (CDF 9/7 style orders 9 + 7 = 16 or 8 + 6 = 14)
-    pair = compiler.compile_biorthogonal_pair(order_h0=8, order_g0=6, cutoff=0.25)
+    # Valid pair compilation (CDF 9/7 style orders 8 + 6 = 14)
+    pair = compiler.compile_biorthogonal_pair(order_h0=8, order_g0=6, cutoff=0.25, vanishing_moments=2)
 
     assert "H0" in pair and "H1" in pair and "G0" in pair and "G1" in pair and "P" in pair
     assert isinstance(pair["H0"], QuantizedTaps)
@@ -299,9 +299,13 @@ def test_biorthogonal_pair_compilation():
     assert len(h0_taps) == len(g1_taps)
     assert len(g0_taps) == len(h1_taps)
 
-    # Verify DC gain normalization (approx sqrt(2))
+    # Verify DC gain normalization
     assert abs(np.sum(h0_taps) - np.sqrt(2)) < 1e-5
     assert abs(np.sum(g0_taps) - np.sqrt(2)) < 1e-5
+
+    # Verify PR distortion error and alias cancellation error
+    assert pair["pr_error"] < 1e-8
+    assert pair["alias_error"] < 1e-8
 
 
 def test_quantization_formats():
