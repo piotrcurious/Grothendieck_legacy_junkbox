@@ -1276,9 +1276,8 @@ class GegenbauerFilterCompiler:
             )
 
         best_cost, best = np.inf, None
-        use_hp = (total_order > 30)
         for idx in dp[target]:
-            h, g = factor_taps(set(idx), high_precision=use_hp)
+            h, g = factor_taps(set(idx), high_precision=False)
             dc_h, dc_g = float(h.sum()), float(g.sum())
             if dc_h * dc_g <= 0.0:
                 continue
