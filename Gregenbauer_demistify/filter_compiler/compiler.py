@@ -1196,13 +1196,13 @@ class GegenbauerFilterCompiler:
                 import mpmath as mp
                 dps_orig = mp.mp.dps
                 mp.mp.dps = max(80, total_order * 2)
-                coeffs_mp = [mp.mpf(float(x)) for x in q_taps]
+                coeffs_mp = [mp.mpf(float(x)) for x in q_taps[::-1]]
                 roots_mp = mp.polyroots(coeffs_mp, maxsteps=500)
                 groups = self._symmetric_root_groups(roots_mp, root_tol=mp.mpf('1e-6'))
                 mp.mp.dps = dps_orig
             else:
                 groups = self._symmetric_root_groups(
-                    list(np.roots(q_taps))
+                    list(np.roots(q_taps[::-1]))
                 )
         if sum(len(g) for g in groups) != len(q_taps) - 1:
             raise RuntimeError("root grouping lost roots")
@@ -1264,21 +1264,43 @@ class GegenbauerFilterCompiler:
                 h_full_mp = poly_mult_mp(poly_h_mp, binom_K_mp)
                 g_full_mp = poly_mult_mp(poly_g_mp, binom_K_mp)
 
+                # Constant coefficient is the LAST coefficient in descending form
+                h_const_mp = h_full_mp[-1]
+                g_const_mp = g_full_mp[-1]
+
+                if abs(h_const_mp * g_const_mp) == 0:
+                    raise RuntimeError("factorization produced a zero constant coefficient")
+
                 p0_mp = mp.mpf(float(p_taps[0]))
-                hg0_mp = poly_mult_mp(h_full_mp, g_full_mp)[0]
-                scale_mp = p0_mp / hg0_mp
+                scale_mp = p0_mp / (h_const_mp * g_const_mp)
                 g_full_mp = [c * scale_mp for c in g_full_mp]
 
-                h = np.array([float(mp.re(c)) for c in h_full_mp], dtype=np.float64)
-                g = np.array([float(mp.re(c)) for c in g_full_mp], dtype=np.float64)
+                # Convert descending polynomial coefficients -> ascending FIR taps
+                h = np.array([float(mp.re(c)) for c in reversed(h_full_mp)], dtype=np.float64)
+                g = np.array([float(mp.re(c)) for c in reversed(g_full_mp)], dtype=np.float64)
                 mp.mp.dps = dps_orig
                 return h, g
 
             hr_c = [complex(r) for r in hr]
             gr_c = [complex(r) for r in gr]
-            h = np.convolve(binom_K.coeffs, np.poly(hr_c).real if hr_c else [1.0])
-            g = np.convolve(binom_K.coeffs, np.poly(gr_c).real if gr_c else [1.0])
-            g = g * (p_taps[0] / np.convolve(h, g)[0])
+
+            binom_K_rev = np.array(binom_K.coeffs, dtype=np.float64)[::-1]
+
+            poly_h_desc = np.poly(hr_c).real if hr_c else np.array([1.0], dtype=np.float64)
+            poly_g_desc = np.poly(gr_c).real if gr_c else np.array([1.0], dtype=np.float64)
+
+            # Reversing descending poly coefficients -> ascending FIR taps
+            poly_h_asc = poly_h_desc[::-1]
+            poly_g_asc = poly_g_desc[::-1]
+
+            h = np.convolve(binom_K_rev, poly_h_asc)
+            g = np.convolve(binom_K_rev, poly_g_asc)
+
+            if abs(h[0] * g[0]) < 1e-15:
+                raise RuntimeError("factorization produced a zero constant tap")
+
+            scale = p_taps[0] / (h[0] * g[0])
+            g *= scale
             return h, g
 
         def lowpass_cost(h: np.ndarray, order: int, cutoff_freq: float = 0.25) -> float:
