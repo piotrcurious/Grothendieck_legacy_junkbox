@@ -1123,20 +1123,31 @@ class GegenbauerFilterCompiler:
 
     def compile_biorthogonal_pair(
         self,
-        taps_h0: int,
-        taps_g0: int,
+        taps_h0: Optional[int] = None,
+        taps_g0: Optional[int] = None,
         cutoff: float = 0.25,
         vanishing_moments: int = 1,
         verify_tol: float = 1e-8,
+        order_h0: Optional[int] = None,
+        order_g0: Optional[int] = None,
     ) -> dict:
         """Compile a linear-phase biorthogonal bank (H0, H1, G0, G1) by half-band
         spectral factorization.
 
         `taps_h0` and `taps_g0` specify the tap lengths of $H_0$ and $G_0$.
         Polynomial degrees are `degree_h0 = taps_h0 - 1` and `degree_g0 = taps_g0 - 1`.
+        For backward compatibility, if `order_h0` or `order_g0` are passed, they are interpreted as `taps_h0` and `taps_g0`.
         The total degree `total_order = degree_h0 + degree_g0` must satisfy
         `total_order % 4 == 2` for centered linear-phase half-band product filters with odd center delay.
         """
+        if taps_h0 is None and order_h0 is not None:
+            taps_h0 = order_h0
+        if taps_g0 is None and order_g0 is not None:
+            taps_g0 = order_g0
+
+        if taps_h0 is None or taps_g0 is None:
+            raise ValueError("Both taps_h0 (or order_h0) and taps_g0 (or order_g0) must be specified.")
+
         if taps_h0 < 3 or taps_g0 < 3:
             raise ValueError("Biorthogonal filters must have at least 3 taps.")
 
