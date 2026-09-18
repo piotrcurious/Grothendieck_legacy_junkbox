@@ -1328,7 +1328,15 @@ class GegenbauerFilterCompiler:
         h1_taps = ((-1.0) ** (np.arange(len(g0_taps)) + 1)) * g0_taps
         g1_taps = ((-1.0) ** np.arange(len(h0_taps))) * h0_taps
 
-        # 6. Verify linear-phase symmetry, product residual, and BOTH perfect-reconstruction conditions
+        # 6. Verify individual linear-phase symmetries, product residual, and BOTH perfect-reconstruction conditions
+        h_symmetry_residual = float(np.max(np.abs(h0_taps - h0_taps[::-1])))
+        g_symmetry_residual = float(np.max(np.abs(g0_taps - g0_taps[::-1])))
+
+        if h_symmetry_residual > verify_tol:
+            raise RuntimeError(f"H0 is not linear-phase symmetric: {h_symmetry_residual:.3e}")
+        if g_symmetry_residual > verify_tol:
+            raise RuntimeError(f"G0 is not linear-phase symmetric: {g_symmetry_residual:.3e}")
+
         prod_check = np.convolve(h0_taps, g0_taps)
         symmetry_residual = float(
             max(
