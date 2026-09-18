@@ -385,102 +385,204 @@ class GegenbauerFilterCompiler:
 
         return D, W
 
+    def _basis_chebyshev_matrix(self, max_degree: int) -> np.ndarray:
+        """Row n = cosine-harmonic (Chebyshev) coefficients of _eval_basis(n, .)."""
+        lam = self.lam
+        T = np.zeros((max_degree + 1, max_degree + 1), dtype=np.float64)
+        T[0, 0] = 1.0
+        if max_degree >= 1:
+            T[1, 1] = 1.0
+        for n in range(1, max_degree):
+            a_n = (n + 2.0 * lam) / (2.0 * (n + lam))
+            b_n = n / (2.0 * (n + lam))
+            shift = np.zeros(max_degree + 1, dtype=np.float64)
+            for m in range(max_degree + 1):
+                c = T[n, m]
+                if c == 0.0:
+                    continue
+                if m + 1 <= max_degree:
+                    shift[m + 1] += 0.5 * c
+                shift[abs(m - 1)] += 0.5 * c
+            T[n + 1] = (shift - b_n * T[n - 1]) / a_n
+        if self.basis_type != "normalized":
+            from math import lgamma, exp
+            for n in range(max_degree + 1):
+                T[n] *= exp(lgamma(n + 2.0 * lam) - lgamma(2.0 * lam) - lgamma(n + 1.0))
+        return T
+
+    def _basis_deriv_at_minus_one(self, n: int, j: int) -> float:
+        """d^j/dx^j of _eval_basis(n, .) at x = -1."""
+        from math import lgamma, exp
+        lam = self.lam
+        if j > n:
+            return 0.0
+        log_poch = lgamma(lam + j) - lgamma(lam)
+        log_c = lgamma(n + j + 2.0 * lam) - lgamma(2.0 * lam + 2.0 * j) - lgamma(n - j + 1.0)
+        val = (2.0 ** j) * exp(log_poch + log_c) * ((-1.0) ** (n - j))
+        if self.basis_type == "normalized":
+            val /= exp(lgamma(n + 2.0 * lam) - lgamma(2.0 * lam) - lgamma(n + 1.0))
+        return val
+
+    @staticmethod
+    def _deflate_at_minus_one(p: np.ndarray, times: int, tol: float = 1e-8) -> np.ndarray:
+        """Divide p(z) by (1 + z^-1)^times by synthetic division."""
+        q = np.asarray(p, dtype=np.float64)
+        for step in range(times):
+            out = np.empty(len(q) - 1, dtype=np.float64)
+            acc = 0.0
+            for i in range(len(q) - 1):
+                acc = q[i] - acc
+                out[i] = acc
+            residual = abs(q[-1] - acc)
+            if residual > tol * max(1.0, float(np.max(np.abs(q)))):
+                raise RuntimeError(
+                    f"deflation residual {residual:.3e} at step {step + 1}/{times}: "
+                    "z = -1 is not a root of the designed product filter to the "
+                    "requested multiplicity."
+                )
+            q = out
+        return q
+
+    @staticmethod
+    def _symmetric_root_groups(
+        roots: np.ndarray,
+        root_tol: Optional[float] = None,
+        real_tol: float = 1e-9,
+    ) -> List[List[complex]]:
+        """Atomic conjugate/reciprocal orbits."""
+        if root_tol is None:
+            root_tol = max(1e-8, 50.0 * float(np.finfo(float).eps) ** (1.0 / max(2, len(roots))))
+        unused = set(range(len(roots)))
+
+        def rel(a, b):
+            return abs(a - b) / max(1.0, abs(a), abs(b))
+
+        conj: List[List[int]] = []
+        while unused:
+            i = min(unused)
+            r = roots[i]
+            unused.remove(i)
+            if abs(r.imag) <= real_tol * max(1.0, abs(r)):
+                conj.append([i])
+                continue
+            j = min(unused, key=lambda k: rel(roots[k], np.conj(r))) if unused else None
+            if j is None or rel(roots[j], np.conj(r)) > root_tol:
+                raise ValueError(f"root {r} has no conjugate partner within {root_tol:.2e}")
+            unused.remove(j)
+            conj.append([i, j])
+
+        groups: List[List[int]] = []
+        used = set()
+        for gi, g in enumerate(conj):
+            if gi in used:
+                continue
+            r = roots[g[0]]
+            if abs(abs(r) - 1.0) <= root_tol:
+                groups.append(g)
+                used.add(gi)
+                continue
+            target = 1.0 / r
+            best_j, best_d = None, np.inf
+            for gj, other in enumerate(conj):
+                if gj == gi or gj in used or len(other) != len(g):
+                    continue
+                d = min(rel(roots[k], target) for k in other)
+                if d < best_d:
+                    best_d, best_j = d, gj
+            if best_j is None or best_d > root_tol:
+                raise ValueError(
+                    f"root {r} has no reciprocal partner within {root_tol:.2e} "
+                    f"(nearest {best_d:.3e})"
+                )
+            groups.append(g + conj[best_j])
+            used.update({gi, best_j})
+        return [[roots[i] for i in g] for g in groups]
+
     def solve_halfband_product_coefficients(
         self,
         total_order: int,
         cutoff: float = 0.25,
+        vanishing_moments: int = 1,
     ) -> np.ndarray:
-        """
-        Construct P(z) directly in the odd-harmonic halfband subspace.
-
-        For total_order = 96:
-            P has 97 taps
-            center = 48
-            admissible Gegenbauer degrees:
-                0, 1, 3, 5, ..., 47
-
-        The constant coefficient is fixed to 1, so that
-            P(w) + P(w+pi) = 2 exp(-j*w*48)
-        exactly at the representation level.
-        """
-        if total_order % 2 != 0:
-            raise ValueError("total_order must be even")
-
+        """Zero-phase amplitude A(w) = 1 + sum_{odd n} c_n phi_n(cos w) with KKT constraints."""
+        if abs(cutoff - 0.25) > 1e-12:
+            raise ValueError(
+                f"a half-band product filter pins the crossover at fs/4; got cutoff={cutoff}."
+            )
+        if total_order % 4 != 2:
+            raise ValueError(
+                "total_order must satisfy total_order % 4 == 2 so that the half-band "
+                f"centre is odd; got total_order={total_order}."
+            )
         center = total_order // 2
-        max_degree = center
+        odd_degrees = np.arange(1, center + 1, 2)
+        K = int(vanishing_moments)
+        if not (1 <= K <= len(odd_degrees)):
+            raise ValueError(
+                f"vanishing_moments must lie in [1, {len(odd_degrees)}] for "
+                f"total_order={total_order}; got {K}."
+            )
 
-        omega = np.linspace(
-            0.0,
-            np.pi,
-            max(self.grid_samples, 4096),
-            endpoint=True,
-        )
+        omega = np.linspace(0.0, np.pi, max(self.grid_samples, 8 * total_order), endpoint=True)
         f = omega / (2.0 * np.pi)
         x = np.cos(omega)
 
+        wp, ws = 0.20, 0.30
         D = np.zeros_like(omega)
         W = np.ones_like(omega)
-
-        wp = max(0.01, cutoff - 0.05)
-        ws = min(0.49, cutoff + 0.05)
-
-        pass_mask = f <= wp
-        stop_mask = f >= ws
+        pass_mask, stop_mask = f <= wp, f >= ws
         trans_mask = ~(pass_mask | stop_mask)
-
         D[pass_mask] = 2.0
-        D[stop_mask] = 0.0
-
-        if np.any(trans_mask):
-            t = (f[trans_mask] - wp) / (ws - wp)
-            D[trans_mask] = 1.0 + np.cos(np.pi * t)
-
-        W[pass_mask] = 1.0
-        W[stop_mask] = 10.0
+        t = (f[trans_mask] - wp) / (ws - wp)
+        D[trans_mask] = 1.0 + np.cos(np.pi * t)
         W[trans_mask] = 0.1
 
-        odd_degrees = np.arange(1, max_degree + 1, 2)
-
-        A = np.empty((len(omega), len(odd_degrees)), dtype=np.float64)
-
-        for j, degree in enumerate(odd_degrees):
-            A[:, j] = self._eval_basis(
-                int(degree),
-                x,
-                symmetry=SymmetryClass.TYPE_I,
-            )
-
-        target = D - 1.0
-
+        A = np.column_stack(
+            [self._eval_basis(int(d), x, symmetry=SymmetryClass.TYPE_I) for d in odd_degrees]
+        )
         sqrt_W = np.sqrt(W)
         A_w = A * sqrt_W[:, None]
-        b_w = target * sqrt_W
+        b_w = (D - 1.0) * sqrt_W
 
-        R_diag = np.empty(len(odd_degrees), dtype=np.float64)
-
-        for j, degree in enumerate(odd_degrees):
-            eig = degree * (degree + 2.0 * self.lam)
-            R_diag[j] = eig ** self.reg_power
-
-        R_mat = np.diag(np.sqrt(self.mu_reg * R_diag))
-
-        A_sys = np.vstack((A_w, R_mat))
-        b_sys = np.concatenate((
-            b_w,
-            np.zeros(len(odd_degrees)),
-        ))
-
-        coeff_odd, _, _, _ = np.linalg.lstsq(
-            A_sys,
-            b_sys,
-            rcond=None,
+        R_diag = np.array(
+            [(d * (d + 2.0 * self.lam)) ** self.reg_power for d in odd_degrees], dtype=np.float64
         )
+        R_mat = np.diag(np.sqrt(self.mu_reg * R_diag))
+        A_sys = np.vstack((A_w, R_mat))
+        b_sys = np.concatenate((b_w, np.zeros(len(odd_degrees))))
 
-        a = np.zeros(max_degree + 1, dtype=np.float64)
+        C = np.array(
+            [[self._basis_deriv_at_minus_one(int(d), j) for d in odd_degrees] for j in range(K)]
+        )
+        rhs_c = np.array([-self._basis_deriv_at_minus_one(0, j) for j in range(K)])
+        row_scale = np.maximum(np.max(np.abs(C), axis=1), 1e-300)
+        C, rhs_c = C / row_scale[:, None], rhs_c / row_scale
+
+        n_var = len(odd_degrees)
+        KKT = np.zeros((n_var + K, n_var + K), dtype=np.float64)
+        KKT[:n_var, :n_var] = A_sys.T @ A_sys
+        KKT[:n_var, n_var:] = C.T
+        KKT[n_var:, :n_var] = C
+        sol = np.linalg.solve(KKT, np.concatenate((A_sys.T @ b_sys, rhs_c)))
+
+        a = np.zeros(center + 1, dtype=np.float64)
         a[0] = 1.0
-        a[odd_degrees] = coeff_odd
-
+        a[odd_degrees] = sol[:n_var]
         return a
+
+    def _halfband_taps(self, a_coeffs: np.ndarray, total_order: int) -> np.ndarray:
+        """Exact tap recovery from the Gegenbauer coefficients (no quadrature)."""
+        center = total_order // 2
+        c = a_coeffs @ self._basis_chebyshev_matrix(center)
+        p = np.zeros(total_order + 1, dtype=np.float64)
+        p[center] = c[0]
+        for m in range(1, center + 1):
+            p[center - m] = 0.5 * c[m]
+            p[center + m] = 0.5 * c[m]
+        for m in range(2, center + 1, 2):
+            p[center - m] = 0.0
+            p[center + m] = 0.0
+        return p / p[center]
 
     def solve_qmf_power_coefficients(self, spec: FilterSpec) -> Tuple[np.ndarray, int, float, float, float, float]:
         """
@@ -1016,440 +1118,174 @@ class GegenbauerFilterCompiler:
         result.header_code = self.generate_header(result)
         return result
 
-    def compile_biorthogonal_pair(self, order_h0: int, order_g0: int, cutoff: float = 0.25) -> dict:
+    def compile_biorthogonal_pair(
+        self,
+        order_h0: int,
+        order_g0: int,
+        cutoff: float = 0.25,
+        vanishing_moments: int = 1,
+        verify_tol: float = 1e-8,
+    ) -> dict:
+        """Compile a linear-phase biorthogonal bank (H0, H1, G0, G1) by half-band
+        spectral factorization.
+
+        Orders are polynomial degrees (tap length - 1) and must satisfy
+        order_h0 + order_g0 = 2 (mod 4). `vanishing_moments` K is the number of
+        zeros at z = -1 given to *each* branch; K must share the parity of the
+        orders, since the remaining roots occur in reciprocal pairs and quartets.
+        K = (centre+1)/2 leaves zero degrees of freedom and reproduces the
+        maximally-flat (Daubechies) product filter exactly.
         """
-        Compiles a Biorthogonal filter bank pair (H0, G0) via half-band spectral factorization.
-        The sum of the filter orders (degree = tap length - 1) must be even to form a valid half-band product filter.
-        Groupings keep conjugate and reciprocal quadruplets/pairs together to maintain exact linear phase symmetry.
-        """
+        if abs(cutoff - 0.25) > 1e-12:
+            raise ValueError(
+                f"a half-band product filter pins the crossover at fs/4; got cutoff={cutoff}."
+            )
         total_order = order_h0 + order_g0
-        if total_order % 2 != 0:
-            raise ValueError("The sum of H0 and G0 orders must be even for a valid half-band filter.")
-
-        # 1. Define and compile the Product Filter P(z) in Half-Band Subspace
-        p_spec = FilterSpec(
-            kind="lowpass",
-            order=total_order + 1,
-            cutoff=cutoff,
-            wp=max(0.01, cutoff - 0.05),
-            ws=min(0.49, cutoff + 0.05)
-        )
-
-        a_coeffs = self.solve_halfband_product_coefficients(
-            total_order=total_order,
-            cutoff=cutoff
-        )
-
-        # Transform directly to taps without sum(h) = 1 LP normalization
-        grid_L = self.grid_samples
-        omega_grid = np.linspace(0, np.pi, grid_L)
-        x_grid = np.cos(omega_grid)
-
-        A_freq = np.zeros(grid_L, dtype=np.float64)
-        for k_idx, c_val in enumerate(a_coeffs):
-            A_freq += c_val * self._eval_basis(k_idx, x_grid, symmetry=SymmetryClass.TYPE_I)
-
-        p_taps = np.zeros(total_order + 1, dtype=np.float64)
-        mid_idx = total_order // 2
-        trapz_fn = np.trapezoid if hasattr(np, 'trapezoid') else np.trapz
-
-        for m_idx in range(mid_idx + 1):
-            integrand = A_freq if m_idx == 0 else A_freq * np.cos(m_idx * omega_grid)
-            val = (1.0 / np.pi) * trapz_fn(integrand, x=omega_grid)
-            if m_idx == 0:
-                p_taps[mid_idx] = val
-            else:
-                p_taps[mid_idx - m_idx] = val
-                p_taps[mid_idx + m_idx] = val
-
+        if total_order % 4 != 2:
+            raise ValueError(
+                "order_h0 + order_g0 must be congruent to 2 (mod 4) for a linear-phase "
+                f"biorthogonal pair; got {order_h0} + {order_g0} = {total_order}. "
+                "An even half-band centre forces p[0] = p[N] = 0 and admits no "
+                "alias-cancelling modulation."
+            )
+        K = int(vanishing_moments)
+        if (order_h0 - K) % 2 != 0:
+            raise ValueError(
+                "vanishing_moments must share the parity of the filter orders "
+                f"(order_h0={order_h0}, order_g0={order_g0}); got K={K}. The residual "
+                "roots come in reciprocal pairs and quartets, so order_h0 - K must be even."
+            )
+        if K > min(order_h0, order_g0):
+            raise ValueError(
+                f"vanishing_moments={K} exceeds min(order_h0, order_g0)={min(order_h0, order_g0)}"
+            )
         center = total_order // 2
-        if abs(p_taps[center] - 1.0) > 1e-6:
-            p_taps /= p_taps[center]
 
-        # 2. Robust symmetric root grouping with Projective (0, infinity) handling
-        #
-        # Strip leading and trailing zero coefficients resulting from half-band zeroing.
-        # Leading zeros represent roots at infinity (degree reduction in z);
-        # Trailing zeros represent roots at z = 0.
-        leading_zeros = 0
-        for v in p_taps:
-            if abs(v) <= 1e-12:
-                leading_zeros += 1
-            else:
-                break
+        # 1. half-band product filter P(z), exact centre tap and exact (1+z^-1)^2K
+        a_coeffs = self.solve_halfband_product_coefficients(
+            total_order, cutoff=cutoff, vanishing_moments=K
+        )
+        p_taps = self._halfband_taps(a_coeffs, total_order)
 
-        trailing_zeros = 0
-        for v in p_taps[::-1]:
-            if abs(v) <= 1e-12:
-                trailing_zeros += 1
-            else:
-                break
+        # 2. deflate the multiple root at z = -1, then root-find the remainder
+        q_taps = self._deflate_at_minus_one(p_taps, 2 * K)
+        binom_K = np.poly1d([1.0, 1.0]) ** K
 
-        p_trimmed = p_taps[leading_zeros : len(p_taps) - trailing_zeros] if (leading_zeros + trailing_zeros) < len(p_taps) else p_taps
-        roots = np.asarray(np.roots(p_trimmed), dtype=np.complex128)
-
-        finite_degree = len(p_trimmed) - 1
-        if len(roots) != finite_degree:
-            raise RuntimeError(
-                f"Spectral factorization returned {len(roots)} roots "
-                f"for trimmed polynomial degree {finite_degree}."
+        groups: List[List[complex]] = []
+        if len(q_taps) > 1:
+            groups = self._symmetric_root_groups(
+                np.asarray(np.roots(q_taps), dtype=np.complex128)
             )
+        if sum(len(g) for g in groups) != len(q_taps) - 1:
+            raise RuntimeError("root grouping lost roots")
 
-        root_tol = 1e-5
-        real_tol = 1e-7
-
-        # Projective reciprocal pairs (0, infinity)
-        # Each leading zero (root at inf) pairs with a trailing zero (root at 0) as a 2-root group.
-        # If un-paired, single zero or inf roots act as singletons or delay factors.
-        projective_pairs = min(leading_zeros, trailing_zeros)
-        extra_leading = leading_zeros - projective_pairs
-        extra_trailing = trailing_zeros - projective_pairs
-
-        # Represent projective groups using dummy marker objects/dicts or special group structures
-        # Group element: ('FINITE', complex_val) or ('PROJECTIVE_ZERO',) or ('PROJECTIVE_INF',)
-        unused = set(range(len(roots)))
-        atomic_groups = []
-
-        # Represent projective 2-root pairs (0, inf) as atomic groups of size 2
-        for _ in range(projective_pairs):
-            atomic_groups.append([('PROJECTIVE_ZERO',), ('PROJECTIVE_INF',)])
-        for _ in range(extra_trailing):
-            atomic_groups.append([('PROJECTIVE_ZERO',)])
-        for _ in range(extra_leading):
-            atomic_groups.append([('PROJECTIVE_INF',)])
-
-        def rel_dist(a: complex, b: complex) -> float:
-            scale = max(1.0, abs(a), abs(b))
-            return abs(a - b) / scale
-
-        def nearest_unused(target: complex, candidates: set):
-            if not candidates:
-                return None, np.inf
-
-            best_j = min(
-                candidates,
-                key=lambda j: rel_dist(roots[j], target)
-            )
-            return best_j, rel_dist(roots[best_j], target)
-
-        # First establish conjugate pairs.
-        conjugate_groups = []
-
-        while unused:
-            i = min(unused)
-            r = roots[i]
-            unused.remove(i)
-
-            # Numerically real root.
-            if abs(r.imag) <= real_tol * max(1.0, abs(r)):
-                conjugate_groups.append([i])
-                continue
-
-            j, d = nearest_unused(np.conj(r), unused)
-
-            if j is None or d > root_tol:
-                raise ValueError(
-                    "Could not pair a complex root with its conjugate: "
-                    f"r={r}, nearest_distance={d:.3e}"
-                )
-
-            unused.remove(j)
-            conjugate_groups.append([i, j])
-
-        # Now pair conjugate groups through reciprocal symmetry.
-        reciprocal_groups = []
-        used_groups = set()
-
-        for gi, group in enumerate(conjugate_groups):
-            if gi in used_groups:
-                continue
-
-            # Singleton roots must be self-reciprocal (approximately +/-1)
-            # for a symmetric factor.
-            if len(group) == 1:
-                i = group[0]
-                r = roots[i]
-
-                if abs(abs(r) - 1.0) <= root_tol:
-                    reciprocal_groups.append(group)
-                    used_groups.add(gi)
-                    continue
-
-                # Real root away from unit circle: find reciprocal root.
-                j = None
-                best_d = np.inf
-
-                for gj, other_group in enumerate(conjugate_groups):
-                    if gj == gi or gj in used_groups:
-                        continue
-                    if len(other_group) != 1:
-                        continue
-
-                    candidate = roots[other_group[0]]
-                    d = rel_dist(candidate, 1.0 / r)
-
-                    if d < best_d:
-                        best_d = d
-                        j = gj
-
-                if j is None or best_d > root_tol:
-                    raise ValueError(
-                        "Could not find reciprocal partner for real root "
-                        f"r={r}; nearest reciprocal distance={best_d:.3e}"
-                    )
-
-                reciprocal_groups.append(
-                    group + conjugate_groups[j]
-                )
-                used_groups.add(gi)
-                used_groups.add(j)
-                continue
-
-            # Complex conjugate pair.
-            r = roots[group[0]]
-
-            # Unit-circle conjugate pair: reciprocal orbit is itself.
-            if abs(abs(r) - 1.0) <= root_tol:
-                reciprocal_groups.append(group)
-                used_groups.add(gi)
-                continue
-
-            reciprocal_target = 1.0 / r
-
-            j = None
-            best_d = np.inf
-
-            for gj, other_group in enumerate(conjugate_groups):
-                if gj == gi or gj in used_groups:
-                    continue
-                if len(other_group) != 2:
-                    continue
-
-                candidate_roots = roots[other_group]
-
-                # Match reciprocal of r against either member of pair.
-                d = min(
-                    rel_dist(candidate_roots[0], reciprocal_target),
-                    rel_dist(candidate_roots[1], reciprocal_target),
-                )
-
-                if d < best_d:
-                    best_d = d
-                    j = gj
-
-            if j is None or best_d > root_tol:
-                raise ValueError(
-                    "Could not complete reciprocal-conjugate root quartet "
-                    f"for r={r}; nearest group distance={best_d:.3e}"
-                )
-
-            reciprocal_groups.append(
-                group + conjugate_groups[j]
-            )
-            used_groups.add(gi)
-            used_groups.add(j)
-
-        for group in reciprocal_groups:
-            atomic_groups.append([('FINITE', roots[i]) for i in group])
-
-        # Sanity check: every root must belong to exactly one group.
-        grouped_count = sum(len(g) for g in atomic_groups)
-
-        if grouped_count != total_order:
-            raise RuntimeError(
-                f"Root grouping lost roots: grouped={grouped_count}, "
-                f"expected={total_order}, "
-                f"group_sizes={[len(g) for g in atomic_groups]}"
-            )
-
-        # 3. Exact partition of atomic groups with Lowpass Spectral Optimization
-        target = int(order_h0)
-
-        dp_combinations = {0: [[]]}
-        for gi, group in enumerate(atomic_groups):
-            size = len(group)
-            for degree in sorted(list(dp_combinations.keys()), reverse=True):
+        # 3. exact partition of whole orbits, K zeros at -1 to each branch
+        target = order_h0 - K
+        dp = {0: [[]]}
+        for gi, g in enumerate(groups):
+            size = len(g)
+            for degree in sorted(dp.keys(), reverse=True):
                 new_degree = degree + size
                 if new_degree > target:
                     continue
-                if new_degree not in dp_combinations:
-                    dp_combinations[new_degree] = []
-                for comb in dp_combinations[degree]:
-                    if len(dp_combinations[new_degree]) < 500:
-                        dp_combinations[new_degree].append(comb + [gi])
-
-        if target not in dp_combinations or not dp_combinations[target]:
+                dp.setdefault(new_degree, [])
+                for comb in dp[degree]:
+                    if len(dp[new_degree]) < 2000:
+                        dp[new_degree].append(comb + [gi])
+        if target not in dp or not dp[target]:
             raise ValueError(
-                "Unable to partition roots into exact target orders "
-                f"order_h0={order_h0}, order_g0={order_g0}. "
-                f"Atomic root-group sizes="
-                f"{[len(g) for g in atomic_groups]}. "
-                "No symmetry-preserving subset has the requested H0 order."
+                f"no symmetry-preserving root subset of size {target} exists for "
+                f"order_h0={order_h0}, order_g0={order_g0}, K={K}; orbit sizes="
+                f"{[len(g) for g in groups]}"
             )
 
-        def reconstruct_factor_taps(elements, nominal_order):
-            finite_roots = [elem[1] for elem in elements if elem[0] == 'FINITE']
-            zero_count = sum(1 for elem in elements if elem[0] == 'PROJECTIVE_ZERO')
-            inf_count = sum(1 for elem in elements if elem[0] == 'PROJECTIVE_INF')
+        def factor_taps(subset: set) -> Tuple[np.ndarray, np.ndarray]:
+            hr = [r for gi, g in enumerate(groups) if gi in subset for r in g]
+            gr = [r for gi, g in enumerate(groups) if gi not in subset for r in g]
+            h = np.convolve(binom_K.coeffs, np.poly(hr).real if hr else [1.0])
+            g = np.convolve(binom_K.coeffs, np.poly(gr).real if gr else [1.0])
+            g = g * (p_taps[0] / np.convolve(h, g)[0])
+            return h, g
 
-            poly_taps = np.poly(finite_roots).real if len(finite_roots) > 0 else np.array([1.0])
+        def lowpass_cost(h: np.ndarray) -> float:
+            H = np.abs(np.fft.rfft(h, 4096))
+            fr = np.fft.rfftfreq(4096, d=1.0)
+            pb, sb = fr <= 0.20, fr >= 0.30
+            return float(
+                10.0 * np.mean(H[sb] ** 2)
+                + np.mean((H[pb] - math.sqrt(2.0)) ** 2)
+                + 5.0 * (H[0] - math.sqrt(2.0)) ** 2
+            )
 
-            if zero_count > 0:
-                poly_taps = np.pad(poly_taps, (0, zero_count), mode='constant')
-
-            if inf_count > 0:
-                poly_taps = np.pad(poly_taps, (inf_count, 0), mode='constant')
-
-            if len(poly_taps) < nominal_order + 1:
-                poly_taps = np.pad(poly_taps, (0, nominal_order + 1 - len(poly_taps)), mode='constant')
-
-            return poly_taps
-
-        def lowpass_cost(h_taps, cutoff_freq=0.25):
-            nfft = 4096
-            H = np.fft.rfft(h_taps, nfft)
-            freqs = np.fft.rfftfreq(nfft, d=1.0)
-            mag = np.abs(H)
-
-            wp = max(0.05, cutoff_freq - 0.05)
-            ws = min(0.45, cutoff_freq + 0.05)
-
-            pass_mask = freqs <= wp
-            stop_mask = freqs >= ws
-
-            target_gain = math.sqrt(2.0)
-            pass_err = np.mean((mag[pass_mask] - target_gain) ** 2) if np.any(pass_mask) else 0.0
-            stop_err = np.mean(mag[stop_mask] ** 2) if np.any(stop_mask) else 0.0
-            dc_err = (mag[0] - target_gain) ** 2
-            nyq_err = mag[-1] ** 2
-
-            return 10.0 * stop_err + pass_err + 5.0 * dc_err + 5.0 * nyq_err
-
-        best_cost = np.inf
-        best_h_indices = None
-
-        for h_indices in dp_combinations[target]:
-            h_set = set(h_indices)
-            h0_elems = []
-            g0_elems = []
-            for gi, group in enumerate(atomic_groups):
-                if gi in h_set:
-                    h0_elems.extend(group)
-                else:
-                    g0_elems.extend(group)
-
-            h0_cand = reconstruct_factor_taps(h0_elems, order_h0)
-            g0_cand = reconstruct_factor_taps(g0_elems, order_g0)
-
-            prod_cand = np.convolve(h0_cand, g0_cand)
-            p_scale_idx = np.flatnonzero(np.abs(p_taps) > 1e-11)
-            c_scale_idx = np.flatnonzero(np.abs(prod_cand) > 1e-11)
-            if len(p_scale_idx) == 0 or len(c_scale_idx) == 0:
+        best_cost, best = np.inf, None
+        for idx in dp[target]:
+            h, g = factor_taps(set(idx))
+            dc_h, dc_g = float(h.sum()), float(g.sum())
+            if dc_h * dc_g <= 0.0:
                 continue
-
-            scale_cand = p_taps[p_scale_idx[0]] / prod_cand[c_scale_idx[0]]
-            g0_cand *= scale_cand
-
-            dc_h_cand = float(np.sum(h0_cand))
-            dc_g_cand = float(np.sum(g0_cand))
-            if abs(dc_h_cand) < 1e-10 or abs(dc_g_cand) < 1e-10 or dc_h_cand * dc_g_cand <= 0.0:
-                continue
-
-            eq_cand = math.sqrt(abs(dc_g_cand / dc_h_cand))
-            h0_cand_eq = h0_cand * eq_cand
-            g0_cand_eq = g0_cand / eq_cand
-
-            cost = lowpass_cost(h0_cand_eq, cutoff_freq=cutoff) + lowpass_cost(g0_cand_eq, cutoff_freq=cutoff)
+            eq = math.sqrt(abs(dc_g / dc_h))
+            cost = lowpass_cost(h * eq) + lowpass_cost(g / eq)
             if cost < best_cost:
-                best_cost = cost
-                best_h_indices = h_indices
+                best_cost, best = cost, idx
+        if best is None:
+            raise ValueError("no root partition yields a pair of lowpass factors")
 
-        if best_h_indices is None:
-            raise ValueError(
-                "Unable to find a root partition that yields valid lowpass filters "
-                f"for order_h0={order_h0}, order_g0={order_g0}."
+        h0_taps, g0_taps = factor_taps(set(best))
+
+        # 4. product-preserving DC balance: H0(1) = G0(1) = sqrt(2), H0*G0 = P
+        dc_h, dc_g = float(h0_taps.sum()), float(g0_taps.sum())
+        eq = math.sqrt(abs(dc_g / dc_h))
+        h0_taps, g0_taps = h0_taps * eq, g0_taps / eq
+        if h0_taps.sum() < 0.0:
+            h0_taps, g0_taps = -h0_taps, -g0_taps
+
+        # 5. modulation with the relative sign that cancels aliasing
+        h1_taps = ((-1.0) ** (np.arange(len(g0_taps)) + 1)) * g0_taps
+        g1_taps = ((-1.0) ** np.arange(len(h0_taps))) * h0_taps
+
+        # 6. verify BOTH perfect-reconstruction conditions
+        K_fft = max(4096, 1 << (total_order.bit_length() + 4))
+        w = 2.0 * np.pi * np.arange(K_fft) / K_fft
+        shift = (np.arange(K_fft) + K_fft // 2) % K_fft
+        H0 = np.fft.fft(h0_taps, K_fft)
+        G0 = np.fft.fft(g0_taps, K_fft)
+        H1 = np.fft.fft(h1_taps, K_fft)
+        G1 = np.fft.fft(g1_taps, K_fft)
+
+        pr_error = float(np.max(np.abs(H0 * G0 + H1 * G1 - 2.0 * np.exp(-1j * w * center))))
+        alias_error = float(np.max(np.abs(H0[shift] * G0 + H1[shift] * G1)))
+        product_residual = float(np.max(np.abs(np.convolve(h0_taps, g0_taps) - p_taps)))
+        halfband_residual = float(
+            max(
+                abs(p_taps[k])
+                for k in range(total_order + 1)
+                if (k - center) % 2 == 0 and k != center
             )
-
-        h_group_indices = set(best_h_indices)
-
-        h0_elements = []
-        g0_elements = []
-
-        for gi, group in enumerate(atomic_groups):
-            if gi in h_group_indices:
-                h0_elements.extend(group)
-            else:
-                g0_elements.extend(group)
-
-        if (
-            len(h0_elements) != order_h0
-            or len(g0_elements) != order_g0
-        ):
+        )
+        if pr_error > verify_tol or alias_error > verify_tol:
             raise RuntimeError(
-                "Internal root partition inconsistency: "
-                f"H0={len(h0_elements)}/{order_h0}, "
-                f"G0={len(g0_elements)}/{order_g0}."
+                "biorthogonal bank failed verification: distortion "
+                f"|H0*G0 + H1*G1 - 2z^-{center}|_max = {pr_error:.3e}, alias "
+                f"|H0(-z)G0 + H1(-z)G1|_max = {alias_error:.3e}, half-band residual "
+                f"= {halfband_residual:.3e}."
             )
-
-        # 4. Reconstruct Filter Taps from Finite and Projective Roots
-        h0_taps = reconstruct_factor_taps(h0_elements, order_h0)
-        g0_taps = reconstruct_factor_taps(g0_elements, order_g0)
-
-        # Scale g0_taps so that H0 * G0 = P exactly
-        product = np.convolve(h0_taps, g0_taps)
-        p_scale_idx = np.flatnonzero(np.abs(p_taps) > 1e-11)
-        c_scale_idx = np.flatnonzero(np.abs(product) > 1e-11)
-
-        if len(p_scale_idx) == 0 or len(c_scale_idx) == 0:
-            raise RuntimeError("Degenerate polynomial factorization.")
-
-        scale = p_taps[p_scale_idx[0]] / product[c_scale_idx[0]]
-        g0_taps *= scale
-
-        # Inverse DC gain equalization to balance H0 and G0 DC gains while keeping H0 * G0 = P
-        dc_h = float(np.sum(h0_taps))
-        dc_g = float(np.sum(g0_taps))
-        if dc_h * dc_g > 0.0:
-            equalizer = math.sqrt(abs(dc_g / dc_h))
-            h0_taps *= equalizer
-            g0_taps /= equalizer
-
-        # Global scaling to normalize DC gains to exact sqrt(2) if P(1) ~ 2.0
-        dc_current = float(np.sum(h0_taps))
-        if abs(dc_current) > 1e-12:
-            scale_dc = np.sqrt(2) / abs(dc_current) if dc_current > 0 else -np.sqrt(2) / abs(dc_current)
-            h0_taps *= scale_dc
-            g0_taps *= scale_dc
-
-        # 5. Generate Highpass Filters using CQF modulation rule
-        delay = (order_h0 + order_g0) // 2
-        h1_taps = (g0_taps * ((-1.0) ** np.arange(len(g0_taps))))[::-1]
-        g1_taps = (h0_taps * ((-1.0) ** np.arange(len(h0_taps))))[::-1]
-
-        # 6. Verify Factor Product Residual and Polyphase Perfect Reconstruction (PR) Condition: H0(z)G0(z) + H1(z)G1(z) = 2 z^-d
-        h0_conv_g0 = np.convolve(h0_taps, g0_taps)
-        product_residual = float(np.max(np.abs(h0_conv_g0 - p_taps))) if len(h0_conv_g0) == len(p_taps) else float('nan')
-
-        K_fft = 4096
-        omega = 2.0 * np.pi * np.arange(K_fft) / float(K_fft)
-        expected_pr = 2.0 * np.exp(-1j * omega * delay)
-
-        H0_f = np.fft.fft(h0_taps, K_fft)
-        G0_f = np.fft.fft(g0_taps, K_fft)
-        H1_f = np.fft.fft(h1_taps, K_fft)
-        G1_f = np.fft.fft(g1_taps, K_fft)
-
-        pr_complex = H0_f * G0_f + H1_f * G1_f
-        pr_error = float(np.max(np.abs(pr_complex - expected_pr)))
 
         return {
-            "H0": self.quantize_taps(h0_taps), # Analysis Lowpass
-            "H1": self.quantize_taps(h1_taps), # Analysis Highpass
-            "G0": self.quantize_taps(g0_taps), # Synthesis Lowpass
-            "G1": self.quantize_taps(g1_taps), # Synthesis Highpass
-            "P": p_taps,                        # Product Half-band
+            "H0": self.quantize_taps(h0_taps),   # analysis lowpass
+            "H1": self.quantize_taps(h1_taps),   # analysis highpass
+            "G0": self.quantize_taps(g0_taps),   # synthesis lowpass
+            "G1": self.quantize_taps(g1_taps),   # synthesis highpass
+            "P": p_taps,
+            "delay": center,
+            "vanishing_moments": K,
             "product_residual": product_residual,
-            "pr_error": pr_error
+            "halfband_residual": halfband_residual,
+            "pr_error": pr_error,
+            "alias_error": alias_error,
+            "dc_gain_h0": float(h0_taps.sum()),
+            "dc_gain_g0": float(g0_taps.sum()),
+            "nyquist_gain_h0": float((h0_taps * (-1.0) ** np.arange(len(h0_taps))).sum()),
+            "nyquist_gain_g0": float((g0_taps * (-1.0) ** np.arange(len(g0_taps))).sum()),
         }
 
     def plot_response(self, result: FilterResult, output_path: str):
