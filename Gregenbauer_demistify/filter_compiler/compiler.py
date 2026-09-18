@@ -444,12 +444,60 @@ class GegenbauerFilterCompiler:
         return q
 
     @staticmethod
+    def _canonical_root_orbit(
+        roots: List[object],
+        root_tol: float = 1e-8,
+    ) -> List[object]:
+        """
+        Replace a numerically approximate reciprocal/conjugate orbit by an
+        exact reciprocal-conjugate orbit.
+
+        The first root determines the orbit geometry; partners are regenerated
+        algebraically rather than copied from the numerical root solver.
+        """
+        r0 = roots[0]
+        is_mp = hasattr(r0, 'real') and hasattr(r0, 'imag') and not isinstance(r0, (complex, float, int))
+
+        if is_mp:
+            import mpmath as mp
+            r = mp.mpc(r0)
+            r_abs = abs(r)
+            if abs(r_abs - mp.mpf(1.0)) <= root_tol:
+                angle = mp.atan2(r.imag, r.real)
+                r_unit = mp.mpc(mp.cos(angle), mp.sin(angle))
+                return [r_unit, mp.conj(r_unit)]
+            if abs(r.imag) <= root_tol * max(mp.mpf(1.0), r_abs):
+                r_real = mp.mpc(r.real, mp.mpf(0.0))
+                return [r_real, mp.mpf(1.0) / r_real]
+            rc = mp.conj(r)
+            ri = mp.mpf(1.0) / r
+            ric = mp.mpf(1.0) / rc
+            return [r, rc, ri, ric]
+
+        r = complex(r0)
+        if abs(abs(r) - 1.0) <= root_tol:
+            angle = math.atan2(r.imag, r.real)
+            r_unit = complex(math.cos(angle), math.sin(angle))
+            return [r_unit, r_unit.conjugate()]
+
+        if abs(r.imag) <= root_tol * max(1.0, abs(r)):
+            r_real = complex(r.real, 0.0)
+            return [r_real, 1.0 / r_real]
+
+        rc = r.conjugate()
+        ri = 1.0 / r
+        ric = 1.0 / rc
+
+        return [r, rc, ri, ric]
+
+    @classmethod
     def _symmetric_root_groups(
+        cls,
         roots: List[object],
         root_tol: Optional[float] = None,
         real_tol: float = 1e-9,
     ) -> List[List[object]]:
-        """Atomic conjugate/reciprocal orbits."""
+        """Atomic conjugate/reciprocal orbits canonicalized algebraically."""
         if root_tol is None:
             root_tol = 1e-5
         unused = set(range(len(roots)))
@@ -474,14 +522,14 @@ class GegenbauerFilterCompiler:
             unused.remove(j)
             conj.append([i, j])
 
-        groups: List[List[int]] = []
+        groups_idx: List[List[int]] = []
         used = set()
         for gi, g in enumerate(conj):
             if gi in used:
                 continue
             r = roots[g[0]]
             if abs(abs(r) - 1.0) <= root_tol:
-                groups.append(g)
+                groups_idx.append(g)
                 used.add(gi)
                 continue
             target = 1.0 / r
@@ -497,9 +545,12 @@ class GegenbauerFilterCompiler:
                     f"root {r} has no reciprocal partner within {root_tol:.2e} "
                     f"(nearest {best_d:.3e})"
                 )
-            groups.append(g + conj[best_j])
+            groups_idx.append(g + conj[best_j])
             used.update({gi, best_j})
-        return [[roots[i] for i in g] for g in groups]
+
+        raw_groups = [[roots[i] for i in g] for g in groups_idx]
+        canonical_groups = [cls._canonical_root_orbit(g, root_tol=root_tol) for g in raw_groups]
+        return canonical_groups
 
     def solve_halfband_product_coefficients(
         self,
@@ -1303,37 +1354,58 @@ class GegenbauerFilterCompiler:
             g *= scale
             return h, g
 
-        def lowpass_cost(h: np.ndarray, order: int, cutoff_freq: float = 0.25) -> float:
-            nfft = 8192
-            H = np.abs(np.fft.rfft(h, nfft))
-            fr = np.fft.rfftfreq(nfft, d=1.0)
+        def _root_response(roots_list: List[object], omega_arr: np.ndarray, K_moments: int) -> np.ndarray:
+            zinv = np.exp(-1j * omega_arr)
+            H_resp = (1.0 + zinv) ** K_moments
+            for r_val in roots_list:
+                H_resp = H_resp * (1.0 - complex(r_val) * zinv)
+            return H_resp
 
-            transition = 0.35 / max(order, 4)
-            wp = cutoff_freq - transition
-            ws = cutoff_freq + transition
+        omega_eval = np.linspace(0.0, np.pi, 4097, endpoint=True)
+        fr_eval = omega_eval / (2.0 * np.pi)
+        pb_eval = fr_eval <= 0.20
+        sb_eval = fr_eval >= 0.30
+        target_sqrt2 = math.sqrt(2.0)
 
-            pb = fr <= wp
-            sb = fr >= ws
+        def eval_partition_cost(idx_set: set) -> float:
+            hr_roots = [r for gi, g in enumerate(groups) if gi in idx_set for r in g]
+            gr_roots = [r for gi, g in enumerate(groups) if gi not in idx_set for r in g]
 
-            target = math.sqrt(2.0)
+            Hr = _root_response(hr_roots, omega_eval, K)
+            Gr = _root_response(gr_roots, omega_eval, K)
 
-            return float(
-                5.0 * np.mean((H[pb] - target) ** 2) if np.any(pb) else 0.0
-                + 20.0 * np.mean(H[sb] ** 2) if np.any(sb) else 0.0
-                + 10.0 * (H[0] - target) ** 2
-                + 10.0 * H[-1] ** 2
+            dc_h_val = float(abs(Hr[0]))
+            dc_g_val = float(abs(Gr[0]))
+
+            if dc_h_val <= 1e-15 or dc_g_val <= 1e-15:
+                return np.inf
+
+            eq_val = math.sqrt(dc_g_val / dc_h_val)
+            Hmag = np.abs(Hr * eq_val)
+            Gmag = np.abs(Gr / eq_val)
+
+            cost_h = (
+                5.0 * float(np.mean((Hmag[pb_eval] - target_sqrt2) ** 2))
+                + 20.0 * float(np.mean(Hmag[sb_eval] ** 2))
+                + 10.0 * float((Hmag[0] - target_sqrt2) ** 2)
+                + 10.0 * float(Hmag[-1] ** 2)
             )
+            cost_g = (
+                5.0 * float(np.mean((Gmag[pb_eval] - target_sqrt2) ** 2))
+                + 20.0 * float(np.mean(Gmag[sb_eval] ** 2))
+                + 10.0 * float((Gmag[0] - target_sqrt2) ** 2)
+                + 10.0 * float(Gmag[-1] ** 2)
+            )
+
+            return float(cost_h + cost_g)
 
         best_cost, best = np.inf, None
         for idx in dp[target]:
-            h, g = factor_taps(set(idx), high_precision=False)
-            dc_h, dc_g = float(h.sum()), float(g.sum())
-            if dc_h * dc_g <= 0.0:
-                continue
-            eq = math.sqrt(abs(dc_g / dc_h))
-            cost = lowpass_cost(h * eq, degree_h0, cutoff) + lowpass_cost(g / eq, degree_g0, cutoff)
-            if cost < best_cost:
-                best_cost, best = cost, idx
+            cost = eval_partition_cost(set(idx))
+            if np.isfinite(cost) and cost < best_cost:
+                best_cost = cost
+                best = idx
+
         if best is None:
             raise ValueError("no root partition yields a pair of lowpass factors")
 
