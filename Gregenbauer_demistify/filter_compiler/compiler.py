@@ -1123,8 +1123,8 @@ class GegenbauerFilterCompiler:
 
     def compile_biorthogonal_pair(
         self,
-        order_h0: int,
-        order_g0: int,
+        taps_h0: int,
+        taps_g0: int,
         cutoff: float = 0.25,
         vanishing_moments: int = 1,
         verify_tol: float = 1e-8,
@@ -1132,35 +1132,40 @@ class GegenbauerFilterCompiler:
         """Compile a linear-phase biorthogonal bank (H0, H1, G0, G1) by half-band
         spectral factorization.
 
-        Orders are polynomial degrees (tap length - 1) and must satisfy
-        order_h0 + order_g0 = 2 (mod 4). `vanishing_moments` K is the number of
-        zeros at z = -1 given to *each* branch; K must share the parity of the
-        orders, since the remaining roots occur in reciprocal pairs and quartets.
-        K = (centre+1)/2 leaves zero degrees of freedom and reproduces the
-        maximally-flat (Daubechies) product filter exactly.
+        `taps_h0` and `taps_g0` specify the tap lengths of $H_0$ and $G_0$.
+        Polynomial degrees are `degree_h0 = taps_h0 - 1` and `degree_g0 = taps_g0 - 1`.
+        The total degree `total_order = degree_h0 + degree_g0` must satisfy
+        `total_order % 4 == 2` for centered linear-phase half-band product filters with odd center delay.
         """
+        if taps_h0 < 3 or taps_g0 < 3:
+            raise ValueError("Biorthogonal filters must have at least 3 taps.")
+
         if abs(cutoff - 0.25) > 1e-12:
             raise ValueError(
                 f"a half-band product filter pins the crossover at fs/4; got cutoff={cutoff}."
             )
-        total_order = order_h0 + order_g0
+
+        degree_h0 = taps_h0 - 1
+        degree_g0 = taps_g0 - 1
+        total_order = degree_h0 + degree_g0
+
         if total_order % 4 != 2:
             raise ValueError(
-                "order_h0 + order_g0 must be congruent to 2 (mod 4) for a linear-phase "
-                f"biorthogonal pair; got {order_h0} + {order_g0} = {total_order}. "
-                "An even half-band centre forces p[0] = p[N] = 0 and admits no "
-                "alias-cancelling modulation."
+                "The current centered linear-phase construction requires "
+                f"(taps_h0 - 1) + (taps_g0 - 1) == 2 mod 4; "
+                f"got {degree_h0} + {degree_g0} = {total_order}."
             )
+
         K = int(vanishing_moments)
-        if (order_h0 - K) % 2 != 0:
+        if (degree_h0 - K) % 2 != 0:
             raise ValueError(
-                "vanishing_moments must share the parity of the filter orders "
-                f"(order_h0={order_h0}, order_g0={order_g0}); got K={K}. The residual "
-                "roots come in reciprocal pairs and quartets, so order_h0 - K must be even."
+                "vanishing_moments must share the parity of the filter degrees "
+                f"(degree_h0={degree_h0}, degree_g0={degree_g0}); got K={K}. The residual "
+                "roots come in reciprocal pairs and quartets, so degree_h0 - K must be even."
             )
-        if K > min(order_h0, order_g0):
+        if K > min(degree_h0, degree_g0):
             raise ValueError(
-                f"vanishing_moments={K} exceeds min(order_h0, order_g0)={min(order_h0, order_g0)}"
+                f"vanishing_moments={K} exceeds min(degree_h0, degree_g0)={min(degree_h0, degree_g0)}"
             )
         center = total_order // 2
 
@@ -1192,7 +1197,7 @@ class GegenbauerFilterCompiler:
             raise RuntimeError("root grouping lost roots")
 
         # 3. exact partition of whole orbits, K zeros at -1 to each branch
-        target = order_h0 - K
+        target = degree_h0 - K
         dp = {0: [[]]}
         for gi, g in enumerate(groups):
             size = len(g)
@@ -1207,7 +1212,7 @@ class GegenbauerFilterCompiler:
         if target not in dp or not dp[target]:
             raise ValueError(
                 f"no symmetry-preserving root subset of size {target} exists for "
-                f"order_h0={order_h0}, order_g0={order_g0}, K={K}; orbit sizes="
+                f"degree_h0={degree_h0}, degree_g0={degree_g0}, K={K}; orbit sizes="
                 f"{[len(g) for g in groups]}"
             )
 
@@ -1265,14 +1270,25 @@ class GegenbauerFilterCompiler:
             g = g * (p_taps[0] / np.convolve(h, g)[0])
             return h, g
 
-        def lowpass_cost(h: np.ndarray) -> float:
-            H = np.abs(np.fft.rfft(h, 4096))
-            fr = np.fft.rfftfreq(4096, d=1.0)
-            pb, sb = fr <= 0.20, fr >= 0.30
+        def lowpass_cost(h: np.ndarray, order: int, cutoff_freq: float = 0.25) -> float:
+            nfft = 8192
+            H = np.abs(np.fft.rfft(h, nfft))
+            fr = np.fft.rfftfreq(nfft, d=1.0)
+
+            transition = 0.35 / max(order, 4)
+            wp = cutoff_freq - transition
+            ws = cutoff_freq + transition
+
+            pb = fr <= wp
+            sb = fr >= ws
+
+            target = math.sqrt(2.0)
+
             return float(
-                10.0 * np.mean(H[sb] ** 2)
-                + np.mean((H[pb] - math.sqrt(2.0)) ** 2)
-                + 5.0 * (H[0] - math.sqrt(2.0)) ** 2
+                5.0 * np.mean((H[pb] - target) ** 2) if np.any(pb) else 0.0
+                + 20.0 * np.mean(H[sb] ** 2) if np.any(sb) else 0.0
+                + 10.0 * (H[0] - target) ** 2
+                + 10.0 * H[-1] ** 2
             )
 
         best_cost, best = np.inf, None
@@ -1282,7 +1298,7 @@ class GegenbauerFilterCompiler:
             if dc_h * dc_g <= 0.0:
                 continue
             eq = math.sqrt(abs(dc_g / dc_h))
-            cost = lowpass_cost(h * eq) + lowpass_cost(g / eq)
+            cost = lowpass_cost(h * eq, degree_h0, cutoff) + lowpass_cost(g / eq, degree_g0, cutoff)
             if cost < best_cost:
                 best_cost, best = cost, idx
         if best is None:
@@ -1301,7 +1317,17 @@ class GegenbauerFilterCompiler:
         h1_taps = ((-1.0) ** (np.arange(len(g0_taps)) + 1)) * g0_taps
         g1_taps = ((-1.0) ** np.arange(len(h0_taps))) * h0_taps
 
-        # 6. verify BOTH perfect-reconstruction conditions
+        # 6. Verify linear-phase symmetry, product residual, and BOTH perfect-reconstruction conditions
+        prod_check = np.convolve(h0_taps, g0_taps)
+        symmetry_residual = float(
+            max(
+                abs(prod_check[k] - prod_check[total_order - k])
+                for k in range(total_order + 1)
+            )
+        )
+        if symmetry_residual > verify_tol:
+            raise RuntimeError(f"H0*G0 product filter lost linear-phase symmetry: residual = {symmetry_residual:.3e}")
+
         K_fft = max(4096, 1 << (total_order.bit_length() + 4))
         w = 2.0 * np.pi * np.arange(K_fft) / K_fft
         shift = (np.arange(K_fft) + K_fft // 2) % K_fft
@@ -1312,7 +1338,7 @@ class GegenbauerFilterCompiler:
 
         pr_error = float(np.max(np.abs(H0 * G0 + H1 * G1 - 2.0 * np.exp(-1j * w * center))))
         alias_error = float(np.max(np.abs(H0[shift] * G0 + H1[shift] * G1)))
-        product_residual = float(np.max(np.abs(np.convolve(h0_taps, g0_taps) - p_taps)))
+        product_residual = float(np.max(np.abs(prod_check - p_taps)))
         halfband_residual = float(
             max(
                 abs(p_taps[k])
@@ -1334,6 +1360,12 @@ class GegenbauerFilterCompiler:
             "G0": self.quantize_taps(g0_taps),   # synthesis lowpass
             "G1": self.quantize_taps(g1_taps),   # synthesis highpass
             "P": p_taps,
+            "length_h0": len(h0_taps),
+            "length_g0": len(g0_taps),
+            "degree_h0": degree_h0,
+            "degree_g0": degree_g0,
+            "delay_h0": degree_h0 / 2.0,
+            "delay_g0": degree_g0 / 2.0,
             "delay": center,
             "vanishing_moments": K,
             "product_residual": product_residual,
