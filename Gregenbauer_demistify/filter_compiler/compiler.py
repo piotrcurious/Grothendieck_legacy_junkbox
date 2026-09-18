@@ -445,13 +445,13 @@ class GegenbauerFilterCompiler:
 
     @staticmethod
     def _symmetric_root_groups(
-        roots: np.ndarray,
+        roots: List[object],
         root_tol: Optional[float] = None,
         real_tol: float = 1e-9,
-    ) -> List[List[complex]]:
+    ) -> List[List[object]]:
         """Atomic conjugate/reciprocal orbits."""
         if root_tol is None:
-            root_tol = max(1e-8, 50.0 * float(np.finfo(float).eps) ** (1.0 / max(2, len(roots))))
+            root_tol = 1e-5
         unused = set(range(len(roots)))
 
         def rel(a, b):
@@ -462,11 +462,14 @@ class GegenbauerFilterCompiler:
             i = min(unused)
             r = roots[i]
             unused.remove(i)
-            if abs(r.imag) <= real_tol * max(1.0, abs(r)):
+            r_imag = float(r.imag) if hasattr(r, 'imag') else float(complex(r).imag)
+            r_abs = float(abs(r))
+            if abs(r_imag) <= real_tol * max(1.0, r_abs):
                 conj.append([i])
                 continue
-            j = min(unused, key=lambda k: rel(roots[k], np.conj(r))) if unused else None
-            if j is None or rel(roots[j], np.conj(r)) > root_tol:
+            r_conj = type(r)(r.real, -r.imag) if hasattr(r, 'real') and hasattr(r, 'imag') else (r.conjugate() if hasattr(r, 'conjugate') else complex(r).conjugate())
+            j = min(unused, key=lambda k: rel(roots[k], r_conj)) if unused else None
+            if j is None or rel(roots[j], r_conj) > root_tol:
                 raise ValueError(f"root {r} has no conjugate partner within {root_tol:.2e}")
             unused.remove(j)
             conj.append([i, j])
@@ -1171,11 +1174,20 @@ class GegenbauerFilterCompiler:
         q_taps = self._deflate_at_minus_one(p_taps, 2 * K)
         binom_K = np.poly1d([1.0, 1.0]) ** K
 
-        groups: List[List[complex]] = []
+        groups: List[List[object]] = []
         if len(q_taps) > 1:
-            groups = self._symmetric_root_groups(
-                np.asarray(np.roots(q_taps), dtype=np.complex128)
-            )
+            if total_order > 30:
+                import mpmath as mp
+                dps_orig = mp.mp.dps
+                mp.mp.dps = max(80, total_order * 2)
+                coeffs_mp = [mp.mpf(float(x)) for x in q_taps]
+                roots_mp = mp.polyroots(coeffs_mp, maxsteps=500)
+                groups = self._symmetric_root_groups(roots_mp, root_tol=mp.mpf('1e-6'))
+                mp.mp.dps = dps_orig
+            else:
+                groups = self._symmetric_root_groups(
+                    list(np.roots(q_taps))
+                )
         if sum(len(g) for g in groups) != len(q_taps) - 1:
             raise RuntimeError("root grouping lost roots")
 
@@ -1199,11 +1211,57 @@ class GegenbauerFilterCompiler:
                 f"{[len(g) for g in groups]}"
             )
 
-        def factor_taps(subset: set) -> Tuple[np.ndarray, np.ndarray]:
+        def factor_taps(subset: set, high_precision: bool = False) -> Tuple[np.ndarray, np.ndarray]:
             hr = [r for gi, g in enumerate(groups) if gi in subset for r in g]
             gr = [r for gi, g in enumerate(groups) if gi not in subset for r in g]
-            h = np.convolve(binom_K.coeffs, np.poly(hr).real if hr else [1.0])
-            g = np.convolve(binom_K.coeffs, np.poly(gr).real if gr else [1.0])
+
+            if high_precision:
+                import mpmath as mp
+                dps_orig = mp.mp.dps
+                mp.mp.dps = max(80, total_order * 2)
+
+                def poly_from_roots_mp(root_list):
+                    p = [mp.mpf(1.0)]
+                    for r in root_list:
+                        p_next = [mp.mpf(0.0)] * (len(p) + 1)
+                        r_mpc = mp.mpc(r)
+                        for i, c in enumerate(p):
+                            p_next[i] += c
+                            p_next[i + 1] -= c * r_mpc
+                        p = p_next
+                    return p
+
+                def poly_mult_mp(p1, p2):
+                    res = [mp.mpf(0.0)] * (len(p1) + len(p2) - 1)
+                    for i, c1 in enumerate(p1):
+                        for j, c2 in enumerate(p2):
+                            res[i + j] += c1 * c2
+                    return res
+
+                binom_K_mp = poly_from_roots_mp([-mp.mpf(1.0)] * K)
+                hr_mp = [mp.mpc(r) for r in hr]
+                gr_mp = [mp.mpc(r) for r in gr]
+
+                poly_h_mp = poly_from_roots_mp(hr_mp) if hr else [mp.mpf(1.0)]
+                poly_g_mp = poly_from_roots_mp(gr_mp) if gr else [mp.mpf(1.0)]
+
+                h_full_mp = poly_mult_mp(poly_h_mp, binom_K_mp)
+                g_full_mp = poly_mult_mp(poly_g_mp, binom_K_mp)
+
+                p0_mp = mp.mpf(float(p_taps[0]))
+                hg0_mp = poly_mult_mp(h_full_mp, g_full_mp)[0]
+                scale_mp = p0_mp / hg0_mp
+                g_full_mp = [c * scale_mp for c in g_full_mp]
+
+                h = np.array([float(mp.re(c)) for c in h_full_mp], dtype=np.float64)
+                g = np.array([float(mp.re(c)) for c in g_full_mp], dtype=np.float64)
+                mp.mp.dps = dps_orig
+                return h, g
+
+            hr_c = [complex(r) for r in hr]
+            gr_c = [complex(r) for r in gr]
+            h = np.convolve(binom_K.coeffs, np.poly(hr_c).real if hr_c else [1.0])
+            g = np.convolve(binom_K.coeffs, np.poly(gr_c).real if gr_c else [1.0])
             g = g * (p_taps[0] / np.convolve(h, g)[0])
             return h, g
 
@@ -1218,8 +1276,9 @@ class GegenbauerFilterCompiler:
             )
 
         best_cost, best = np.inf, None
+        use_hp = (total_order > 30)
         for idx in dp[target]:
-            h, g = factor_taps(set(idx))
+            h, g = factor_taps(set(idx), high_precision=use_hp)
             dc_h, dc_g = float(h.sum()), float(g.sum())
             if dc_h * dc_g <= 0.0:
                 continue
@@ -1230,7 +1289,7 @@ class GegenbauerFilterCompiler:
         if best is None:
             raise ValueError("no root partition yields a pair of lowpass factors")
 
-        h0_taps, g0_taps = factor_taps(set(best))
+        h0_taps, g0_taps = factor_taps(set(best), high_precision=(total_order > 30))
 
         # 4. product-preserving DC balance: H0(1) = G0(1) = sqrt(2), H0*G0 = P
         dc_h, dc_g = float(h0_taps.sum()), float(g0_taps.sum())
