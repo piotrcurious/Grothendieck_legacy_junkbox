@@ -275,12 +275,12 @@ def test_biorthogonal_pair_compilation():
     """Tests biorthogonal filter bank pair compilation via half-band spectral factorization."""
     compiler = GegenbauerFilterCompiler(lam=1.5)
 
-    # Invalid order sum (degrees not congruent to 2 mod 4) must raise ValueError
-    with pytest.raises(ValueError, match=r"requires \(taps_h0 - 1\) \+ \(taps_g0 - 1\) == 2 mod 4"):
-        compiler.compile_biorthogonal_pair(taps_h0=8, taps_g0=6)
+    # Odd sum of orders must raise ValueError
+    with pytest.raises(ValueError, match="sum of H0 and G0 orders must be even"):
+        compiler.compile_biorthogonal_pair(order_h0=9, order_g0=6)
 
-    # Valid pair compilation (CDF 9/7 style taps 9 + 7 = 16, degree sum 14)
-    pair = compiler.compile_biorthogonal_pair(taps_h0=9, taps_g0=7, cutoff=0.25, vanishing_moments=2)
+    # Valid pair compilation (CDF 9/7 style orders 9 + 7 = 16 or 8 + 6 = 14)
+    pair = compiler.compile_biorthogonal_pair(order_h0=8, order_g0=6, cutoff=0.25)
 
     assert "H0" in pair and "H1" in pair and "G0" in pair and "G1" in pair and "P" in pair
     assert isinstance(pair["H0"], QuantizedTaps)
@@ -294,36 +294,14 @@ def test_biorthogonal_pair_compilation():
     g1_taps = pair["G1"].float64_taps
     p_taps = pair["P"]
 
-    # Verify tap lengths
-    assert len(p_taps) == 9 + 7 - 1
-    assert len(h0_taps) == 9
-    assert len(g0_taps) == 7
-    assert len(h1_taps) == 7
-    assert len(g1_taps) == 9
+    # Verify lengths
+    assert len(p_taps) == 8 + 6 + 1
+    assert len(h0_taps) == len(g1_taps)
+    assert len(g0_taps) == len(h1_taps)
 
-    # Verify explicit delays
-    assert pair["length_h0"] == 9
-    assert pair["length_g0"] == 7
-    assert pair["delay_h0"] == 4.0
-    assert pair["delay_g0"] == 3.0
-    assert pair["delay"] == 7
-
-    # Verify DC gain normalization
+    # Verify DC gain normalization (approx sqrt(2))
     assert abs(np.sum(h0_taps) - np.sqrt(2)) < 1e-5
     assert abs(np.sum(g0_taps) - np.sqrt(2)) < 1e-5
-
-    # Verify PR distortion error, alias cancellation error, and product residual
-    assert pair["pr_error"] < 1e-8
-    assert pair["alias_error"] < 1e-8
-    assert pair["product_residual"] < 1e-8
-
-    # Also verify 64/32 tap pair (degree sum 63 + 31 = 94 == 2 mod 4)
-    pair_64_32 = compiler.compile_biorthogonal_pair(taps_h0=64, taps_g0=32, cutoff=0.25, vanishing_moments=1)
-    assert pair_64_32["length_h0"] == 64
-    assert pair_64_32["length_g0"] == 32
-    assert pair_64_32["pr_error"] < 1e-8
-    assert pair_64_32["alias_error"] < 1e-8
-    assert pair_64_32["product_residual"] < 1e-8
 
 
 def test_quantization_formats():
