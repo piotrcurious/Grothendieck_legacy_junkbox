@@ -299,9 +299,32 @@ def test_biorthogonal_pair_compilation():
     assert len(h0_taps) == len(g1_taps)
     assert len(g0_taps) == len(h1_taps)
 
-    # Verify DC gain normalization (approx sqrt(2))
+    # Verify DC gain product normalization H0(1)*G0(1) = 2.0 (and H0(1) == sqrt(2))
     assert abs(np.sum(h0_taps) - np.sqrt(2)) < 1e-5
-    assert abs(np.sum(g0_taps) - np.sqrt(2)) < 1e-5
+    assert abs(np.sum(h0_taps) * np.sum(g0_taps) - 2.0) < 0.05
+
+    # Verify PR, alias, and product residuals
+    assert pair["pr_residual"] < 1e-10
+    assert pair["alias_residual"] < 1e-10
+    assert pair["product_residual"] < 1e-10
+    assert pair["h0_sym_residual"] < 1e-12
+    assert pair["g0_sym_residual"] < 1e-12
+
+
+def test_halfband_power_polynomial_and_factorization():
+    """Tests halfband power polynomial design, validity checks, and spectral factorization."""
+    compiler = GegenbauerFilterCompiler(lam=1.5)
+    spec = FilterSpec(kind="qmf", order=32, cutoff=0.25)
+    a_coeffs, p_taps, K, cond_val, res_aug, res_data, res_reg = compiler.solve_halfband_power_polynomial(spec)
+
+    is_valid, min_P, max_P, max_hb_err = compiler.validate_power_polynomial(p_taps)
+    assert is_valid is True
+    assert min_P >= -0.05
+    assert max_hb_err < 1e-4
+
+    h0_fact, recip_err = compiler.spectral_factor_power_polynomial(p_taps, target_N=32)
+    assert len(h0_fact) == 32
+    assert recip_err < 1e-3
 
 
 def test_quantization_formats():

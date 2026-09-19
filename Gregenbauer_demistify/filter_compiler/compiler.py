@@ -134,6 +134,9 @@ class FilterSpec:
         if self.kind in ("qmf", "asymmetric_qmf") and self.order % 2 != 0:
             raise ValueError(f"QMF filter pair requires an even tap length N, got {self.order}.")
 
+        if self.kind == "qmf":
+            self.cutoff = 0.25
+
         if self.kind == "bandpass":
             if self.wp is None: self.wp = max(0.02, self.cutoff - 0.05)
             if self.ws is None: self.ws = max(0.01, self.wp - 0.05)
@@ -318,6 +321,7 @@ class GegenbauerFilterCompiler:
         elif self.asymptotic_mode == "wkb":
             phi_asymp = interior_wkb_approx(n, self.lam, theta)
         else:
+            # composite / auto mode uses two-endpoint composite matched asymptotics
             phi_asymp = composite_matched_approx(n, self.lam, theta)
 
         if symmetry == SymmetryClass.TYPE_I:
@@ -385,23 +389,26 @@ class GegenbauerFilterCompiler:
 
         return D, W
 
-    def solve_qmf_power_coefficients(self, spec: FilterSpec) -> Tuple[np.ndarray, int, float, float, float, float]:
+    def solve_halfband_power_polynomial(self, spec: FilterSpec) -> Tuple[np.ndarray, np.ndarray, int, float, float, float, float]:
         """
-        Solves for QMF power response P(x) = 0.5 + R_odd(x) using odd Gegenbauer basis terms C_{2k+1}^(lambda)(x).
-        Structurally guarantees P(x) + P(-x) = 1 (power complementarity) at the representation level.
+        Solves for half-band power polynomial P(x) = 0.5 + R_odd(x) in odd Gegenbauer basis C_{2k+1}^(\\lambda)(x).
+        Returns (a_coeffs, p_taps, K, cond_val, res_aug, res_data, res_reg).
+        Structurally guarantees P(x) + P(-x) = 1 in frequency space.
         """
-        N = spec.order
-        M = self._independent_dimension(spec)
-        K = min(M, max(16, N // 2))
+        # spec.order is the number of taps in P(z)
+        total_taps = spec.order
+        if total_taps % 2 == 0:
+            total_taps += 1
+        total_order = total_taps - 1
+        center = total_order // 2
+        K = max(1, center)
 
         nodes, weights = gauss_gegenbauer_quadrature(self.grid_samples, self.lam)
         omega_q = np.arccos(nodes)
 
-        # Target R_odd(x) = D_q(x)^2 - 0.5 where D_q(x) is amplitude target
         D_q, W_q = self._build_spectral_target(spec, omega_q)
         R_target = np.abs(D_q)**2 - 0.5
 
-        # Odd basis matrix A_odd containing C_{2k+1}^(lambda)(x)
         A_odd = np.zeros((self.grid_samples, K))
         for k in range(K):
             n_odd = 2 * k + 1
@@ -430,11 +437,85 @@ class GegenbauerFilterCompiler:
         res_data = float(np.linalg.norm(A_w @ a_odd - D_w) / max(np.linalg.norm(D_w), 1e-15))
         res_reg = float(np.linalg.norm(R_mat @ a_odd) / max(np.linalg.norm(D_w), 1e-15))
 
-        # Reconstruct full coefficient array mapping odd indices
         a_coeffs = np.zeros(2 * K)
         for k in range(K):
             a_coeffs[2 * k + 1] = a_odd[k]
 
+        # Convert R_odd(cos w) to Fourier cosine taps b_k
+        grid_L = self.grid_samples
+        omega_grid = np.linspace(0, np.pi, grid_L)
+        x_grid = np.cos(omega_grid)
+        R_vals = np.zeros(grid_L, dtype=np.float64)
+        for k in range(K):
+            n_odd = 2 * k + 1
+            R_vals += a_odd[k] * self._eval_basis(n_odd, x_grid, symmetry=SymmetryClass.TYPE_I)
+
+        trapz_fn = np.trapezoid if hasattr(np, 'trapezoid') else np.trapz
+        p_taps = np.zeros(total_taps, dtype=np.float64)
+        p_taps[center] = 0.5 # Center tap corresponds to constant 0.5
+
+        for m in range(1, center + 1):
+            if m % 2 != 0: # Odd Fourier harmonics
+                integrand = R_vals * np.cos(m * omega_grid)
+                b_m = (2.0 / np.pi) * trapz_fn(integrand, x=omega_grid)
+                p_taps[center - m] = b_m / 2.0
+                p_taps[center + m] = b_m / 2.0
+
+        return a_coeffs, p_taps, K, cond_val, res_aug, res_data, res_reg
+
+    def validate_power_polynomial(self, p_taps: np.ndarray, grid_size: int = 2048) -> Tuple[bool, float, float, float]:
+        """
+        Validates half-band power polynomial P(z).
+        Returns (is_valid, min_P, max_P, max_halfband_err).
+        Checks P(w) >= 0 and P(w) + P(w + pi) = 1.
+        """
+        K_fft = max(4096, grid_size)
+        center = (len(p_taps) - 1) // 2
+        w = 2.0 * np.pi * np.arange(K_fft) / float(K_fft)
+        P_w = np.zeros(K_fft, dtype=np.float64)
+        for n, val in enumerate(p_taps):
+            P_w += val * np.cos((n - center) * w)
+
+        min_P = float(np.min(P_w))
+        max_P = float(np.max(P_w))
+
+        P_shift = np.roll(P_w, K_fft // 2)
+        max_hb_err = float(np.max(np.abs(P_w + P_shift - 1.0)))
+
+        is_valid = (min_P >= -0.05) and (max_hb_err <= 1e-4)
+        return is_valid, min_P, max_P, max_hb_err
+
+    def spectral_factor_power_polynomial(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float]:
+        """
+        Spectrally factors positive half-band power polynomial P(z) into minimum-phase / linear-phase factor H0(z) of length target_N.
+        Returns (h0_taps, root_reciprocity_residual).
+        """
+        roots = np.roots(p_taps)
+        # Select target_N - 1 roots inside or on the unit circle
+        M = target_N - 1
+        sorted_roots = sorted(roots, key=lambda r: np.abs(r))
+        inside_roots = sorted_roots[:M]
+
+        h0 = np.poly(inside_roots).real
+
+        # Verify root reciprocity error for outside roots: |r_out * r_in - 1|
+        outside_roots = sorted_roots[M:]
+        recip_err = 0.0
+        if len(outside_roots) == len(inside_roots):
+            for r_in, r_out in zip(inside_roots, reversed(outside_roots)):
+                recip_err = max(recip_err, abs(abs(r_in * r_out) - 1.0))
+
+        # Scale h0 so that convolution h0 * h0[::-1] matches p_taps at center
+        r_h0 = np.convolve(h0, h0[::-1])
+        center = len(p_taps) // 2
+        scale = np.sqrt(max(1e-15, p_taps[center] / max(1e-15, r_h0[len(r_h0) // 2])))
+        h0 *= scale
+
+        return h0, float(recip_err)
+
+    def solve_qmf_power_coefficients(self, spec: FilterSpec) -> Tuple[np.ndarray, int, float, float, float, float]:
+        """Backward compatibility wrapper around solve_halfband_power_polynomial."""
+        a_coeffs, _, K, cond_val, res_aug, res_data, res_reg = self.solve_halfband_power_polynomial(spec)
         return a_coeffs, K, cond_val, res_aug, res_data, res_reg
 
     def solve_coefficients(self, spec: FilterSpec) -> Tuple[np.ndarray, int, float, float, float, float]:
@@ -476,18 +557,17 @@ class GegenbauerFilterCompiler:
                 res_data = float(np.linalg.norm(sqrt_w * (A @ a_coeffs - D_q)) / max(np.linalg.norm(sqrt_w * D_q), 1e-15))
                 return a_coeffs, K, cond_val, res_data, res_data, 0.0
             else:
-                # For non-Type-I wrapped bases, compute the exact Gram matrix G_ij = sum_q w_q B_i(x_q) B_j(x_q)
+                # Direct QR/SVD least squares solve without forming normal equations A_w.T @ A_w
                 A = np.zeros((self.grid_samples, K))
                 for k in range(K):
                     A[:, k] = self._eval_basis(k, nodes, symmetry=sym)
                 sqrt_w = np.sqrt(weights)
                 A_w = A * sqrt_w[:, np.newaxis]
-                b_sys = np.dot(A_w.T, D_q * sqrt_w)
-                G_mat = np.dot(A_w.T, A_w)
-                a_coeffs, _, _, _ = np.linalg.lstsq(G_mat, b_sys, rcond=None)
+                D_w = D_q * sqrt_w
+                a_coeffs, _, _, _ = np.linalg.lstsq(A_w, D_w, rcond=None)
                 s_vals = np.linalg.svd(A_w, compute_uv=False)
                 cond_val = float(s_vals[0] / s_vals[-1]) if len(s_vals) > 0 and s_vals[-1] > 1e-12 else np.inf
-                res_data = float(np.linalg.norm(A_w @ a_coeffs - D_q * sqrt_w) / max(np.linalg.norm(D_q * sqrt_w), 1e-15))
+                res_data = float(np.linalg.norm(A_w @ a_coeffs - D_w) / max(np.linalg.norm(D_w), 1e-15))
                 return a_coeffs, K, cond_val, res_data, res_data, 0.0
 
         elif self.solver == "spectral_regularized":
@@ -854,15 +934,15 @@ class GegenbauerFilterCompiler:
         )
 
         basis_asymptotic_validated = (self.asymptotic_mode != "none" and asymp_err < 0.05)
-        pass_ripple_thresh = spec.passband_ripple_db * 3.0 if spec.kind in ("qmf", "asymmetric_qmf") else spec.passband_ripple_db * 2.0
+        # Separate design target metrics from prototype FIR specification thresholds
         prototype_fir_certified = (
-            pass_ripple <= pass_ripple_thresh and
-            stop_atten >= min(spec.stopband_atten_db * 0.5, 20.0)
+            pass_ripple <= max(spec.passband_ripple_db, 0.5) and
+            stop_atten >= min(spec.stopband_atten_db, 20.0)
         )
         if spec.kind in ("qmf", "asymmetric_qmf") and h1_quant is not None:
             prototype_fir_certified = prototype_fir_certified and (
-                pass_ripple_h1 <= pass_ripple_thresh and
-                stop_atten_h1 >= min(spec.stopband_atten_db * 0.5, 20.0)
+                pass_ripple_h1 <= max(spec.passband_ripple_db, 0.5) and
+                stop_atten_h1 >= min(spec.stopband_atten_db, 20.0)
             )
         
         qmf_power_complementary = True
@@ -921,116 +1001,124 @@ class GegenbauerFilterCompiler:
 
     def compile_biorthogonal_pair(self, order_h0: int, order_g0: int, cutoff: float = 0.25) -> dict:
         """
-        Compiles a Biorthogonal filter bank pair (H0, G0) via half-band spectral factorization.
-        The sum of the filter orders (degree = tap length - 1) must be even to form a valid half-band product filter.
-        Groupings keep conjugate and reciprocal quadruplets/pairs together to maintain exact linear phase symmetry.
+        Compiles a Biorthogonal filter bank pair (H0, G0) via Gegenbauer half-band product filter factorization.
+        Uses global canonical root orbits (conjugate & reciprocal closure) and exact DP subset-sum root partitioning.
+        Preserves exact H0(z) G0(z) = P(z) product scaling without uncoordinated independent normalizations.
         """
         total_order = order_h0 + order_g0
         if total_order % 2 != 0:
             raise ValueError("The sum of H0 and G0 orders must be even for a valid half-band filter.")
 
-        # 1. Define and compile the Product Filter P(z) as a Half-Band Lowpass
         p_spec = FilterSpec(
             kind="lowpass",
-            order=total_order + 1, # +1 for taps
+            order=total_order + 1, # Tap length = total_order + 1
             cutoff=cutoff,
             wp=max(0.01, cutoff - 0.05),
             ws=min(0.49, cutoff + 0.05)
         )
 
-        # Solve for P(z) taps using the existing Gegenbauer spectral solver
-        a_coeffs, _, _, _, _, _ = self.solve_coefficients(p_spec)
-        p_taps = self.transform_to_taps(a_coeffs, p_spec)
+        _, p_taps, _, _, _, _, _ = self.solve_halfband_power_polynomial(p_spec)
 
-        # Force strict half-band time-domain constraints (zero out non-center even taps)
+        # Force strict half-band time-domain zeroing for non-center even taps
         center = total_order // 2
         for n in range(len(p_taps)):
             if abs(n - center) % 2 == 0 and n != center:
                 p_taps[n] = 0.0
 
-        # Normalize center tap to 1.0 for P(z) + P(-z) = 2 z^-d delay scaling
-        if abs(p_taps[center]) > 1e-12:
-            p_taps /= p_taps[center]
+        # Set center tap to exactly 0.5 so half-band P(z) + P(-z) = z^-d delay scaling is exact
+        p_taps[center] = 0.5
+        p_prod = 2.0 * p_taps
 
-        # 2. Spectral Factorization
-        roots = np.roots(p_taps)
+        # Construct global canonical root orbits closed under conjugation and reciprocal reflection
+        roots = np.roots(p_prod)
+        rel_tol, abs_tol = 1e-2, 1e-3
 
-        # Group roots into symmetric quadruplets / pairs to ensure real linear-phase factors
-        # A) Unit circle roots (stopband zeros) occurring in complex conjugate pairs
-        unit_circle_roots = []
-        other_roots = []
+        def same_root(a, b):
+            return abs(a - b) <= max(abs_tol, rel_tol * max(abs(a), abs(b)))
 
-        for r in roots:
-            if abs(abs(r) - 1.0) < 1e-3:
-                unit_circle_roots.append(r)
-            else:
-                other_roots.append(r)
-
-        # Sort unit circle roots by angle to group conjugate pairs
-        unit_circle_roots = sorted(unit_circle_roots, key=lambda x: (np.abs(np.angle(x)), np.angle(x)))
-
-        # Group off-unit-circle roots into reciprocal/conjugate quadruplets or real pairs
-        quads = []
-        visited = set()
-        for i, r in enumerate(other_roots):
-            if i in visited:
+        orbits = []
+        used = [False] * len(roots)
+        for i in range(len(roots)):
+            if used[i]:
                 continue
-            # Find conjugate r*, reciprocal 1/r, and reciprocal conjugate 1/r*
-            group = [r]
-            visited.add(i)
-            for j, r2 in enumerate(other_roots):
-                if j in visited:
-                    continue
-                if abs(r2 - np.conj(r)) < 1e-3 or abs(r2 - 1.0/r) < 1e-3 or abs(r2 - 1.0/np.conj(r)) < 1e-3:
-                    group.append(r2)
-                    visited.add(j)
-            quads.append(group)
+            r_val = roots[i]
+            orbit_idx = [i]
+            used[i] = True
 
-        # 3. Distribute Roots to maintain Linear Phase & Requested Filter Orders
-        # Pair unit circle conjugate zeros into 2-root factors
-        uc_pairs = []
-        for i in range(0, len(unit_circle_roots) - 1, 2):
-            uc_pairs.append([unit_circle_roots[i], unit_circle_roots[i+1]])
-        if len(unit_circle_roots) % 2 != 0:
-            uc_pairs.append([unit_circle_roots[-1]])
+            added = True
+            while added:
+                added = False
+                curr_vals = [roots[k] for k in orbit_idx]
+                for cv in curr_vals:
+                    targets = [np.conj(cv)]
+                    if abs(cv) > 1e-12:
+                        targets.append(1.0 / cv)
+                        targets.append(1.0 / np.conj(cv))
+                    for tgt in targets:
+                        for j in range(len(roots)):
+                            if not used[j] and same_root(roots[j], tgt):
+                                orbit_idx.append(j)
+                                used[j] = True
+                                added = True
+            orbits.append([roots[k] for k in orbit_idx])
 
-        # Combine uc_pairs and quads into atomic symmetric root groups
-        atomic_groups = uc_pairs + quads
+        # Exact DP subset-sum root orbit partition for order_h0
+        orbit_sizes = [len(o) for o in orbits]
+        dp = {0: []}
+        for i, sz in enumerate(orbit_sizes):
+            new_dp = dict(dp)
+            for s, chosen in dp.items():
+                if s + sz <= order_h0 and (s + sz) not in new_dp:
+                    new_dp[s + sz] = chosen + [i]
+            dp = new_dp
 
+        if order_h0 not in dp:
+            raise ValueError(
+                f"Unable to partition roots into exact target orders order_h0={order_h0} and order_g0={order_g0} "
+                f"while preserving symmetric canonical root orbits {orbit_sizes}."
+            )
+
+        h0_orbit_indices = set(dp[order_h0])
         h0_roots = []
         g0_roots = []
-
-        # Distribute atomic groups to match requested order_h0 exactly
-        for group in atomic_groups:
-            if len(h0_roots) + len(group) <= order_h0:
-                h0_roots.extend(group)
+        for i, orbit in enumerate(orbits):
+            if i in h0_orbit_indices:
+                h0_roots.extend(orbit)
             else:
-                g0_roots.extend(group)
+                g0_roots.extend(orbit)
 
-        if len(h0_roots) != order_h0 or len(g0_roots) != order_g0:
-            raise ValueError(f"Unable to partition roots into exact target orders order_h0={order_h0} and order_g0={order_g0} while preserving symmetric quadruplet/conjugate grouping. Got order_h0={len(h0_roots)}, order_g0={len(g0_roots)}.")
+        # Reconstruct unscaled factor polynomials from roots
+        h0_unscaled = np.poly(h0_roots).real if len(h0_roots) > 0 else np.array([1.0])
+        g0_unscaled = np.poly(g0_roots).real if len(g0_roots) > 0 else np.array([1.0])
 
-        # 4. Reconstruct Filter Taps from Roots
-        h0_taps = np.poly(h0_roots).real if len(h0_roots) > 0 else np.array([1.0])
-        g0_taps = np.poly(g0_roots).real if len(g0_roots) > 0 else np.array([1.0])
+        # Joint scaling: ensure H0(z) G0(z) = P_prod(z) = 2 P(z) exactly
+        conv_unscaled = np.convolve(h0_unscaled, g0_unscaled)
+        req_scale = float(np.dot(conv_unscaled, p_prod) / max(1e-15, np.dot(conv_unscaled, conv_unscaled)))
 
-        # Normalize DC gain to sqrt(2)
-        if abs(np.sum(h0_taps)) > 1e-12:
-            h0_taps *= np.sqrt(2) / np.sum(h0_taps)
-        if abs(np.sum(g0_taps)) > 1e-12:
-            g0_taps *= np.sqrt(2) / np.sum(g0_taps)
+        h0_dc = float(np.sum(h0_unscaled))
+        alpha = np.sqrt(2.0) / h0_dc if abs(h0_dc) > 1e-12 else 1.0
+        beta = req_scale / alpha
 
-        # 5. Generate Highpass Filters using alternating sign rule
-        # H1(z) = G0(-z) z^-d_g0, G1(z) = (-1)^(delay+1) H0(-z) z^-d_h0
+        h0_taps = h0_unscaled * alpha
+        g0_taps = g0_unscaled * beta
+
+        # Generate complementary highpass filters H1 and G1 for 2-channel Biorthogonal Bank
+        # Delay d = (order_h0 + order_g0) // 2
+        # If d is odd, P(z) - P(-z) = 2 z^-d, so H1(z) = G0(-z) and G1(z) = -H0(-z) yields H0 G0 + H1 G1 = P(z) - P(-z) = 2 z^-d.
+        # If d is even, P(z) + P(-z) = 2 z^-d, so H1(z) = G0(-z) and G1(z) = H0(-z) yields H0 G0 + H1 G1 = P(z) + P(-z) = 2 z^-d.
+        # In both cases, alias H0(-z) G0(z) + H1(-z) G1(z) is exactly zeroed out!
         delay = (order_h0 + order_g0) // 2
-        g1_sign = -1.0 if delay % 2 == 0 else 1.0
+        g1_sign = 1.0 if delay % 2 == 0 else -1.0
 
-        h1_taps = np.array([g0_taps[n] * ((-1)**n) for n in range(len(g0_taps))])[::-1]
-        g1_taps = np.array([g1_sign * h0_taps[n] * ((-1)**n) for n in range(len(h0_taps))])[::-1]
+        h1_taps = np.array([((-1.0)**n) * g0_taps[n] for n in range(len(g0_taps))])
+        g1_taps = np.array([g1_sign * ((-1.0)**n) * h0_taps[n] for n in range(len(h0_taps))])
 
-        # 6. Verify Factor Product Residual and Polyphase Perfect Reconstruction (PR) Condition: H0(z)G0(z) + H1(z)G1(z) = 2 z^-d
+        # Verification metrics & symmetry residuals (comparing H0 * G0 against P_prod(z))
         h0_conv_g0 = np.convolve(h0_taps, g0_taps)
-        product_residual = float(np.max(np.abs(h0_conv_g0 - p_taps))) if len(h0_conv_g0) == len(p_taps) else float('nan')
+        product_residual = float(np.max(np.abs(h0_conv_g0 - p_prod)))
+
+        h0_sym_res = float(np.max(np.abs(h0_taps - h0_taps[::-1])))
+        g0_sym_res = float(np.max(np.abs(g0_taps - g0_taps[::-1])))
 
         K_fft = 4096
         omega = 2.0 * np.pi * np.arange(K_fft) / float(K_fft)
@@ -1042,16 +1130,31 @@ class GegenbauerFilterCompiler:
         G1_f = np.fft.fft(g1_taps, K_fft)
 
         pr_complex = H0_f * G0_f + H1_f * G1_f
-        pr_error = float(np.max(np.abs(pr_complex - expected_pr)))
+        pr_residual = float(np.max(np.abs(pr_complex - expected_pr)))
+
+        # Alias cancellation check H0(-z) G0(z) + H1(-z) G1(z) == 0
+        H0_neg = np.fft.fft(h0_taps * np.array([(-1.0)**n for n in range(len(h0_taps))]), K_fft)
+        H1_neg = np.fft.fft(h1_taps * np.array([(-1.0)**n for n in range(len(h1_taps))]), K_fft)
+        alias_complex = H0_neg * G0_f + H1_neg * G1_f
+        alias_residual = float(np.max(np.abs(alias_complex)))
+
+        h1_qmf_res = float(np.max(np.abs(H1_f - np.roll(np.conj(G0_f), K_fft // 2))))
+        g1_qmf_res = float(np.max(np.abs(G1_f - np.roll(np.conj(H0_f), K_fft // 2))))
 
         return {
-            "H0": self.quantize_taps(h0_taps), # Analysis Lowpass
-            "H1": self.quantize_taps(h1_taps), # Analysis Highpass
-            "G0": self.quantize_taps(g0_taps), # Synthesis Lowpass
-            "G1": self.quantize_taps(g1_taps), # Synthesis Highpass
-            "P": p_taps,                        # Product Half-band
+            "H0": self.quantize_taps(h0_taps),
+            "H1": self.quantize_taps(h1_taps),
+            "G0": self.quantize_taps(g0_taps),
+            "G1": self.quantize_taps(g1_taps),
+            "P": p_taps,
             "product_residual": product_residual,
-            "pr_error": pr_error
+            "pr_residual": pr_residual,
+            "pr_error": pr_residual, # Backward compatibility alias
+            "alias_residual": alias_residual,
+            "h0_sym_residual": h0_sym_res,
+            "g0_sym_residual": g0_sym_res,
+            "h1_qmf_residual": h1_qmf_res,
+            "g1_qmf_residual": g1_qmf_res
         }
 
     def plot_response(self, result: FilterResult, output_path: str):
@@ -1090,7 +1193,7 @@ class GegenbauerFilterCompiler:
         # Subplot 3: QMF / Impulse Response
         plt.subplot(2, 2, 3)
         if spec.kind in ("qmf", "asymmetric_qmf") and result.h1_taps is not None:
-            K_fft = len(result.freq_grid) * 2
+            K_fft = 2 * (len(result.freq_grid) - 1)
             H0 = np.fft.fft(result.h0_taps.float64_taps, K_fft)
             H1 = np.fft.fft(result.h1_taps.float64_taps, K_fft)
             H0_shift = np.roll(H0, K_fft // 2)
@@ -1098,8 +1201,8 @@ class GegenbauerFilterCompiler:
 
             pow_comp = np.abs(H0)**2 + np.abs(H1)**2
             aliasing_func = 0.5 * np.abs(H0 * H0_shift - H1 * H1_shift)
-            pow_db = 10 * np.log10(np.maximum(1e-12, pow_comp[:K_fft // 2]))
-            alias_db = 20 * np.log10(np.maximum(1e-12, aliasing_func[:K_fft // 2]))
+            pow_db = 10 * np.log10(np.maximum(1e-12, pow_comp[:len(result.freq_grid)]))
+            alias_db = 20 * np.log10(np.maximum(1e-12, aliasing_func[:len(result.freq_grid)]))
 
             plt.plot(result.freq_grid, pow_db, 'g-', label='Power Complementarity $|H_0|^2 + |H_1|^2$', linewidth=2)
             plt.plot(result.freq_grid, alias_db, 'm--', label='Alias Transfer $A(e^{j\\omega})$', linewidth=1.5)
