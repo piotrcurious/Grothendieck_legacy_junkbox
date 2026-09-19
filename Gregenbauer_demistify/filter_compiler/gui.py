@@ -546,7 +546,8 @@ class GegenbauerFilterGUI(tk.Tk):
                 if params[0] == "biorthogonal":
                     _, taps_h0, taps_g0, cutoff, sampling_rate, compiler_kwargs = params
                     compiler = GegenbauerFilterCompiler(**compiler_kwargs)
-                    pair = compiler.compile_biorthogonal_pair(taps_h0=taps_h0, taps_g0=taps_g0, cutoff=cutoff)
+                    vm = 2 if ((taps_h0 - 1) % 2 == 0) else 1
+                    pair = compiler.compile_biorthogonal_pair(taps_h0=taps_h0, taps_g0=taps_g0, cutoff=cutoff, vanishing_moments=vm)
 
                     K_fft = 4096
                     freq_grid = np.arange(K_fft // 2 + 1) / float(K_fft)

@@ -201,8 +201,8 @@ class TestGUIIntegration(unittest.TestCase):
 
         prev_res = app.current_result
         app.kind_var.set("biorthogonal")
-        app.order_var.set(8)
-        app.order_g0_var.set(6)
+        app.order_var.set(9)
+        app.order_g0_var.set(7)
         app.cutoff_var.set(0.25)
         app.lambda_var.set(1.5)
         app._on_compile()
@@ -211,10 +211,10 @@ class TestGUIIntegration(unittest.TestCase):
 
         from filter_compiler.gui import BiorthogonalResult
         self.assertIsInstance(app.current_result, BiorthogonalResult)
-        self.assertEqual(app.current_result.order_h0, 8)
-        self.assertEqual(app.current_result.order_g0, 6)
-        self.assertIn("GEG_ORDER_H0 8", app.current_result.header_code)
-        self.assertIn("GEG_ORDER_G0 6", app.current_result.header_code)
+        self.assertEqual(app.current_result.order_h0, 9)
+        self.assertEqual(app.current_result.order_g0, 7)
+        self.assertIn("GEG_ORDER_H0 9", app.current_result.header_code)
+        self.assertIn("GEG_ORDER_G0 7", app.current_result.header_code)
 
         # Test live audio PR reconstruction mode
         app.qmf_mode_var.set("Full PR Reconstruction")
