@@ -446,20 +446,14 @@ class GegenbauerFilterGUI(tk.Tk):
         try:
             kind = self.kind_var.get()
             order = min(512, max(3, int(self.order_var.get())))
-            order_g0 = min(512, max(3, int(self.order_g0_var.get())))
+            order_g0 = min(512, max(2, int(self.order_g0_var.get())))
             if kind == "highpass" and order % 2 == 0:
                 self.order_var.set(min(512, order + 1))
             elif kind in ("qmf", "asymmetric_qmf") and order % 2 != 0:
                 self.order_var.set(min(512, order + 1 if order > 3 else 4))
             elif kind == "biorthogonal":
-                deg_sum = (order - 1) + (order_g0 - 1)
-                if deg_sum % 4 != 2:
-                    needed_g0_deg = ((order - 1) + 2) % 4
-                    # Adjust order_g0 (taps_g0) so (order-1) + (order_g0-1) == 2 mod 4
-                    new_g0 = order_g0
-                    while ((order - 1) + (new_g0 - 1)) % 4 != 2:
-                        new_g0 += 1
-                    self.order_g0_var.set(min(512, new_g0))
+                if (order + order_g0) % 2 != 0:
+                    self.order_g0_var.set(min(512, order_g0 + 1))
             else:
                 self.order_var.set(order)
         except Exception as e:
@@ -500,12 +494,11 @@ class GegenbauerFilterGUI(tk.Tk):
         )
 
         if kind == "biorthogonal":
-            taps_h0 = int(self.order_var.get())
-            taps_g0 = int(self.order_g0_var.get())
-            deg_sum = (taps_h0 - 1) + (taps_g0 - 1)
-            if deg_sum % 4 != 2:
-                raise ValueError(f"Sum of H0 and G0 degrees ((taps_h0 - 1) + (taps_g0 - 1)) must be 2 mod 4 for Biorthogonal pairs. Got degrees {taps_h0 - 1} + {taps_g0 - 1} = {deg_sum}.")
-            return "biorthogonal", taps_h0, taps_g0, cutoff, sampling_rate, compiler_kwargs
+            order_h0 = int(self.order_var.get())
+            order_g0 = int(self.order_g0_var.get())
+            if (order_h0 + order_g0) % 2 != 0:
+                raise ValueError(f"Sum of H0 ({order_h0}) and G0 ({order_g0}) orders must be even for Biorthogonal pairs.")
+            return "biorthogonal", order_h0, order_g0, cutoff, sampling_rate, compiler_kwargs
 
         order = min(512, max(3, int(self.order_var.get())))
         wp = float(self.wp_var.get()) if self.wp_var.get().strip() else None
@@ -544,10 +537,9 @@ class GegenbauerFilterGUI(tk.Tk):
         def worker():
             try:
                 if params[0] == "biorthogonal":
-                    _, taps_h0, taps_g0, cutoff, sampling_rate, compiler_kwargs = params
+                    _, order_h0, order_g0, cutoff, sampling_rate, compiler_kwargs = params
                     compiler = GegenbauerFilterCompiler(**compiler_kwargs)
-                    vm = 2 if ((taps_h0 - 1) % 2 == 0) else 1
-                    pair = compiler.compile_biorthogonal_pair(taps_h0=taps_h0, taps_g0=taps_g0, cutoff=cutoff, vanishing_moments=vm)
+                    pair = compiler.compile_biorthogonal_pair(order_h0=order_h0, order_g0=order_g0, cutoff=cutoff)
 
                     K_fft = 4096
                     freq_grid = np.arange(K_fft // 2 + 1) / float(K_fft)
@@ -557,11 +549,11 @@ class GegenbauerFilterGUI(tk.Tk):
                     G1_resp = 20 * np.log10(np.maximum(1e-12, np.abs(np.fft.fft(pair["G1"].float64_taps, K_fft)[:K_fft // 2 + 1])))
                     P_resp = 20 * np.log10(np.maximum(1e-12, np.abs(np.fft.fft(pair["P"], K_fft)[:K_fft // 2 + 1])))
 
-                    hdr = generate_biorthogonal_header(pair, taps_h0, taps_g0, cutoff, compiler_kwargs["lam"], sampling_rate)
+                    hdr = generate_biorthogonal_header(pair, order_h0, order_g0, cutoff, compiler_kwargs["lam"], sampling_rate)
 
                     biorthg_res = BiorthogonalResult(
-                        order_h0=taps_h0,
-                        order_g0=taps_g0,
+                        order_h0=order_h0,
+                        order_g0=order_g0,
                         cutoff=cutoff,
                         sampling_rate=sampling_rate,
                         lam=compiler_kwargs["lam"],
@@ -621,7 +613,7 @@ class GegenbauerFilterGUI(tk.Tk):
         def worker():
             try:
                 if params[0] == "biorthogonal":
-                    _, taps_h0, taps_g0, cutoff, sampling_rate, compiler_kwargs = params
+                    _, order_h0, order_g0, cutoff, sampling_rate, compiler_kwargs = params
                     best_pair = None
                     best_score = float('inf')
                     best_lam = compiler_kwargs['lam']
@@ -630,7 +622,7 @@ class GegenbauerFilterGUI(tk.Tk):
                         ck['lam'] = lam
                         compiler = GegenbauerFilterCompiler(**ck)
                         try:
-                            pair = compiler.compile_biorthogonal_pair(taps_h0=taps_h0, taps_g0=taps_g0, cutoff=cutoff)
+                            pair = compiler.compile_biorthogonal_pair(order_h0=order_h0, order_g0=order_g0, cutoff=cutoff)
                             score = pair['product_residual'] * 100.0 + pair['pr_error'] * 10.0
                             if score < best_score:
                                 best_score = score
@@ -650,11 +642,11 @@ class GegenbauerFilterGUI(tk.Tk):
                     G1_resp = 20 * np.log10(np.maximum(1e-12, np.abs(np.fft.fft(best_pair["G1"].float64_taps, K_fft)[:K_fft // 2 + 1])))
                     P_resp = 20 * np.log10(np.maximum(1e-12, np.abs(np.fft.fft(best_pair["P"], K_fft)[:K_fft // 2 + 1])))
 
-                    hdr = generate_biorthogonal_header(best_pair, taps_h0, taps_g0, cutoff, best_lam, sampling_rate)
+                    hdr = generate_biorthogonal_header(best_pair, order_h0, order_g0, cutoff, best_lam, sampling_rate)
 
                     biorthg_res = BiorthogonalResult(
-                        order_h0=taps_h0,
-                        order_g0=taps_g0,
+                        order_h0=order_h0,
+                        order_g0=order_g0,
                         cutoff=cutoff,
                         sampling_rate=sampling_rate,
                         lam=best_lam,
