@@ -58,7 +58,29 @@ public:
     std::vector<int> generate_bipolar_sequence(size_t num_bits) const;
 };
 
-// Comprehensive spectral and Wiener series analysis result
+// Result structure for Walsh-Wiener Chaos Analysis of Boolean/Filtered Functions
+struct WienerChaosResult {
+    uint32_t L;
+    std::vector<double> walsh_coefficients; // 2^L Walsh-Fourier coefficients
+    std::vector<double> energy_per_degree;   // E(k) for k in 0..L
+    double total_energy;                     // Sum E(k) = ||f||^2
+    double nonlinearity;                     // Distance to closest linear Boolean function
+};
+
+// Analyzer class for Wiener Chaos Expansion
+class WienerChaosAnalyzer {
+public:
+    // Analyze a Boolean/filtering function truth table f: {-1, +1}^L -> R
+    static WienerChaosResult analyze_function(uint32_t L, const std::vector<double>& truth_table);
+
+    // Compute Volterra-Wiener Kernels for input-driven scrambler/filter
+    // output_v and input_w are bipolar {-1, +1} sequences of length T
+    static double compute_volterra_kernel_0(const std::vector<int>& v);
+    static std::vector<double> compute_volterra_kernel_1(const std::vector<int>& v, const std::vector<int>& w, size_t max_lag);
+    static std::vector<std::vector<double>> compute_volterra_kernel_2(const std::vector<int>& v, const std::vector<int>& w, size_t max_lag);
+};
+
+// Comprehensive spectral and Wiener series analysis report
 struct SpectralReport {
     uint32_t L;
     uint32_t N;
@@ -70,6 +92,7 @@ struct SpectralReport {
     std::vector<double> power_spectrum;
     std::vector<Complex> gauss_sums;
     std::vector<double> autocorrelation;
+    std::vector<double> wiener_energy_distribution; // E(k) for k in 0..L
     bool is_flat;
     bool is_autocorr_two_valued;
     double max_spectral_error;

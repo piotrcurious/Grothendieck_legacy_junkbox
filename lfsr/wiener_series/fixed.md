@@ -2,9 +2,9 @@
 
 ## Executive Summary & Theoretical Synthesis
 
-This document presents a rigorous, fully cross-checked algebraic, spectral, and functional analysis of Linear Feedback Shift Registers (LFSRs). We resolve previous ambiguities regarding Volterra expansions, Walsh character dualities, and finite-field spectral decompositions.
+This document presents a rigorous, fully cross-checked algebraic, spectral, and functional analysis of Linear Feedback Shift Registers (LFSRs) and Filtered Generator Systems. We resolve previous ambiguities regarding Volterra expansions, Walsh character dualities, finite-field spectral decompositions, and the discrete **Walsh-Wiener Chaos Expansion**.
 
-The central insight is that an LFSR over $\mathbb{F}_2$, multiplication in an extension field $\mathbb{F}_{2^L}$, Walsh characters on the Boolean hypercube $(\{-1, +1\}^L, \times)$, and multiplicative-character Gauss sums over $\mathbb{F}_{2^L}^\times$ are **a single mathematical object viewed in different coordinates**:
+The central insight is that an LFSR over $\mathbb{F}_2$, multiplication in an extension field $\mathbb{F}_{2^L}$, Walsh characters on the Boolean hypercube $(\{-1, +1\}^L, \mu_{\text{uniform}})$, and multiplicative-character Gauss sums over $\mathbb{F}_{2^L}^\times$ are **a single mathematical object viewed in different coordinates**:
 
 $$
 \boxed{
@@ -14,6 +14,8 @@ X_{n+1} = A X_n & & z_{n+1} = \alpha z_n & & u_n = \psi(\beta \alpha^n) & & U_k 
 \end{array}
 }
 $$
+
+Furthermore, when observable outputs are formed by applying linear or non-linear Boolean filtering functions $f : \{-1, +1\}^L \to \mathbb{R}$ to LFSR states, the output sequence $y_n = f(X_n)$ admits a canonical **Rademacher-Walsh Wiener Chaos Decomposition**. The degree-$k$ Wiener chaos subspaces $\mathcal{H}_k$ are invariant under LFSR time evolution permutations, providing a fundamental bridge between pseudorandomness, nonlinearity, and functional analysis.
 
 ---
 
@@ -48,29 +50,93 @@ $$x + y \pmod 2 \longrightarrow (-1)^{x+y} = (-1)^x (-1)^y$$
 For example, the Fibonacci recurrence $x_{n+3} = x_{n+1} + x_n \pmod 2$ transforms into the multiplicative monomial recurrence:
 $$u_{n+3} = u_{n+1} u_n$$
 
-### Clarification on Volterra vs. Walsh Extensions
-1. **Conjugacy, Not Nonlinearity**: The $\pm 1$ transformation is an exact algebraic conjugacy. The dynamics remain linear over $\mathbb{F}_2$; the multiplicative recurrence over $\{-1, +1\}$ is simply the same linear dynamics written in multiplicative coordinates.
-2. **1-Sparsity in the Seed**: Because $x_n$ is a linear combination of initial seed bits $(x_0, \dots, x_{L-1})$, $u_n$ is **exactly one Walsh monomial** of the initial bipolar seed $u^{(0)} = (u_0, \dots, u_{L-1})$:
-$$u_n = \chi_{S_n}(u^{(0)}) = \prod_{j \in S_n} u_j, \qquad S_n = \operatorname{supp}\left(e_1^T A^n\right)$$
-In a discrete Wiener-Walsh chaos expansion $f(u) = \sum_{S \subseteq \{0,\dots,L-1\}} \hat{f}(S) \chi_S(u)$, the LFSR output at time $n$ has spectrum $\hat{u}_n(S) = \delta_{S, S_n}$. It is 1-sparse. This extreme sparsity reflects the absence of true non-linear interactions across seed bits, which is precisely why the Berlekamp-Massey algorithm can recover the entire state generator from just $2L$ stream bits.
-3. **Genuine Volterra Systems**: Genuine Volterra series describe nonlinear responses to an external input stream $w_n$. An input-driven additive scrambler $s_n = w_n \oplus \sum_{j=1}^L c_j s_{n-j}$ yields in bipolar form $v_n = (-1)^{w_n} \prod_{k} v_{n-k}^{h_k}$, where $h_k$ is the impulse response over $\mathbb{F}_2$. Autonomous LFSRs are free-running systems and thus represent pure monomial orbit trajectories rather than multi-order input kernels.
+---
+
+## 3. The Discrete Walsh-Wiener Chaos Expansion Framework
+
+In classical Wiener analysis on continuous Gaussian space, functions $f \in L^2(\mathbb{R}^d, \gamma)$ are decomposed into orthogonal Hermite polynomial chaoses. For discrete binary dynamics over the Boolean hypercube $\mathcal{B}_L = \{-1, +1\}^L$ equipped with uniform probability measure $\mu$, the exact analogue is the **Discrete Walsh-Wiener Chaos Expansion**.
+
+### 3.1 Hilbert Space Chaos Decomposition
+The space $L^2(\{-1, +1\}^L, \mu)$ admits an orthogonal direct sum decomposition into $L+1$ Wiener chaos subspaces of degree $k$:
+
+$$\boxed{L^2(\{-1, +1\}^L, \mu) = \bigoplus_{k=0}^L \mathcal{H}_k}$$
+
+where the $k$-th Wiener chaos subspace $\mathcal{H}_k$ is defined by:
+$$\mathcal{H}_k = \operatorname{span}\left\{ \chi_S(u) : S \subseteq \{0, 1, \dots, L-1\}, \, |S| = k \right\}$$
+
+and $\chi_S(u) = \prod_{j \in S} u_j$ are the Walsh characters (Rademacher chaos monomials).
+
+The dimension of the $k$-th chaos subspace $\mathcal{H}_k$ is $\dim(\mathcal{H}_k) = \binom{L}{k}$, satisfying:
+$$\sum_{k=0}^L \binom{L}{k} = 2^L = \dim\left(L^2(\{-1, +1\}^L)\right)$$
+
+### 3.2 Wiener Chaos Projection & Energy Distribution
+For any Boolean function or real-valued observable $f : \{-1, +1\}^L \to \mathbb{R}$, its unique Fourier-Walsh expansion is:
+
+$$f(u) = \sum_{S \subseteq \{0, \dots, L-1\}} \hat{f}(S) \chi_S(u)$$
+
+where the Fourier-Walsh coefficients are given by the inner product:
+$$\hat{f}(S) = \langle f, \chi_S \rangle = \frac{1}{2^L} \sum_{u \in \{-1, +1\}^L} f(u) \chi_S(u)$$
+
+The **$k$-th Order Wiener Chaos Projection** operator $W_k : L^2(\{-1, +1\}^L) \to \mathcal{H}_k$ is defined as:
+
+$$\boxed{W_k[f](u) = \sum_{\substack{S \subseteq \{0, \dots, L-1\} \\ |S| = k}} \hat{f}(S) \chi_S(u)}$$
+
+The **Wiener Chaos Energy** at degree $k$, denoted $E_f(k)$, measures the proportion of total variance/power concentrated in $k$-bit non-linear interactions:
+
+$$\boxed{E_f(k) = \|W_k[f]\|^2 = \sum_{|S|=k} |\hat{f}(S)|^2}$$
+
+By Parseval's identity, the total signal energy satisfies:
+$$\sum_{k=0}^L E_f(k) = \|f\|^2 = \frac{1}{2^L} \sum_{u \in \{-1, +1\}^L} |f(u)|^2$$
+
+### 3.3 LFSR Evolution as Chaos Index Permutation
+When an LFSR evolves in time $X_n = A^n X_0$, each initial Walsh monomial $\chi_S(X_0)$ transforms into another single Walsh monomial:
+
+$$\chi_S(X_n) = \chi_S(A^n X_0) = \chi_{S A^n}(X_0)$$
+
+where $S A^n$ denotes the linear action of the transposed state transition on the subset index mask $S \in \mathbb{F}_2^L$.
+
+**Theorem (Wiener Chaos Energy Conservation under LFSR Evolution)**:
+*Let $y_n = f(X_n)$ be a filtered LFSR output, where $X_{n+1} = A X_n$ with nonsingular $A$. The $k$-th order Wiener chaos projection of the time series $y_n$ with respect to initial state $X_0$ is:*
+
+$$W_k[y_n](X_0) = \sum_{|S|=k} \hat{f}(S) \chi_{S A^n}(X_0)$$
+
+*Because $A$ is an isomorphism over $\mathbb{F}_2^L$, the linear map $S \mapsto S A^n$ preserves subset cardinality $|S A^n| = |S| = k$. Consequently, the total Wiener chaos energy $E_{y_n}(k) = E_f(k)$ is strictly invariant for all $n$.*
+
+This proves that LFSR evolution acts as an **energy-preserving permutation operator** across Walsh modes within each Wiener chaos subspace $\mathcal{H}_k$.
 
 ---
 
-## 3. Character Duality and Unification
+## 4. Volterra-Wiener Series for Input-Driven Shift Register Systems
 
-There are not three independent bases; rather, there is a fundamental duality:
+While autonomous free-running LFSRs exhibit 1-sparse Walsh chaos trajectories, input-driven binary systems (such as additive scramblers, stream ciphers, and nonlinear feedback filters with external input $w_n \in \{-1, +1\}$) possess genuine multi-order **Volterra-Wiener functional kernels**.
 
-1. **Additive Characters / Walsh Basis**: The $2^L$ additive characters of $\mathbb{F}_{2^L}$ are given by $\psi_a(z) = \psi(a z) = (-1)^{\operatorname{Tr}(a z)}$ for $a \in \mathbb{F}_{2^L}$. Under a choice of basis $\mathbb{F}_{2^L} \cong \mathbb{F}_2^L$, these are identical to the $2^L$ Walsh characters $\chi_S(u) = \prod_{j \in S} u_j$ on the Boolean hypercube.
-2. **Multiplicative Characters / Time-Domain Fourier Basis**: Time-domain spectral analysis over one period $N = 2^L - 1$ operates on the cyclic group $\mathbb{Z}_N \cong \mathbb{F}_{2^L}^\times$. The multiplicative characters of $\mathbb{F}_{2^L}^\times$ are $\chi_k(\alpha^n) = e^{-2\pi i k n / N} = \omega^{-kn}$, where $\omega = e^{2\pi i / N}$.
+Let $v_n \in \{-1, +1\}$ be the output of a general causal discrete shift system fed by an independent input stream $w_n \in \{-1, +1\}$:
+$$v_n = F(w_n, w_{n-1}, \dots, w_{n-M}, v_{n-1}, \dots, v_{n-L})$$
 
-The change of basis between the additive character domain ($\mathbb{F}_{2^L}$) and the multiplicative character domain ($\mathbb{F}_{2^L}^\times$) is mediated precisely by **Gauss sums**:
+Expressing $v_n$ as a functional of current and past inputs $w_n, w_{n-1}, w_{n-2}, \dots$ yields the exact discrete **Volterra-Wiener Series Expansion**:
 
-$$g(\chi_k, \psi) = \sum_{z \in \mathbb{F}_{2^L}^\times} \chi_k(z) \psi(z)$$
+$$\boxed{
+v_n = h_0 + \sum_{k \ge 0} h_1(k) w_{n-k} + \sum_{0 \le k_1 < k_2} h_2(k_1, k_2) w_{n-k_1} w_{n-k_2} + \sum_{0 \le k_1 < k_2 < k_3} h_3(k_1, k_2, k_3) w_{n-k_1} w_{n-k_2} w_{n-k_3} + \dots
+}$$
+
+where:
+- $h_0 = \mathbb{E}[v_n]$ is the DC / 0-th order Wiener kernel.
+- $h_1(k) = \mathbb{E}[v_n w_{n-k}]$ is the 1st-order linear Volterra-Wiener kernel (impulse response over $\{-1, +1\}$).
+- $h_2(k_1, k_2) = \mathbb{E}[v_n w_{n-k_1} w_{n-k_2}]$ is the 2nd-order non-linear interaction Volterra-Wiener kernel.
+- $h_m(k_1, \dots, k_m) = \mathbb{E}[v_n w_{n-k_1} \dots w_{n-k_m}]$ is the $m$-th order Volterra-Wiener kernel.
+
+### Volterra Kernel Extraction via Cross-Correlation
+Under independent white binary input $w_n \sim \text{Bernoulli}(1/2)$ mapped to $\{-1, +1\}$, the input character monomials $W_S(n) = \prod_{j \in S} w_{n-j}$ satisfy the orthogonality condition:
+
+$$\mathbb{E}[W_S(n) W_T(n)] = \delta_{S, T}$$
+
+Therefore, the $m$-th order Volterra-Wiener kernel $h_m(k_1, \dots, k_m)$ is computed via higher-order cross-correlation:
+
+$$h_m(k_1, \dots, k_m) = \frac{1}{T} \sum_{n=0}^{T-1} v_n w_{n-k_1} w_{n-k_2} \dots w_{n-k_m}$$
 
 ---
 
-## 4. Derived Theorems & Spectral Proofs
+## 5. Derived Theorems & Spectral Proofs
 
 ### Theorem 1: Exact Two-Valued Autocorrelation
 For an $m$-sequence generated by a primitive polynomial of degree $L$ with period $N = 2^L - 1$, the periodic autocorrelation $R(d) = \sum_{n=0}^{N-1} u_n u_{n+d}$ satisfies:
@@ -104,20 +170,9 @@ $$\boxed{U_k = \chi_k(\beta)^{-1} g(\chi_k, \psi)}$$
 3. The power spectrum is perfectly flat:
 $$\boxed{|U_k| = 2^{L/2} \implies |U_k|^2 = 2^L = N + 1 \quad \forall k \neq 0}$$
 
-*Proof*:
-1. For $k = 0$, $U_0 = \sum_{n=0}^{N-1} u_n = \sum_{z \in \mathbb{F}_{2^L}^\times} \psi(\beta z) = -1$.
-2. For $k \neq 0$, substitute $u_n = \psi(\beta \alpha^n)$ and $\omega^{-kn} = \chi_k(\alpha^n)$:
-$$U_k = \sum_{n=0}^{N-1} \psi(\beta \alpha^n) \chi_k(\alpha^n)$$
-Change variables $z = \beta \alpha^n \implies \alpha^n = \beta^{-1} z$. Since $\chi_k$ is a multiplicative character:
-$$\chi_k(\alpha^n) = \chi_k(\beta^{-1} z) = \chi_k(\beta)^{-1} \chi_k(z)$$
-Substituting this back into the sum:
-$$U_k = \sum_{z \in \mathbb{F}_{2^L}^\times} \psi(z) \chi_k(\beta)^{-1} \chi_k(z) = \chi_k(\beta)^{-1} \sum_{z \in \mathbb{F}_{2^L}^\times} \chi_k(z) \psi(z) = \chi_k(\beta)^{-1} g(\chi_k, \psi)$$
-3. Since $\chi_k(\beta)$ lies on the complex unit circle, $|\chi_k(\beta)| = 1$. By the classical field theory property of non-trivial Gauss sums over $\mathbb{F}_q$ ($q = 2^L$), $|g(\chi_k, \psi)| = \sqrt{q} = 2^{L/2}$.
-Therefore, $|U_k| = 2^{L/2}$, and $|U_k|^2 = 2^L = N + 1$. $\blacksquare$
-
 ---
 
-## 5. Koopman Operator and Spectral Decomposition
+## 6. Koopman Operator and Spectral Decomposition
 
 The Koopman operator $\mathcal{K}$ acts on functions $f : \mathbb{F}_{2^L}^\times \to \mathbb{C}$ via state space transition:
 $$(\mathcal{K} f)(z) = f(\alpha z)$$
@@ -134,16 +189,6 @@ Evaluating along the orbit $z_n = \alpha^n$ yields the exact spectral decomposit
 
 ---
 
-## 6. Generalizations: Non-Primitive Polynomials, Reducible Rings, and NFSRs
-
-1. **Non-Primitive Irreducible Polynomials**: If $p(t)$ is irreducible of degree $L$ but non-primitive, its root $\alpha$ generates a sub-group of $\mathbb{F}_{2^L}^\times$ of order $M = \operatorname{ord}(\alpha) < 2^L - 1$, where $M \mid (2^L - 1)$. The output period is $M$, and the spectrum consists of impulses scaled by sub-field character sums.
-2. **Reducible Polynomials & Ring Decomposition**: When $p(t) = \prod_{i=1}^m p_i(t)^{e_i}$, the Chinese Remainder Theorem splits the state ring:
-$$R = \mathbb{F}_2[t]/(p(t)) \cong \bigoplus_{i=1}^m \mathbb{F}_2[t]/(p_i(t)^{e_i})$$
-Factors with $e_i = 1$ correspond to pure periodic orbits over subfields $\mathbb{F}_{2^{\deg p_i}}$. Repeated factors ($e_i > 1$) introduce nilpotent elements $N^{e_i} = 0$, generating polynomial-modulated polynomial drift terms (e.g., $n^k \alpha^n$) on top of periodic motion.
-3. **Nonlinear Feedback Shift Registers (NFSRs)**: For nonlinear update functions $x_{n+L} = f(x_n, \dots, x_{n+L-1})$, the state map $F : \mathbb{F}_2^L \to \mathbb{F}_2^L$ is a polynomial map on the Boolean variety $V(x_0^2 - x_0, \dots, x_{L-1}^2 - x_{L-1})$. Spectral analysis proceeds via the full Koopman matrix or Walsh transform of $F$. Orbit structure, cycle decompositions, and algebraic immunity are determined by the Gröbner basis of the iteration ideal $I_k = \langle F^{\circ k}(x) - x \rangle$.
-
----
-
 ## Summary Matrix of LFSR Duality
 
 | Domain / Coordinate System | Underlying Set | Basic Operation | Spectral Basis | Key Quantity |
@@ -151,5 +196,7 @@ Factors with $e_i = 1$ correspond to pure periodic orbits over subfields $\mathb
 | **State Vector Space** | $\mathbb{F}_2^L$ | $X_{n+1} = A X_n$ | Canonical unit vectors | State transition $A^n$ |
 | **Extension Field** | $\mathbb{F}_{2^L}$ | $z_{n+1} = \alpha z_n$ | Trace map $\operatorname{Tr}(\beta z)$ | Primitive root $\alpha$ |
 | **Bipolar Monomials** | $\{-1, +1\}^L$ | $u_{n+3} = u_{n+1} u_n$ | Walsh characters $\chi_S$ | 1-sparse index $S_n$ |
+| **Wiener Chaos Space** | $L^2(\{-1,+1\}^L, \mu)$ | $W_k[f] = \sum_{|S|=k} \hat{f}(S) \chi_S$ | Chaos Subspaces $\mathcal{H}_k$ | Energy Spectrum $E_f(k)$ |
+| **Volterra Input Series** | $\{-1, +1\}^\mathbb{N}$ | Convolution / Filtering | Multi-input products | Volterra Kernels $h_m(k_1,\dots,k_m)$ |
 | **Time Domain (DFT)** | $\mathbb{Z}_N$ | Shift $n \to n+1$ | Fourier modes $e^{2\pi i k n / N}$ | Spectrum $|U_k| = 2^{L/2}$ |
 | **Koopman / Characters** | $\mathbb{F}_{2^L}^\times$ | $(\mathcal{K}f)(z) = f(\alpha z)$ | Multiplicative $\chi_k$ | Gauss Sum $g(\chi_k, \psi)$ |
