@@ -53,12 +53,9 @@ uint32_t GF2Field::trace(uint32_t z) const {
     uint32_t tr = 0;
     uint32_t cur = z;
     for (uint32_t i = 0; i < L; ++i) {
-        tr ^= (cur & 1); // Tr(z) in F2 is sum of LSBs of Galois field elements or parity
+        tr ^= (cur & 1);
         cur = mul(cur, cur);
     }
-    // Alternatively, for canonical polynomial basis representation, Tr(z) is linear.
-    // To ensure exact match with F2 trace: sum_{i=0}^{L-1} z^{2^i}
-    // In characteristic 2, the result is in F2 (either 0 or 1).
     return tr & 1;
 }
 
@@ -68,7 +65,6 @@ int GF2Field::additive_character(uint32_t z) const {
 
 Complex GF2Field::multiplicative_character(uint32_t k, uint32_t z) const {
     if (z == 0) return 0.0;
-    // Find logarithm of z base alpha: z = alpha^n
     uint32_t n = 0;
     uint32_t cur = 1;
     bool found = false;
@@ -108,7 +104,6 @@ std::vector<int> LFSRGenerator::generate_bits_companion(size_t num_bits, uint32_
 
     for (size_t i = 0; i < num_bits; ++i) {
         bits[i] = state & 1;
-        // Companion matrix shift according to feedback poly
         bool feedback = false;
         for (uint32_t j = 0; j < field.L; ++j) {
             if ((field.poly >> j) & 1) {
@@ -137,6 +132,92 @@ std::vector<int> LFSRGenerator::generate_bipolar_sequence(size_t num_bits) const
         bipolar[i] = (bits[i] == 0) ? 1 : -1;
     }
     return bipolar;
+}
+
+WienerChaosResult WienerChaosAnalyzer::analyze_function(uint32_t L, const std::vector<double>& truth_table) {
+    size_t num_states = 1U << L;
+    if (truth_table.size() != num_states) {
+        throw std::invalid_argument("Truth table size must match 2^L");
+    }
+
+    std::vector<double> buf = truth_table;
+    SpectralAnalyzer::fwht(buf);
+
+    WienerChaosResult result;
+    result.L = L;
+    result.walsh_coefficients.resize(num_states);
+    result.energy_per_degree.assign(L + 1, 0.0);
+    result.total_energy = 0.0;
+
+    double max_lin_coeff = 0.0;
+
+    for (size_t mask = 0; mask < num_states; ++mask) {
+        // Normalize FWHT by 2^L
+        double coeff = buf[mask] / static_cast<double>(num_states);
+        result.walsh_coefficients[mask] = coeff;
+
+        double energy = coeff * coeff;
+        result.total_energy += energy;
+
+        // Popcount degree k
+        uint32_t degree = 0;
+        for (uint32_t j = 0; j < L; ++j) {
+            if ((mask >> j) & 1) degree++;
+        }
+        result.energy_per_degree[degree] += energy;
+
+        if (degree == 1) {
+            if (std::abs(coeff) > max_lin_coeff) {
+                max_lin_coeff = std::abs(coeff);
+            }
+        }
+    }
+
+    // Distance to closest affine function over {-1, +1}
+    result.nonlinearity = (1.0 - max_lin_coeff) / 2.0;
+    return result;
+}
+
+double WienerChaosAnalyzer::compute_volterra_kernel_0(const std::vector<int>& v) {
+    if (v.empty()) return 0.0;
+    double sum = 0.0;
+    for (int val : v) sum += val;
+    return sum / static_cast<double>(v.size());
+}
+
+std::vector<double> WienerChaosAnalyzer::compute_volterra_kernel_1(const std::vector<int>& v, const std::vector<int>& w, size_t max_lag) {
+    size_t T = std::min(v.size(), w.size());
+    std::vector<double> h1(max_lag, 0.0);
+    for (size_t k = 0; k < max_lag; ++k) {
+        double sum = 0.0;
+        size_t count = 0;
+        for (size_t n = k; n < T; ++n) {
+            sum += static_cast<double>(v[n] * w[n - k]);
+            count++;
+        }
+        h1[k] = (count > 0) ? (sum / static_cast<double>(count)) : 0.0;
+    }
+    return h1;
+}
+
+std::vector<std::vector<double>> WienerChaosAnalyzer::compute_volterra_kernel_2(const std::vector<int>& v, const std::vector<int>& w, size_t max_lag) {
+    size_t T = std::min(v.size(), w.size());
+    std::vector<std::vector<double>> h2(max_lag, std::vector<double>(max_lag, 0.0));
+    for (size_t k1 = 0; k1 < max_lag; ++k1) {
+        for (size_t k2 = k1 + 1; k2 < max_lag; ++k2) {
+            double sum = 0.0;
+            size_t count = 0;
+            size_t start_n = std::max(k1, k2);
+            for (size_t n = start_n; n < T; ++n) {
+                sum += static_cast<double>(v[n] * w[n - k1] * w[n - k2]);
+                count++;
+            }
+            double val = (count > 0) ? (sum / static_cast<double>(count)) : 0.0;
+            h2[k1][k2] = val;
+            h2[k2][k1] = val;
+        }
+    }
+    return h2;
 }
 
 void SpectralAnalyzer::fwht(std::vector<double>& a) {
@@ -171,7 +252,6 @@ std::vector<Complex> SpectralAnalyzer::compute_gauss_sums(const GF2Field& field)
     uint32_t N = field.N;
     std::vector<Complex> g(N);
 
-    // g(chi_k, psi) = sum_{z in GF(2^L)*} chi_k(z) * psi(z)
     for (uint32_t k = 0; k < N; ++k) {
         Complex sum = 0.0;
         uint32_t z = 1;
@@ -213,8 +293,6 @@ double SpectralAnalyzer::compute_higher_order_correlation(const std::vector<int>
 }
 
 bool SpectralAnalyzer::poly_divides_delay_sum(uint32_t poly, uint32_t L, const std::vector<uint32_t>& delays) {
-    // Q(t) = sum_{d in delays} t^d in F2[t]
-    // Polynomial division over F2
     uint32_t max_d = 0;
     for (uint32_t d : delays) {
         if (d > max_d) max_d = d;
@@ -224,15 +302,13 @@ bool SpectralAnalyzer::poly_divides_delay_sum(uint32_t poly, uint32_t L, const s
         Q[d] ^= 1;
     }
 
-    // p(t) coefficients
-    uint32_t p_deg = L; // degree of primitive poly is L
+    uint32_t p_deg = L;
     std::vector<int> P(p_deg + 1, 0);
     P[p_deg] = 1;
     for (uint32_t j = 0; j < L; ++j) {
         P[j] = (poly >> j) & 1;
     }
 
-    // Long division Q(t) by P(t) over F2
     int cur_deg = max_d;
     while (cur_deg >= static_cast<int>(p_deg)) {
         if (Q[cur_deg]) {
@@ -262,7 +338,7 @@ SpectralReport SpectralAnalyzer::analyze(const GF2Field& field, uint32_t beta) {
 
     report.dft = compute_dft(report.bipolar);
     report.power_spectrum.resize(field.N);
-    double target_magnitude = std::sqrt(static_cast<double>(field.N + 1)); // 2^(L/2)
+    double target_magnitude = std::sqrt(static_cast<double>(field.N + 1));
 
     report.is_flat = true;
     report.max_spectral_error = 0.0;
@@ -291,6 +367,15 @@ SpectralReport SpectralAnalyzer::analyze(const GF2Field& field, uint32_t beta) {
             report.is_autocorr_two_valued = false;
         }
     }
+
+    // Compute Wiener Chaos Energy Distribution on the linear trace observable function f(z) = psi(beta * z)
+    size_t num_states = 1U << field.L;
+    std::vector<double> truth_table(num_states);
+    for (size_t state = 0; state < num_states; ++state) {
+        truth_table[state] = field.additive_character(field.mul(beta, state));
+    }
+    WienerChaosResult chaos_res = WienerChaosAnalyzer::analyze_function(field.L, truth_table);
+    report.wiener_energy_distribution = chaos_res.energy_per_degree;
 
     return report;
 }
@@ -322,6 +407,12 @@ std::string SpectralAnalyzer::export_json(const SpectralReport& report) {
     ss << "  \"autocorrelation\": [";
     for (size_t i = 0; i < report.autocorrelation.size(); ++i) {
         ss << report.autocorrelation[i] << (i + 1 < report.autocorrelation.size() ? ", " : "");
+    }
+    ss << "],\n";
+
+    ss << "  \"wiener_energy_distribution\": [";
+    for (size_t i = 0; i < report.wiener_energy_distribution.size(); ++i) {
+        ss << report.wiener_energy_distribution[i] << (i + 1 < report.wiener_energy_distribution.size() ? ", " : "");
     }
     ss << "]\n";
 

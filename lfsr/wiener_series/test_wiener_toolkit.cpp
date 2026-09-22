@@ -11,15 +11,13 @@ using namespace lfsr_wiener;
 
 void test_field_arithmetic() {
     std::cout << "[TEST] Field Arithmetic GF(2^3)..." << std::endl;
-    // p(t) = t^3 + t + 1 -> 11 (0b1011)
     GF2Field field(3, 11);
 
     assert(field.N == 7);
-    assert(field.add(5, 3) == 6); // 101 ^ 011 = 110
+    assert(field.add(5, 3) == 6);
     assert(field.mul(0, 5) == 0);
     assert(field.mul(1, 5) == 5);
 
-    // Test inverses: a * a^(-1) = 1 for all a in GF(2^3)*
     for (uint32_t a = 1; a < 8; ++a) {
         uint32_t inv_a = field.inverse(a);
         assert(field.mul(a, inv_a) == 1);
@@ -35,12 +33,9 @@ void test_trace_and_companion_match() {
     std::vector<int> bits_trace = gen.generate_bits_trace(7);
     std::vector<int> bits_companion = gen.generate_bits_companion(7, 1);
 
-    // Since initial state for trace is z_0 = beta = 1, and initial vector is (1, 0, 0),
-    // both generate the same m-sequence period up to cyclic shift or exact match.
     assert(bits_trace.size() == 7);
     assert(bits_companion.size() == 7);
 
-    // Check that both have balance property: 4 ones and 3 zeros (or vice versa depending on sign)
     int ones_trace = 0, ones_comp = 0;
     for (int i = 0; i < 7; ++i) {
         ones_trace += bits_trace[i];
@@ -53,15 +48,7 @@ void test_trace_and_companion_match() {
 
 void test_walsh_sparsity() {
     std::cout << "[TEST] Walsh Monomial 1-Sparsity..." << std::endl;
-    GF2Field field(3, 11);
-    LFSRGenerator gen(field, 1);
-    std::vector<int> bipolar = gen.generate_bipolar_sequence(7);
-
-    // Construct Walsh transform on 2^L = 8 points for any bit sample
-    // Each output u_n is exactly one Walsh character chi_S(u_0, u_1, u_2)
     std::vector<double> walsh_buf(8, 0.0);
-    // Let function f(u0, u1, u2) = u_3 = u_1 * u_0
-    // Truth table over 8 boolean states
     for (uint32_t state = 0; state < 8; ++state) {
         std::vector<int> bits(3);
         bits[0] = state & 1;
@@ -82,18 +69,61 @@ void test_walsh_sparsity() {
             assert(std::abs(std::abs(val) - 8.0) < 1e-7);
         }
     }
-    // Exactly 1 non-zero Walsh coefficient out of 8!
     assert(non_zero_count == 1);
+    std::cout << "  -> PASS" << std::endl;
+}
+
+void test_wiener_chaos_decomposition() {
+    std::cout << "[TEST] Discrete Walsh-Wiener Chaos Expansion..." << std::endl;
+    // Define a non-linear Boolean filtering function f(u0, u1, u2) = u0 * u1 * u2 + u0
+    // L = 3
+    uint32_t L = 3;
+    std::vector<double> truth_table(8);
+    for (uint32_t state = 0; state < 8; ++state) {
+        int u0 = ((state >> 0) & 1) ? -1 : 1;
+        int u1 = ((state >> 1) & 1) ? -1 : 1;
+        int u2 = ((state >> 2) & 1) ? -1 : 1;
+        truth_table[state] = u0 * u1 * u2 + u0;
+    }
+
+    WienerChaosResult res = WienerChaosAnalyzer::analyze_function(L, truth_table);
+
+    // Degrees: degree 1 has term u0 (energy 1.0), degree 3 has term u0*u1*u2 (energy 1.0)
+    assert(std::abs(res.total_energy - 2.0) < 1e-7);
+    assert(std::abs(res.energy_per_degree[1] - 1.0) < 1e-7);
+    assert(std::abs(res.energy_per_degree[3] - 1.0) < 1e-7);
+    assert(std::abs(res.energy_per_degree[0]) < 1e-7);
+    assert(std::abs(res.energy_per_degree[2]) < 1e-7);
+
+    std::cout << "  -> PASS" << std::endl;
+}
+
+void test_volterra_kernel_extraction() {
+    std::cout << "[TEST] Volterra-Wiener Kernel Extraction..." << std::endl;
+    // Input-driven scrambler v_n = w_n * w_{n-1} + w_{n-2}
+    size_t T = 1000;
+    std::vector<int> w(T);
+    for (size_t i = 0; i < T; ++i) {
+        w[i] = ((i * 11 + 7) % 2 == 0) ? 1 : -1;
+    }
+
+    std::vector<int> v(T);
+    for (size_t n = 2; n < T; ++n) {
+        int term2 = w[n] * w[n - 1];
+        int term1 = w[n - 2];
+        v[n] = (term2 * term1 == 1) ? 1 : -1;
+    }
+
+    std::vector<double> h1 = WienerChaosAnalyzer::compute_volterra_kernel_1(v, w, 5);
+    std::vector<std::vector<double>> h2 = WienerChaosAnalyzer::compute_volterra_kernel_2(v, w, 5);
+
+    assert(h1.size() == 5);
+    assert(h2.size() == 5);
     std::cout << "  -> PASS" << std::endl;
 }
 
 void test_autocorrelation_and_flat_spectrum() {
     std::cout << "[TEST] Two-Valued Autocorrelation & Flat Spectrum (L=3, 4, 5)..." << std::endl;
-
-    // Tested primitive polynomials:
-    // L=3: t^3 + t + 1 (11)
-    // L=4: t^4 + t + 1 (19)
-    // L=5: t^5 + t^2 + 1 (37)
     std::vector<std::pair<uint32_t, uint32_t>> test_cases = {
         {3, 11},
         {4, 19},
@@ -111,10 +141,8 @@ void test_autocorrelation_and_flat_spectrum() {
         assert(report.is_autocorr_two_valued);
         assert(report.max_spectral_error < 1e-7);
 
-        // Check U_0 = -1
         assert(std::abs(report.dft[0] - Complex(-1.0, 0.0)) < 1e-7);
 
-        // Check power spectrum |U_k|^2 = 2^L
         double expected_pwr = static_cast<double>(1U << L);
         for (size_t k = 1; k < field.N; ++k) {
             assert(std::abs(report.power_spectrum[k] - expected_pwr) < 1e-7);
@@ -126,7 +154,7 @@ void test_autocorrelation_and_flat_spectrum() {
 void test_gauss_sum_dft_identity() {
     std::cout << "[TEST] DFT vs Gauss Sum Identity U_k = chi_k(beta)^(-1) * g(chi_k, psi)..." << std::endl;
     GF2Field field(3, 11);
-    uint32_t beta = 3; // Test with non-trivial beta
+    uint32_t beta = 3;
 
     LFSRGenerator gen(field, beta);
     std::vector<int> bipolar = gen.generate_bipolar_sequence(field.N);
@@ -143,18 +171,16 @@ void test_gauss_sum_dft_identity() {
 
 void test_higher_order_correlation() {
     std::cout << "[TEST] Higher-Order Correlation Selection Rules..." << std::endl;
-    GF2Field field(3, 11); // p(t) = t^3 + t + 1
+    GF2Field field(3, 11);
     LFSRGenerator gen(field, 1);
     std::vector<int> bipolar = gen.generate_bipolar_sequence(field.N);
 
-    // Case 1: D = {0, 1, 3} -> t^3 + t + 1, divisible by p(t)
     std::vector<uint32_t> delays1 = {0, 1, 3};
     double corr1 = SpectralAnalyzer::compute_higher_order_correlation(bipolar, delays1);
     bool div1 = SpectralAnalyzer::poly_divides_delay_sum(11, 3, delays1);
     assert(div1 == true);
     assert(std::abs(corr1 - 7.0) < 1e-7);
 
-    // Case 2: D = {0, 1, 2} -> t^2 + t + 1, NOT divisible by p(t)
     std::vector<uint32_t> delays2 = {0, 1, 2};
     double corr2 = SpectralAnalyzer::compute_higher_order_correlation(bipolar, delays2);
     bool div2 = SpectralAnalyzer::poly_divides_delay_sum(11, 3, delays2);
@@ -168,7 +194,6 @@ void test_koopman_eigenfunctions() {
     std::cout << "[TEST] Koopman Operator Eigenfunctions..." << std::endl;
     GF2Field field(3, 11);
 
-    // Check (K chi_k)(z) = chi_k(alpha * z) == omega^(-k) * chi_k(z)
     for (uint32_t k = 0; k < field.N; ++k) {
         double angle = -2.0 * PI * static_cast<double>(k) / static_cast<double>(field.N);
         Complex eigenvalue(std::cos(angle), std::sin(angle));
@@ -192,6 +217,8 @@ int main() {
     test_field_arithmetic();
     test_trace_and_companion_match();
     test_walsh_sparsity();
+    test_wiener_chaos_decomposition();
+    test_volterra_kernel_extraction();
     test_autocorrelation_and_flat_spectrum();
     test_gauss_sum_dft_identity();
     test_higher_order_correlation();
