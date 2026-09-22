@@ -152,14 +152,12 @@ WienerChaosResult WienerChaosAnalyzer::analyze_function(uint32_t L, const std::v
     double max_lin_coeff = 0.0;
 
     for (size_t mask = 0; mask < num_states; ++mask) {
-        // Normalize FWHT by 2^L
         double coeff = buf[mask] / static_cast<double>(num_states);
         result.walsh_coefficients[mask] = coeff;
 
         double energy = coeff * coeff;
         result.total_energy += energy;
 
-        // Popcount degree k
         uint32_t degree = 0;
         for (uint32_t j = 0; j < L; ++j) {
             if ((mask >> j) & 1) degree++;
@@ -173,7 +171,6 @@ WienerChaosResult WienerChaosAnalyzer::analyze_function(uint32_t L, const std::v
         }
     }
 
-    // Distance to closest affine function over {-1, +1}
     result.nonlinearity = (1.0 - max_lin_coeff) / 2.0;
     return result;
 }
@@ -218,6 +215,131 @@ std::vector<std::vector<double>> WienerChaosAnalyzer::compute_volterra_kernel_2(
         }
     }
     return h2;
+}
+
+uint64_t LFSRSynthesisEngine::gcd(uint64_t a, uint64_t b) {
+    while (b > 0) {
+        uint64_t t = b;
+        b = a % b;
+        a = t;
+    }
+    return a;
+}
+
+uint64_t LFSRSynthesisEngine::lcm(uint64_t a, uint64_t b) {
+    if (a == 0 || b == 0) return 0;
+    return (a / gcd(a, b)) * b;
+}
+
+PairSynthesisReport LFSRSynthesisEngine::synthesize_pair(
+    const GF2Field& field_A, uint32_t beta_A,
+    const GF2Field& field_B, uint32_t beta_B,
+    PairCombinationMode mode,
+    double weight_A, double weight_B
+) {
+    PairSynthesisReport report;
+    report.L_A = field_A.L;
+    report.L_B = field_B.L;
+    report.poly_A = field_A.poly;
+    report.poly_B = field_B.poly;
+    report.beta_A = beta_A;
+    report.beta_B = beta_B;
+    report.N_A = field_A.N;
+    report.N_B = field_B.N;
+    report.N_joint = static_cast<uint32_t>(lcm(field_A.N, field_B.N));
+    report.mode = mode;
+
+    LFSRGenerator gen_A(field_A, beta_A);
+    LFSRGenerator gen_B(field_B, beta_B);
+
+    std::vector<int> u_A = gen_A.generate_bipolar_sequence(report.N_joint);
+    std::vector<int> u_B = gen_B.generate_bipolar_sequence(report.N_joint);
+
+    report.synthesized_bipolar.resize(report.N_joint);
+    for (size_t n = 0; n < report.N_joint; ++n) {
+        if (mode == PairCombinationMode::MULTIPLICATIVE) {
+            report.synthesized_bipolar[n] = u_A[n] * u_B[n];
+        } else if (mode == PairCombinationMode::ADDITIVE) {
+            report.synthesized_bipolar[n] = static_cast<int>(std::round(weight_A * u_A[n] + weight_B * u_B[n]));
+        } else { // MULTIPLEXED
+            report.synthesized_bipolar[n] = (n % 2 == 0) ? u_A[n] : u_B[n];
+        }
+    }
+
+    report.joint_dft = SpectralAnalyzer::compute_dft(report.synthesized_bipolar);
+    report.joint_power_spectrum.resize(report.N_joint);
+    for (size_t k = 0; k < report.N_joint; ++k) {
+        double mag = std::abs(report.joint_dft[k]);
+        report.joint_power_spectrum[k] = mag * mag;
+    }
+
+    report.joint_autocorrelation = SpectralAnalyzer::compute_autocorrelation(report.synthesized_bipolar);
+
+    // Compute joint Wiener chaos energy distribution
+    size_t joint_L = field_A.L + field_B.L;
+    size_t joint_num_states = 1U << joint_L;
+    std::vector<double> joint_truth_table(joint_num_states);
+    for (size_t state = 0; state < joint_num_states; ++state) {
+        uint32_t state_A = state & field_A.N;
+        uint32_t state_B = (state >> field_A.L) & field_B.N;
+
+        int val_A = field_A.additive_character(field_A.mul(beta_A, state_A));
+        int val_B = field_B.additive_character(field_B.mul(beta_B, state_B));
+
+        if (mode == PairCombinationMode::MULTIPLICATIVE) {
+            joint_truth_table[state] = val_A * val_B;
+        } else if (mode == PairCombinationMode::ADDITIVE) {
+            joint_truth_table[state] = weight_A * val_A + weight_B * val_B;
+        } else {
+            joint_truth_table[state] = (state % 2 == 0) ? val_A : val_B;
+        }
+    }
+
+    WienerChaosResult chaos_res = WienerChaosAnalyzer::analyze_function(joint_L, joint_truth_table);
+    report.joint_wiener_energy = chaos_res.energy_per_degree;
+
+    return report;
+}
+
+std::string LFSRSynthesisEngine::export_pair_json(const PairSynthesisReport& report) {
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(6);
+    ss << "{\n";
+    ss << "  \"L_A\": " << report.L_A << ",\n";
+    ss << "  \"L_B\": " << report.L_B << ",\n";
+    ss << "  \"poly_A\": " << report.poly_A << ",\n";
+    ss << "  \"poly_B\": " << report.poly_B << ",\n";
+    ss << "  \"N_A\": " << report.N_A << ",\n";
+    ss << "  \"N_B\": " << report.N_B << ",\n";
+    ss << "  \"N_joint\": " << report.N_joint << ",\n";
+    ss << "  \"mode\": " << (report.mode == PairCombinationMode::MULTIPLICATIVE ? "\"MULTIPLICATIVE\"" : (report.mode == PairCombinationMode::ADDITIVE ? "\"ADDITIVE\"" : "\"MULTIPLEXED\"")) << ",\n";
+
+    ss << "  \"synthesized_bipolar\": [";
+    for (size_t i = 0; i < report.synthesized_bipolar.size(); ++i) {
+        ss << report.synthesized_bipolar[i] << (i + 1 < report.synthesized_bipolar.size() ? ", " : "");
+    }
+    ss << "],\n";
+
+    ss << "  \"joint_power_spectrum\": [";
+    for (size_t i = 0; i < report.joint_power_spectrum.size(); ++i) {
+        ss << report.joint_power_spectrum[i] << (i + 1 < report.joint_power_spectrum.size() ? ", " : "");
+    }
+    ss << "],\n";
+
+    ss << "  \"joint_autocorrelation\": [";
+    for (size_t i = 0; i < report.joint_autocorrelation.size(); ++i) {
+        ss << report.joint_autocorrelation[i] << (i + 1 < report.joint_autocorrelation.size() ? ", " : "");
+    }
+    ss << "],\n";
+
+    ss << "  \"joint_wiener_energy\": [";
+    for (size_t i = 0; i < report.joint_wiener_energy.size(); ++i) {
+        ss << report.joint_wiener_energy[i] << (i + 1 < report.joint_wiener_energy.size() ? ", " : "");
+    }
+    ss << "]\n";
+
+    ss << "}\n";
+    return ss.str();
 }
 
 void SpectralAnalyzer::fwht(std::vector<double>& a) {
@@ -368,7 +490,6 @@ SpectralReport SpectralAnalyzer::analyze(const GF2Field& field, uint32_t beta) {
         }
     }
 
-    // Compute Wiener Chaos Energy Distribution on the linear trace observable function f(z) = psi(beta * z)
     size_t num_states = 1U << field.L;
     std::vector<double> truth_table(num_states);
     for (size_t state = 0; state < num_states; ++state) {

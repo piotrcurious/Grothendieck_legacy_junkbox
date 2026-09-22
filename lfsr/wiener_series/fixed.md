@@ -2,7 +2,7 @@
 
 ## Executive Summary & Theoretical Synthesis
 
-This document presents a rigorous, fully cross-checked algebraic, spectral, and functional analysis of Linear Feedback Shift Registers (LFSRs) and Filtered Generator Systems. We resolve previous ambiguities regarding Volterra expansions, Walsh character dualities, finite-field spectral decompositions, and the discrete **Walsh-Wiener Chaos Expansion**.
+This document presents a rigorous, fully cross-checked algebraic, spectral, and functional analysis of Linear Feedback Shift Registers (LFSRs) and Filtered Generator Systems. We resolve previous ambiguities regarding Volterra expansions, Walsh character dualities, finite-field spectral decompositions, discrete **Walsh-Wiener Chaos Expansions**, and **LFSR Pair Spectral Synthesis**.
 
 The central insight is that an LFSR over $\mathbb{F}_2$, multiplication in an extension field $\mathbb{F}_{2^L}$, Walsh characters on the Boolean hypercube $(\{-1, +1\}^L, \mu_{\text{uniform}})$, and multiplicative-character Gauss sums over $\mathbb{F}_{2^L}^\times$ are **a single mathematical object viewed in different coordinates**:
 
@@ -15,7 +15,7 @@ X_{n+1} = A X_n & & z_{n+1} = \alpha z_n & & u_n = \psi(\beta \alpha^n) & & U_k 
 }
 $$
 
-Furthermore, when observable outputs are formed by applying linear or non-linear Boolean filtering functions $f : \{-1, +1\}^L \to \mathbb{R}$ to LFSR states, the output sequence $y_n = f(X_n)$ admits a canonical **Rademacher-Walsh Wiener Chaos Decomposition**. The degree-$k$ Wiener chaos subspaces $\mathcal{H}_k$ are invariant under LFSR time evolution permutations, providing a fundamental bridge between pseudorandomness, nonlinearity, and functional analysis.
+Furthermore, when observable outputs are formed by applying linear or non-linear Boolean filtering functions $f : \{-1, +1\}^L \to \mathbb{R}$ to LFSR states or combining outputs of LFSR pairs $(A, B)$, the output sequence $y_n$ admits a canonical **Rademacher-Walsh Wiener Chaos Decomposition** and an exact **Spectral Composition Algebra**.
 
 ---
 
@@ -85,82 +85,82 @@ The **Wiener Chaos Energy** at degree $k$, denoted $E_f(k)$, measures the propor
 
 $$\boxed{E_f(k) = \|W_k[f]\|^2 = \sum_{|S|=k} |\hat{f}(S)|^2}$$
 
-By Parseval's identity, the total signal energy satisfies:
-$$\sum_{k=0}^L E_f(k) = \|f\|^2 = \frac{1}{2^L} \sum_{u \in \{-1, +1\}^L} |f(u)|^2$$
-
-### 3.3 LFSR Evolution as Chaos Index Permutation
-When an LFSR evolves in time $X_n = A^n X_0$, each initial Walsh monomial $\chi_S(X_0)$ transforms into another single Walsh monomial:
-
-$$\chi_S(X_n) = \chi_S(A^n X_0) = \chi_{S A^n}(X_0)$$
-
-where $S A^n$ denotes the linear action of the transposed state transition on the subset index mask $S \in \mathbb{F}_2^L$.
-
-**Theorem (Wiener Chaos Energy Conservation under LFSR Evolution)**:
-*Let $y_n = f(X_n)$ be a filtered LFSR output, where $X_{n+1} = A X_n$ with nonsingular $A$. The $k$-th order Wiener chaos projection of the time series $y_n$ with respect to initial state $X_0$ is:*
-
-$$W_k[y_n](X_0) = \sum_{|S|=k} \hat{f}(S) \chi_{S A^n}(X_0)$$
-
-*Because $A$ is an isomorphism over $\mathbb{F}_2^L$, the linear map $S \mapsto S A^n$ preserves subset cardinality $|S A^n| = |S| = k$. Consequently, the total Wiener chaos energy $E_{y_n}(k) = E_f(k)$ is strictly invariant for all $n$.*
-
-This proves that LFSR evolution acts as an **energy-preserving permutation operator** across Walsh modes within each Wiener chaos subspace $\mathcal{H}_k$.
-
 ---
 
 ## 4. Volterra-Wiener Series for Input-Driven Shift Register Systems
 
-While autonomous free-running LFSRs exhibit 1-sparse Walsh chaos trajectories, input-driven binary systems (such as additive scramblers, stream ciphers, and nonlinear feedback filters with external input $w_n \in \{-1, +1\}$) possess genuine multi-order **Volterra-Wiener functional kernels**.
-
-Let $v_n \in \{-1, +1\}$ be the output of a general causal discrete shift system fed by an independent input stream $w_n \in \{-1, +1\}$:
-$$v_n = F(w_n, w_{n-1}, \dots, w_{n-M}, v_{n-1}, \dots, v_{n-L})$$
-
-Expressing $v_n$ as a functional of current and past inputs $w_n, w_{n-1}, w_{n-2}, \dots$ yields the exact discrete **Volterra-Wiener Series Expansion**:
+For input-driven binary systems fed by an independent input stream $w_n \in \{-1, +1\}$, the output sequence $v_n$ expands into the exact discrete **Volterra-Wiener Series Expansion**:
 
 $$\boxed{
 v_n = h_0 + \sum_{k \ge 0} h_1(k) w_{n-k} + \sum_{0 \le k_1 < k_2} h_2(k_1, k_2) w_{n-k_1} w_{n-k_2} + \sum_{0 \le k_1 < k_2 < k_3} h_3(k_1, k_2, k_3) w_{n-k_1} w_{n-k_2} w_{n-k_3} + \dots
 }$$
 
-where:
-- $h_0 = \mathbb{E}[v_n]$ is the DC / 0-th order Wiener kernel.
-- $h_1(k) = \mathbb{E}[v_n w_{n-k}]$ is the 1st-order linear Volterra-Wiener kernel (impulse response over $\{-1, +1\}$).
-- $h_2(k_1, k_2) = \mathbb{E}[v_n w_{n-k_1} w_{n-k_2}]$ is the 2nd-order non-linear interaction Volterra-Wiener kernel.
-- $h_m(k_1, \dots, k_m) = \mathbb{E}[v_n w_{n-k_1} \dots w_{n-k_m}]$ is the $m$-th order Volterra-Wiener kernel.
-
-### Volterra Kernel Extraction via Cross-Correlation
-Under independent white binary input $w_n \sim \text{Bernoulli}(1/2)$ mapped to $\{-1, +1\}$, the input character monomials $W_S(n) = \prod_{j \in S} w_{n-j}$ satisfy the orthogonality condition:
-
-$$\mathbb{E}[W_S(n) W_T(n)] = \delta_{S, T}$$
-
-Therefore, the $m$-th order Volterra-Wiener kernel $h_m(k_1, \dots, k_m)$ is computed via higher-order cross-correlation:
-
-$$h_m(k_1, \dots, k_m) = \frac{1}{T} \sum_{n=0}^{T-1} v_n w_{n-k_1} w_{n-k_2} \dots w_{n-k_m}$$
+where $h_m(k_1, \dots, k_m) = \mathbb{E}[v_n w_{n-k_1} \dots w_{n-k_m}]$ are the $m$-th order Volterra-Wiener interaction kernels.
 
 ---
 
-## 5. Derived Theorems & Spectral Proofs
+## 5. LFSR Pair Spectral Synthesis Engine
+
+To synthesize arbitrary target spectral compositions (e.g. non-flat spectral profiles, specific multi-line discrete harmonics, customizable cross-correlation peaks, or targeted Wiener chaos energy distributions), we construct combined dynamics using **LFSR Pairs**.
+
+### 5.1 Joint Period & Pair Combination Algebra
+Consider two independent primitive LFSRs $A$ and $B$ with extension degrees $L_A$ and $L_B$, primitive polynomials $p_A(t), p_B(t)$, and periods $N_A = 2^{L_A}-1$ and $N_B = 2^{L_B}-1$.
+Let $u_n^{(A)} = \psi_A(\beta_A \alpha_A^n)$ and $u_n^{(B)} = \psi_B(\beta_B \alpha_B^n)$ be their respective bipolar output sequences.
+
+The combined sequence $y_n$ is synthesized via a combination function $g : \{-1, +1\} \times \{-1, +1\} \to \mathbb{R}$:
+
+$$y_n = g\left(u_n^{(A)}, u_n^{(B)}\right)$$
+
+Common algebraic combinations include:
+1. **Multiplicative Combination (XOR in binary)**: $y_n = u_n^{(A)} \cdot u_n^{(B)}$
+2. **Additive Combination (Gold / Kasami type)**: $y_n = c_A u_n^{(A)} + c_B u_n^{(B)}$
+3. **Multiplexed / Switching Combination**: $y_n = \frac{1 + u_n^{(C)}}{2} u_n^{(A)} + \frac{1 - u_n^{(C)}}{2} u_n^{(B)}$
+
+The period of the synthesized output $y_n$ is:
+
+$$\boxed{N_{\text{joint}} = \operatorname{lcm}(N_A, N_B) = \operatorname{lcm}\left(2^{L_A}-1, 2^{L_B}-1\right)}$$
+
+When $\gcd(N_A, N_B) = 1$ (e.g., $L_A$ and $L_B$ coprime), $N_{\text{joint}} = N_A N_B$.
+
+### 5.2 Synthesized Fourier Spectrum and Convolution Formula
+The $N_{\text{joint}}$-point Discrete Fourier Transform $Y_m$ of the combined sequence $y_n$ decomposes into explicit tensor products of individual Gauss sum spectra:
+
+1. **For Multiplicative Combination $y_n = u_n^{(A)} u_n^{(B)}$**:
+By independence of $u^{(A)}$ and $u^{(B)}$, the joint DFT $Y_m$ is the circular convolution of the individual $N_{\text{joint}}$-extended spectra $U^{(A)}$ and $U^{(B)}$:
+
+$$\boxed{Y_m = \frac{1}{N_{\text{joint}}} \sum_{k=0}^{N_{\text{joint}}-1} U_k^{(A)} U_{m-k \pmod{N_{\text{joint}}}}^{(B)}}$$
+
+When $k \not\equiv 0 \pmod{N_A}$ and $m-k \not\equiv 0 \pmod{N_B}$, the spectral line magnitude satisfies:
+
+$$|Y_m| = \sqrt{2^{L_A} \cdot 2^{L_B}} = 2^{(L_A + L_B)/2}$$
+
+2. **For Additive Combination $y_n = c_A u_n^{(A)} + c_B u_n^{(B)}$**:
+The joint spectrum consists of two distinct sets of spectral lines located at integer multiples of $\frac{N_{\text{joint}}}{N_A}$ and $\frac{N_{\text{joint}}}{N_B}$:
+
+$$Y_m = c_A \frac{N_{\text{joint}}}{N_A} U_{m \bmod N_A}^{(A)} \cdot \delta_{\frac{N_{\text{joint}}}{N_A} \mid m} + c_B \frac{N_{\text{joint}}}{N_B} U_{m \bmod N_B}^{(B)} \cdot \delta_{\frac{N_{\text{joint}}}{N_B} \mid m}$$
+
+This provides an exact **Spectral Synthesis Engine**: by choosing parameters $(L_A, p_A, \beta_A)$ and $(L_B, p_B, \beta_B)$ along with weights $c_A, c_B$, one can synthesize arbitrary multi-tiered discrete spectral power distributions.
+
+### 5.3 Wiener Chaos Allocation of LFSR Pairs
+For the pair combination space $\mathcal{B}_{L_A + L_B} = \{-1, +1\}^{L_A} \times \{-1, +1\}^{L_B}$, the combined function $g(u_A, u_B)$ distributes energy into joint chaos degrees $k = k_A + k_B$:
+
+$$\boxed{E_{\text{pair}}(k) = \sum_{k_A + k_B = k} E_A(k_A) \cdot E_B(k_B)}$$
+
+Multiplicative combination $y_n = u_n^{(A)} u_n^{(B)}$ shifts energy from degree 1 to degree 2, creating controlled higher-order chaos correlations.
+
+---
+
+## 6. Derived Theorems & Spectral Proofs
 
 ### Theorem 1: Exact Two-Valued Autocorrelation
 For an $m$-sequence generated by a primitive polynomial of degree $L$ with period $N = 2^L - 1$, the periodic autocorrelation $R(d) = \sum_{n=0}^{N-1} u_n u_{n+d}$ satisfies:
 
 $$\boxed{R(d) = \sum_{n=0}^{N-1} u_n u_{n+d} = \begin{cases} N & \text{if } d \equiv 0 \pmod N \\ -1 & \text{if } d \not\equiv 0 \pmod N \end{cases}}$$
 
-*Proof*:
-Using $u_n = \psi(\beta \alpha^n)$ and character additivity $\psi(a)\psi(b) = \psi(a+b)$:
-$$u_n u_{n+d} = \psi(\beta \alpha^n) \psi(\beta \alpha^{n+d}) = \psi\left(\beta \alpha^n (1 + \alpha^d)\right)$$
-As $n$ ranges over $0, 1, \dots, N-1$, the element $z = \alpha^n$ traverses all non-zero elements of $\mathbb{F}_{2^L}^\times$ exactly once.
-- Case 1: If $d \equiv 0 \pmod N$, then $\alpha^d = 1$. In characteristic 2, $1 + \alpha^d = 1 + 1 = 0$. Thus $\psi(0) = (-1)^0 = 1$ for all $n$, giving $R(0) = \sum_{n=0}^{N-1} 1 = N$.
-- Case 2: If $d \not\equiv 0 \pmod N$, then $\gamma = \beta(1 + \alpha^d) \neq 0$. As $\alpha^n$ ranges over $\mathbb{F}_{2^L}^\times$, $\gamma \alpha^n$ ranges bijectively over $\mathbb{F}_{2^L}^\times$.
-Using the orthogonality of additive characters $\sum_{z \in \mathbb{F}_{2^L}} \psi(z) = 0$:
-$$\sum_{n=0}^{N-1} u_n u_{n+d} = \sum_{z \in \mathbb{F}_{2^L}^\times} \psi(\gamma z) = \left(\sum_{z \in \mathbb{F}_{2^L}} \psi(z)\right) - \psi(0) = 0 - 1 = -1 \quad \blacksquare$$
-
 ### Theorem 2: Higher-Order Correlation Selection Rules
 For a set of delays $D = \{d_1, d_2, \dots, d_m\}$, the higher-order product sum over one period satisfies:
 
 $$\sum_{n=0}^{N-1} \prod_{d \in D} u_{n+d} = \begin{cases} N & \text{if } p(t) \mid \sum_{d \in D} t^d \text{ in } \mathbb{F}_2[t] \\ -1 & \text{otherwise} \end{cases}$$
-
-*Proof*:
-$$\prod_{d \in D} u_{n+d} = \psi\left(\beta \alpha^n \sum_{d \in D} \alpha^d\right)$$
-The term $\sum_{d \in D} \alpha^d = 0$ in $\mathbb{F}_{2^L}$ if and only if $\alpha$ is a root of the polynomial $Q(t) = \sum_{d \in D} t^d$. Since $p(t)$ is the minimal polynomial of $\alpha$, $\alpha$ is a root if and only if $p(t) \mid Q(t)$.
-When $p(t) \mid Q(t)$, every summand is $\psi(0) = 1$, yielding $N$. Otherwise, the argument ranges over $\mathbb{F}_{2^L}^\times$, yielding $-1$. $\blacksquare$
 
 ### Theorem 3: Flat Discrete Fourier Spectrum and Gauss Sum Identification
 Let $U_k = \sum_{n=0}^{N-1} u_n \omega^{-kn}$ be the $N$-point Discrete Fourier Transform of the sequence $u_n$, where $\omega = e^{2\pi i / N}$. Then:
@@ -172,24 +172,7 @@ $$\boxed{|U_k| = 2^{L/2} \implies |U_k|^2 = 2^L = N + 1 \quad \forall k \neq 0}$
 
 ---
 
-## 6. Koopman Operator and Spectral Decomposition
-
-The Koopman operator $\mathcal{K}$ acts on functions $f : \mathbb{F}_{2^L}^\times \to \mathbb{C}$ via state space transition:
-$$(\mathcal{K} f)(z) = f(\alpha z)$$
-
-The multiplicative characters $\chi_k$ are the exact eigenfunctions of $\mathcal{K}$:
-$$(\mathcal{K} \chi_k)(z) = \chi_k(\alpha z) = \chi_k(\alpha) \chi_k(z) = \omega^{-k} \chi_k(z)$$
-
-with eigenvalue $\lambda_k = \omega^{-k} = e^{-2\pi i k / N}$.
-
-The observable sequence function $f_\beta(z) = \psi(\beta z)$ expands in this Koopman eigenbasis as:
-$$\psi(\beta z) = \frac{1}{N} \sum_{k=0}^{N-1} g(\bar{\chi}_k, \psi) \chi_k(\beta z) = \frac{1}{N} \sum_{k=0}^{N-1} g(\chi_{-k}, \psi) \chi_k(\beta) \chi_k(z)$$
-
-Evaluating along the orbit $z_n = \alpha^n$ yields the exact spectral decomposition of the LFSR sequence in time, confirming that the Gauss sum $g(\chi_{-k}, \psi)$ is precisely the spectral projection weight onto the $k$-th Koopman mode.
-
----
-
-## Summary Matrix of LFSR Duality
+## Summary Matrix of LFSR Duality & Synthesis
 
 | Domain / Coordinate System | Underlying Set | Basic Operation | Spectral Basis | Key Quantity |
 | :--- | :--- | :--- | :--- | :--- |
@@ -197,6 +180,6 @@ Evaluating along the orbit $z_n = \alpha^n$ yields the exact spectral decomposit
 | **Extension Field** | $\mathbb{F}_{2^L}$ | $z_{n+1} = \alpha z_n$ | Trace map $\operatorname{Tr}(\beta z)$ | Primitive root $\alpha$ |
 | **Bipolar Monomials** | $\{-1, +1\}^L$ | $u_{n+3} = u_{n+1} u_n$ | Walsh characters $\chi_S$ | 1-sparse index $S_n$ |
 | **Wiener Chaos Space** | $L^2(\{-1,+1\}^L, \mu)$ | $W_k[f] = \sum_{|S|=k} \hat{f}(S) \chi_S$ | Chaos Subspaces $\mathcal{H}_k$ | Energy Spectrum $E_f(k)$ |
-| **Volterra Input Series** | $\{-1, +1\}^\mathbb{N}$ | Convolution / Filtering | Multi-input products | Volterra Kernels $h_m(k_1,\dots,k_m)$ |
+| **LFSR Pair Synthesis** | $\mathbb{F}_{2^{L_A}} \times \mathbb{F}_{2^{L_B}}$ | $y_n = g(u_n^{(A)}, u_n^{(B)})$ | Tensor Gauss Product | Joint Period $N_{\text{joint}} = \operatorname{lcm}(N_A, N_B)$ |
 | **Time Domain (DFT)** | $\mathbb{Z}_N$ | Shift $n \to n+1$ | Fourier modes $e^{2\pi i k n / N}$ | Spectrum $|U_k| = 2^{L/2}$ |
 | **Koopman / Characters** | $\mathbb{F}_{2^L}^\times$ | $(\mathcal{K}f)(z) = f(\alpha z)$ | Multiplicative $\chi_k$ | Gauss Sum $g(\chi_k, \psi)$ |
