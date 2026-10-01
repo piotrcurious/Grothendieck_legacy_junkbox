@@ -231,11 +231,55 @@ uint64_t LFSRSynthesisEngine::lcm(uint64_t a, uint64_t b) {
     return (a / gcd(a, b)) * b;
 }
 
+std::vector<int> LFSRSynthesisEngine::generate_gold_sequence(
+    const GF2Field& field_A, uint32_t beta_A,
+    const GF2Field& field_B, uint32_t beta_B,
+    uint32_t shift
+) {
+    if (field_A.L != field_B.L) {
+        throw std::invalid_argument("Gold sequence requires preferred pair of equal degree L");
+    }
+    uint32_t N = field_A.N;
+    LFSRGenerator gen_A(field_A, beta_A);
+    LFSRGenerator gen_B(field_B, beta_B);
+
+    std::vector<int> u_A = gen_A.generate_bipolar_sequence(N);
+    std::vector<int> u_B = gen_B.generate_bipolar_sequence(N);
+
+    std::vector<int> gold(N);
+    for (uint32_t n = 0; n < N; ++n) {
+        gold[n] = u_A[n] * u_B[(n + shift) % N];
+    }
+    return gold;
+}
+
+std::vector<int> LFSRSynthesisEngine::generate_kasami_sequence(
+    const GF2Field& field, uint32_t beta,
+    uint32_t shift
+) {
+    if (field.L % 2 != 0) {
+        throw std::invalid_argument("Kasami sequence requires even degree L");
+    }
+    uint32_t N = field.N;
+    uint32_t decimation = (1U << (field.L / 2)) + 1;
+
+    LFSRGenerator gen(field, beta);
+    std::vector<int> u = gen.generate_bipolar_sequence(N);
+
+    std::vector<int> kasami(N);
+    for (uint32_t n = 0; n < N; ++n) {
+        uint32_t decimated_index = (decimation * n + shift) % N;
+        kasami[n] = u[n] * u[decimated_index];
+    }
+    return kasami;
+}
+
 PairSynthesisReport LFSRSynthesisEngine::synthesize_pair(
     const GF2Field& field_A, uint32_t beta_A,
     const GF2Field& field_B, uint32_t beta_B,
     PairCombinationMode mode,
-    double weight_A, double weight_B
+    double weight_A, double weight_B,
+    uint32_t shift
 ) {
     PairSynthesisReport report;
     report.L_A = field_A.L;
@@ -249,20 +293,28 @@ PairSynthesisReport LFSRSynthesisEngine::synthesize_pair(
     report.N_joint = static_cast<uint32_t>(lcm(field_A.N, field_B.N));
     report.mode = mode;
 
-    LFSRGenerator gen_A(field_A, beta_A);
-    LFSRGenerator gen_B(field_B, beta_B);
+    if (mode == PairCombinationMode::GOLD_CODE) {
+        report.synthesized_bipolar = generate_gold_sequence(field_A, beta_A, field_B, beta_B, shift);
+        report.N_joint = field_A.N;
+    } else if (mode == PairCombinationMode::KASAMI_CODE) {
+        report.synthesized_bipolar = generate_kasami_sequence(field_A, beta_A, shift);
+        report.N_joint = field_A.N;
+    } else {
+        LFSRGenerator gen_A(field_A, beta_A);
+        LFSRGenerator gen_B(field_B, beta_B);
 
-    std::vector<int> u_A = gen_A.generate_bipolar_sequence(report.N_joint);
-    std::vector<int> u_B = gen_B.generate_bipolar_sequence(report.N_joint);
+        std::vector<int> u_A = gen_A.generate_bipolar_sequence(report.N_joint);
+        std::vector<int> u_B = gen_B.generate_bipolar_sequence(report.N_joint);
 
-    report.synthesized_bipolar.resize(report.N_joint);
-    for (size_t n = 0; n < report.N_joint; ++n) {
-        if (mode == PairCombinationMode::MULTIPLICATIVE) {
-            report.synthesized_bipolar[n] = u_A[n] * u_B[n];
-        } else if (mode == PairCombinationMode::ADDITIVE) {
-            report.synthesized_bipolar[n] = static_cast<int>(std::round(weight_A * u_A[n] + weight_B * u_B[n]));
-        } else { // MULTIPLEXED
-            report.synthesized_bipolar[n] = (n % 2 == 0) ? u_A[n] : u_B[n];
+        report.synthesized_bipolar.resize(report.N_joint);
+        for (size_t n = 0; n < report.N_joint; ++n) {
+            if (mode == PairCombinationMode::MULTIPLICATIVE) {
+                report.synthesized_bipolar[n] = u_A[n] * u_B[(n + shift) % report.N_joint];
+            } else if (mode == PairCombinationMode::ADDITIVE) {
+                report.synthesized_bipolar[n] = static_cast<int>(std::round(weight_A * u_A[n] + weight_B * u_B[(n + shift) % report.N_joint]));
+            } else { // MULTIPLEXED
+                report.synthesized_bipolar[n] = (n % 2 == 0) ? u_A[n] : u_B[(n + shift) % report.N_joint];
+            }
         }
     }
 
@@ -275,6 +327,15 @@ PairSynthesisReport LFSRSynthesisEngine::synthesize_pair(
 
     report.joint_autocorrelation = SpectralAnalyzer::compute_autocorrelation(report.synthesized_bipolar);
 
+    // Compute max cross-correlation off peak
+    report.max_cross_correlation = 0.0;
+    for (size_t d = 1; d < report.N_joint; ++d) {
+        double abs_corr = std::abs(report.joint_autocorrelation[d]);
+        if (abs_corr > report.max_cross_correlation) {
+            report.max_cross_correlation = abs_corr;
+        }
+    }
+
     // Compute joint Wiener chaos energy distribution
     size_t joint_L = field_A.L + field_B.L;
     size_t joint_num_states = 1U << joint_L;
@@ -286,7 +347,7 @@ PairSynthesisReport LFSRSynthesisEngine::synthesize_pair(
         int val_A = field_A.additive_character(field_A.mul(beta_A, state_A));
         int val_B = field_B.additive_character(field_B.mul(beta_B, state_B));
 
-        if (mode == PairCombinationMode::MULTIPLICATIVE) {
+        if (mode == PairCombinationMode::MULTIPLICATIVE || mode == PairCombinationMode::GOLD_CODE || mode == PairCombinationMode::KASAMI_CODE) {
             joint_truth_table[state] = val_A * val_B;
         } else if (mode == PairCombinationMode::ADDITIVE) {
             joint_truth_table[state] = weight_A * val_A + weight_B * val_B;
@@ -312,7 +373,8 @@ std::string LFSRSynthesisEngine::export_pair_json(const PairSynthesisReport& rep
     ss << "  \"N_A\": " << report.N_A << ",\n";
     ss << "  \"N_B\": " << report.N_B << ",\n";
     ss << "  \"N_joint\": " << report.N_joint << ",\n";
-    ss << "  \"mode\": " << (report.mode == PairCombinationMode::MULTIPLICATIVE ? "\"MULTIPLICATIVE\"" : (report.mode == PairCombinationMode::ADDITIVE ? "\"ADDITIVE\"" : "\"MULTIPLEXED\"")) << ",\n";
+    ss << "  \"max_cross_correlation\": " << report.max_cross_correlation << ",\n";
+    ss << "  \"mode\": " << (report.mode == PairCombinationMode::MULTIPLICATIVE ? "\"MULTIPLICATIVE\"" : (report.mode == PairCombinationMode::ADDITIVE ? "\"ADDITIVE\"" : (report.mode == PairCombinationMode::GOLD_CODE ? "\"GOLD_CODE\"" : (report.mode == PairCombinationMode::KASAMI_CODE ? "\"KASAMI_CODE\"" : "\"MULTIPLEXED\"")))) << ",\n";
 
     ss << "  \"synthesized_bipolar\": [";
     for (size_t i = 0; i < report.synthesized_bipolar.size(); ++i) {

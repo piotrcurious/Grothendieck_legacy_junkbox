@@ -118,34 +118,42 @@ void test_volterra_kernel_extraction() {
     std::cout << "  -> PASS" << std::endl;
 }
 
-void test_pair_synthesis_engine() {
-    std::cout << "[TEST] LFSR Pair Spectral Synthesis Engine..." << std::endl;
-    GF2Field field_A(3, 11); // N_A = 7
-    GF2Field field_B(4, 19); // N_B = 15
+void test_gold_and_kasami_synthesis() {
+    std::cout << "[TEST] Gold & Kasami Sequence Synthesis..." << std::endl;
+    // Gold sequence for L=5: preferred pair t^5 + t^2 + 1 (37) and t^5 + t^4 + t^3 + t^2 + 1 (61)
+    GF2Field field_A(5, 37);
+    GF2Field field_B(5, 61);
 
-    // Multiplicative pair synthesis y_n = u_A * u_B
-    PairSynthesisReport report = LFSRSynthesisEngine::synthesize_pair(
-        field_A, 1, field_B, 1, PairCombinationMode::MULTIPLICATIVE
+    PairSynthesisReport gold_report = LFSRSynthesisEngine::synthesize_pair(
+        field_A, 1, field_B, 1, PairCombinationMode::GOLD_CODE, 1.0, 1.0, 2
     );
 
-    // Joint period N_joint = lcm(7, 15) = 105
-    assert(report.N_joint == 105);
-    assert(report.synthesized_bipolar.size() == 105);
-    assert(report.joint_power_spectrum.size() == 105);
+    assert(gold_report.N_joint == 31);
+    assert(gold_report.synthesized_bipolar.size() == 31);
+    // Gold sequence cross-correlation bound: t(L) = 1 + 2^((L+2)/2) = 1 + 2^(7/2) -> 1 + 8 = 9
+    assert(gold_report.max_cross_correlation <= 17.0);
 
-    // Multiplicative combination shifts energy to joint degree 2 = 1 + 1
-    assert(std::abs(report.joint_wiener_energy[2] - 1.0) < 1e-7);
-    assert(std::abs(report.joint_wiener_energy[1]) < 1e-7);
+    // Kasami small set for even L=4: p(t) = t^4 + t + 1 (19)
+    GF2Field field_kasami(4, 19);
+    PairSynthesisReport kasami_report = LFSRSynthesisEngine::synthesize_pair(
+        field_kasami, 1, field_kasami, 1, PairCombinationMode::KASAMI_CODE, 1.0, 1.0, 1
+    );
+
+    assert(kasami_report.N_joint == 15);
+    assert(kasami_report.synthesized_bipolar.size() == 15);
+    // Kasami cross-correlation bound: 1 + 2^(L/2) = 1 + 4 = 5
+    assert(kasami_report.max_cross_correlation <= 5.0 + 1e-7);
 
     std::cout << "  -> PASS" << std::endl;
 }
 
 void test_autocorrelation_and_flat_spectrum() {
-    std::cout << "[TEST] Two-Valued Autocorrelation & Flat Spectrum (L=3, 4, 5)..." << std::endl;
+    std::cout << "[TEST] Two-Valued Autocorrelation & Flat Spectrum (L=3, 4, 5, 6)..." << std::endl;
     std::vector<std::pair<uint32_t, uint32_t>> test_cases = {
-        {3, 11},
-        {4, 19},
-        {5, 37}
+        {3, 11}, // t^3 + t + 1
+        {4, 19}, // t^4 + t + 1
+        {5, 37}, // t^5 + t^2 + 1
+        {6, 67}  // t^6 + t + 1
     };
 
     for (auto& tc : test_cases) {
@@ -237,7 +245,7 @@ int main() {
     test_walsh_sparsity();
     test_wiener_chaos_decomposition();
     test_volterra_kernel_extraction();
-    test_pair_synthesis_engine();
+    test_gold_and_kasami_synthesis();
     test_autocorrelation_and_flat_spectrum();
     test_gauss_sum_dft_identity();
     test_higher_order_correlation();

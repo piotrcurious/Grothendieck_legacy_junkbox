@@ -15,6 +15,7 @@ int main(int argc, char* argv[]) {
     uint32_t L_B = 4;
     uint32_t poly_B = 19; // t^4 + t + 1
     uint32_t beta_B = 1;
+    uint32_t shift = 0;
     PairCombinationMode mode = PairCombinationMode::MULTIPLICATIVE;
 
     std::string outfile = "";
@@ -28,10 +29,13 @@ int main(int argc, char* argv[]) {
         else if (arg == "-LB" && i + 1 < argc) L_B = std::stoul(argv[++i]);
         else if (arg == "-pB" && i + 1 < argc) poly_B = std::stoul(argv[++i]);
         else if (arg == "-bB" && i + 1 < argc) beta_B = std::stoul(argv[++i]);
+        else if (arg == "-s" && i + 1 < argc) shift = std::stoul(argv[++i]);
         else if (arg == "-m" && i + 1 < argc) {
             std::string m_str = argv[++i];
             if (m_str == "additive") mode = PairCombinationMode::ADDITIVE;
             else if (m_str == "multiplexed") mode = PairCombinationMode::MULTIPLEXED;
+            else if (m_str == "gold") mode = PairCombinationMode::GOLD_CODE;
+            else if (m_str == "kasami") mode = PairCombinationMode::KASAMI_CODE;
             else mode = PairCombinationMode::MULTIPLICATIVE;
         }
         else if (arg == "-o" && i + 1 < argc) outfile = argv[++i];
@@ -42,7 +46,7 @@ int main(int argc, char* argv[]) {
     std::string json_str;
     if (synthesize) {
         GF2Field field_B(L_B, poly_B);
-        PairSynthesisReport pair_report = LFSRSynthesisEngine::synthesize_pair(field_A, beta, field_B, beta_B, mode);
+        PairSynthesisReport pair_report = LFSRSynthesisEngine::synthesize_pair(field_A, beta, field_B, beta_B, mode, 1.0, 1.0, shift);
         json_str = LFSRSynthesisEngine::export_pair_json(pair_report);
     } else {
         SpectralReport report = SpectralAnalyzer::analyze(field_A, beta);
