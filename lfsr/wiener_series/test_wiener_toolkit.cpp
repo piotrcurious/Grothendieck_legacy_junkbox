@@ -75,8 +75,6 @@ void test_walsh_sparsity() {
 
 void test_wiener_chaos_decomposition() {
     std::cout << "[TEST] Discrete Walsh-Wiener Chaos Expansion..." << std::endl;
-    // Define a non-linear Boolean filtering function f(u0, u1, u2) = u0 * u1 * u2 + u0
-    // L = 3
     uint32_t L = 3;
     std::vector<double> truth_table(8);
     for (uint32_t state = 0; state < 8; ++state) {
@@ -88,7 +86,6 @@ void test_wiener_chaos_decomposition() {
 
     WienerChaosResult res = WienerChaosAnalyzer::analyze_function(L, truth_table);
 
-    // Degrees: degree 1 has term u0 (energy 1.0), degree 3 has term u0*u1*u2 (energy 1.0)
     assert(std::abs(res.total_energy - 2.0) < 1e-7);
     assert(std::abs(res.energy_per_degree[1] - 1.0) < 1e-7);
     assert(std::abs(res.energy_per_degree[3] - 1.0) < 1e-7);
@@ -100,7 +97,6 @@ void test_wiener_chaos_decomposition() {
 
 void test_volterra_kernel_extraction() {
     std::cout << "[TEST] Volterra-Wiener Kernel Extraction..." << std::endl;
-    // Input-driven scrambler v_n = w_n * w_{n-1} + w_{n-2}
     size_t T = 1000;
     std::vector<int> w(T);
     for (size_t i = 0; i < T; ++i) {
@@ -119,6 +115,28 @@ void test_volterra_kernel_extraction() {
 
     assert(h1.size() == 5);
     assert(h2.size() == 5);
+    std::cout << "  -> PASS" << std::endl;
+}
+
+void test_pair_synthesis_engine() {
+    std::cout << "[TEST] LFSR Pair Spectral Synthesis Engine..." << std::endl;
+    GF2Field field_A(3, 11); // N_A = 7
+    GF2Field field_B(4, 19); // N_B = 15
+
+    // Multiplicative pair synthesis y_n = u_A * u_B
+    PairSynthesisReport report = LFSRSynthesisEngine::synthesize_pair(
+        field_A, 1, field_B, 1, PairCombinationMode::MULTIPLICATIVE
+    );
+
+    // Joint period N_joint = lcm(7, 15) = 105
+    assert(report.N_joint == 105);
+    assert(report.synthesized_bipolar.size() == 105);
+    assert(report.joint_power_spectrum.size() == 105);
+
+    // Multiplicative combination shifts energy to joint degree 2 = 1 + 1
+    assert(std::abs(report.joint_wiener_energy[2] - 1.0) < 1e-7);
+    assert(std::abs(report.joint_wiener_energy[1]) < 1e-7);
+
     std::cout << "  -> PASS" << std::endl;
 }
 
@@ -219,6 +237,7 @@ int main() {
     test_walsh_sparsity();
     test_wiener_chaos_decomposition();
     test_volterra_kernel_extraction();
+    test_pair_synthesis_engine();
     test_autocorrelation_and_flat_spectrum();
     test_gauss_sum_dft_identity();
     test_higher_order_correlation();

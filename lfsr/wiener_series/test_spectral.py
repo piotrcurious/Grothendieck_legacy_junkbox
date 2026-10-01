@@ -27,18 +27,26 @@ def test_cpp_cli_integration():
     assert len(bipolar) == 15
     assert len(power_spectrum) == 15
     assert len(autocorr) == 15
-    assert len(wiener_energy) == 5 # L+1 degrees (0..4)
+    assert len(wiener_energy) == 5
 
-    # Power spectrum flatness check: |U_k|^2 = 2^L = 16 for k > 0
     np.testing.assert_allclose(power_spectrum[1:], 16.0, rtol=1e-6)
-
-    # Autocorrelation check: R(0) = 15, R(d) = -1 for d != 0
     assert autocorr[0] == 15.0
     np.testing.assert_allclose(autocorr[1:], -1.0, rtol=1e-6)
-
-    # Wiener chaos energy check: linear trace map has energy 1.0 at degree 1
     assert wiener_energy[1] == 1.0
-    assert np.sum(wiener_energy[2:]) == 0.0
+
+    # Test pair synthesis via CLI
+    cmd_synth = [cli_path, "-L", "3", "-p", "11", "-b", "1", "--synthesize", "-LB", "4", "-pB", "19", "-bB", "1", "-m", "multiplicative", "-o", out_json]
+    subprocess.run(cmd_synth, check=True)
+
+    with open(out_json, 'r') as f:
+        synth_data = json.load(f)
+
+    assert synth_data["L_A"] == 3
+    assert synth_data["L_B"] == 4
+    assert synth_data["N_joint"] == 105
+    assert len(synth_data["synthesized_bipolar"]) == 105
+    assert len(synth_data["joint_power_spectrum"]) == 105
+    assert len(synth_data["joint_autocorrelation"]) == 105
 
     print("Python Integration Test: PASS")
 

@@ -5,9 +5,13 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-def run_cpp_cli(L, poly, beta, output_json):
+def run_cpp_cli(L, poly, beta, output_json, synthesize=False, L_B=4, poly_B=19, beta_B=1, mode="multiplicative"):
     cli_path = os.path.join(os.path.dirname(__file__), "lfsr_wiener_cli")
-    cmd = [cli_path, "-L", str(L), "-p", str(poly), "-b", str(beta), "-o", output_json]
+    cmd = [cli_path, "-L", str(L), "-p", str(poly), "-b", str(beta)]
+    if synthesize:
+        cmd.extend(["--synthesize", "-LB", str(L_B), "-pB", str(poly_B), "-bB", str(beta_B), "-m", mode])
+    cmd.extend(["-o", output_json])
+
     subprocess.run(cmd, capture_output=True, text=True, check=True)
     with open(output_json, 'r') as f:
         data = json.load(f)
@@ -80,9 +84,8 @@ def plot_spectral_properties(data, save_prefix="lfsr_spectral"):
 
     # 6. Non-linear Filtering Wiener Chaos Comparison
     ax6 = axes[1, 2]
-    # Comparison of Chaos Energy between Linear Trace vs Nonlinear Filter (Product u0*u1*u2)
     nonlinear_chaos_energy = np.zeros(L + 1)
-    nonlinear_chaos_energy[L] = 1.0 # Pure degree-L chaos
+    nonlinear_chaos_energy[L] = 1.0
     width = 0.35
     ax6.bar(degrees - width/2, wiener_energy, width, label='Linear Trace $x_n$', color='teal', alpha=0.8)
     ax6.bar(degrees + width/2, nonlinear_chaos_energy, width, label='Nonlinear Filter $u_0 u_1 u_2$', color='crimson', alpha=0.8)
@@ -100,10 +103,69 @@ def plot_spectral_properties(data, save_prefix="lfsr_spectral"):
     print(f"Plot successfully saved to {plot_path}")
     return plot_path
 
+def plot_pair_synthesis(synth_data, save_prefix="lfsr_pair_synthesis"):
+    L_A = synth_data["L_A"]
+    L_B = synth_data["L_B"]
+    N_joint = synth_data["N_joint"]
+    mode = synth_data["mode"]
+
+    bipolar = np.array(synth_data["synthesized_bipolar"])
+    power_spectrum = np.array(synth_data["joint_power_spectrum"])
+    autocorr = np.array(synth_data["joint_autocorrelation"])
+    wiener_energy = np.array(synth_data["joint_wiener_energy"])
+
+    fig, axes = plt.subplots(2, 2, figsize=(13, 9))
+    fig.suptitle(f"LFSR Pair Spectral Synthesis Engine ({mode}: L_A={L_A}, L_B={L_B} -> N_joint={N_joint})", fontsize=13, fontweight='bold')
+
+    # 1. Synthesized Time-Domain Sequence
+    ax1 = axes[0, 0]
+    ax1.step(np.arange(N_joint), bipolar, where='mid', color='darkgreen', linewidth=1.2)
+    ax1.set_title(r"Synthesized Sequence $y_n = g(u_n^{(A)}, u_n^{(B)})$", fontsize=11)
+    ax1.set_xlabel("Joint Time Index $n$")
+    ax1.set_ylabel("Amplitude")
+    ax1.grid(True, alpha=0.3)
+
+    # 2. Synthesized Fourier Power Spectrum
+    ax2 = axes[0, 1]
+    ax2.plot(np.arange(N_joint), power_spectrum, 'o-', color='darkblue', markersize=3, linewidth=1)
+    ax2.set_title("Synthesized Joint Power Spectrum $|Y_m|^2$", fontsize=11)
+    ax2.set_xlabel("Joint Frequency Index $m$")
+    ax2.set_ylabel("Power Spectrum")
+    ax2.grid(True, alpha=0.3)
+
+    # 3. Synthesized Autocorrelation
+    ax3 = axes[1, 0]
+    ax3.plot(np.arange(N_joint), autocorr, 'd-', color='crimson', markersize=3, linewidth=1)
+    ax3.set_title("Joint Autocorrelation $R_{\text{joint}}(d)$", fontsize=11)
+    ax3.set_xlabel("Joint Delay $d$")
+    ax3.set_ylabel("Autocorrelation")
+    ax3.grid(True, alpha=0.3)
+
+    # 4. Synthesized Joint Wiener Chaos Energy Allocation
+    ax4 = axes[1, 1]
+    degrees = np.arange(len(wiener_energy))
+    ax4.bar(degrees, wiener_energy, color='darkmagenta', alpha=0.8, edgecolor='black', width=0.5)
+    ax4.set_title("Synthesized Joint Wiener Chaos Spectrum $E_{\text{joint}}(k)$", fontsize=11)
+    ax4.set_xlabel("Joint Chaos Degree $k$")
+    ax4.set_ylabel("Energy")
+    ax4.set_xticks(degrees)
+    ax4.grid(True, alpha=0.3)
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plot_path = f"{save_prefix}_L{L_A}_{L_B}.png"
+    plt.savefig(plot_path, dpi=200)
+    plt.close()
+    print(f"Pair synthesis plot successfully saved to {plot_path}")
+    return plot_path
+
 def main():
     json_path = os.path.join(os.path.dirname(__file__), "spectral_report_L3.json")
     data = run_cpp_cli(L=3, poly=11, beta=1, output_json=json_path)
     plot_spectral_properties(data, save_prefix=os.path.join(os.path.dirname(__file__), "lfsr_spectral"))
+
+    synth_json = os.path.join(os.path.dirname(__file__), "pair_synth_report.json")
+    synth_data = run_cpp_cli(L=3, poly=11, beta=1, output_json=synth_json, synthesize=True, L_B=4, poly_B=19, beta_B=1, mode="multiplicative")
+    plot_pair_synthesis(synth_data, save_prefix=os.path.join(os.path.dirname(__file__), "lfsr_pair_synthesis"))
 
 if __name__ == "__main__":
     main()

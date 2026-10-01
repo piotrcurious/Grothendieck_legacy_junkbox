@@ -74,10 +74,49 @@ public:
     static WienerChaosResult analyze_function(uint32_t L, const std::vector<double>& truth_table);
 
     // Compute Volterra-Wiener Kernels for input-driven scrambler/filter
-    // output_v and input_w are bipolar {-1, +1} sequences of length T
     static double compute_volterra_kernel_0(const std::vector<int>& v);
     static std::vector<double> compute_volterra_kernel_1(const std::vector<int>& v, const std::vector<int>& w, size_t max_lag);
     static std::vector<std::vector<double>> compute_volterra_kernel_2(const std::vector<int>& v, const std::vector<int>& w, size_t max_lag);
+};
+
+// Combination mode for LFSR Synthesis Engine
+enum class PairCombinationMode {
+    MULTIPLICATIVE, // y_n = u_A * u_B (XOR in binary)
+    ADDITIVE,       // y_n = c_A * u_A + c_B * u_B
+    MULTIPLEXED     // y_n = (n % 2 == 0) ? u_A : u_B
+};
+
+// Structure representing synthesized LFSR pair analysis
+struct PairSynthesisReport {
+    uint32_t L_A, L_B;
+    uint32_t poly_A, poly_B;
+    uint32_t beta_A, beta_B;
+    uint32_t N_A, N_B;
+    uint32_t N_joint; // lcm(N_A, N_B)
+    PairCombinationMode mode;
+    std::vector<int> synthesized_bipolar;
+    std::vector<Complex> joint_dft;
+    std::vector<double> joint_power_spectrum;
+    std::vector<double> joint_autocorrelation;
+    std::vector<double> joint_wiener_energy;
+};
+
+// Engine finding LFSR pairs producing arbitrary spectral compositions
+class LFSRSynthesisEngine {
+public:
+    static uint64_t gcd(uint64_t a, uint64_t b);
+    static uint64_t lcm(uint64_t a, uint64_t b);
+
+    // Synthesize combined LFSR pair sequence and analyze spectral properties
+    static PairSynthesisReport synthesize_pair(
+        const GF2Field& field_A, uint32_t beta_A,
+        const GF2Field& field_B, uint32_t beta_B,
+        PairCombinationMode mode = PairCombinationMode::MULTIPLICATIVE,
+        double weight_A = 1.0, double weight_B = 1.0
+    );
+
+    // Export PairSynthesisReport to JSON string
+    static std::string export_pair_json(const PairSynthesisReport& report);
 };
 
 // Comprehensive spectral and Wiener series analysis report
