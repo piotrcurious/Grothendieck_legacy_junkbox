@@ -48,6 +48,17 @@ def test_cpp_cli_integration():
     assert len(synth_data["joint_power_spectrum"]) == 105
     assert len(synth_data["joint_autocorrelation"]) == 105
 
+    # Test Gold sequence synthesis via CLI
+    cmd_gold = [cli_path, "-L", "5", "-p", "37", "-b", "1", "--synthesize", "-LB", "5", "-pB", "61", "-bB", "1", "-m", "gold", "-o", out_json]
+    subprocess.run(cmd_gold, check=True)
+
+    with open(out_json, 'r') as f:
+        gold_data = json.load(f)
+
+    assert gold_data["mode"] == "GOLD_CODE"
+    assert gold_data["N_joint"] == 31
+    assert len(gold_data["synthesized_bipolar"]) == 31
+
     print("Python Integration Test: PASS")
 
     if os.path.exists(out_json):

@@ -83,7 +83,9 @@ public:
 enum class PairCombinationMode {
     MULTIPLICATIVE, // y_n = u_A * u_B (XOR in binary)
     ADDITIVE,       // y_n = c_A * u_A + c_B * u_B
-    MULTIPLEXED     // y_n = (n % 2 == 0) ? u_A : u_B
+    MULTIPLEXED,    // y_n = (n % 2 == 0) ? u_A : u_B
+    GOLD_CODE,      // Gold sequence pair XOR: u_A(n) * u_B(n + shift)
+    KASAMI_CODE     // Small set Kasami sequence: u_A(n) * u_A((2^(L/2)+1) * n)
 };
 
 // Structure representing synthesized LFSR pair analysis
@@ -99,6 +101,7 @@ struct PairSynthesisReport {
     std::vector<double> joint_power_spectrum;
     std::vector<double> joint_autocorrelation;
     std::vector<double> joint_wiener_energy;
+    double max_cross_correlation;
 };
 
 // Engine finding LFSR pairs producing arbitrary spectral compositions
@@ -112,7 +115,21 @@ public:
         const GF2Field& field_A, uint32_t beta_A,
         const GF2Field& field_B, uint32_t beta_B,
         PairCombinationMode mode = PairCombinationMode::MULTIPLICATIVE,
-        double weight_A = 1.0, double weight_B = 1.0
+        double weight_A = 1.0, double weight_B = 1.0,
+        uint32_t shift = 0
+    );
+
+    // Specialized Gold sequence synthesis: u_A(n) * u_B(n + shift)
+    static std::vector<int> generate_gold_sequence(
+        const GF2Field& field_A, uint32_t beta_A,
+        const GF2Field& field_B, uint32_t beta_B,
+        uint32_t shift
+    );
+
+    // Specialized Kasami small set sequence synthesis: u_A(n) * u_A((2^(L/2)+1)*n + shift)
+    static std::vector<int> generate_kasami_sequence(
+        const GF2Field& field, uint32_t beta,
+        uint32_t shift
     );
 
     // Export PairSynthesisReport to JSON string
