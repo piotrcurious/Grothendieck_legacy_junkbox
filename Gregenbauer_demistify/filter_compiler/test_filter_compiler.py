@@ -279,6 +279,10 @@ def test_biorthogonal_pair_compilation():
     with pytest.raises(ValueError, match="sum of H0 and G0 orders must be even"):
         compiler.compile_biorthogonal_pair(order_h0=9, order_g0=6)
 
+    # Even delay (e.g. 2+2=4 -> delay 2) requires odd PR delay
+    with pytest.raises(ValueError, match="requires odd PR delay"):
+        compiler.compile_biorthogonal_pair(order_h0=2, order_g0=2)
+
     # Valid pair compilation (CDF 9/7 style orders 9 + 7 = 16 or 8 + 6 = 14)
     pair = compiler.compile_biorthogonal_pair(order_h0=8, order_g0=6, cutoff=0.25)
 
@@ -299,9 +303,9 @@ def test_biorthogonal_pair_compilation():
     assert len(h0_taps) == len(g1_taps)
     assert len(g0_taps) == len(h1_taps)
 
-    # Verify DC gain product normalization H0(1)*G0(1) = 2.0 (and H0(1) == sqrt(2))
+    # Verify H0 DC gain normalization H0(1) == sqrt(2) and product relation H0(1)*G0(1) == 2 P(1)
     assert abs(np.sum(h0_taps) - np.sqrt(2)) < 1e-5
-    assert abs(np.sum(h0_taps) * np.sum(g0_taps) - 2.0) < 0.05
+    assert abs(np.sum(h0_taps) * np.sum(g0_taps) - np.sum(pair["P"]) * 2.0) < 1e-10
 
     # Verify PR, alias, and product residuals
     assert pair["pr_residual"] < 1e-10

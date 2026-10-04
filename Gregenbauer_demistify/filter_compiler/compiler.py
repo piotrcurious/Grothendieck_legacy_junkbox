@@ -1070,29 +1070,31 @@ class GegenbauerFilterCompiler:
         Compiles a Biorthogonal filter bank pair (H0, G0) via Gegenbauer half-band product filter factorization.
         Uses global canonical root orbits (conjugate & reciprocal closure) and exact DP subset-sum root partitioning.
         Preserves exact H0(z) G0(z) = P(z) product scaling without uncoordinated independent normalizations.
+        Requires odd PR delay (order_h0 + order_g0 = 2 mod 4) for standard 2-channel linear-phase half-band PR.
         """
         total_order = order_h0 + order_g0
         if total_order % 2 != 0:
             raise ValueError("The sum of H0 and G0 orders must be even for a valid half-band filter.")
 
+        delay = total_order // 2
+        if delay % 2 == 0:
+            raise ValueError(
+                f"Current 2-channel half-band biorthogonal construction requires odd PR delay (delay = {delay} is even). "
+                f"Use degree pairs satisfying order_h0 + order_g0 == 2 mod 4 (e.g. 4/2, 8/6, 12/10)."
+            )
+
         p_spec = FilterSpec(
-            kind="lowpass",
-            order=total_order + 1, # Tap length = total_order + 1
+            kind="qmf",
+            order=(total_order // 2) + 1,
             cutoff=cutoff,
             wp=max(0.01, cutoff - 0.05),
             ws=min(0.49, cutoff + 0.05)
         )
 
-        a_coeffs, _, _, _, _, _ = self.solve_coefficients(p_spec)
-        p_taps = self.transform_to_taps(a_coeffs, p_spec)
-
-        # Force strict half-band time-domain zeroing for non-center even taps
-        center = total_order // 2
-        for n in range(len(p_taps)):
-            if abs(n - center) % 2 == 0 and n != center:
-                p_taps[n] = 0.0
+        _, p_taps, _, _, _, _, _ = self.solve_halfband_power_polynomial(p_spec)
 
         # Set center tap to exactly 0.5 so half-band P(z) + P(-z) = z^-d delay scaling is exact
+        center = total_order // 2
         p_taps[center] = 0.5
         p_prod = 2.0 * p_taps
 
@@ -1170,23 +1172,18 @@ class GegenbauerFilterCompiler:
         g0_taps = g0_unscaled * beta
 
         # Generate complementary highpass filters H1 and G1 for 2-channel Biorthogonal Bank
-        # Degrees d_h0 = order_h0, d_g0 = order_g0, d = d_h0 + d_g0
-        # H1(z) = (-1)^d_g0 G0(-z) => h1[n] = (-1)^d_g0 (-1)^n g0[n]
-        # G1(z) = -(-1)^d (-1)^d_h0 H0(-z) => g1[n] = -(-1)^d (-1)^d_h0 (-1)^n h0[n]
-        # This guarantees exact alias cancellation H0(-z)G0(z) + H1(-z)G1(z) = 0 for all degree parities!
-        d_h0, d_g0 = order_h0, order_g0
-        d = d_h0 + d_g0
-        delay = d // 2
-
-        h1_sign = ((-1.0)**d_g0)
-        g1_sign = -((-1.0)**d) * ((-1.0)**d_h0)
-
-        h1_taps = np.array([h1_sign * ((-1.0)**n) * g0_taps[n] for n in range(len(g0_taps))])
-        g1_taps = np.array([g1_sign * ((-1.0)**n) * h0_taps[n] for n in range(len(h0_taps))])
+        # H1(z) = G0(-z) => h1[n] = (-1)^n * g0[n]
+        # G1(z) = -H0(-z) => g1[n] = -(-1)^n * h0[n]
+        # This yields H0(z)G0(z) + H1(z)G1(z) = P(z) - P(-z) = 2 z^-delay (Perfect Reconstruction for odd delay)
+        # and H0(-z)G0(z) + H1(-z)G1(z) = H0(-z)G0(z) - G0(z)H0(-z) = 0 (Exact Alias Cancellation)
+        h1_taps = np.array([((-1.0)**n) * g0_taps[n] for n in range(len(g0_taps))])
+        g1_taps = np.array([-((-1.0)**n) * h0_taps[n] for n in range(len(h0_taps))])
 
         # Verification metrics & symmetry residuals (comparing H0 * G0 against P_prod(z))
         h0_conv_g0 = np.convolve(h0_taps, g0_taps)
         product_residual = float(np.max(np.abs(h0_conv_g0 - p_prod)))
+        if product_residual > 1e-6:
+            raise ValueError(f"Biorthogonal polynomial factorization residual {product_residual:.4e} exceeds 1e-6 tolerance.")
 
         h0_sym_res = float(np.max(np.abs(h0_taps - h0_taps[::-1])))
         g0_sym_res = float(np.max(np.abs(g0_taps - g0_taps[::-1])))
