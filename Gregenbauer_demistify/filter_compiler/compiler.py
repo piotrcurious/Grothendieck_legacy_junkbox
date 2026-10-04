@@ -93,6 +93,39 @@ def determine_truth_status(lam: float) -> TruthStatus:
     return TruthStatus.ANALYTIC_CONTINUATION
 
 
+def gegenbauer_to_cosine_matrix(max_degree: int, lam: float, normalized: bool = True) -> np.ndarray:
+    """
+    Computes exact algebraic Gegenbauer-to-Cosine expansion matrix C_cos[n, m]
+    mapping Gegenbauer basis functions phi_n^(lambda)(cos w) or C_n^(lambda)(cos w) to cosine Fourier harmonics cos(m w).
+    """
+    C_cos = np.zeros((max_degree + 1, max_degree + 1), dtype=np.float64)
+    C_cos[0, 0] = 1.0
+    if max_degree >= 1:
+        C_cos[1, 1] = 2.0 * float(lam)
+
+    for deg in range(2, max_degree + 1):
+        alpha_d = 2.0 * (deg + lam - 1.0) / float(deg)
+        beta_d = (deg + 2.0 * lam - 2.0) / float(deg)
+        x_C1 = np.zeros(max_degree + 1, dtype=np.float64)
+        for m in range(deg):
+            val = C_cos[deg - 1, m]
+            if val != 0.0:
+                if m == 0:
+                    x_C1[1] += val
+                else:
+                    x_C1[m + 1] += 0.5 * val
+                    x_C1[abs(m - 1)] += 0.5 * val
+        C_cos[deg, :] = alpha_d * x_C1 - beta_d * C_cos[deg - 2, :]
+
+    if normalized:
+        for deg in range(max_degree + 1):
+            c1 = float(c_n_1_val(deg, lam))
+            if abs(c1) > 1e-12:
+                C_cos[deg, :] /= c1
+
+    return C_cos
+
+
 def qmf_alias_transfer(H0: np.ndarray, H1: np.ndarray) -> np.ndarray:
     """Computes complex CQF/QMF alias transfer function A(e^{j\\omega}) = 0.5 * (H0(\\omega+\\pi) H0*(\\omega) + H1(\\omega+\\pi) H1*(\\omega))."""
     if len(H0) != len(H1):
@@ -335,25 +368,21 @@ class GegenbauerFilterCompiler:
         phi_k = self._eval_basis(n, x)
         return self._apply_fir_symmetry_envelope(phi_k, x, symmetry)
 
-    def _eval_asymptotic_basis(self, n: int, omega: np.ndarray, symmetry: SymmetryClass = SymmetryClass.TYPE_I) -> np.ndarray:
+    def _eval_pure_asymptotic_basis(self, n: int, omega: np.ndarray) -> np.ndarray:
+        """Evaluates pure Gegenbauer asymptotic approximation phi_n^asymp(theta) without FIR symmetry envelopes."""
         theta = omega
         if self.asymptotic_mode == "bessel":
-            phi_asymp = endpoint_bessel_leading(n, self.lam, theta)
+            return endpoint_bessel_leading(n, self.lam, theta)
         elif self.asymptotic_mode == "wkb":
-            phi_asymp = interior_wkb_approx(n, self.lam, theta)
+            return interior_wkb_approx(n, self.lam, theta)
         else:
-            # composite / auto mode uses two-endpoint composite matched asymptotics
-            phi_asymp = composite_matched_approx(n, self.lam, theta)
+            return composite_matched_approx(n, self.lam, theta)
 
-        if symmetry == SymmetryClass.TYPE_I:
-            return phi_asymp
-        elif symmetry == SymmetryClass.TYPE_II:
-            return np.cos(0.5 * omega) * phi_asymp
-        elif symmetry == SymmetryClass.TYPE_III:
-            return np.sin(omega) * phi_asymp
-        elif symmetry == SymmetryClass.TYPE_IV:
-            return np.sin(0.5 * omega) * phi_asymp
-        return phi_asymp
+    def _eval_asymptotic_basis(self, n: int, omega: np.ndarray, symmetry: SymmetryClass = SymmetryClass.TYPE_I) -> np.ndarray:
+        """Evaluates Gegenbauer asymptotic approximation with FIR Type I-IV symmetry envelope modulation."""
+        phi_asymp = self._eval_pure_asymptotic_basis(n, omega)
+        x = np.cos(omega)
+        return self._apply_fir_symmetry_envelope(phi_asymp, x, symmetry)
 
     def _build_spectral_target(self, spec: FilterSpec, omega: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         f = omega / (2.0 * np.pi)
@@ -463,33 +492,15 @@ class GegenbauerFilterCompiler:
         p_taps = np.zeros(2 * M + 1, dtype=np.float64)
         p_taps[center] = 0.5 # Center tap corresponds to constant 0.5
 
-        # Compute exact Gegenbauer-to-Cosine transformation matrix
-        C_cos = np.zeros((2 * K, 2 * K))
-        C_cos[0, 0] = 1.0
-        if 2 * K > 1:
-            C_cos[1, 1] = 2.0 * self.lam
-        for deg in range(2, 2 * K):
-            alpha_d = 2.0 * (deg + self.lam - 1.0) / float(deg)
-            beta_d = (deg + 2.0 * self.lam - 2.0) / float(deg)
-            x_C1 = np.zeros(2 * K)
-            for m in range(deg):
-                val = C_cos[deg - 1, m]
-                if val != 0.0:
-                    if m == 0:
-                        x_C1[1] += val
-                    else:
-                        x_C1[m + 1] += 0.5 * val
-                        x_C1[abs(m - 1)] += 0.5 * val
-            C_cos[deg, :] = alpha_d * x_C1 - beta_d * C_cos[deg - 2, :]
+        max_deg = 2 * K
+        C_cos = gegenbauer_to_cosine_matrix(max_deg, self.lam, normalized=(self.basis_type == "normalized"))
 
-        # Scale by c1(n, lam) for normalized phi_n basis
-        b_harmonics = np.zeros(2 * K)
+        b_harmonics = np.zeros(max_deg + 1, dtype=np.float64)
         for k in range(K):
             n_odd = 2 * k + 1
-            c1 = float(c_n_1_val(n_odd, self.lam)) if self.basis_type == "normalized" else 1.0
-            b_harmonics += (a_odd[k] / c1) * C_cos[n_odd, :]
+            b_harmonics += a_odd[k] * C_cos[n_odd, :]
 
-        for m in range(1, min(M + 1, 2 * K)):
+        for m in range(1, min(M + 1, max_deg + 1)):
             if m % 2 != 0:
                 b_m = b_harmonics[m]
                 p_taps[center - m] = b_m / 2.0
