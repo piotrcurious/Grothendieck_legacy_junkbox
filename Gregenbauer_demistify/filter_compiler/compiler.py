@@ -1098,78 +1098,135 @@ class GegenbauerFilterCompiler:
         p_taps[center] = 0.5
         p_prod = 2.0 * p_taps
 
-        # Construct global canonical root orbits closed under conjugation and reciprocal reflection
-        roots = np.roots(p_prod)
+        # Build atomic root clusters (pairing reciprocal / conjugate roots and tracking multiplicities)
+        roots = list(np.roots(p_prod))
         rel_tol, abs_tol = 1e-2, 1e-3
-
         def same_root(a, b):
             return abs(a - b) <= max(abs_tol, rel_tol * max(abs(a), abs(b)))
 
-        orbits = []
-        used = [False] * len(roots)
+        raw_clusters = []
+        used_r = [False] * len(roots)
         for i in range(len(roots)):
-            if used[i]:
+            if used_r[i]:
                 continue
-            r_val = roots[i]
-            orbit_idx = [i]
-            used[i] = True
+            group = [i]
+            used_r[i] = True
+            for j in range(i + 1, len(roots)):
+                if not used_r[j] and same_root(roots[j], roots[i]):
+                    group.append(j)
+                    used_r[j] = True
+            rep = np.mean([roots[k] for k in group])
+            raw_clusters.append({'rep': rep, 'mult': len(group)})
 
-            added = True
-            while added:
-                added = False
-                curr_vals = [roots[k] for k in orbit_idx]
-                for cv in curr_vals:
-                    targets = [np.conj(cv)]
-                    if abs(cv) > 1e-12:
-                        targets.append(1.0 / cv)
-                        targets.append(1.0 / np.conj(cv))
-                    for tgt in targets:
-                        for j in range(len(roots)):
-                            if not used[j] and same_root(roots[j], tgt):
-                                orbit_idx.append(j)
-                                used[j] = True
-                                added = True
-            orbits.append([roots[k] for k in orbit_idx])
+        # Group raw clusters into symmetry units
+        used_c = [False] * len(raw_clusters)
+        atomic_units = []
+        for i in range(len(raw_clusters)):
+            if used_c[i]:
+                continue
+            c1 = raw_clusters[i]
+            r1 = c1['rep']
+            m1 = c1['mult']
+            used_c[i] = True
 
-        # Exact DP subset-sum root orbit partition for order_h0
-        orbit_sizes = [len(o) for o in orbits]
-        dp = {0: []}
-        for i, sz in enumerate(orbit_sizes):
-            new_dp = dict(dp)
-            for s, chosen in dp.items():
-                if s + sz <= order_h0 and (s + sz) not in new_dp:
-                    new_dp[s + sz] = chosen + [i]
-            dp = new_dp
+            if abs(np.imag(r1)) < 1e-3:
+                r1 = r1.real
+                if abs(abs(r1) - 1.0) < 1e-3:
+                    atomic_units.append({'kind': 'SELF_REAL', 'roots': [r1], 'size': 1, 'mult': m1})
+                else:
+                    recip_idx = -1
+                    for j in range(len(raw_clusters)):
+                        if not used_c[j] and abs(raw_clusters[j]['rep'] - 1.0/r1) < 1e-2:
+                            recip_idx = j
+                            break
+                    if recip_idx != -1:
+                        c2 = raw_clusters[recip_idx]
+                        used_c[recip_idx] = True
+                        atomic_units.append({'kind': 'REAL_PAIR', 'roots': [r1, c2['rep'].real], 'size': 2, 'mult': min(m1, c2['mult'])})
+                    else:
+                        atomic_units.append({'kind': 'SELF_REAL', 'roots': [r1], 'size': 1, 'mult': m1})
+            else:
+                quad_indices = [i]
+                for j in range(len(raw_clusters)):
+                    if not used_c[j]:
+                        r2 = raw_clusters[j]['rep']
+                        if abs(r2 - np.conj(r1)) < 1e-2 or abs(r2 - 1.0/r1) < 1e-2 or abs(r2 - 1.0/np.conj(r1)) < 1e-2:
+                            quad_indices.append(j)
+                            used_c[j] = True
+                quad_roots = [raw_clusters[k]['rep'] for k in quad_indices]
+                quad_mult = min(raw_clusters[k]['mult'] for k in quad_indices)
+                kind = 'UNIT_PAIR' if abs(abs(r1) - 1.0) < 1e-3 else 'COMPLEX_QUARTET'
+                atomic_units.append({'kind': kind, 'roots': quad_roots, 'size': len(quad_roots), 'mult': quad_mult})
 
-        if order_h0 not in dp:
+        # Generate candidate root allocations for target order_h0
+        allocations = []
+        def search_allocations(unit_idx, current_deg_h0, current_h0_roots, current_g0_roots):
+            if unit_idx == len(atomic_units):
+                if current_deg_h0 == order_h0:
+                    allocations.append((current_h0_roots, current_g0_roots))
+                return
+
+            unit = atomic_units[unit_idx]
+            kind, r_list, size, mult = unit['kind'], unit['roots'], unit['size'], unit['mult']
+
+            if kind == 'SELF_REAL':
+                # Splittable root multiplicity (must allocate even multiplicity to preserve real symmetry)
+                for k in range(0, mult + 1, 2 if mult >= 2 else 1):
+                    if current_deg_h0 + k * size <= order_h0:
+                        search_allocations(
+                            unit_idx + 1,
+                            current_deg_h0 + k * size,
+                            current_h0_roots + r_list * k,
+                            current_g0_roots + r_list * (mult - k)
+                        )
+            else:
+                # Pair / Quartet multiplicity allocation
+                for k in range(0, mult + 1):
+                    if current_deg_h0 + k * size <= order_h0:
+                        search_allocations(
+                            unit_idx + 1,
+                            current_deg_h0 + k * size,
+                            current_h0_roots + r_list * k,
+                            current_g0_roots + r_list * (mult - k)
+                        )
+
+        search_allocations(0, 0, [], [])
+
+        if not allocations:
             raise ValueError(
                 f"Unable to partition roots into exact target orders order_h0={order_h0} and order_g0={order_g0} "
-                f"while preserving symmetric canonical root orbits {orbit_sizes}."
+                f"while preserving symmetric root clusters."
             )
 
-        h0_orbit_indices = set(dp[order_h0])
-        h0_roots = []
-        g0_roots = []
-        for i, orbit in enumerate(orbits):
-            if i in h0_orbit_indices:
-                h0_roots.extend(orbit)
-            else:
-                g0_roots.extend(orbit)
+        # Rank candidate root factorizations by DSP lowpass performance
+        best_candidate = None
+        best_score = float('inf')
 
-        # Reconstruct unscaled factor polynomials from roots
-        h0_unscaled = np.poly(h0_roots).real if len(h0_roots) > 0 else np.array([1.0])
-        g0_unscaled = np.poly(g0_roots).real if len(g0_roots) > 0 else np.array([1.0])
+        for cand_h0_roots, cand_g0_roots in allocations:
+            h0_u = np.poly(cand_h0_roots).real if len(cand_h0_roots) > 0 else np.array([1.0])
+            g0_u = np.poly(cand_g0_roots).real if len(cand_g0_roots) > 0 else np.array([1.0])
 
-        # Joint scaling: ensure H0(z) G0(z) = P_prod(z) = 2 P(z) exactly
-        conv_unscaled = np.convolve(h0_unscaled, g0_unscaled)
-        req_scale = float(np.dot(conv_unscaled, p_prod) / max(1e-15, np.dot(conv_unscaled, conv_unscaled)))
+            conv_u = np.convolve(h0_u, g0_u)
+            c = float(p_prod[0] / conv_u[0]) if abs(conv_u[0]) > 1e-12 else 1.0
+            h0_c = h0_u * np.sign(c) * np.sqrt(abs(c))
+            g0_c = g0_u * np.sqrt(abs(c))
 
-        h0_dc = float(np.sum(h0_unscaled))
-        alpha = np.sqrt(2.0) / h0_dc if abs(h0_dc) > 1e-12 else 1.0
-        beta = req_scale / alpha
+            # Joint DC gain normalization H0(1) = sqrt(2), G0(1) = 2.0 / H0(1)
+            h0_sum = float(np.sum(h0_c))
+            scale_h0 = np.sqrt(2.0) / h0_sum if abs(h0_sum) > 1e-12 else 1.0
+            h0_norm = h0_c * scale_h0
+            g0_norm = g0_c / scale_h0
 
-        h0_taps = h0_unscaled * alpha
-        g0_taps = g0_unscaled * beta
+            nyq_h0 = abs(np.sum(h0_norm * np.array([(-1.0)**n for n in range(len(h0_norm))])))
+            nyq_g0 = abs(np.sum(g0_norm * np.array([(-1.0)**n for n in range(len(g0_norm))])))
+            dc_score = abs(np.sum(g0_norm) - np.sqrt(2.0))
+            score = dc_score + (nyq_h0 + nyq_g0) * 10.0 + np.max(np.abs(h0_norm)) + np.max(np.abs(g0_norm))
+
+            if score < best_score:
+                best_score = score
+                best_candidate = (h0_norm, g0_norm)
+
+        h0_taps, g0_taps = best_candidate
 
         # Generate complementary highpass filters H1 and G1 for 2-channel Biorthogonal Bank
         # H1(z) = G0(-z) => h1[n] = (-1)^n * g0[n]
