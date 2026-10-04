@@ -48,7 +48,7 @@ def test_basis_to_fir_roundtrip():
         # Evaluate target basis sum A(omega)
         A_basis = np.zeros_like(omega)
         for k, c in enumerate(a_coeffs):
-            A_basis += c * compiler._eval_basis(k, x, symmetry=spec.symmetry_class)
+            A_basis += c * compiler._eval_fir_basis(k, x, symmetry=spec.symmetry_class)
 
         # Evaluate reconstructed FIR frequency response H(omega)
         H_fir = np.zeros_like(omega)
@@ -84,8 +84,8 @@ def test_solve_qmf_power_coefficients():
     for k in range(K):
         n_odd = 2 * k + 1
         c_k = a_coeffs[n_odd]
-        R_pos += c_k * compiler._eval_basis(n_odd, x_nodes, symmetry=SymmetryClass.TYPE_I)
-        R_neg += c_k * compiler._eval_basis(n_odd, -x_nodes, symmetry=SymmetryClass.TYPE_I)
+        R_pos += c_k * compiler._eval_basis(n_odd, x_nodes)
+        R_neg += c_k * compiler._eval_basis(n_odd, -x_nodes)
 
     # Verify R_odd(-x) == -R_odd(x) => P(x) + P(-x) = (0.5 + R(x)) + (0.5 + R(-x)) == 1
     np.testing.assert_allclose(R_pos + R_neg, 0.0, atol=1e-12)
@@ -399,12 +399,11 @@ def test_layer_viii_provenance_and_truth_status():
     """Tests TruthStatus topology classification and Layer VIII CertifiedEvaluationPayload."""
     from filter_compiler.compiler import TruthStatus, MatchingStatus
 
-    # Subcritical limit circle
+    # Physical sphere geometry (lambda = 0.5 => d = 3 Legendre P_n, lambda = 1.5 => d = 5)
     spec = FilterSpec(kind="lowpass", order=31, cutoff=0.2)
     res_sub = GegenbauerFilterCompiler(lam=0.5).compile(spec)
-    assert res_sub.payload.truth_status == TruthStatus.LIMIT_CIRCLE_SUBCRITICAL
+    assert res_sub.payload.truth_status == TruthStatus.PHYSICAL_SPHERE_GEOMETRY
 
-    # Physical sphere geometry (lambda = 1.5 => d = 5)
     res_phys = GegenbauerFilterCompiler(lam=1.5).compile(spec)
     assert res_phys.payload.truth_status == TruthStatus.PHYSICAL_SPHERE_GEOMETRY
 

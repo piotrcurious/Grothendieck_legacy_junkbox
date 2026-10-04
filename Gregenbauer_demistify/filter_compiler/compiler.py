@@ -88,8 +88,6 @@ class CertifiedEvaluationPayload:
 
 
 def determine_truth_status(lam: float) -> TruthStatus:
-    if abs(lam - 0.5) < 1e-12:
-        return TruthStatus.LIMIT_CIRCLE_SUBCRITICAL
     if lam > 0 and abs(2.0 * lam - round(2.0 * lam)) < 1e-12:
         return TruthStatus.PHYSICAL_SPHERE_GEOMETRY
     return TruthStatus.ANALYTIC_CONTINUATION
@@ -190,6 +188,23 @@ class QuantizedTaps:
 
 
 @dataclass
+class GegenbauerSpectralDesign:
+    """Primary Layer VIII Mathematical Representation of Gegenbauer Spectral Multiplier F(x) = sum a_n phi_n(x)."""
+    lam: float
+    a_coeffs: np.ndarray
+    basis_degrees: np.ndarray
+    basis_terms: int
+    operator_eigenvalues: np.ndarray
+    sturm_liouville_energy: float
+    projection_residual: float
+    quadrature_residual: float
+    conditioning: float
+    asymptotic_error_bound: float
+    truth_status: TruthStatus
+    matching_status: MatchingStatus
+
+
+@dataclass
 class FilterResult:
     """Compiler output containing taps, metrics, certifications, payloads, and headers."""
     spec: FilterSpec
@@ -199,6 +214,7 @@ class FilterResult:
     h0_taps: QuantizedTaps
     payload: CertifiedEvaluationPayload
     h1_taps: Optional[QuantizedTaps] = None
+    spectral_design: Optional[GegenbauerSpectralDesign] = None
     freq_grid: np.ndarray = field(default_factory=lambda: np.array([]))
     H0_response: np.ndarray = field(default_factory=lambda: np.array([]))
     H1_response: Optional[np.ndarray] = None
@@ -292,27 +308,32 @@ class GegenbauerFilterCompiler:
             return N // 2
         return (N + 1) // 2
 
-    def _eval_basis(self, n: int, x: np.ndarray, symmetry: SymmetryClass = SymmetryClass.TYPE_I) -> np.ndarray:
-        """Evaluates n-th basis function at array x = cos(omega) in [-1, 1], multiplied by symmetry envelope."""
+    def _eval_basis(self, n: int, x: np.ndarray) -> np.ndarray:
+        """Evaluates pure n-th Gegenbauer basis function phi_n^(lambda)(x) at array x in [-1, 1]."""
         x_arr = np.clip(np.asarray(x, dtype=np.float64), -1.0, 1.0)
         if self.basis_type == "normalized":
-            P_k = normalized_phi_recurrence(n, self.lam, x_arr)
+            return normalized_phi_recurrence(n, self.lam, x_arr)
         else:
             c1 = float(c_n_1_val(n, self.lam))
-            P_k = c1 * normalized_phi_recurrence(n, self.lam, x_arr)
+            return c1 * normalized_phi_recurrence(n, self.lam, x_arr)
 
+    def _apply_fir_symmetry_envelope(self, P_k: np.ndarray, x: np.ndarray, symmetry: SymmetryClass) -> np.ndarray:
+        """Applies FIR Type I-IV symmetry envelope modulation to Gegenbauer basis evaluation."""
+        x_arr = np.clip(np.asarray(x, dtype=np.float64), -1.0, 1.0)
         if symmetry == SymmetryClass.TYPE_I:
             return P_k
         elif symmetry == SymmetryClass.TYPE_II:
-            # cos(omega/2) = sqrt((1 + x)/2)
             return np.sqrt(0.5 * (1.0 + x_arr)) * P_k
         elif symmetry == SymmetryClass.TYPE_III:
-            # sin(omega) = sqrt(1 - x^2)
             return np.sqrt(np.maximum(0.0, 1.0 - x_arr**2)) * P_k
         elif symmetry == SymmetryClass.TYPE_IV:
-            # sin(omega/2) = sqrt((1 - x)/2)
             return np.sqrt(np.maximum(0.0, 0.5 * (1.0 - x_arr))) * P_k
         return P_k
+
+    def _eval_fir_basis(self, n: int, x: np.ndarray, symmetry: SymmetryClass = SymmetryClass.TYPE_I) -> np.ndarray:
+        """Evaluates n-th Gegenbauer basis function with FIR Type I-IV symmetry envelope for tap realization."""
+        phi_k = self._eval_basis(n, x)
+        return self._apply_fir_symmetry_envelope(phi_k, x, symmetry)
 
     def _eval_asymptotic_basis(self, n: int, omega: np.ndarray, symmetry: SymmetryClass = SymmetryClass.TYPE_I) -> np.ndarray:
         theta = omega
@@ -389,12 +410,11 @@ class GegenbauerFilterCompiler:
 
         return D, W
 
-    def solve_halfband_power_polynomial(self, spec: FilterSpec) -> Tuple[np.ndarray, np.ndarray, int, float, float, float, float]:
+    def solve_parity_constrained_gegenbauer_response(self, spec: FilterSpec) -> Tuple[np.ndarray, np.ndarray, int, float, float, float, float]:
         """
-        Solves for half-band power polynomial P(x) = 0.5 + R_odd(x) in odd Gegenbauer basis C_{2k+1}^(\\lambda)(x)
-        for an N-tap QMF filter H0 (where P(z) has degree 2N-2 and length 2N-1 = 2M+1).
+        Solves for parity-constrained Gegenbauer response P_lambda(x) = 0.5 + R_odd(x) in odd Gegenbauer basis C_{2k+1}^(\\lambda)(x).
+        Structurally guarantees P_lambda(x) + P_lambda(-x) = 1 in x = cos(omega) space via Gegenbauer odd parity C_{2k+1}^(\\lambda)(-x) = -C_{2k+1}^(\\lambda)(x).
         Returns (a_coeffs, p_taps, K, cond_val, res_aug, res_data, res_reg).
-        Structurally guarantees P(x) + P(-x) = 1 in frequency space.
         """
         N = spec.order       # N taps for H0
         M = N - 1            # Degree of H0 = N - 1
@@ -410,7 +430,7 @@ class GegenbauerFilterCompiler:
         A_odd = np.zeros((self.grid_samples, K))
         for k in range(K):
             n_odd = 2 * k + 1
-            A_odd[:, k] = self._eval_basis(n_odd, nodes, symmetry=SymmetryClass.TYPE_I)
+            A_odd[:, k] = self._eval_basis(n_odd, nodes)
 
         sqrt_W = np.sqrt(W_q * weights)
         A_w = A_odd * sqrt_W[:, np.newaxis]
@@ -439,28 +459,43 @@ class GegenbauerFilterCompiler:
         for k in range(K):
             a_coeffs[2 * k + 1] = a_odd[k]
 
-        # Convert R_odd(cos w) to Fourier cosine taps b_k
-        grid_L = self.grid_samples
-        omega_grid = np.linspace(0, np.pi, grid_L)
-        x_grid = np.cos(omega_grid)
-        R_vals = np.zeros(grid_L, dtype=np.float64)
-        for k in range(K):
-            n_odd = 2 * k + 1
-            R_vals += a_odd[k] * self._eval_basis(n_odd, x_grid, symmetry=SymmetryClass.TYPE_I)
-
-        trapz_fn = getattr(np, 'trapezoid', getattr(np, 'trapz', None))
+        # Convert R_odd(cos w) to Fourier cosine taps b_k via exact Gegenbauer-to-Cosine expansion
         p_taps = np.zeros(2 * M + 1, dtype=np.float64)
         p_taps[center] = 0.5 # Center tap corresponds to constant 0.5
 
-        for m in range(1, M + 1):
-            if m % 2 != 0: # Odd Fourier harmonics
-                integrand = R_vals * np.cos(m * omega_grid)
-                b_m = (2.0 / np.pi) * trapz_fn(integrand, x=omega_grid)
+        # Compute exact Gegenbauer-to-Cosine transformation matrix
+        C_cos = np.zeros((2 * K, 2 * K))
+        C_cos[0, 0] = 1.0
+        if 2 * K > 1:
+            C_cos[1, 1] = 2.0 * self.lam
+        for deg in range(2, 2 * K):
+            alpha_d = 2.0 * (deg + self.lam - 1.0) / float(deg)
+            beta_d = (deg + 2.0 * self.lam - 2.0) / float(deg)
+            x_C1 = np.zeros(2 * K)
+            for m in range(deg):
+                val = C_cos[deg - 1, m]
+                if val != 0.0:
+                    if m == 0:
+                        x_C1[1] += val
+                    else:
+                        x_C1[m + 1] += 0.5 * val
+                        x_C1[abs(m - 1)] += 0.5 * val
+            C_cos[deg, :] = alpha_d * x_C1 - beta_d * C_cos[deg - 2, :]
+
+        # Scale by c1(n, lam) for normalized phi_n basis
+        b_harmonics = np.zeros(2 * K)
+        for k in range(K):
+            n_odd = 2 * k + 1
+            c1 = float(c_n_1_val(n_odd, self.lam)) if self.basis_type == "normalized" else 1.0
+            b_harmonics += (a_odd[k] / c1) * C_cos[n_odd, :]
+
+        for m in range(1, min(M + 1, 2 * K)):
+            if m % 2 != 0:
+                b_m = b_harmonics[m]
                 p_taps[center - m] = b_m / 2.0
                 p_taps[center + m] = b_m / 2.0
 
         # Ensure P(w) = 0.5 + R_odd(w) is non-negative P(w) >= 0 and P(w) <= 1
-        # so that power polynomial P(z) is valid for spectral factorization
         w_eval = np.linspace(0, np.pi, 2048)
         P_w = np.zeros_like(w_eval)
         for n, val in enumerate(p_taps):
@@ -477,6 +512,10 @@ class GegenbauerFilterCompiler:
                     p_taps[center + m] *= scale_factor
 
         return a_coeffs, p_taps, K, cond_val, res_aug, res_data, res_reg
+
+    def solve_halfband_power_polynomial(self, spec: FilterSpec) -> Tuple[np.ndarray, np.ndarray, int, float, float, float, float]:
+        """Backward-compatibility alias for solve_parity_constrained_gegenbauer_response."""
+        return self.solve_parity_constrained_gegenbauer_response(spec)
 
     def validate_power_polynomial(self, p_taps: np.ndarray, grid_size: int = 2048) -> Tuple[bool, float, float, float]:
         """
@@ -600,13 +639,13 @@ class GegenbauerFilterCompiler:
             if sym == SymmetryClass.TYPE_I:
                 a_coeffs = np.zeros(K)
                 for k in range(K):
-                    phi_k = self._eval_basis(k, nodes, symmetry=sym)
+                    phi_k = self._eval_basis(k, nodes)
                     c1 = float(c_n_1_val(k, self.lam))
                     norm_sq = phi_norm_squared(k, self.lam) / (c1 ** 2) if self.basis_type == "normalized" else phi_norm_squared(k, self.lam)
                     a_coeffs[k] = np.sum(D_q * phi_k * weights) / norm_sq
                 A = np.zeros((self.grid_samples, K))
                 for k in range(K):
-                    A[:, k] = self._eval_basis(k, nodes, symmetry=sym)
+                    A[:, k] = self._eval_basis(k, nodes)
                 sqrt_w = np.sqrt(weights)
                 A_w = A * sqrt_w[:, np.newaxis]
                 s_vals = np.linalg.svd(A_w, compute_uv=False)
@@ -614,10 +653,10 @@ class GegenbauerFilterCompiler:
                 res_data = float(np.linalg.norm(sqrt_w * (A @ a_coeffs - D_q)) / max(np.linalg.norm(sqrt_w * D_q), 1e-15))
                 return a_coeffs, K, cond_val, res_data, res_data, 0.0
             else:
-                # Direct QR/SVD least squares solve without forming normal equations A_w.T @ A_w
+                # Direct QR/SVD least squares solve using FIR symmetry envelope basis
                 A = np.zeros((self.grid_samples, K))
                 for k in range(K):
-                    A[:, k] = self._eval_basis(k, nodes, symmetry=sym)
+                    A[:, k] = self._eval_fir_basis(k, nodes, symmetry=sym)
                 sqrt_w = np.sqrt(weights)
                 A_w = A * sqrt_w[:, np.newaxis]
                 D_w = D_q * sqrt_w
@@ -634,7 +673,7 @@ class GegenbauerFilterCompiler:
 
             A = np.zeros((self.grid_samples, K))
             for k in range(K):
-                A[:, k] = self._eval_basis(k, nodes, symmetry=sym)
+                A[:, k] = self._eval_fir_basis(k, nodes, symmetry=sym)
 
             sqrt_W = np.sqrt(W_q * weights)
             A_w = A * sqrt_W[:, np.newaxis]
@@ -663,7 +702,7 @@ class GegenbauerFilterCompiler:
 
             A = np.zeros((self.grid_samples, K))
             for k in range(K):
-                A[:, k] = self._eval_basis(k, x, symmetry=sym)
+                A[:, k] = self._eval_fir_basis(k, x, symmetry=sym)
 
             sqrt_W = np.sqrt(W)
             A_w = A * sqrt_W[:, np.newaxis]
@@ -686,7 +725,7 @@ class GegenbauerFilterCompiler:
 
         A_freq = np.zeros(grid_L, dtype=np.float64)
         for k, c in enumerate(a_coeffs):
-            A_freq += c * self._eval_basis(k, x, symmetry=sym)
+            A_freq += c * self._eval_fir_basis(k, x, symmetry=sym)
 
         h = np.zeros(N, dtype=np.float64)
         trapz_fn = np.trapezoid if hasattr(np, 'trapezoid') else np.trapz
@@ -971,15 +1010,23 @@ class GegenbauerFilterCompiler:
             qmf_pow_lin = max(qmf_pow_lin_list)
             qmf_alias_lin = max(qmf_alias_lin_list)
 
-        reg_energy = sum((c ** 2) * ((k * (k + 2.0 * self.lam)) ** self.reg_power) for k, c in enumerate(a_coeffs))
+        if spec.kind in ("qmf", "asymmetric_qmf"):
+            basis_degrees = 2 * np.arange(K) + 1
+            a_active = a_coeffs[basis_degrees]
+            op_eigs = basis_degrees * (basis_degrees + 2.0 * self.lam)
+            reg_energy = float(np.sum((a_active ** 2) * (op_eigs ** self.reg_power)))
+        else:
+            basis_degrees = np.arange(K)
+            op_eigs = basis_degrees * (basis_degrees + 2.0 * self.lam)
+            reg_energy = float(np.sum((a_coeffs[:K] ** 2) * (op_eigs ** self.reg_power)))
 
         asymp_err = 0.0
         matching_status = MatchingStatus.MATCHING_SCHEMA
         if self.asymptotic_mode != "none":
             omega_sample = np.linspace(0.001, np.pi - 0.001, 100)
-            n_eval = max(0, K - 1)
+            n_eval = int(basis_degrees[-1]) if len(basis_degrees) > 0 else 0
             sym = spec.symmetry_class
-            phi_exact = self._eval_basis(n_eval, np.cos(omega_sample), symmetry=sym)
+            phi_exact = self._eval_fir_basis(n_eval, np.cos(omega_sample), symmetry=sym)
             phi_asymp = self._eval_asymptotic_basis(n_eval, omega_sample, symmetry=sym)
             asymp_err = float(np.max(np.abs(phi_exact - phi_asymp)))
 
@@ -1038,6 +1085,21 @@ class GegenbauerFilterCompiler:
 
         prov_err = float(np.max(mixed_error(h0_quant.float64_taps, h0_quant.q15_taps / h0_quant.q15_scale)))
 
+        spectral_design = GegenbauerSpectralDesign(
+            lam=self.lam,
+            a_coeffs=a_coeffs,
+            basis_degrees=basis_degrees,
+            basis_terms=K,
+            operator_eigenvalues=op_eigs,
+            sturm_liouville_energy=reg_energy,
+            projection_residual=res_data,
+            quadrature_residual=res_aug,
+            conditioning=cond_val,
+            asymptotic_error_bound=asymp_err,
+            truth_status=truth_status,
+            matching_status=matching_status
+        )
+
         result = FilterResult(
             spec=spec,
             lam=self.lam,
@@ -1046,6 +1108,7 @@ class GegenbauerFilterCompiler:
             h0_taps=h0_quant,
             payload=payload,
             h1_taps=h1_quant,
+            spectral_design=spectral_design,
             freq_grid=freq_grid,
             H0_response=H0_db,
             H1_response=20 * np.log10(np.maximum(1e-12, np.abs(np.fft.fft(h1_quant.float64_taps, K_fft)[:K_fft // 2 + 1]))) if h1_quant else None,
@@ -1118,7 +1181,7 @@ class GegenbauerFilterCompiler:
             rep = np.mean([roots[k] for k in group])
             raw_clusters.append({'rep': rep, 'mult': len(group)})
 
-        # Group raw clusters into symmetry units
+        # Group raw clusters into symmetry units (reciprocal & conjugate quadruplets / pairs)
         used_c = [False] * len(raw_clusters)
         atomic_units = []
         for i in range(len(raw_clusters)):
@@ -1217,10 +1280,12 @@ class GegenbauerFilterCompiler:
             h0_norm = h0_c * scale_h0
             g0_norm = g0_c / scale_h0
 
+            sym_h0 = np.max(np.abs(h0_norm - h0_norm[::-1]))
+            sym_g0 = np.max(np.abs(g0_norm - g0_norm[::-1]))
             nyq_h0 = abs(np.sum(h0_norm * np.array([(-1.0)**n for n in range(len(h0_norm))])))
             nyq_g0 = abs(np.sum(g0_norm * np.array([(-1.0)**n for n in range(len(g0_norm))])))
             dc_score = abs(np.sum(g0_norm) - np.sqrt(2.0))
-            score = dc_score + (nyq_h0 + nyq_g0) * 10.0 + np.max(np.abs(h0_norm)) + np.max(np.abs(g0_norm))
+            score = (sym_h0 + sym_g0) * 100.0 + dc_score + (nyq_h0 + nyq_g0) * 10.0 + np.max(np.abs(h0_norm)) + np.max(np.abs(g0_norm))
 
             if score < best_score:
                 best_score = score
