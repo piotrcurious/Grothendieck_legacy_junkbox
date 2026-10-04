@@ -190,6 +190,22 @@ class QuantizedTaps:
 
 
 @dataclass
+class GegenbauerSpectralDesign:
+    """Primary Layer VIII Mathematical Representation of Gegenbauer Spectral Multiplier F(x) = sum a_n phi_n(x)."""
+    lam: float
+    a_coeffs: np.ndarray
+    basis_terms: int
+    operator_eigenvalues: np.ndarray
+    sturm_liouville_energy: float
+    projection_residual: float
+    quadrature_residual: float
+    conditioning: float
+    asymptotic_error_bound: float
+    truth_status: TruthStatus
+    matching_status: MatchingStatus
+
+
+@dataclass
 class FilterResult:
     """Compiler output containing taps, metrics, certifications, payloads, and headers."""
     spec: FilterSpec
@@ -199,6 +215,7 @@ class FilterResult:
     h0_taps: QuantizedTaps
     payload: CertifiedEvaluationPayload
     h1_taps: Optional[QuantizedTaps] = None
+    spectral_design: Optional[GegenbauerSpectralDesign] = None
     freq_grid: np.ndarray = field(default_factory=lambda: np.array([]))
     H0_response: np.ndarray = field(default_factory=lambda: np.array([]))
     H1_response: Optional[np.ndarray] = None
@@ -389,12 +406,11 @@ class GegenbauerFilterCompiler:
 
         return D, W
 
-    def solve_halfband_power_polynomial(self, spec: FilterSpec) -> Tuple[np.ndarray, np.ndarray, int, float, float, float, float]:
+    def solve_parity_constrained_gegenbauer_response(self, spec: FilterSpec) -> Tuple[np.ndarray, np.ndarray, int, float, float, float, float]:
         """
-        Solves for half-band power polynomial P(x) = 0.5 + R_odd(x) in odd Gegenbauer basis C_{2k+1}^(\\lambda)(x)
-        for an N-tap QMF filter H0 (where P(z) has degree 2N-2 and length 2N-1 = 2M+1).
+        Solves for parity-constrained Gegenbauer response P_lambda(x) = 0.5 + R_odd(x) in odd Gegenbauer basis C_{2k+1}^(\\lambda)(x).
+        Structurally guarantees P_lambda(x) + P_lambda(-x) = 1 in x = cos(omega) space via Gegenbauer odd parity C_{2k+1}^(\\lambda)(-x) = -C_{2k+1}^(\\lambda)(x).
         Returns (a_coeffs, p_taps, K, cond_val, res_aug, res_data, res_reg).
-        Structurally guarantees P(x) + P(-x) = 1 in frequency space.
         """
         N = spec.order       # N taps for H0
         M = N - 1            # Degree of H0 = N - 1
@@ -460,7 +476,6 @@ class GegenbauerFilterCompiler:
                 p_taps[center + m] = b_m / 2.0
 
         # Ensure P(w) = 0.5 + R_odd(w) is non-negative P(w) >= 0 and P(w) <= 1
-        # so that power polynomial P(z) is valid for spectral factorization
         w_eval = np.linspace(0, np.pi, 2048)
         P_w = np.zeros_like(w_eval)
         for n, val in enumerate(p_taps):
@@ -477,6 +492,10 @@ class GegenbauerFilterCompiler:
                     p_taps[center + m] *= scale_factor
 
         return a_coeffs, p_taps, K, cond_val, res_aug, res_data, res_reg
+
+    def solve_halfband_power_polynomial(self, spec: FilterSpec) -> Tuple[np.ndarray, np.ndarray, int, float, float, float, float]:
+        """Backward-compatibility alias for solve_parity_constrained_gegenbauer_response."""
+        return self.solve_parity_constrained_gegenbauer_response(spec)
 
     def validate_power_polynomial(self, p_taps: np.ndarray, grid_size: int = 2048) -> Tuple[bool, float, float, float]:
         """
@@ -1038,6 +1057,21 @@ class GegenbauerFilterCompiler:
 
         prov_err = float(np.max(mixed_error(h0_quant.float64_taps, h0_quant.q15_taps / h0_quant.q15_scale)))
 
+        op_eigs = np.array([k * (k + 2.0 * self.lam) for k in range(K)])
+        spectral_design = GegenbauerSpectralDesign(
+            lam=self.lam,
+            a_coeffs=a_coeffs,
+            basis_terms=K,
+            operator_eigenvalues=op_eigs,
+            sturm_liouville_energy=float(reg_energy),
+            projection_residual=res_data,
+            quadrature_residual=res_aug,
+            conditioning=cond_val,
+            asymptotic_error_bound=asymp_err,
+            truth_status=truth_status,
+            matching_status=matching_status
+        )
+
         result = FilterResult(
             spec=spec,
             lam=self.lam,
@@ -1046,6 +1080,7 @@ class GegenbauerFilterCompiler:
             h0_taps=h0_quant,
             payload=payload,
             h1_taps=h1_quant,
+            spectral_design=spectral_design,
             freq_grid=freq_grid,
             H0_response=H0_db,
             H1_response=20 * np.log10(np.maximum(1e-12, np.abs(np.fft.fft(h1_quant.float64_taps, K_fft)[:K_fft // 2 + 1]))) if h1_quant else None,
@@ -1118,7 +1153,7 @@ class GegenbauerFilterCompiler:
             rep = np.mean([roots[k] for k in group])
             raw_clusters.append({'rep': rep, 'mult': len(group)})
 
-        # Group raw clusters into symmetry units
+        # Group raw clusters into symmetry units (reciprocal & conjugate quadruplets / pairs)
         used_c = [False] * len(raw_clusters)
         atomic_units = []
         for i in range(len(raw_clusters)):
@@ -1217,10 +1252,12 @@ class GegenbauerFilterCompiler:
             h0_norm = h0_c * scale_h0
             g0_norm = g0_c / scale_h0
 
+            sym_h0 = np.max(np.abs(h0_norm - h0_norm[::-1]))
+            sym_g0 = np.max(np.abs(g0_norm - g0_norm[::-1]))
             nyq_h0 = abs(np.sum(h0_norm * np.array([(-1.0)**n for n in range(len(h0_norm))])))
             nyq_g0 = abs(np.sum(g0_norm * np.array([(-1.0)**n for n in range(len(g0_norm))])))
             dc_score = abs(np.sum(g0_norm) - np.sqrt(2.0))
-            score = dc_score + (nyq_h0 + nyq_g0) * 10.0 + np.max(np.abs(h0_norm)) + np.max(np.abs(g0_norm))
+            score = (sym_h0 + sym_g0) * 100.0 + dc_score + (nyq_h0 + nyq_g0) * 10.0 + np.max(np.abs(h0_norm)) + np.max(np.abs(g0_norm))
 
             if score < best_score:
                 best_score = score
