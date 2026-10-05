@@ -1035,11 +1035,19 @@ class GegenbauerFilterCompiler:
         matching_status = MatchingStatus.MATCHING_SCHEMA
         if self.asymptotic_mode != "none":
             omega_sample = np.linspace(0.001, np.pi - 0.001, 100)
-            n_eval = int(basis_degrees[-1]) if len(basis_degrees) > 0 else 0
-            sym = spec.symmetry_class
-            phi_exact = self._eval_fir_basis(n_eval, np.cos(omega_sample), symmetry=sym)
-            phi_asymp = self._eval_asymptotic_basis(n_eval, omega_sample, symmetry=sym)
-            asymp_err = float(np.max(np.abs(phi_exact - phi_asymp)))
+            x_sample = np.cos(omega_sample)
+
+            # Compute asymptotic response error bound over active degrees
+            deg_errs = []
+            for deg_idx, deg in enumerate(basis_degrees):
+                deg_int = int(deg)
+                if deg_int == 0:
+                    continue
+                phi_exact = self._eval_basis(deg_int, x_sample)
+                phi_asymp = self._eval_pure_asymptotic_basis(deg_int, omega_sample)
+                deg_errs.append(float(np.max(np.abs(phi_exact - phi_asymp))))
+
+            asymp_err = float(np.max(deg_errs)) if len(deg_errs) > 0 else 0.0
 
             if asymp_err < 0.05 and self.lam > 0:
                 matching_status = MatchingStatus.SAMPLED_ASYMPTOTIC_MATCHING
@@ -1157,12 +1165,13 @@ class GegenbauerFilterCompiler:
                 f"Use degree pairs satisfying order_h0 + order_g0 == 2 mod 4 (e.g. 4/2, 8/6, 12/10)."
             )
 
+        trans_half = min(0.24, max(0.01, abs(cutoff - 0.25) if abs(cutoff - 0.25) > 1e-4 else 0.05))
         p_spec = FilterSpec(
             kind="qmf",
             order=(total_order // 2) + 1,
-            cutoff=cutoff,
-            wp=max(0.01, cutoff - 0.05),
-            ws=min(0.49, cutoff + 0.05)
+            cutoff=0.25,
+            wp=0.25 - trans_half,
+            ws=0.25 + trans_half
         )
 
         _, p_taps, _, _, _, _, _ = self.solve_halfband_power_polynomial(p_spec)
