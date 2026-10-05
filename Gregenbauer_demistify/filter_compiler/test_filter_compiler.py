@@ -23,7 +23,8 @@ from filter_compiler.compiler import (
     QuantizedTaps,
     FilterResult,
     GegenbauerFilterCompiler,
-    SymmetryClass
+    SymmetryClass,
+    FactorMode
 )
 
 
@@ -329,6 +330,28 @@ def test_halfband_power_polynomial_and_factorization():
     h0_fact, recip_err = compiler.spectral_factor_power_polynomial(p_taps, target_N=32)
     assert len(h0_fact) == 32
     assert recip_err < 1e-3
+
+
+def test_spectral_factorization_backends():
+    """Tests Fejér-Riesz, Structured Chebyshev x-domain root lifting, and Reference Roots factorizations."""
+    spec = FilterSpec(kind="qmf", order=32, cutoff=0.25)
+    compiler = GegenbauerFilterCompiler(lam=1.5)
+    _, p_taps, _, _, _, _, _ = compiler.solve_halfband_power_polynomial(spec)
+
+    # 1. Production Fejér-Riesz Minimum-Phase Cepstral Factorization
+    h0_fr, res_fr = compiler.spectral_factor_power_polynomial(p_taps, target_N=32, mode=FactorMode.FEJER_RIESZ)
+    assert len(h0_fr) == 32
+    assert res_fr < 1e-4
+
+    # 2. Structured Chebyshev x-domain Root Lifting Factorization
+    h0_cheb, res_cheb = compiler.spectral_factor_power_polynomial(p_taps, target_N=32, mode=FactorMode.STRUCTURED_CHEBYSHEV)
+    assert len(h0_cheb) == 32
+    assert res_cheb < 0.5
+
+    # 3. Reference Roots Monomial Factorization
+    h0_ref, res_ref = compiler.spectral_factor_power_polynomial(p_taps, target_N=32, mode=FactorMode.REFERENCE_ROOTS)
+    assert len(h0_ref) == 32
+    assert res_ref < 1e-3
 
 
 def test_quantization_formats():
