@@ -33,7 +33,8 @@ from filter_compiler.compiler import (
     FilterSpec,
     FilterResult,
     QuantizedTaps,
-    PrecisionType
+    PrecisionType,
+    FactorMode
 )
 
 
@@ -296,10 +297,15 @@ class GegenbauerFilterGUI(tk.Tk):
         self.grid_samples_var = tk.IntVar(value=2048)
         ttk.Entry(alg_group, textvariable=self.grid_samples_var, width=10).grid(row=7, column=1, sticky=tk.W, pady=3)
 
+        # Factorization Mode (for QMF)
+        ttk.Label(alg_group, text="QMF Factor Mode:").grid(row=8, column=0, sticky=tk.W, pady=3)
+        self.factor_mode_var = tk.StringVar(value="STRUCTURED_CHEBYSHEV")
+        ttk.Combobox(alg_group, textvariable=self.factor_mode_var, values=["STRUCTURED_CHEBYSHEV", "CEPSTRAL_APPROX", "REFERENCE_ROOTS"], state="readonly").grid(row=8, column=1, sticky=tk.EW, pady=3)
+
         # Precision
-        ttk.Label(alg_group, text="Precision Context:").grid(row=8, column=0, sticky=tk.W, pady=3)
+        ttk.Label(alg_group, text="Precision Context:").grid(row=9, column=0, sticky=tk.W, pady=3)
         self.precision_var = tk.StringVar(value="FLOAT64")
-        ttk.Combobox(alg_group, textvariable=self.precision_var, values=["FLOAT32", "FLOAT64", "LONGDOUBLE"], state="readonly").grid(row=8, column=1, sticky=tk.EW, pady=3)
+        ttk.Combobox(alg_group, textvariable=self.precision_var, values=["FLOAT32", "FLOAT64", "LONGDOUBLE"], state="readonly").grid(row=9, column=1, sticky=tk.EW, pady=3)
 
         # Buttons Frame
         btn_frame = ttk.Frame(scroll_content, padding=5)
@@ -481,6 +487,12 @@ class GegenbauerFilterGUI(tk.Tk):
         else:
             precision = PrecisionType.FLOAT64
 
+        factor_mode_str = self.factor_mode_var.get()
+        try:
+            factor_mode = FactorMode[factor_mode_str]
+        except KeyError:
+            factor_mode = FactorMode.STRUCTURED_CHEBYSHEV
+
         compiler_kwargs = dict(
             lam=lam,
             basis_terms=basis_terms,
@@ -490,6 +502,7 @@ class GegenbauerFilterGUI(tk.Tk):
             reg_power=reg_power,
             asymptotic_mode=asymptotic_mode,
             grid_samples=grid_samples,
+            factor_mode=factor_mode,
             precision=precision
         )
 

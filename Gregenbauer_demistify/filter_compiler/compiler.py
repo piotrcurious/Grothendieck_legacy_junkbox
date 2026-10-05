@@ -96,7 +96,7 @@ class FactorizationDiagnostics:
 
     @property
     def factor_degree(self) -> int:
-        return self.target_degree
+        return self.actual_degree
 
 
 @dataclass
@@ -773,6 +773,8 @@ class GegenbauerFilterCompiler:
         h0 = np.poly(z_inside).real
         if len(h0) < target_N:
             h0 = np.pad(h0, (0, target_N - len(h0)), mode='constant')
+        elif len(h0) > target_N:
+            h0 = h0[:target_N]
 
         r_h0 = np.convolve(h0, h0[::-1])
         scale = np.sqrt(max(1e-15, p_taps[center] / max(1e-15, r_h0[len(r_h0) // 2])))
@@ -1299,7 +1301,7 @@ class GegenbauerFilterCompiler:
                 deg_int = int(deg)
                 if deg_int == 0:
                     continue
-                phi_exact = self._eval_basis(deg_int, x_sample)
+                phi_exact = normalized_phi_recurrence(deg_int, self.lam, x_sample)
                 phi_asymp = self._eval_pure_asymptotic_basis(deg_int, omega_sample)
                 deg_errs.append(float(np.max(np.abs(phi_exact - phi_asymp))))
 
