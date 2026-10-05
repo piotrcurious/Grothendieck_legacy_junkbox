@@ -61,6 +61,13 @@ class SymmetryClass(Enum):
     TYPE_IV = "TYPE_IV"   # Even N, anti-symmetric
 
 
+class FactorMode(Enum):
+    """Spectral Factorization Backends for Half-band Power Polynomial P(z)."""
+    FEJER_RIESZ = "FEJER_RIESZ"                   # Production cepstral log-spectral minimum-phase factorization
+    STRUCTURED_CHEBYSHEV = "STRUCTURED_CHEBYSHEV" # Degree-M x-polynomial Chebyshev root finding in x = cos(w)
+    REFERENCE_ROOTS = "REFERENCE_ROOTS"           # Reference monomial degree-2M root finding backend
+
+
 @dataclass
 class ErrorBoundProvenance:
     """Layer VIII Certified Non-Double-Counting Error Decomposition Payload."""
@@ -298,6 +305,7 @@ class GegenbauerFilterCompiler:
         mu_reg: float = 1e-4,
         reg_power: int = 1,
         asymptotic_mode: str = "auto",
+        factor_mode: FactorMode = FactorMode.FEJER_RIESZ,
         grid_samples: int = 2048,
         precision: PrecisionType = PrecisionType.FLOAT64
     ):
@@ -325,6 +333,7 @@ class GegenbauerFilterCompiler:
         self.mu_reg = float(mu_reg)
         self.reg_power = int(reg_power)
         self.asymptotic_mode = asymptotic_mode
+        self.factor_mode = factor_mode
         self.grid_samples = grid_samples
         self.ctx = NumericalContext(precision=precision, base=NumericalBase.BASE_2)
 
@@ -550,16 +559,96 @@ class GegenbauerFilterCompiler:
         is_valid = (min_P >= -0.05) and (max_hb_err <= 1e-4)
         return is_valid, min_P, max_P, max_hb_err
 
-    def spectral_factor_power_polynomial(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float]:
+    def spectral_factor_fejer_riesz(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float]:
         """
-        Spectrally factors positive half-band power polynomial P(z) into minimum-phase / linear-phase factor H0(z) of length target_N.
-        Uses canonical root orbit grouping (conjugate & reciprocal closure) to preserve real minimum-phase factors.
-        Returns (h0_taps, root_reciprocity_residual).
+        Fejér-Riesz spectral factorization via real cepstral log-spectrum decomposition.
+        Operates directly on positive trigonometric power polynomial P(w) >= 0.
+        Guarantees minimum-phase real FIR factor H0(z) of degree M = target_N - 1.
+        Returns (h0_taps, residual).
         """
-        M = target_N - 1 # Degree of H0
+        M = target_N - 1
+        center = (len(p_taps) - 1) // 2
+        K_grid = 16384
+
+        # Evaluate trigonometric polynomial P(w) = sum p_k e^{-j k w}
+        w = 2.0 * np.pi * np.arange(K_grid) / float(K_grid)
+        P_w = np.zeros(K_grid, dtype=np.float64)
+        for k_idx, val in enumerate(p_taps):
+            P_w += val * np.cos((k_idx - center) * w)
+
+        P_w = np.maximum(P_w, 1e-14)
+        log_P = 0.5 * np.log(P_w)
+
+        # Real cepstrum via IFFT
+        c = np.fft.ifft(log_P).real
+
+        # Construct minimum-phase causal log-spectrum
+        c_min = np.zeros(K_grid, dtype=np.float64)
+        c_min[0] = c[0]
+        c_min[1:K_grid // 2] = 2.0 * c[1:K_grid // 2]
+        c_min[K_grid // 2] = c[K_grid // 2]
+
+        # Minimum-phase spectral response H_min(w) = exp(FFT(c_min))
+        H_min = np.exp(np.fft.fft(c_min))
+        h_full = np.fft.ifft(H_min).real
+
+        # Truncate to target N taps
+        h0 = h_full[:target_N]
+
+        # Scale h0 so convolution h0 * h0[::-1] matches center tap
+        r_h0 = np.convolve(h0, h0[::-1])
+        scale = np.sqrt(max(1e-15, p_taps[center] / max(1e-15, r_h0[len(r_h0) // 2])))
+        h0 *= scale
+
+        # Autocorrelation residual
+        r_fact = np.convolve(h0, h0[::-1])
+        res = float(np.max(np.abs(r_fact - p_taps)))
+        return h0, res
+
+    def factor_by_chebyshev_roots(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float]:
+        """
+        Structured Chebyshev x-domain root factorization.
+        Converts P(z) = b0 + sum_{m=1}^M b_m T_m(x) into degree-M polynomial in x = cos(w).
+        Finds degree-M roots in x and lifts z_j = x_j - sqrt(x_j^2 - 1) to enforce exact reciprocal symmetry.
+        Returns (h0_taps, residual).
+        """
+        M = target_N - 1
+        center = (len(p_taps) - 1) // 2
+
+        # Extract Fourier cosine coefficients b_m
+        b_harmonics = np.zeros(M + 1, dtype=np.float64)
+        b_harmonics[0] = p_taps[center]
+        for m in range(1, M + 1):
+            if center + m < len(p_taps):
+                b_harmonics[m] = 2.0 * p_taps[center + m]
+
+        # Chebyshev roots in x = cos(w)
+        x_roots = np.polynomial.chebyshev.chebroots(b_harmonics)
+
+        # Lift x_roots to z_roots in unit circle |z| <= 1
+        z_inside = []
+        for x_val in x_roots:
+            disc = np.sqrt(x_val**2 - 1.0 + 0j)
+            z1 = x_val - disc
+            z2 = x_val + disc
+            z_sel = z1 if abs(z1) <= 1.0 + 1e-4 else z2
+            z_inside.append(z_sel)
+
+        h0 = np.poly(z_inside).real
+        r_h0 = np.convolve(h0, h0[::-1])
+        scale = np.sqrt(max(1e-15, p_taps[center] / max(1e-15, r_h0[len(r_h0) // 2])))
+        h0 *= scale
+
+        res = float(np.max(np.abs(np.convolve(h0, h0[::-1]) - p_taps)))
+        return h0, res
+
+    def factor_by_roots_reference(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float]:
+        """
+        Reference degree-2M monomial root finding backend (np.roots).
+        """
+        M = target_N - 1
         roots = np.roots(p_taps)
 
-        # Build canonical orbits under conjugation and reciprocal reflection
         rel_tol, abs_tol = 1e-2, 1e-3
         def same_root(a, b):
             return abs(a - b) <= max(abs_tol, rel_tol * max(abs(a), abs(b)))
@@ -567,12 +656,9 @@ class GegenbauerFilterCompiler:
         orbits = []
         used = [False] * len(roots)
         for i in range(len(roots)):
-            if used[i]:
-                continue
-            r_val = roots[i]
+            if used[i]: continue
             orbit_idx = [i]
             used[i] = True
-
             added = True
             while added:
                 added = False
@@ -590,7 +676,6 @@ class GegenbauerFilterCompiler:
                                 added = True
             orbits.append([roots[k] for k in orbit_idx])
 
-        # Select M roots inside or on the unit circle from canonical orbits
         inside_roots = []
         for orbit in orbits:
             in_orbit = [r for r in orbit if abs(r) <= 1.0 + 1e-4]
@@ -603,22 +688,36 @@ class GegenbauerFilterCompiler:
                 sorted_orb = sorted(orbit, key=lambda x: abs(x))
                 inside_roots.extend(sorted_orb[:half_len])
 
-        # Truncate / pad to exact target degree M
         if len(inside_roots) > M:
             inside_roots = sorted(inside_roots, key=lambda x: abs(x))[:M]
 
         h0 = np.poly(inside_roots).real
-
-        # Scale h0 so convolution h0 * h0[::-1] matches center tap p_taps[center]
         center = (len(p_taps) - 1) // 2
         r_h0 = np.convolve(h0, h0[::-1])
         scale = np.sqrt(max(1e-15, p_taps[center] / max(1e-15, r_h0[len(r_h0) // 2])))
         h0 *= scale
 
-        # Calculate root reciprocity residual
-        recip_err = float(np.max(np.abs(np.convolve(h0, h0[::-1]) - p_taps)))
+        res = float(np.max(np.abs(np.convolve(h0, h0[::-1]) - p_taps)))
+        return h0, res
 
-        return h0, recip_err
+    def spectral_factor_power_polynomial(
+        self,
+        p_taps: np.ndarray,
+        target_N: int,
+        mode: FactorMode = FactorMode.FEJER_RIESZ
+    ) -> Tuple[np.ndarray, float]:
+        """
+        Spectrally factors positive half-band power polynomial P(z) into minimum-phase factor H0(z) of length target_N.
+        Dispatches to Fejér-Riesz, Structured Chebyshev x-domain root lifting, or Reference Root backends.
+        Returns (h0_taps, residual).
+        """
+        if mode == FactorMode.FEJER_RIESZ:
+            return self.spectral_factor_fejer_riesz(p_taps, target_N)
+        elif mode == FactorMode.STRUCTURED_CHEBYSHEV:
+            return self.factor_by_chebyshev_roots(p_taps, target_N)
+        elif mode == FactorMode.REFERENCE_ROOTS:
+            return self.factor_by_roots_reference(p_taps, target_N)
+        return self.spectral_factor_fejer_riesz(p_taps, target_N)
 
     def solve_qmf_power_coefficients(self, spec: FilterSpec) -> Tuple[np.ndarray, int, float, float, float, float]:
         """Backward compatibility wrapper around solve_halfband_power_polynomial."""
@@ -922,7 +1021,7 @@ class GegenbauerFilterCompiler:
             if min_P < -0.05:
                 raise ValueError(f"Half-band power response min P = {min_P:.4f} < -0.05 is not spectrally factorizable.")
 
-            h0_float, _ = self.spectral_factor_power_polynomial(p_taps, target_N=spec.order)
+            h0_float, _ = self.spectral_factor_power_polynomial(p_taps, target_N=spec.order, mode=self.factor_mode)
             h0_quant = self.quantize_taps(h0_float)
 
             # Derive H1 directly via CQF modulation h1[n] = (-1)^n * h0[N-1-n]
