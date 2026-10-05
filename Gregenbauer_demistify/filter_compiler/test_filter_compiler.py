@@ -141,7 +141,7 @@ def test_lowpass_compilation():
 
 
 def test_highpass_compilation():
-    """Tests highpass filter synthesis, tap anti-symmetry for Type III odd N, and peak gain normalization."""
+    """Tests highpass filter synthesis, tap symmetry for Type I odd N, and Nyquist gain normalization."""
     spec = FilterSpec(kind="highpass", order=33, cutoff=0.3)
     compiler = GegenbauerFilterCompiler(lam=1.25)
     result = compiler.compile(spec)
@@ -149,13 +149,13 @@ def test_highpass_compilation():
     taps = result.h0_taps.float64_taps
     assert len(taps) == 33
 
-    # Verify anti-symmetry for Type III odd N highpass: h[n] == -h[N-1-n]
-    np.testing.assert_allclose(taps, -taps[::-1], atol=1e-12)
+    # Verify symmetry for Type I odd N highpass: h[n] == h[N-1-n]
+    np.testing.assert_allclose(taps, taps[::-1], atol=1e-12)
 
-    # Verify peak magnitude gain normalized to 1.0
-    K_fft = 4096
-    max_g = np.max(np.abs(np.fft.fft(taps, K_fft)))
-    assert abs(max_g - 1.0) < 1e-2
+    # Verify Nyquist gain (sum(h * (-1)^n) == 1.0)
+    sign_pattern = np.array([(-1.0)**n for n in range(33)])
+    nyq_gain = np.sum(taps * sign_pattern)
+    assert abs(nyq_gain - 1.0) < 1e-10
 
 
 def test_bandpass_compilation():
