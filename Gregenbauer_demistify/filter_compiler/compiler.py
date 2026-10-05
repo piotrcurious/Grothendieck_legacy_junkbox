@@ -565,7 +565,9 @@ class GegenbauerFilterCompiler:
             scale_factor = 0.5 / (0.5 + over)
             a_odd *= scale_factor
             a_coeffs *= scale_factor
+            res_data = float(np.linalg.norm(A_w @ a_odd - D_w) / max(np.linalg.norm(D_w), 1e-15))
             res_reg = float(np.linalg.norm(R_mat @ a_odd) / max(np.linalg.norm(D_w), 1e-15))
+            res_aug = float(np.linalg.norm(np.concatenate([A_w @ a_odd - D_w, R_mat @ a_odd])) / max(np.linalg.norm(D_sys), 1e-15))
             for m in range(1, M + 1):
                 if m % 2 != 0:
                     p_taps[center - m] *= scale_factor
@@ -579,12 +581,15 @@ class GegenbauerFilterCompiler:
 
     def validate_power_polynomial(self, p_taps: np.ndarray, grid_size: int = 2048) -> Tuple[bool, float, float, float]:
         """
-        Validates half-band power polynomial P(z) using exact Chebyshev critical point evaluation.
+        Validates half-band power polynomial P(z) using numerical critical point evaluation.
         Evaluates P(x) at endpoints x = +-1 and all real derivative roots P'(x) = 0 in [-1, 1].
         Returns (is_valid, min_P, max_P, max_halfband_err).
         """
         center = (len(p_taps) - 1) // 2
         M = center
+
+        # First check coefficient symmetry p_taps[center-m] == p_taps[center+m]
+        sym_err = float(np.max(np.abs(p_taps[:center] - p_taps[center+1:][::-1]))) if center > 0 else 0.0
 
         b_harmonics = np.zeros(M + 1, dtype=np.float64)
         b_harmonics[0] = p_taps[center]
@@ -607,9 +612,9 @@ class GegenbauerFilterCompiler:
         min_P = float(np.min(vals))
         max_P = float(np.max(vals))
 
-        # Coefficient-domain half-band complementarity check: P(-x) + P(x) = 1
-        b_even_err = float(np.sum(np.abs(b_harmonics[2::2]))) if len(b_harmonics) > 2 else 0.0
-        max_hb_err = float(abs(2.0 * b_harmonics[0] - 1.0) + b_even_err)
+        # Complementarity residual bound: |2 b0 - 1| + 2 * sum_{m>0, even} |b_m|
+        b_even_sum = 2.0 * float(np.sum(np.abs(b_harmonics[2::2]))) if len(b_harmonics) > 2 else 0.0
+        max_hb_err = float(abs(2.0 * b_harmonics[0] - 1.0) + b_even_sum + sym_err)
 
         tau_P = 1e-4 * max(1.0, abs(max_P))
         is_valid = (min_P >= -tau_P) and (max_hb_err <= 1e-4)
@@ -622,12 +627,14 @@ class GegenbauerFilterCompiler:
         mode: FactorMode
     ) -> Tuple[np.ndarray, FactorizationDiagnostics]:
         imag_res = float(np.max(np.abs(np.imag(h0_complex)))) if np.iscomplexobj(h0_complex) else 0.0
-        h0 = np.real(h0_complex)
+        if imag_res > 1e-5:
+            raise ValueError(f"Factorization produced non-real filter taps: imaginary residual {imag_res:.3e} exceeds 1e-5 tolerance.")
 
+        h0 = np.real(h0_complex)
         M_target = len(h0) - 1
         center = (len(p_taps) - 1) // 2
 
-        # Exact Chebyshev critical-point validation
+        # Validate half-band power polynomial P(z)
         _, min_P, max_P, hb_err = self.validate_power_polynomial(p_taps)
 
         r_fact = np.convolve(h0, h0[::-1])
@@ -648,13 +655,19 @@ class GegenbauerFilterCompiler:
         non_zero = np.where(np.abs(h0) > 1e-12)[0]
         actual_deg = int(non_zero[-1] - non_zero[0]) if len(non_zero) > 1 else M_target
 
+        # Count zeros near unit circle |z - 1| < 1e-3
+        roots_h0 = np.roots(h0) if len(h0) > 1 else np.array([])
+        zero_uc_count = int(np.sum(np.abs(np.abs(roots_h0) - 1.0) < 1e-3))
+
         is_finite = bool(np.all(np.isfinite(h0)) and np.isfinite(coeff_res_abs) and np.isfinite(freq_res_abs))
-        certified = bool(
-            is_finite and
-            coeff_res_rel <= 1e-2 and
-            freq_res_rel <= 1e-2 and
-            imag_res <= 1e-6 and
-            min_P >= -1e-3
+        certified = self.certify_factorization_diagnostics(
+            is_finite=is_finite,
+            actual_degree=actual_deg,
+            target_degree=M_target,
+            coeff_res_rel=coeff_res_rel,
+            freq_res_rel=freq_res_rel,
+            imag_res=imag_res,
+            min_P=min_P
         )
 
         diag = FactorizationDiagnostics(
@@ -669,11 +682,31 @@ class GegenbauerFilterCompiler:
             positivity_min=min_P,
             positivity_max=max_P,
             halfband_residual=hb_err,
-            zero_on_unit_circle_count=0,
+            zero_on_unit_circle_count=zero_uc_count,
             finite=is_finite,
             certified=certified
         )
         return h0, diag
+
+    @staticmethod
+    def certify_factorization_diagnostics(
+        is_finite: bool,
+        actual_degree: int,
+        target_degree: int,
+        coeff_res_rel: float,
+        freq_res_rel: float,
+        imag_res: float,
+        min_P: float
+    ) -> bool:
+        """Single-source authority for certifying spectral factor diagnostic payloads."""
+        return bool(
+            is_finite and
+            actual_degree == target_degree and
+            coeff_res_rel <= 1e-2 and
+            freq_res_rel <= 1e-2 and
+            imag_res <= 1e-6 and
+            min_P >= -1e-3
+        )
 
     def spectral_factor_cepstral(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float]:
         """
@@ -1175,11 +1208,14 @@ class GegenbauerFilterCompiler:
             h0_float, factor_diag = self.spectral_factor_power_polynomial(p_taps, target_N=spec.order, mode=self.factor_mode)
             rel_coeff_res = factor_diag.coefficient_residual / max(1.0, float(np.max(np.abs(p_taps))))
             rel_freq_res = factor_diag.frequency_residual / max(1.0, float(factor_diag.positivity_max))
-            factorization_certified = bool(
-                factor_diag.finite and
-                factor_diag.factor_degree == (spec.order - 1) and
-                rel_coeff_res <= 1e-2 and
-                rel_freq_res <= 1e-2
+            factorization_certified = self.certify_factorization_diagnostics(
+                is_finite=factor_diag.finite,
+                actual_degree=factor_diag.actual_degree,
+                target_degree=spec.order - 1,
+                coeff_res_rel=rel_coeff_res,
+                freq_res_rel=rel_freq_res,
+                imag_res=factor_diag.factor_imaginary_residual,
+                min_P=factor_diag.positivity_min
             )
             h0_quant = self.quantize_taps(h0_float)
 
@@ -1322,7 +1358,10 @@ class GegenbauerFilterCompiler:
             e_implementation=0.0
         )
 
-        basis_asymptotic_validated = (self.asymptotic_mode != "none" and asymp_err < 0.05)
+        if self.asymptotic_mode == "none":
+            basis_asymptotic_validated = True
+        else:
+            basis_asymptotic_validated = bool(asymp_err < 0.05)
         # Separate design target metrics from prototype FIR specification thresholds
         pass_ripple_thresh = spec.passband_ripple_db * 3.0 if spec.kind in ("qmf", "asymmetric_qmf") else spec.passband_ripple_db * 2.0
         prototype_fir_certified = (
@@ -1547,6 +1586,7 @@ class GegenbauerFilterCompiler:
                             current_g0_roots + r_list * (mult - k)
                         )
 
+        # Use degree-bounded branch & bound pruning search
         search_allocations(0, 0, [], [])
 
         if not allocations:
@@ -1622,8 +1662,11 @@ class GegenbauerFilterCompiler:
         alias_complex = H0_neg * G0_f + H1_neg * G1_f
         alias_residual = float(np.max(np.abs(alias_complex)))
 
-        h1_qmf_res = float(np.max(np.abs(H1_f - np.roll(np.conj(G0_f), K_fft // 2))))
-        g1_qmf_res = float(np.max(np.abs(G1_f - np.roll(np.conj(H0_f), K_fft // 2))))
+        # Structural frequency domain relations H1(w) = G0(w+pi) and G1(w) = -H0(w+pi)
+        G0_shift = np.roll(G0_f, K_fft // 2)
+        H0_shift = np.roll(H0_f, K_fft // 2)
+        h1_qmf_res = float(np.max(np.abs(H1_f - G0_shift)))
+        g1_qmf_res = float(np.max(np.abs(G1_f + H0_shift)))
 
         return {
             "H0": self.quantize_taps(h0_taps),
