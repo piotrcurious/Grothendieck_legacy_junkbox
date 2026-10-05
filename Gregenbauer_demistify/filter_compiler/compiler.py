@@ -294,9 +294,12 @@ class FilterResult:
             f"Truth Status Topology: {self.payload.truth_status.value}",
             f"Asymptotic Matching Certification: {self.payload.matching_status.value}",
             f"Certifications: Basis={self.payload.basis_asymptotic_validated} | Prototype={self.payload.prototype_fir_certified}"
-            f" | QMF Power={self.payload.qmf_power_complementary} | QMF Alias={self.payload.qmf_alias_cancellation} | Total={self.payload.is_certified}",
+            f" | QMF Power={self.payload.qmf_power_complementary} | QMF Alias={self.payload.qmf_alias_cancellation}"
+            f" | Factorization={self.payload.factorization_certified} | Total={self.payload.is_certified}",
             f"Passband Ripple: {self.passband_ripple_actual:.4f} dB | Stopband Attenuation: {self.stopband_atten_actual:.2f} dB",
         ]
+        if self.factorization is not None:
+            lines.append(f"Factorization Mode: {self.factorization.mode.value} | Coeff Residual: {self.factorization.coefficient_residual:.6e} | Freq Residual: {self.factorization.frequency_residual:.6e}")
         if self.spec.kind in ("qmf", "asymmetric_qmf"):
             lines.append(f"QMF Power Complementarity Peak Ripple: {self.qmf_power_complementarity_max_db:.4f} dB")
             lines.append(f"QMF Peak Alias Distortion: {self.qmf_alias_distortion_max_db:.2f} dB")
@@ -319,7 +322,7 @@ class GegenbauerFilterCompiler:
         mu_reg: float = 1e-4,
         reg_power: int = 1,
         asymptotic_mode: str = "auto",
-        factor_mode: FactorMode = FactorMode.CEPSTRAL_APPROX,
+        factor_mode: FactorMode = FactorMode.STRUCTURED_CHEBYSHEV,
         grid_samples: int = 2048,
         precision: PrecisionType = PrecisionType.FLOAT64
     ):
@@ -588,7 +591,8 @@ class GegenbauerFilterCompiler:
         b_even_err = float(np.sum(np.abs(b_harmonics[2::2]))) if len(b_harmonics) > 2 else 0.0
         max_hb_err = float(abs(2.0 * b_harmonics[0] - 1.0) + b_even_err)
 
-        is_valid = (min_P >= -1e-3) and (max_hb_err <= 1e-4)
+        tau_P = 1e-4 * max(1.0, abs(max_P))
+        is_valid = (min_P >= -tau_P) and (max_hb_err <= 1e-4)
         return is_valid, min_P, max_P, max_hb_err
 
     def _compute_factorization_diagnostics(
@@ -791,19 +795,21 @@ class GegenbauerFilterCompiler:
         self,
         p_taps: np.ndarray,
         target_N: int,
-        mode: FactorMode = FactorMode.CEPSTRAL_APPROX
+        mode: FactorMode = FactorMode.STRUCTURED_CHEBYSHEV
     ) -> Tuple[np.ndarray, FactorizationDiagnostics]:
         """
         Spectrally factors positive half-band power polynomial P(z) into minimum-phase factor H0(z) of length target_N.
         Dispatches to Structured Chebyshev x-domain root lifting, Cepstral approximation, or Reference Root backends.
         Returns (h0_taps, diagnostics).
         """
-        if mode in (FactorMode.CEPSTRAL_APPROX, FactorMode.FEJER_RIESZ if hasattr(FactorMode, 'FEJER_RIESZ') else None):
+        if mode == FactorMode.STRUCTURED_CHEBYSHEV:
+            h0, _ = self.factor_by_chebyshev_roots(p_taps, target_N)
+        elif mode == FactorMode.CEPSTRAL_APPROX:
             h0, _ = self.spectral_factor_fejer_riesz(p_taps, target_N)
         elif mode == FactorMode.REFERENCE_ROOTS:
             h0, _ = self.factor_by_roots_reference(p_taps, target_N)
-        else: # Default FactorMode.STRUCTURED_CHEBYSHEV
-            h0, _ = self.factor_by_chebyshev_roots(p_taps, target_N)
+        else:
+            raise ValueError(f"Unknown FactorMode: '{mode}'")
 
         diag = self._compute_factorization_diagnostics(h0, p_taps, mode=mode)
         return h0, diag
@@ -1109,16 +1115,21 @@ class GegenbauerFilterCompiler:
         if spec.kind in ("qmf", "asymmetric_qmf"):
             # Direct QMF compilation route via half-band power polynomial and spectral factorization
             a_coeffs, p_taps, K, cond_val, res_aug, res_data, res_reg = self.solve_halfband_power_polynomial(spec)
-            _, min_P, max_P, _ = self.validate_power_polynomial(p_taps)
-            if min_P < -0.05:
-                raise ValueError(f"Half-band power response min P = {min_P:.4f} < -0.05 is not spectrally factorizable.")
+            power_valid, min_P, max_P, hb_err = self.validate_power_polynomial(p_taps)
+            if not power_valid:
+                raise ValueError(
+                    f"Invalid half-band power polynomial: min P = {min_P:.3e}, max P = {max_P:.3e}, "
+                    f"halfband_error = {hb_err:.3e} exceeds positivity/complementarity tolerance."
+                )
 
             h0_float, factor_diag = self.spectral_factor_power_polynomial(p_taps, target_N=spec.order, mode=self.factor_mode)
+            rel_coeff_res = factor_diag.coefficient_residual / max(1.0, float(np.max(np.abs(p_taps))))
+            rel_freq_res = factor_diag.frequency_residual / max(1.0, float(factor_diag.positivity_max))
             factorization_certified = bool(
                 factor_diag.finite and
                 factor_diag.factor_degree == (spec.order - 1) and
-                factor_diag.coefficient_residual <= 1e-2 and
-                factor_diag.frequency_residual <= 1e-2
+                rel_coeff_res <= 1e-2 and
+                rel_freq_res <= 1e-2
             )
             h0_quant = self.quantize_taps(h0_float)
 
@@ -1349,10 +1360,12 @@ class GegenbauerFilterCompiler:
 
     def compile_biorthogonal_pair(self, order_h0: int, order_g0: int, cutoff: float = 0.25) -> dict:
         """
-        Compiles a Biorthogonal filter bank pair (H0, G0) via Gegenbauer half-band product filter factorization.
-        Uses global canonical root orbits (conjugate & reciprocal closure) and exact DP subset-sum root partitioning.
-        Preserves exact H0(z) G0(z) = P(z) product scaling without uncoordinated independent normalizations.
-        Requires odd PR delay (order_h0 + order_g0 = 2 mod 4) for standard 2-channel linear-phase half-band PR.
+        Compiles a Biorthogonal filter bank pair (H0, G0) of polynomial degrees order_h0 and order_g0.
+        Uses Gegenbauer half-band product filter factorization.
+        The product filter E(z) = H0(z) G0(z) = 2 z^-d P_c(z) where P_c(z) is the centered half-band
+        Laurent polynomial satisfying P_c(z) + P_c(-z) = 1.
+        For odd delay d = (order_h0 + order_g0) // 2, E(z) - E(-z) = 2 z^-d (P_c(z) + P_c(-z)) = 2 z^-d (exact PR delay).
+        Requires odd PR delay (order_h0 + order_g0 == 2 mod 4) for standard 2-channel linear-phase half-band PR.
         """
         total_order = order_h0 + order_g0
         if total_order % 2 != 0:

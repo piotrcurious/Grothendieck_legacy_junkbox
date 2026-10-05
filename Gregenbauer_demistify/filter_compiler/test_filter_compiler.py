@@ -172,7 +172,7 @@ def test_bandpass_compilation():
 def test_qmf_pair_compilation():
     """Tests QMF complementary filter bank synthesis, canonical mirror taps, and aliasing distortion metrics."""
     spec = FilterSpec(kind="qmf", order=64, cutoff=0.25)
-    compiler = GegenbauerFilterCompiler(lam=1.25, solver="spectral_regularized", mu_reg=1e-4)
+    compiler = GegenbauerFilterCompiler(lam=1.25, solver="spectral_regularized", mu_reg=1e-4, factor_mode=FactorMode.CEPSTRAL_APPROX)
     result = compiler.compile(spec)
 
     assert result.h1_taps is not None
@@ -333,6 +333,15 @@ def test_halfband_power_polynomial_and_factorization():
     h0_fact, diag = compiler.spectral_factor_power_polynomial(p_taps, target_N=32)
     assert len(h0_fact) == 32
     assert diag.coefficient_residual < 1e-3
+
+
+def test_invalid_power_polynomial_rejection():
+    """Verifies that validate_power_polynomial rejects non-positive power polynomials."""
+    compiler = GegenbauerFilterCompiler()
+    p_taps_bad = np.array([-1.0, 0.5, -1.0])
+    is_valid, min_P, max_P, max_hb_err = compiler.validate_power_polynomial(p_taps_bad)
+    assert is_valid is False
+    assert min_P < -0.1
 
 
 def test_spectral_factorization_backends():
