@@ -103,6 +103,7 @@ class CertifiedEvaluationPayload:
     prototype_fir_certified: bool = True
     qmf_power_complementary: bool = True
     qmf_alias_cancellation: bool = True
+    factorization_certified: bool = True
     is_certified: bool = True
 
 
@@ -265,6 +266,7 @@ class FilterResult:
     mu_reg: float
     h0_taps: QuantizedTaps
     payload: CertifiedEvaluationPayload
+    factorization: Optional[FactorizationDiagnostics] = None
     h1_taps: Optional[QuantizedTaps] = None
     spectral_design: Optional[GegenbauerSpectralDesign] = None
     freq_grid: np.ndarray = field(default_factory=lambda: np.array([]))
@@ -538,6 +540,9 @@ class GegenbauerFilterCompiler:
         over = max(0.0, -min_P, max_P - 1.0)
         if over > 1e-12:
             scale_factor = 0.5 / (0.5 + over)
+            a_odd *= scale_factor
+            a_coeffs *= scale_factor
+            res_reg = float(np.linalg.norm(R_mat @ a_odd) / max(np.linalg.norm(D_w), 1e-15))
             for m in range(1, M + 1):
                 if m % 2 != 0:
                     p_taps[center - m] *= scale_factor
@@ -551,22 +556,37 @@ class GegenbauerFilterCompiler:
 
     def validate_power_polynomial(self, p_taps: np.ndarray, grid_size: int = 2048) -> Tuple[bool, float, float, float]:
         """
-        Validates half-band power polynomial P(z).
+        Validates half-band power polynomial P(z) using exact Chebyshev critical point evaluation.
+        Evaluates P(x) at endpoints x = +-1 and all real derivative roots P'(x) = 0 in [-1, 1].
         Returns (is_valid, min_P, max_P, max_halfband_err).
-        Checks P(w) >= 0 and P(w) + P(w + pi) = 1.
         """
-        K_fft = max(4096, grid_size)
         center = (len(p_taps) - 1) // 2
-        w = 2.0 * np.pi * np.arange(K_fft) / float(K_fft)
-        P_w = np.zeros(K_fft, dtype=np.float64)
-        for n, val in enumerate(p_taps):
-            P_w += val * np.cos((n - center) * w)
+        M = center
 
-        min_P = float(np.min(P_w))
-        max_P = float(np.max(P_w))
+        b_harmonics = np.zeros(M + 1, dtype=np.float64)
+        b_harmonics[0] = p_taps[center]
+        for m in range(1, M + 1):
+            if center + m < len(p_taps):
+                b_harmonics[m] = 2.0 * p_taps[center + m]
 
-        P_shift = np.roll(P_w, K_fft // 2)
-        max_hb_err = float(np.max(np.abs(P_w + P_shift - 1.0)))
+        # Compute Chebyshev derivative P'(x)
+        b_der = np.polynomial.chebyshev.chebder(b_harmonics)
+        crit_pts = [-1.0, 1.0]
+
+        if len(b_der) > 0:
+            crit_roots = np.polynomial.chebyshev.chebroots(b_der)
+            for r in crit_roots:
+                if abs(np.imag(r)) < 1e-6 and -1.0 <= r.real <= 1.0:
+                    crit_pts.append(float(r.real))
+
+        # Evaluate P(x) at endpoints and critical points
+        vals = np.polynomial.chebyshev.chebval(crit_pts, b_harmonics)
+        min_P = float(np.min(vals))
+        max_P = float(np.max(vals))
+
+        # Coefficient-domain half-band complementarity check: P(-x) + P(x) = 1
+        b_even_err = float(np.sum(np.abs(b_harmonics[2::2]))) if len(b_harmonics) > 2 else 0.0
+        max_hb_err = float(abs(2.0 * b_harmonics[0] - 1.0) + b_even_err)
 
         is_valid = (min_P >= -1e-3) and (max_hb_err <= 1e-4)
         return is_valid, min_P, max_P, max_hb_err
@@ -608,9 +628,8 @@ class GegenbauerFilterCompiler:
 
     def spectral_factor_fejer_riesz(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float]:
         """
-        Fejér-Riesz spectral factorization via real cepstral log-spectrum decomposition.
-        Operates directly on positive trigonometric power polynomial P(w) >= 0.
-        Guarantees minimum-phase real FIR factor H0(z) of degree M = target_N - 1.
+        Constructs an FFT/cepstrum approximation to the minimum-phase spectral factor and truncates it to target_N taps.
+        Operates on positive trigonometric power polynomial P(w) >= 0.
         Returns (h0_taps, residual).
         """
         M = target_N - 1
@@ -654,9 +673,10 @@ class GegenbauerFilterCompiler:
 
     def factor_by_chebyshev_roots(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float]:
         """
-        Structured Chebyshev x-domain root factorization.
+        Structured Chebyshev x-domain root factorization with unit-circle conjugate pairing.
         Converts P(z) = b0 + sum_{m=1}^M b_m T_m(x) into degree-M polynomial in x = cos(w).
         Finds degree-M roots in x and lifts z_j = x_j - sqrt(x_j^2 - 1) to enforce exact reciprocal symmetry.
+        Symmetrically pairs unit-circle roots x in [-1, 1] as e^{j theta} and e^{-j theta} to preserve real FIR taps.
         Returns (h0_taps, residual).
         """
         M = target_N - 1
@@ -672,14 +692,34 @@ class GegenbauerFilterCompiler:
         # Chebyshev roots in x = cos(w)
         x_roots = np.polynomial.chebyshev.chebroots(b_harmonics)
 
-        # Lift x_roots to z_roots in unit circle |z| <= 1
+        # Lift x_roots to z_roots in unit circle |z| <= 1 with conjugate pairing for interior x roots
         z_inside = []
-        for x_val in x_roots:
+        unit_x = [x for x in x_roots if abs(np.imag(x)) < 1e-6 and -1.0 - 1e-4 <= x.real <= 1.0 + 1e-4]
+        off_x = [x for x in x_roots if x not in unit_x]
+
+        # Process off-unit-circle roots
+        for x_val in off_x:
             disc = np.sqrt(x_val**2 - 1.0 + 0j)
             z1 = x_val - disc
             z2 = x_val + disc
             z_sel = z1 if abs(z1) <= 1.0 + 1e-4 else z2
             z_inside.append(z_sel)
+
+        # Process unit-circle roots x in [-1, 1] as conjugate pairs e^{+-j theta}
+        unit_reals = sorted([np.clip(x.real, -1.0, 1.0) for x in unit_x])
+        u_idx = 0
+        while u_idx < len(unit_reals):
+            xr = unit_reals[u_idx]
+            theta = np.arccos(xr)
+            if u_idx + 1 < len(unit_reals) and abs(unit_reals[u_idx + 1] - xr) < 1e-3:
+                # Pair double root as e^{+j theta} and e^{-j theta}
+                z_inside.append(np.exp(1j * theta))
+                z_inside.append(np.exp(-1j * theta))
+                u_idx += 2
+            else:
+                disc = np.sqrt(xr**2 - 1.0 + 0j)
+                z_inside.append(xr - disc)
+                u_idx += 1
 
         h0 = np.poly(z_inside).real
         r_h0 = np.convolve(h0, h0[::-1])
@@ -1063,6 +1103,9 @@ class GegenbauerFilterCompiler:
     def compile(self, spec: FilterSpec) -> FilterResult:
         truth_status = determine_truth_status(self.lam)
 
+        factor_diag = None
+        factorization_certified = True
+
         if spec.kind in ("qmf", "asymmetric_qmf"):
             # Direct QMF compilation route via half-band power polynomial and spectral factorization
             a_coeffs, p_taps, K, cond_val, res_aug, res_data, res_reg = self.solve_halfband_power_polynomial(spec)
@@ -1070,7 +1113,13 @@ class GegenbauerFilterCompiler:
             if min_P < -0.05:
                 raise ValueError(f"Half-band power response min P = {min_P:.4f} < -0.05 is not spectrally factorizable.")
 
-            h0_float, _ = self.spectral_factor_power_polynomial(p_taps, target_N=spec.order, mode=self.factor_mode)
+            h0_float, factor_diag = self.spectral_factor_power_polynomial(p_taps, target_N=spec.order, mode=self.factor_mode)
+            factorization_certified = bool(
+                factor_diag.finite and
+                factor_diag.factor_degree == (spec.order - 1) and
+                factor_diag.coefficient_residual <= 1e-2 and
+                factor_diag.frequency_residual <= 1e-2
+            )
             h0_quant = self.quantize_taps(h0_float)
 
             # Derive H1 directly via CQF modulation h1[n] = (-1)^n * h0[N-1-n]
@@ -1236,7 +1285,8 @@ class GegenbauerFilterCompiler:
             basis_asymptotic_validated and
             prototype_fir_certified and
             qmf_power_complementary and
-            qmf_alias_cancellation
+            qmf_alias_cancellation and
+            factorization_certified
         )
 
         payload = CertifiedEvaluationPayload(
@@ -1247,6 +1297,7 @@ class GegenbauerFilterCompiler:
             prototype_fir_certified=prototype_fir_certified,
             qmf_power_complementary=qmf_power_complementary,
             qmf_alias_cancellation=qmf_alias_cancellation,
+            factorization_certified=factorization_certified,
             is_certified=is_certified
         )
 
@@ -1274,6 +1325,7 @@ class GegenbauerFilterCompiler:
             mu_reg=self.mu_reg,
             h0_taps=h0_quant,
             payload=payload,
+            factorization=factor_diag,
             h1_taps=h1_quant,
             spectral_design=spectral_design,
             freq_grid=freq_grid,
@@ -1569,9 +1621,9 @@ class GegenbauerFilterCompiler:
             H1_shift = np.roll(H1, K_fft // 2)
 
             pow_comp = np.abs(H0)**2 + np.abs(H1)**2
-            aliasing_func = 0.5 * np.abs(H0 * H0_shift - H1 * H1_shift)
+            alias_transfer = qmf_alias_transfer(H0, H1)
             pow_db = 10 * np.log10(np.maximum(1e-12, pow_comp[:len(result.freq_grid)]))
-            alias_db = 20 * np.log10(np.maximum(1e-12, aliasing_func[:len(result.freq_grid)]))
+            alias_db = 20 * np.log10(np.maximum(1e-12, np.abs(alias_transfer[:len(result.freq_grid)])))
 
             plt.plot(result.freq_grid, pow_db, 'g-', label='Power Complementarity $|H_0|^2 + |H_1|^2$', linewidth=2)
             plt.plot(result.freq_grid, alias_db, 'm--', label='Alias Transfer $A(e^{j\\omega})$', linewidth=1.5)

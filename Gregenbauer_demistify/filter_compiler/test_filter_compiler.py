@@ -190,7 +190,9 @@ def test_qmf_pair_compilation():
     assert result.qmf_power_complementarity_max_db < 1.0
     assert result.qmf_alias_distortion_max_db < -30.0
 
-    # Verify certification flags
+    # Verify certification flags and factorization diagnostics
+    assert result.factorization is not None
+    assert result.payload.factorization_certified is True
     assert result.payload.qmf_power_complementary is True
     assert result.payload.qmf_alias_cancellation is True
     assert result.payload.is_certified is True
