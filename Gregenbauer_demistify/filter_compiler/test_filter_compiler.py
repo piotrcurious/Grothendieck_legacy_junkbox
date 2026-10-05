@@ -24,7 +24,8 @@ from filter_compiler.compiler import (
     FilterResult,
     GegenbauerFilterCompiler,
     SymmetryClass,
-    FactorMode
+    FactorMode,
+    FactorizationDiagnostics
 )
 
 
@@ -148,7 +149,7 @@ def test_highpass_compilation():
     taps = result.h0_taps.float64_taps
     assert len(taps) == 33
 
-    # Verify symmetry
+    # Verify symmetry for Type I odd N highpass: h[n] == h[N-1-n]
     np.testing.assert_allclose(taps, taps[::-1], atol=1e-12)
 
     # Verify Nyquist gain (sum(h * (-1)^n) == 1.0)
@@ -324,34 +325,40 @@ def test_halfband_power_polynomial_and_factorization():
 
     is_valid, min_P, max_P, max_hb_err = compiler.validate_power_polynomial(p_taps)
     assert is_valid is True
-    assert min_P >= -0.05
+    assert min_P >= -1e-3
     assert max_hb_err < 1e-4
 
-    h0_fact, recip_err = compiler.spectral_factor_power_polynomial(p_taps, target_N=32)
+    h0_fact, diag = compiler.spectral_factor_power_polynomial(p_taps, target_N=32)
     assert len(h0_fact) == 32
-    assert recip_err < 1e-3
+    assert diag.coefficient_residual < 1e-3
 
 
 def test_spectral_factorization_backends():
-    """Tests Fejér-Riesz, Structured Chebyshev x-domain root lifting, and Reference Roots factorizations."""
+    """Tests Structured Chebyshev x-domain root lifting, Cepstral approximation, and Reference Roots factorizations."""
     spec = FilterSpec(kind="qmf", order=32, cutoff=0.25)
     compiler = GegenbauerFilterCompiler(lam=1.5)
     _, p_taps, _, _, _, _, _ = compiler.solve_halfband_power_polynomial(spec)
 
-    # 1. Production Fejér-Riesz Minimum-Phase Cepstral Factorization
-    h0_fr, res_fr = compiler.spectral_factor_power_polynomial(p_taps, target_N=32, mode=FactorMode.FEJER_RIESZ)
-    assert len(h0_fr) == 32
-    assert res_fr < 1e-4
-
-    # 2. Structured Chebyshev x-domain Root Lifting Factorization
-    h0_cheb, res_cheb = compiler.spectral_factor_power_polynomial(p_taps, target_N=32, mode=FactorMode.STRUCTURED_CHEBYSHEV)
+    # 1. Production Structured Chebyshev x-domain Root Lifting Factorization
+    h0_cheb, diag_cheb = compiler.spectral_factor_power_polynomial(p_taps, target_N=32, mode=FactorMode.STRUCTURED_CHEBYSHEV)
+    assert isinstance(diag_cheb, FactorizationDiagnostics)
     assert len(h0_cheb) == 32
-    assert res_cheb < 0.5
+    assert diag_cheb.finite is True
+    assert diag_cheb.coefficient_residual < 0.5
+
+    # 2. Cepstral Minimum-Phase Log-Spectrum Approximation
+    h0_cep, diag_cep = compiler.spectral_factor_power_polynomial(p_taps, target_N=32, mode=FactorMode.CEPSTRAL_APPROX)
+    assert isinstance(diag_cep, FactorizationDiagnostics)
+    assert len(h0_cep) == 32
+    assert diag_cep.finite is True
+    assert diag_cep.coefficient_residual < 1e-4
 
     # 3. Reference Roots Monomial Factorization
-    h0_ref, res_ref = compiler.spectral_factor_power_polynomial(p_taps, target_N=32, mode=FactorMode.REFERENCE_ROOTS)
+    h0_ref, diag_ref = compiler.spectral_factor_power_polynomial(p_taps, target_N=32, mode=FactorMode.REFERENCE_ROOTS)
+    assert isinstance(diag_ref, FactorizationDiagnostics)
     assert len(h0_ref) == 32
-    assert res_ref < 1e-3
+    assert diag_ref.finite is True
+    assert diag_ref.coefficient_residual < 1e-3
 
 
 def test_quantization_formats():
