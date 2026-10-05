@@ -72,12 +72,31 @@ class FactorMode(Enum):
 class FactorizationDiagnostics:
     """Layer VIII Spectral Factorization Quality & Invariant Diagnostics."""
     mode: FactorMode
-    coefficient_residual: float  # max_k |p_k - (h * h_rev)_k|
-    frequency_residual: float    # max_w ||H(e^{jw})|^2 - P(e^{jw})|
-    positivity_min: float        # min P(w)
-    positivity_max: float        # max P(w)
-    factor_degree: int           # Degree M = target_N - 1
+    target_degree: int
+    actual_degree: int
+    coefficient_residual_abs: float
+    coefficient_residual_rel: float
+    frequency_residual_abs: float
+    frequency_residual_rel: float
+    factor_imaginary_residual: float
+    positivity_min: float
+    positivity_max: float
+    halfband_residual: float
+    zero_on_unit_circle_count: int
     finite: bool
+    certified: bool
+
+    @property
+    def coefficient_residual(self) -> float:
+        return self.coefficient_residual_abs
+
+    @property
+    def frequency_residual(self) -> float:
+        return self.frequency_residual_abs
+
+    @property
+    def factor_degree(self) -> int:
+        return self.target_degree
 
 
 @dataclass
@@ -474,7 +493,8 @@ class GegenbauerFilterCompiler:
         N = spec.order       # N taps for H0
         M = N - 1            # Degree of H0 = N - 1
         center = M           # Center tap index of P(z) = M (length 2M + 1)
-        K = (M + 1) // 2     # Max Gegenbauer odd terms <= M (Fourier harmonics <= M)
+        K_full = (M + 1) // 2
+        K = min(K_full, self.basis_terms) if self.basis_terms is not None else K_full
 
         nodes, weights = gauss_gegenbauer_quadrature(self.grid_samples, self.lam)
         omega_q = np.arccos(nodes)
@@ -597,14 +617,22 @@ class GegenbauerFilterCompiler:
 
     def _compute_factorization_diagnostics(
         self,
-        h0: np.ndarray,
+        h0_complex: np.ndarray,
         p_taps: np.ndarray,
         mode: FactorMode
-    ) -> FactorizationDiagnostics:
-        M = len(h0) - 1
+    ) -> Tuple[np.ndarray, FactorizationDiagnostics]:
+        imag_res = float(np.max(np.abs(np.imag(h0_complex)))) if np.iscomplexobj(h0_complex) else 0.0
+        h0 = np.real(h0_complex)
+
+        M_target = len(h0) - 1
         center = (len(p_taps) - 1) // 2
+
+        # Exact Chebyshev critical-point validation
+        _, min_P, max_P, hb_err = self.validate_power_polynomial(p_taps)
+
         r_fact = np.convolve(h0, h0[::-1])
-        coeff_res = float(np.max(np.abs(r_fact - p_taps)))
+        coeff_res_abs = float(np.max(np.abs(r_fact - p_taps)))
+        coeff_res_rel = coeff_res_abs / max(1.0, float(np.max(np.abs(p_taps))))
 
         K_fft = 4096
         w = 2.0 * np.pi * np.arange(K_fft) / float(K_fft)
@@ -614,23 +642,40 @@ class GegenbauerFilterCompiler:
 
         H0_f = np.fft.fft(h0, K_fft)
         H0_pow = np.abs(H0_f)**2
-        freq_res = float(np.max(np.abs(H0_pow - P_w)))
+        freq_res_abs = float(np.max(np.abs(H0_pow - P_w)))
+        freq_res_rel = freq_res_abs / max(1.0, float(max_P))
 
-        min_P = float(np.min(P_w))
-        max_P = float(np.max(P_w))
-        is_finite = bool(np.all(np.isfinite(h0)) and np.isfinite(coeff_res) and np.isfinite(freq_res))
+        non_zero = np.where(np.abs(h0) > 1e-12)[0]
+        actual_deg = int(non_zero[-1] - non_zero[0]) if len(non_zero) > 1 else M_target
 
-        return FactorizationDiagnostics(
-            mode=mode,
-            coefficient_residual=coeff_res,
-            frequency_residual=freq_res,
-            positivity_min=min_P,
-            positivity_max=max_P,
-            factor_degree=M,
-            finite=is_finite
+        is_finite = bool(np.all(np.isfinite(h0)) and np.isfinite(coeff_res_abs) and np.isfinite(freq_res_abs))
+        certified = bool(
+            is_finite and
+            coeff_res_rel <= 1e-2 and
+            freq_res_rel <= 1e-2 and
+            imag_res <= 1e-6 and
+            min_P >= -1e-3
         )
 
-    def spectral_factor_fejer_riesz(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float]:
+        diag = FactorizationDiagnostics(
+            mode=mode,
+            target_degree=M_target,
+            actual_degree=actual_deg,
+            coefficient_residual_abs=coeff_res_abs,
+            coefficient_residual_rel=coeff_res_rel,
+            frequency_residual_abs=freq_res_abs,
+            frequency_residual_rel=freq_res_rel,
+            factor_imaginary_residual=imag_res,
+            positivity_min=min_P,
+            positivity_max=max_P,
+            halfband_residual=hb_err,
+            zero_on_unit_circle_count=0,
+            finite=is_finite,
+            certified=certified
+        )
+        return h0, diag
+
+    def spectral_factor_cepstral(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float]:
         """
         Constructs an FFT/cepstrum approximation to the minimum-phase spectral factor and truncates it to target_N taps.
         Operates on positive trigonometric power polynomial P(w) >= 0.
@@ -726,6 +771,9 @@ class GegenbauerFilterCompiler:
                 u_idx += 1
 
         h0 = np.poly(z_inside).real
+        if len(h0) < target_N:
+            h0 = np.pad(h0, (0, target_N - len(h0)), mode='constant')
+
         r_h0 = np.convolve(h0, h0[::-1])
         scale = np.sqrt(max(1e-15, p_taps[center] / max(1e-15, r_h0[len(r_h0) // 2])))
         h0 *= scale
@@ -803,15 +851,15 @@ class GegenbauerFilterCompiler:
         Returns (h0_taps, diagnostics).
         """
         if mode == FactorMode.STRUCTURED_CHEBYSHEV:
-            h0, _ = self.factor_by_chebyshev_roots(p_taps, target_N)
+            h0_raw, _ = self.factor_by_chebyshev_roots(p_taps, target_N)
         elif mode == FactorMode.CEPSTRAL_APPROX:
-            h0, _ = self.spectral_factor_fejer_riesz(p_taps, target_N)
+            h0_raw, _ = self.spectral_factor_cepstral(p_taps, target_N)
         elif mode == FactorMode.REFERENCE_ROOTS:
-            h0, _ = self.factor_by_roots_reference(p_taps, target_N)
+            h0_raw, _ = self.factor_by_roots_reference(p_taps, target_N)
         else:
             raise ValueError(f"Unknown FactorMode: '{mode}'")
 
-        diag = self._compute_factorization_diagnostics(h0, p_taps, mode=mode)
+        h0, diag = self._compute_factorization_diagnostics(h0_raw, p_taps, mode=mode)
         return h0, diag
 
     def solve_qmf_power_coefficients(self, spec: FilterSpec) -> Tuple[np.ndarray, int, float, float, float, float]:
