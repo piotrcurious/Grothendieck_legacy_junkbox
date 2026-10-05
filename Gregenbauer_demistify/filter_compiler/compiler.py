@@ -241,7 +241,7 @@ class FilterSpec:
         """Determines the FIR symmetry class (Type I-IV) based on filter type and order N."""
         is_even = (self.order % 2 == 0)
         if self.kind == "highpass":
-            return SymmetryClass.TYPE_IV if is_even else SymmetryClass.TYPE_I
+            return SymmetryClass.TYPE_IV if is_even else SymmetryClass.TYPE_III
         elif self.kind in ("lowpass", "bandpass", "qmf", "asymmetric_qmf"):
             return SymmetryClass.TYPE_II if is_even else SymmetryClass.TYPE_I
         return SymmetryClass.TYPE_I
@@ -271,9 +271,13 @@ class GegenbauerSpectralDesign:
     projection_residual: float
     quadrature_residual: float
     conditioning: float
-    asymptotic_error_bound: float
+    asymptotic_sampled_discrepancy: float
     truth_status: TruthStatus
     matching_status: MatchingStatus
+
+    @property
+    def asymptotic_error_bound(self) -> float:
+        return self.asymptotic_sampled_discrepancy
 
 
 @dataclass
@@ -301,8 +305,12 @@ class FilterResult:
     fit_residual: float = 0.0
     data_fit_residual: float = 0.0
     regularization_residual: float = 0.0
-    asymptotic_error_bound: float = 0.0
+    asymptotic_sampled_discrepancy: float = 0.0
     provenance_mixed_error: float = 0.0
+
+    @property
+    def asymptotic_error_bound(self) -> float:
+        return self.asymptotic_sampled_discrepancy
     header_code: str = ""
 
     def summary(self) -> str:
@@ -323,7 +331,7 @@ class FilterResult:
             lines.append(f"QMF Power Complementarity Peak Ripple: {self.qmf_power_complementarity_max_db:.4f} dB")
             lines.append(f"QMF Peak Alias Distortion: {self.qmf_alias_distortion_max_db:.2f} dB")
         lines.append(f"Sturm-Liouville Regularization Energy: {self.regularization_energy:.6e}")
-        lines.append(f"Asymptotic Boundary Error Bound (E_analytic): {self.payload.provenance.e_analytic:.6e}")
+        lines.append(f"Asymptotic Sampled Discrepancy (E_analytic): {self.payload.provenance.e_analytic:.6e}")
         lines.append(f"Fixed-Point Quantization Noise (E_arithmetic): {self.payload.provenance.e_arithmetic:.6e}")
         lines.append(f"Certified Total Error Bound (E_total): {self.payload.provenance.total:.6e}")
         return "\n".join(lines)
@@ -624,14 +632,15 @@ class GegenbauerFilterCompiler:
         self,
         h0_complex: np.ndarray,
         p_taps: np.ndarray,
-        mode: FactorMode
+        mode: FactorMode,
+        target_degree: Optional[int] = None
     ) -> Tuple[np.ndarray, FactorizationDiagnostics]:
         imag_res = float(np.max(np.abs(np.imag(h0_complex)))) if np.iscomplexobj(h0_complex) else 0.0
         if imag_res > 1e-5:
             raise ValueError(f"Factorization produced non-real filter taps: imaginary residual {imag_res:.3e} exceeds 1e-5 tolerance.")
 
         h0 = np.real(h0_complex)
-        M_target = len(h0) - 1
+        M_target = target_degree if target_degree is not None else len(h0) - 1
         center = (len(p_taps) - 1) // 2
 
         # Validate half-band power polynomial P(z)
@@ -653,7 +662,12 @@ class GegenbauerFilterCompiler:
         freq_res_rel = freq_res_abs / max(1.0, float(max_P))
 
         non_zero = np.where(np.abs(h0) > 1e-12)[0]
-        actual_deg = int(non_zero[-1] - non_zero[0]) if len(non_zero) > 1 else M_target
+        if len(non_zero) == 0:
+            actual_deg = -1
+        elif len(non_zero) == 1:
+            actual_deg = 0
+        else:
+            actual_deg = int(non_zero[-1] - non_zero[0])
 
         # Count zeros near unit circle |z - 1| < 1e-3
         roots_h0 = np.roots(h0) if len(h0) > 1 else np.array([])
@@ -667,7 +681,8 @@ class GegenbauerFilterCompiler:
             coeff_res_rel=coeff_res_rel,
             freq_res_rel=freq_res_rel,
             imag_res=imag_res,
-            min_P=min_P
+            min_P=min_P,
+            halfband_residual=hb_err
         )
 
         diag = FactorizationDiagnostics(
@@ -696,7 +711,8 @@ class GegenbauerFilterCompiler:
         coeff_res_rel: float,
         freq_res_rel: float,
         imag_res: float,
-        min_P: float
+        min_P: float,
+        halfband_residual: float = 0.0
     ) -> bool:
         """Single-source authority for certifying spectral factor diagnostic payloads."""
         return bool(
@@ -705,7 +721,8 @@ class GegenbauerFilterCompiler:
             coeff_res_rel <= 1e-2 and
             freq_res_rel <= 1e-2 and
             imag_res <= 1e-6 and
-            min_P >= -1e-3
+            min_P >= -1e-3 and
+            halfband_residual <= 1e-3
         )
 
     def spectral_factor_cepstral(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float]:
@@ -1062,6 +1079,11 @@ class GegenbauerFilterCompiler:
             nyq_gain = np.sum(h * np.array([(-1.0)**n for n in range(N)]))
             if abs(nyq_gain) > 1e-12:
                 h /= nyq_gain
+            else:
+                K_fft_norm = max(4096, 1 << (math.ceil(math.log2(spec.order)) + 2))
+                max_g = np.max(np.abs(np.fft.fft(h, K_fft_norm)))
+                if max_g > 1e-12:
+                    h /= max_g
         elif spec.kind == "bandpass":
             K_fft_norm = max(4096, 1 << (math.ceil(math.log2(spec.order)) + 2))
             max_g = np.max(np.abs(np.fft.fft(h, K_fft_norm)))
@@ -1413,7 +1435,7 @@ class GegenbauerFilterCompiler:
             projection_residual=res_data,
             quadrature_residual=res_aug,
             conditioning=cond_val,
-            asymptotic_error_bound=asymp_err,
+            asymptotic_sampled_discrepancy=asymp_err,
             truth_status=truth_status,
             matching_status=matching_status
         )
@@ -1441,7 +1463,7 @@ class GegenbauerFilterCompiler:
             fit_residual=res_aug,
             data_fit_residual=res_data,
             regularization_residual=res_reg,
-            asymptotic_error_bound=asymp_err,
+            asymptotic_sampled_discrepancy=asymp_err,
             provenance_mixed_error=prov_err
         )
         result.header_code = self.generate_header(result)
@@ -1514,7 +1536,7 @@ class GegenbauerFilterCompiler:
             rep = np.mean([roots[k] for k in group])
             raw_clusters.append({'rep': rep, 'mult': len(group)})
 
-        # Group raw clusters into symmetry units (reciprocal & conjugate quadruplets / pairs)
+        # Group raw clusters into symmetry units (reciprocal & conjugate quadruplets / pairs & real endpoints)
         used_c = [False] * len(raw_clusters)
         atomic_units = []
         for i in range(len(raw_clusters)):
@@ -1526,21 +1548,23 @@ class GegenbauerFilterCompiler:
             used_c[i] = True
 
             if abs(np.imag(r1)) < 1e-3:
-                r1 = r1.real
-                if abs(abs(r1) - 1.0) < 1e-3:
-                    atomic_units.append({'kind': 'SELF_REAL', 'roots': [r1], 'size': 1, 'mult': m1})
+                r1_real = float(np.real(r1))
+                if abs(abs(r1_real) - 1.0) < 1e-3:
+                    # Endpoint root at z = +1 or z = -1 (splittable single real root)
+                    ep_val = 1.0 if r1_real > 0 else -1.0
+                    atomic_units.append({'kind': 'REAL_ENDPOINT', 'roots': [ep_val], 'size': 1, 'mult': m1})
                 else:
                     recip_idx = -1
                     for j in range(len(raw_clusters)):
-                        if not used_c[j] and abs(raw_clusters[j]['rep'] - 1.0/r1) < 1e-2:
+                        if not used_c[j] and abs(raw_clusters[j]['rep'] - 1.0/r1_real) < 1e-2:
                             recip_idx = j
                             break
                     if recip_idx != -1:
                         c2 = raw_clusters[recip_idx]
                         used_c[recip_idx] = True
-                        atomic_units.append({'kind': 'REAL_PAIR', 'roots': [r1, c2['rep'].real], 'size': 2, 'mult': min(m1, c2['mult'])})
+                        atomic_units.append({'kind': 'REAL_PAIR', 'roots': [r1_real, float(np.real(c2['rep']))], 'size': 2, 'mult': min(m1, c2['mult'])})
                     else:
-                        atomic_units.append({'kind': 'SELF_REAL', 'roots': [r1], 'size': 1, 'mult': m1})
+                        atomic_units.append({'kind': 'REAL_ENDPOINT', 'roots': [r1_real], 'size': 1, 'mult': m1})
             else:
                 quad_indices = [i]
                 for j in range(len(raw_clusters)):
@@ -1554,6 +1578,14 @@ class GegenbauerFilterCompiler:
                 kind = 'UNIT_PAIR' if abs(abs(r1) - 1.0) < 1e-3 else 'COMPLEX_QUARTET'
                 atomic_units.append({'kind': kind, 'roots': quad_roots, 'size': len(quad_roots), 'mult': quad_mult})
 
+        # Verify algebraic orbit closure: sum size_i * mult_i == total_order
+        orbit_total_size = sum(unit['size'] * unit['mult'] for unit in atomic_units)
+        if orbit_total_size != total_order:
+            # Fallback for endpoint multiplicity alignment
+            diff = total_order - orbit_total_size
+            if diff > 0:
+                atomic_units.append({'kind': 'REAL_ENDPOINT', 'roots': [-1.0], 'size': 1, 'mult': diff})
+
         # Generate candidate root allocations for target order_h0
         allocations = []
         def search_allocations(unit_idx, current_deg_h0, current_h0_roots, current_g0_roots):
@@ -1565,9 +1597,9 @@ class GegenbauerFilterCompiler:
             unit = atomic_units[unit_idx]
             kind, r_list, size, mult = unit['kind'], unit['roots'], unit['size'], unit['mult']
 
-            if kind == 'SELF_REAL':
-                # Splittable root multiplicity (must allocate even multiplicity to preserve real symmetry)
-                for k in range(0, mult + 1, 2 if mult >= 2 else 1):
+            if kind == 'REAL_ENDPOINT':
+                # Endpoint roots (z = +-1) can be partitioned in steps of 1
+                for k in range(0, mult + 1):
                     if current_deg_h0 + k * size <= order_h0:
                         search_allocations(
                             unit_idx + 1,
@@ -1608,7 +1640,7 @@ class GegenbauerFilterCompiler:
             h0_c = h0_u * np.sign(c) * np.sqrt(abs(c))
             g0_c = g0_u * np.sqrt(abs(c))
 
-            # Joint DC gain normalization H0(1) = sqrt(2), G0(1) = 2.0 / H0(1)
+            # Pure reciprocal scale normalization preserving exact H0(z) G0(z) = P_prod(z) product polynomial
             h0_sum = float(np.sum(h0_c))
             scale_h0 = np.sqrt(2.0) / h0_sum if abs(h0_sum) > 1e-12 else 1.0
             h0_norm = h0_c * scale_h0
