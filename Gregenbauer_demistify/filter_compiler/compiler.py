@@ -63,9 +63,21 @@ class SymmetryClass(Enum):
 
 class FactorMode(Enum):
     """Spectral Factorization Backends for Half-band Power Polynomial P(z)."""
-    FEJER_RIESZ = "FEJER_RIESZ"                   # Production cepstral log-spectral minimum-phase factorization
-    STRUCTURED_CHEBYSHEV = "STRUCTURED_CHEBYSHEV" # Degree-M x-polynomial Chebyshev root finding in x = cos(w)
+    CEPSTRAL_APPROX = "CEPSTRAL_APPROX"           # Production cepstral log-spectrum minimum-phase factorization
+    STRUCTURED_CHEBYSHEV = "STRUCTURED_CHEBYSHEV" # Chebyshev x-domain root lifting in x = cos(w)
     REFERENCE_ROOTS = "REFERENCE_ROOTS"           # Reference monomial degree-2M root finding backend
+
+
+@dataclass
+class FactorizationDiagnostics:
+    """Layer VIII Spectral Factorization Quality & Invariant Diagnostics."""
+    mode: FactorMode
+    coefficient_residual: float  # max_k |p_k - (h * h_rev)_k|
+    frequency_residual: float    # max_w ||H(e^{jw})|^2 - P(e^{jw})|
+    positivity_min: float        # min P(w)
+    positivity_max: float        # max P(w)
+    factor_degree: int           # Degree M = target_N - 1
+    finite: bool
 
 
 @dataclass
@@ -305,7 +317,7 @@ class GegenbauerFilterCompiler:
         mu_reg: float = 1e-4,
         reg_power: int = 1,
         asymptotic_mode: str = "auto",
-        factor_mode: FactorMode = FactorMode.FEJER_RIESZ,
+        factor_mode: FactorMode = FactorMode.CEPSTRAL_APPROX,
         grid_samples: int = 2048,
         precision: PrecisionType = PrecisionType.FLOAT64
     ):
@@ -556,8 +568,43 @@ class GegenbauerFilterCompiler:
         P_shift = np.roll(P_w, K_fft // 2)
         max_hb_err = float(np.max(np.abs(P_w + P_shift - 1.0)))
 
-        is_valid = (min_P >= -0.05) and (max_hb_err <= 1e-4)
+        is_valid = (min_P >= -1e-3) and (max_hb_err <= 1e-4)
         return is_valid, min_P, max_P, max_hb_err
+
+    def _compute_factorization_diagnostics(
+        self,
+        h0: np.ndarray,
+        p_taps: np.ndarray,
+        mode: FactorMode
+    ) -> FactorizationDiagnostics:
+        M = len(h0) - 1
+        center = (len(p_taps) - 1) // 2
+        r_fact = np.convolve(h0, h0[::-1])
+        coeff_res = float(np.max(np.abs(r_fact - p_taps)))
+
+        K_fft = 4096
+        w = 2.0 * np.pi * np.arange(K_fft) / float(K_fft)
+        P_w = np.zeros(K_fft, dtype=np.float64)
+        for n, val in enumerate(p_taps):
+            P_w += val * np.cos((n - center) * w)
+
+        H0_f = np.fft.fft(h0, K_fft)
+        H0_pow = np.abs(H0_f)**2
+        freq_res = float(np.max(np.abs(H0_pow - P_w)))
+
+        min_P = float(np.min(P_w))
+        max_P = float(np.max(P_w))
+        is_finite = bool(np.all(np.isfinite(h0)) and np.isfinite(coeff_res) and np.isfinite(freq_res))
+
+        return FactorizationDiagnostics(
+            mode=mode,
+            coefficient_residual=coeff_res,
+            frequency_residual=freq_res,
+            positivity_min=min_P,
+            positivity_max=max_P,
+            factor_degree=M,
+            finite=is_finite
+        )
 
     def spectral_factor_fejer_riesz(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float]:
         """
@@ -704,20 +751,22 @@ class GegenbauerFilterCompiler:
         self,
         p_taps: np.ndarray,
         target_N: int,
-        mode: FactorMode = FactorMode.FEJER_RIESZ
-    ) -> Tuple[np.ndarray, float]:
+        mode: FactorMode = FactorMode.CEPSTRAL_APPROX
+    ) -> Tuple[np.ndarray, FactorizationDiagnostics]:
         """
         Spectrally factors positive half-band power polynomial P(z) into minimum-phase factor H0(z) of length target_N.
-        Dispatches to Fejér-Riesz, Structured Chebyshev x-domain root lifting, or Reference Root backends.
-        Returns (h0_taps, residual).
+        Dispatches to Structured Chebyshev x-domain root lifting, Cepstral approximation, or Reference Root backends.
+        Returns (h0_taps, diagnostics).
         """
-        if mode == FactorMode.FEJER_RIESZ:
-            return self.spectral_factor_fejer_riesz(p_taps, target_N)
-        elif mode == FactorMode.STRUCTURED_CHEBYSHEV:
-            return self.factor_by_chebyshev_roots(p_taps, target_N)
+        if mode in (FactorMode.CEPSTRAL_APPROX, FactorMode.FEJER_RIESZ if hasattr(FactorMode, 'FEJER_RIESZ') else None):
+            h0, _ = self.spectral_factor_fejer_riesz(p_taps, target_N)
         elif mode == FactorMode.REFERENCE_ROOTS:
-            return self.factor_by_roots_reference(p_taps, target_N)
-        return self.spectral_factor_fejer_riesz(p_taps, target_N)
+            h0, _ = self.factor_by_roots_reference(p_taps, target_N)
+        else: # Default FactorMode.STRUCTURED_CHEBYSHEV
+            h0, _ = self.factor_by_chebyshev_roots(p_taps, target_N)
+
+        diag = self._compute_factorization_diagnostics(h0, p_taps, mode=mode)
+        return h0, diag
 
     def solve_qmf_power_coefficients(self, spec: FilterSpec) -> Tuple[np.ndarray, int, float, float, float, float]:
         """Backward compatibility wrapper around solve_halfband_power_polynomial."""
@@ -1280,8 +1329,19 @@ class GegenbauerFilterCompiler:
         p_taps[center] = 0.5
         p_prod = 2.0 * p_taps
 
-        # Build atomic root clusters (pairing reciprocal / conjugate roots and tracking multiplicities)
-        roots = list(np.roots(p_prod))
+        # Build atomic root clusters via Chebyshev x-domain roots in x = cos(w)
+        M_prod = total_order
+        b_harmonics = np.zeros(M_prod + 1, dtype=np.float64)
+        b_harmonics[0] = p_prod[center]
+        for m in range(1, M_prod + 1):
+            if center + m < len(p_prod):
+                b_harmonics[m] = 2.0 * p_prod[center + m]
+
+        x_roots = np.polynomial.chebyshev.chebroots(b_harmonics)
+        roots = []
+        for x_val in x_roots:
+            disc = np.sqrt(x_val**2 - 1.0 + 0j)
+            roots.extend([x_val - disc, x_val + disc])
         rel_tol, abs_tol = 1e-2, 1e-3
         def same_root(a, b):
             return abs(a - b) <= max(abs_tol, rel_tol * max(abs(a), abs(b)))
@@ -1573,6 +1633,7 @@ class GegenbauerFilterCompiler:
                     mu_reg=mu,
                     reg_power=self.reg_power,
                     asymptotic_mode=self.asymptotic_mode,
+                    factor_mode=self.factor_mode,
                     grid_samples=self.grid_samples,
                     precision=self.ctx.precision
                 )
