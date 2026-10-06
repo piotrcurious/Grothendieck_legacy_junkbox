@@ -820,18 +820,18 @@ class GegenbauerFilterCompiler:
                 z_inside.append(xr - disc)
                 u_idx += 1
 
-        h0 = np.poly(z_inside).real
-        if len(h0) < target_N:
-            h0 = np.pad(h0, (0, target_N - len(h0)), mode='constant')
-        elif len(h0) > target_N:
-            raise ValueError(f"Structured factor degree mismatch: got {len(h0) - 1}, expected {target_N - 1}.")
+        h0_complex = np.poly(z_inside)
+        if len(h0_complex) < target_N:
+            h0_complex = np.pad(h0_complex, (0, target_N - len(h0_complex)), mode='constant')
+        elif len(h0_complex) > target_N:
+            raise ValueError(f"Structured factor degree mismatch: got {len(h0_complex) - 1}, expected {target_N - 1}.")
 
-        r_h0 = np.convolve(h0, h0[::-1])
+        r_h0 = np.convolve(np.real(h0_complex), np.real(h0_complex)[::-1])
         scale = np.sqrt(max(1e-15, p_taps[center] / max(1e-15, r_h0[len(r_h0) // 2])))
-        h0 *= scale
+        h0_complex *= scale
 
-        res = float(np.max(np.abs(np.convolve(h0, h0[::-1]) - p_taps)))
-        return h0, res
+        res = float(np.max(np.abs(np.convolve(np.real(h0_complex), np.real(h0_complex)[::-1]) - p_taps)))
+        return h0_complex, res
 
     def factor_by_roots_reference(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float]:
         """
@@ -882,14 +882,14 @@ class GegenbauerFilterCompiler:
         if len(inside_roots) > M:
             inside_roots = sorted(inside_roots, key=lambda x: abs(x))[:M]
 
-        h0 = np.poly(inside_roots).real
+        h0_complex = np.poly(inside_roots)
         center = (len(p_taps) - 1) // 2
-        r_h0 = np.convolve(h0, h0[::-1])
+        r_h0 = np.convolve(np.real(h0_complex), np.real(h0_complex)[::-1])
         scale = np.sqrt(max(1e-15, p_taps[center] / max(1e-15, r_h0[len(r_h0) // 2])))
-        h0 *= scale
+        h0_complex *= scale
 
-        res = float(np.max(np.abs(np.convolve(h0, h0[::-1]) - p_taps)))
-        return h0, res
+        res = float(np.max(np.abs(np.convolve(np.real(h0_complex), np.real(h0_complex)[::-1]) - p_taps)))
+        return h0_complex, res
 
     def spectral_factor_power_polynomial(
         self,
@@ -1568,6 +1568,9 @@ class GegenbauerFilterCompiler:
                 quad_roots = [raw_clusters[k]['rep'] for k in quad_indices]
                 quad_mult = min(raw_clusters[k]['mult'] for k in quad_indices)
                 kind = 'UNIT_PAIR' if abs(abs(r1) - 1.0) < 1e-3 else 'COMPLEX_QUARTET'
+                expected_size = 2 if kind == 'UNIT_PAIR' else 4
+                if len(quad_roots) != expected_size:
+                    raise ValueError(f"Invalid root orbit size for {kind}: got {len(quad_roots)}, expected {expected_size}.")
                 atomic_units.append({'kind': kind, 'roots': quad_roots, 'size': len(quad_roots), 'mult': quad_mult})
 
         # Verify exact algebraic orbit closure: sum size_i * mult_i == total_order
