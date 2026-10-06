@@ -120,12 +120,12 @@ class CertifiedEvaluationPayload:
     truth_status: TruthStatus
     matching_status: MatchingStatus
     provenance: ErrorEstimateProvenance
-    basis_asymptotic_validated: bool = True
-    prototype_fir_certified: bool = True
-    qmf_power_complementary: bool = True
-    qmf_alias_cancellation: bool = True
-    factorization_certified: bool = True
-    is_certified: bool = True
+    basis_asymptotic_validated: bool = False
+    prototype_fir_certified: bool = False
+    qmf_power_complementary: bool = False
+    qmf_alias_cancellation: bool = False
+    factorization_certified: bool = False
+    is_certified: bool = False
 
 
 def determine_truth_status(lam: float) -> TruthStatus:
@@ -227,6 +227,8 @@ class FilterSpec:
         if self.kind == "asymmetric_qmf":
             if not (0.0 < self.wp < 0.25 < self.ws < 0.5):
                 raise ValueError(f"Asymmetric QMF requires transition band straddling fs/4 (0 < wp < 0.25 < ws < 0.5), got wp={self.wp}, ws={self.ws}")
+            if self.wp + self.ws > 0.5 + 1e-6:
+                raise ValueError(f"Asymmetric QMF target transition edges must satisfy wp + ws <= 0.5 to remain compatible with half-band complementarity, got wp={self.wp}, ws={self.ws} (sum = {self.wp + self.ws})")
 
         if self.kind in ("lowpass", "qmf", "asymmetric_qmf"):
             if not (0.0 < self.wp < self.ws < 0.5):
@@ -381,6 +383,8 @@ class GegenbauerFilterCompiler:
         self.asymptotic_mode = asymptotic_mode
         self.factor_mode = factor_mode
         self.grid_samples = grid_samples
+        if precision != PrecisionType.FLOAT64:
+            raise NotImplementedError("Only PrecisionType.FLOAT64 execution is currently implemented.")
         self.ctx = NumericalContext(precision=precision, base=NumericalBase.BASE_2)
 
     def _independent_dimension(self, spec: FilterSpec) -> int:
@@ -1425,6 +1429,12 @@ class GegenbauerFilterCompiler:
             is_certified=is_certified
         )
 
+        # Recompute final realization frequency fit residual from final normalized taps
+        H0_final = np.abs(np.fft.fft(h0_quant.float64_taps, K_fft)[:K_fft // 2 + 1])
+        omega_eval = 2.0 * np.pi * freq_grid
+        D_eval, W_eval = self._build_spectral_target(spec, omega_eval)
+        final_data_fit_res = float(np.linalg.norm(np.sqrt(W_eval) * (H0_final - D_eval)) / max(np.linalg.norm(np.sqrt(W_eval) * D_eval), 1e-15))
+
         prov_err = float(np.max(mixed_error(h0_quant.float64_taps, h0_quant.q15_taps / h0_quant.q15_scale)))
 
         spectral_design = GegenbauerSpectralDesign(
@@ -1434,7 +1444,7 @@ class GegenbauerFilterCompiler:
             basis_terms=K,
             operator_eigenvalues=op_eigs,
             sturm_liouville_energy=reg_energy,
-            projection_residual=res_data,
+            projection_residual=final_data_fit_res,
             quadrature_residual=res_aug,
             conditioning=cond_val,
             asymptotic_sampled_discrepancy=asymp_err,
@@ -1463,7 +1473,7 @@ class GegenbauerFilterCompiler:
             qmf_alias_error_linear=qmf_alias_lin,
             regularization_energy=float(reg_energy),
             fit_residual=res_aug,
-            data_fit_residual=res_data,
+            data_fit_residual=final_data_fit_res,
             regularization_residual=res_reg,
             asymptotic_sampled_discrepancy=asymp_err,
             provenance_mixed_error=prov_err
