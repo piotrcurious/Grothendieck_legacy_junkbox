@@ -150,12 +150,23 @@ class TestGUIIntegration(unittest.TestCase):
 
         self.assertEqual(app.current_result.spec.kind, "highpass")
 
-        # Test Pareto search async execution
+        # Test Pareto search async execution with restricted candidate set for fast GUI test execution
+        from unittest.mock import patch
         prev_res = app.current_result
+        app.order_var.set(15)
         app.solver_var.set("spectral_regularized")
-        app._on_pareto_search()
 
-        _wait_for_result(app, prev_res, timeout=10.0)
+        orig_pareto = GegenbauerFilterCompiler.pareto_search
+        def fast_pareto(self, spec, **kwargs):
+            return orig_pareto(self, spec, lambda_candidates=[1.0, 1.5], mu_candidates=[1e-4], solver=kwargs.get('solver'))
+
+        GegenbauerFilterCompiler.pareto_search = fast_pareto
+        with patch('tkinter.messagebox.showinfo'):
+            try:
+                app._on_pareto_search()
+                _wait_for_result(app, prev_res, timeout=10.0)
+            finally:
+                GegenbauerFilterCompiler.pareto_search = orig_pareto
 
         self.assertIsNotNone(app.current_result)
         self.assertEqual(app.mu_var.get(), app.current_result.mu_reg)

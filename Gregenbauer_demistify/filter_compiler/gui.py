@@ -630,7 +630,7 @@ class GegenbauerFilterGUI(tk.Tk):
                     best_pair = None
                     best_score = float('inf')
                     best_lam = compiler_kwargs['lam']
-                    for lam in [0.5, 1.0, 1.25, 1.5, 2.0]:
+                    for lam in [0.5, 1.0, 1.25, 1.5]:
                         ck = dict(compiler_kwargs)
                         ck['lam'] = lam
                         compiler = GegenbauerFilterCompiler(**ck)
@@ -676,7 +676,12 @@ class GegenbauerFilterGUI(tk.Tk):
                 else:
                     spec, compiler_kwargs = params
                     compiler = GegenbauerFilterCompiler(**compiler_kwargs)
-                    best_res = compiler.pareto_search(spec, solver=compiler_kwargs['solver'])
+                    best_res = compiler.pareto_search(
+                        spec,
+                        lambda_candidates=[1.0, 1.5],
+                        mu_candidates=[0.0, 1e-4],
+                        solver=compiler_kwargs['solver']
+                    )
                     res_q.put(("ok", best_res))
             except Exception as ex:
                 res_q.put(("err", ex))

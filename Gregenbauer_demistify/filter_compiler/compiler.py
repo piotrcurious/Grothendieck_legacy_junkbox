@@ -241,7 +241,7 @@ class FilterSpec:
         """Determines the FIR symmetry class (Type I-IV) based on filter type and order N."""
         is_even = (self.order % 2 == 0)
         if self.kind == "highpass":
-            return SymmetryClass.TYPE_IV if is_even else SymmetryClass.TYPE_III
+            return SymmetryClass.TYPE_IV if is_even else SymmetryClass.TYPE_I
         elif self.kind in ("lowpass", "bandpass", "qmf", "asymmetric_qmf"):
             return SymmetryClass.TYPE_II if is_even else SymmetryClass.TYPE_I
         return SymmetryClass.TYPE_I
@@ -824,7 +824,7 @@ class GegenbauerFilterCompiler:
         if len(h0) < target_N:
             h0 = np.pad(h0, (0, target_N - len(h0)), mode='constant')
         elif len(h0) > target_N:
-            h0 = h0[:target_N]
+            raise ValueError(f"Structured factor degree mismatch: got {len(h0) - 1}, expected {target_N - 1}.")
 
         r_h0 = np.convolve(h0, h0[::-1])
         scale = np.sqrt(max(1e-15, p_taps[center] / max(1e-15, r_h0[len(r_h0) // 2])))
@@ -911,7 +911,9 @@ class GegenbauerFilterCompiler:
         else:
             raise ValueError(f"Unknown FactorMode: '{mode}'")
 
-        h0, diag = self._compute_factorization_diagnostics(h0_raw, p_taps, mode=mode)
+        h0, diag = self._compute_factorization_diagnostics(
+            h0_raw, p_taps, mode=mode, target_degree=target_N - 1
+        )
         return h0, diag
 
     def solve_qmf_power_coefficients(self, spec: FilterSpec) -> Tuple[np.ndarray, int, float, float, float, float]:
@@ -1228,17 +1230,7 @@ class GegenbauerFilterCompiler:
                 )
 
             h0_float, factor_diag = self.spectral_factor_power_polynomial(p_taps, target_N=spec.order, mode=self.factor_mode)
-            rel_coeff_res = factor_diag.coefficient_residual / max(1.0, float(np.max(np.abs(p_taps))))
-            rel_freq_res = factor_diag.frequency_residual / max(1.0, float(factor_diag.positivity_max))
-            factorization_certified = self.certify_factorization_diagnostics(
-                is_finite=factor_diag.finite,
-                actual_degree=factor_diag.actual_degree,
-                target_degree=spec.order - 1,
-                coeff_res_rel=rel_coeff_res,
-                freq_res_rel=rel_freq_res,
-                imag_res=factor_diag.factor_imaginary_residual,
-                min_P=factor_diag.positivity_min
-            )
+            factorization_certified = factor_diag.certified
             h0_quant = self.quantize_taps(h0_float)
 
             # Derive H1 directly via CQF modulation h1[n] = (-1)^n * h0[N-1-n]
@@ -1564,7 +1556,7 @@ class GegenbauerFilterCompiler:
                         used_c[recip_idx] = True
                         atomic_units.append({'kind': 'REAL_PAIR', 'roots': [r1_real, float(np.real(c2['rep']))], 'size': 2, 'mult': min(m1, c2['mult'])})
                     else:
-                        atomic_units.append({'kind': 'REAL_ENDPOINT', 'roots': [r1_real], 'size': 1, 'mult': m1})
+                        raise ValueError(f"Unpaired real reciprocal root detected: {r1_real:.6f} without reciprocal partner {1.0/r1_real:.6f}.")
             else:
                 quad_indices = [i]
                 for j in range(len(raw_clusters)):
@@ -1578,13 +1570,12 @@ class GegenbauerFilterCompiler:
                 kind = 'UNIT_PAIR' if abs(abs(r1) - 1.0) < 1e-3 else 'COMPLEX_QUARTET'
                 atomic_units.append({'kind': kind, 'roots': quad_roots, 'size': len(quad_roots), 'mult': quad_mult})
 
-        # Verify algebraic orbit closure: sum size_i * mult_i == total_order
+        # Verify exact algebraic orbit closure: sum size_i * mult_i == total_order
         orbit_total_size = sum(unit['size'] * unit['mult'] for unit in atomic_units)
         if orbit_total_size != total_order:
-            # Fallback for endpoint multiplicity alignment
-            diff = total_order - orbit_total_size
-            if diff > 0:
-                atomic_units.append({'kind': 'REAL_ENDPOINT', 'roots': [-1.0], 'size': 1, 'mult': diff})
+            raise ValueError(
+                f"Root-orbit decomposition is not closed: got {orbit_total_size} roots, expected {total_order}."
+            )
 
         # Generate candidate root allocations for target order_h0
         allocations = []
@@ -1650,8 +1641,7 @@ class GegenbauerFilterCompiler:
             sym_g0 = np.max(np.abs(g0_norm - g0_norm[::-1]))
             nyq_h0 = abs(np.sum(h0_norm * np.array([(-1.0)**n for n in range(len(h0_norm))])))
             nyq_g0 = abs(np.sum(g0_norm * np.array([(-1.0)**n for n in range(len(g0_norm))])))
-            dc_score = abs(np.sum(g0_norm) - np.sqrt(2.0))
-            score = (sym_h0 + sym_g0) * 100.0 + dc_score + (nyq_h0 + nyq_g0) * 10.0 + np.max(np.abs(h0_norm)) + np.max(np.abs(g0_norm))
+            score = (sym_h0 + sym_g0) * 100.0 + (nyq_h0 + nyq_g0) * 10.0 + np.max(np.abs(h0_norm)) + np.max(np.abs(g0_norm))
 
             if score < best_score:
                 best_score = score
@@ -1805,8 +1795,8 @@ class GegenbauerFilterCompiler:
     def pareto_search(
         self,
         spec: FilterSpec,
-        lambda_candidates: List[float] = [0.5, 1.0, 1.25, 1.5, 2.0, 2.5],
-        mu_candidates: List[float] = [0.0, 1e-6, 1e-4, 1e-2],
+        lambda_candidates: List[float] = [0.5, 1.0, 1.25, 1.5],
+        mu_candidates: List[float] = [0.0, 1e-4],
         solver: Optional[str] = None
     ) -> FilterResult:
         best_res = None
