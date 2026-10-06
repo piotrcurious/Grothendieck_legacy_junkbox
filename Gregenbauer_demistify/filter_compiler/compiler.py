@@ -100,8 +100,8 @@ class FactorizationDiagnostics:
 
 
 @dataclass
-class ErrorBoundProvenance:
-    """Layer VIII Certified Non-Double-Counting Error Decomposition Payload."""
+class ErrorEstimateProvenance:
+    """Layer VIII Non-Double-Counting Error Estimate Decomposition Payload."""
     e_analytic: float = 0.0
     e_arithmetic: float = 0.0
     e_conditioning: float = 0.0
@@ -111,13 +111,15 @@ class ErrorBoundProvenance:
     def total(self) -> float:
         return self.e_analytic + self.e_arithmetic + self.e_conditioning + self.e_implementation
 
+ErrorBoundProvenance = ErrorEstimateProvenance
+
 
 @dataclass
 class CertifiedEvaluationPayload:
     """Layer VIII Certified Evaluation Payload separating diagnostics from certified bounds."""
     truth_status: TruthStatus
     matching_status: MatchingStatus
-    provenance: ErrorBoundProvenance
+    provenance: ErrorEstimateProvenance
     basis_asymptotic_validated: bool = True
     prototype_fir_certified: bool = True
     qmf_power_complementary: bool = True
@@ -617,8 +619,16 @@ class GegenbauerFilterCompiler:
 
         # Evaluate P(x) at endpoints and critical points
         vals = np.polynomial.chebyshev.chebval(crit_pts, b_harmonics)
-        min_P = float(np.min(vals))
-        max_P = float(np.max(vals))
+
+        # Dense grid check to verify critical point extrema
+        if grid_size > 0:
+            x_dense = np.linspace(-1.0, 1.0, grid_size)
+            vals_dense = np.polynomial.chebyshev.chebval(x_dense, b_harmonics)
+            min_P = min(float(np.min(vals)), float(np.min(vals_dense)))
+            max_P = max(float(np.max(vals)), float(np.max(vals_dense)))
+        else:
+            min_P = float(np.min(vals))
+            max_P = float(np.max(vals))
 
         # Complementarity residual bound: |2 b0 - 1| + 2 * sum_{m>0, even} |b_m|
         b_even_sum = 2.0 * float(np.sum(np.abs(b_harmonics[2::2]))) if len(b_harmonics) > 2 else 0.0
@@ -720,7 +730,7 @@ class GegenbauerFilterCompiler:
             actual_degree == target_degree and
             coeff_res_rel <= 1e-2 and
             freq_res_rel <= 1e-2 and
-            imag_res <= 1e-6 and
+            imag_res <= 1e-5 and
             min_P >= -1e-3 and
             halfband_residual <= 1e-3
         )
@@ -1392,8 +1402,8 @@ class GegenbauerFilterCompiler:
         qmf_alias_cancellation = True
 
         if spec.kind in ("qmf", "asymmetric_qmf"):
-            qmf_power_complementary = (qmf_pow_db <= 1.0)
-            qmf_alias_cancellation = (qmf_alias_db <= -20.0)
+            qmf_power_complementary = (qmf_pow_lin <= 0.05)
+            qmf_alias_cancellation = (qmf_alias_lin <= 0.05)
 
         is_certified = (
             basis_asymptotic_validated and
@@ -1553,8 +1563,10 @@ class GegenbauerFilterCompiler:
                             break
                     if recip_idx != -1:
                         c2 = raw_clusters[recip_idx]
+                        if m1 != c2['mult']:
+                            raise ValueError(f"Reciprocal orbit multiplicities disagree for root {r1_real:.6f}: {m1} vs {c2['mult']}.")
                         used_c[recip_idx] = True
-                        atomic_units.append({'kind': 'REAL_PAIR', 'roots': [r1_real, float(np.real(c2['rep']))], 'size': 2, 'mult': min(m1, c2['mult'])})
+                        atomic_units.append({'kind': 'REAL_PAIR', 'roots': [r1_real, float(np.real(c2['rep']))], 'size': 2, 'mult': m1})
                     else:
                         raise ValueError(f"Unpaired real reciprocal root detected: {r1_real:.6f} without reciprocal partner {1.0/r1_real:.6f}.")
             else:

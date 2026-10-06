@@ -335,6 +335,24 @@ def test_halfband_power_polynomial_and_factorization():
     assert diag.coefficient_residual < 1e-3
 
 
+def test_exact_halfband_t3_anchor():
+    """Verifies exact half-band spectral factorization for P(w) = 0.5 + 0.5 cos(3w) => H(z) = 0.5 (1 + z^-3)."""
+    compiler = GegenbauerFilterCompiler()
+    # Centered half-band power polynomial p = [0.25, 0, 0, 0.5, 0, 0, 0.25]
+    p_taps_t3 = np.array([0.25, 0.0, 0.0, 0.5, 0.0, 0.0, 0.25])
+    is_valid, min_P, max_P, max_hb_err = compiler.validate_power_polynomial(p_taps_t3)
+
+    assert is_valid is True
+    assert abs(min_P) < 1e-12
+    assert abs(max_P - 1.0) < 1e-12
+    assert max_hb_err < 1e-12
+
+    h0_fact, diag = compiler.spectral_factor_power_polynomial(p_taps_t3, target_N=4, mode=FactorMode.STRUCTURED_CHEBYSHEV)
+    expected_h = np.array([0.5, 0.0, 0.0, 0.5])
+    np.testing.assert_allclose(h0_fact, expected_h, atol=1e-6)
+    assert diag.certified is True
+
+
 def test_invalid_power_polynomial_rejection():
     """Verifies that validate_power_polynomial rejects non-positive power polynomials."""
     compiler = GegenbauerFilterCompiler()
