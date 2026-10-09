@@ -68,6 +68,26 @@ class FactorMode(Enum):
     REFERENCE_ROOTS = "REFERENCE_ROOTS"           # Reference monomial degree-2M root finding backend
 
 
+class VerificationStatus(Enum):
+    """Tri-state verification status for layer-wise filter certification."""
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+    VERIFIED = "VERIFIED"
+    FAILED = "FAILED"
+
+
+@dataclass
+class RootOrbit:
+    """Algebraic Root Orbit Unit for conjugate/reciprocal symmetry decomposition."""
+    kind: str  # REAL_ENDPOINT, REAL_RECIPROCAL_PAIR, UNIT_CIRCLE_PAIR, COMPLEX_RECIPROCAL_CONJUGATE_QUARTET
+    roots: np.ndarray
+    multiplicity: int
+    orbit_residual: float
+
+    @property
+    def size(self) -> int:
+        return len(self.roots)
+
+
 @dataclass
 class FactorizationDiagnostics:
     """Layer VIII Spectral Factorization Quality & Invariant Diagnostics."""
@@ -120,15 +140,55 @@ class CertifiedEvaluationPayload:
     truth_status: TruthStatus
     matching_status: MatchingStatus
     provenance: ErrorEstimateProvenance
-    basis_asymptotic_validated: bool = False
-    prototype_fir_certified: bool = False
-    qmf_power_complementary: bool = False
-    qmf_alias_cancellation: bool = False
-    factorization_certified: bool = False
+    basis_asymptotic: VerificationStatus = VerificationStatus.NOT_APPLICABLE
+    prototype_fir: VerificationStatus = VerificationStatus.NOT_APPLICABLE
+    qmf_power: VerificationStatus = VerificationStatus.NOT_APPLICABLE
+    qmf_alias: VerificationStatus = VerificationStatus.NOT_APPLICABLE
+    factorization: VerificationStatus = VerificationStatus.NOT_APPLICABLE
+    structural_certified: bool = False
+    specification_met: bool = False
+    asymptotic_diagnostic_passed: bool = False
     is_certified: bool = False
+
+    @property
+    def basis_asymptotic_validated(self) -> bool:
+        return self.basis_asymptotic == VerificationStatus.VERIFIED
+
+    @property
+    def prototype_fir_certified(self) -> bool:
+        return self.prototype_fir == VerificationStatus.VERIFIED
+
+    @property
+    def qmf_power_complementary(self) -> bool:
+        return self.qmf_power == VerificationStatus.VERIFIED
+
+    @property
+    def qmf_alias_cancellation(self) -> bool:
+        return self.qmf_alias == VerificationStatus.VERIFIED
+
+    @property
+    def factorization_certified(self) -> bool:
+        return self.factorization == VerificationStatus.VERIFIED
+
+
+def _fit_spectral_factor_scale(q: np.ndarray, p_taps: np.ndarray, tol: float = 1e-15) -> np.ndarray:
+    """Least-squares optimal scalar recovery scaling for spectral factor q such that r = q * q_rev fits p_taps."""
+    q_real = np.real(q)
+    r = np.convolve(q_real, q_real[::-1])
+    den = float(np.vdot(r, r).real)
+    if den <= tol:
+        raise ValueError("Degenerate spectral factor candidate.")
+    s = float(np.vdot(r, p_taps).real / den)
+    if s <= 0.0:
+        raise ValueError(f"Spectral-factor scalar fit is non-positive: s={s:.6e}")
+    return q * math.sqrt(s)
 
 
 def determine_truth_status(lam: float) -> TruthStatus:
+    if abs(lam) < 1e-12:
+        raise ValueError("Gegenbauer parameter lambda=0 is a singular limit; use Chebyshev polynomial limit T_n(x).")
+    if -0.5 < lam < 0.0:
+        return TruthStatus.LIMIT_CIRCLE_SUBCRITICAL
     if lam > 0 and abs(2.0 * lam - round(2.0 * lam)) < 1e-12:
         return TruthStatus.PHYSICAL_SPHERE_GEOMETRY
     return TruthStatus.ANALYTIC_CONTINUATION
@@ -278,6 +338,10 @@ class GegenbauerSpectralDesign:
     asymptotic_sampled_discrepancy: float
     truth_status: TruthStatus
     matching_status: MatchingStatus
+    augmented_design_residual: float = 0.0
+    data_design_residual: float = 0.0
+    regularization_residual: float = 0.0
+    final_realization_residual: float = 0.0
 
     @property
     def asymptotic_error_bound(self) -> float:
@@ -309,6 +373,9 @@ class FilterResult:
     fit_residual: float = 0.0
     data_fit_residual: float = 0.0
     regularization_residual: float = 0.0
+    augmented_design_residual: float = 0.0
+    data_design_residual: float = 0.0
+    final_realization_residual: float = 0.0
     asymptotic_sampled_discrepancy: float = 0.0
     provenance_mixed_error: float = 0.0
 
@@ -324,9 +391,9 @@ class FilterResult:
             f"Gegenbauer Lambda: {self.lam:.4f} | Basis Terms: {self.basis_terms}",
             f"Truth Status Topology: {self.payload.truth_status.value}",
             f"Asymptotic Matching Certification: {self.payload.matching_status.value}",
-            f"Certifications: Basis={self.payload.basis_asymptotic_validated} | Prototype={self.payload.prototype_fir_certified}"
-            f" | QMF Power={self.payload.qmf_power_complementary} | QMF Alias={self.payload.qmf_alias_cancellation}"
-            f" | Factorization={self.payload.factorization_certified} | Total={self.payload.is_certified}",
+            f"Certifications: Basis={self.payload.basis_asymptotic.value} | Prototype={self.payload.prototype_fir.value}"
+            f" | QMF Power={self.payload.qmf_power.value} | QMF Alias={self.payload.qmf_alias.value}"
+            f" | Factorization={self.payload.factorization.value} | Total={self.payload.is_certified}",
             f"Passband Ripple: {self.passband_ripple_actual:.4f} dB | Stopband Attenuation: {self.stopband_atten_actual:.2f} dB",
         ]
         if self.factorization is not None:
@@ -337,7 +404,7 @@ class FilterResult:
         lines.append(f"Sturm-Liouville Regularization Energy: {self.regularization_energy:.6e}")
         lines.append(f"Asymptotic Sampled Discrepancy (E_analytic): {self.payload.provenance.e_analytic:.6e}")
         lines.append(f"Fixed-Point Quantization Noise (E_arithmetic): {self.payload.provenance.e_arithmetic:.6e}")
-        lines.append(f"Certified Total Error Bound (E_total): {self.payload.provenance.total:.6e}")
+        lines.append(f"Total Error Estimate (E_total_estimate): {self.payload.provenance.total:.6e}")
         return "\n".join(lines)
 
 
@@ -428,12 +495,16 @@ class GegenbauerFilterCompiler:
         return self._apply_fir_symmetry_envelope(phi_k, x, symmetry)
 
     def _eval_pure_asymptotic_basis(self, n: int, omega: np.ndarray) -> np.ndarray:
-        """Evaluates pure Gegenbauer asymptotic approximation phi_n^asymp(theta) without FIR symmetry envelopes."""
+        """
+        Evaluates pure Gegenbauer asymptotic approximation phi_n^asymp(theta) without FIR symmetry envelopes.
+        """
         theta = omega
         if self.asymptotic_mode == "bessel":
             return endpoint_bessel_leading(n, self.lam, theta)
         elif self.asymptotic_mode == "wkb":
             return interior_wkb_approx(n, self.lam, theta)
+        elif self.asymptotic_mode == "composite" or self.asymptotic_mode == "auto":
+            return composite_matched_approx(n, self.lam, theta)
         else:
             return composite_matched_approx(n, self.lam, theta)
 
@@ -774,10 +845,8 @@ class GegenbauerFilterCompiler:
         # Truncate to target N taps
         h0 = h_full[:target_N]
 
-        # Scale h0 so convolution h0 * h0[::-1] matches center tap
-        r_h0 = np.convolve(h0, h0[::-1])
-        scale = np.sqrt(max(1e-15, p_taps[center] / max(1e-15, r_h0[len(r_h0) // 2])))
-        h0 *= scale
+        # Scale h0 via optimal least-squares scalar fit
+        h0 = _fit_spectral_factor_scale(h0, p_taps)
 
         # Autocorrelation residual
         r_fact = np.convolve(h0, h0[::-1])
@@ -823,9 +892,10 @@ class GegenbauerFilterCompiler:
         u_idx = 0
         while u_idx < len(unit_reals):
             xr = unit_reals[u_idx]
-            theta = np.arccos(xr)
             if u_idx + 1 < len(unit_reals) and abs(unit_reals[u_idx + 1] - xr) < 1e-3:
-                # Pair double root as e^{+j theta} and e^{-j theta}
+                # Pair double root as e^{+j theta} and e^{-j theta} using centroid for stability
+                xr_avg = 0.5 * (xr + unit_reals[u_idx + 1])
+                theta = np.arccos(xr_avg)
                 z_inside.append(np.exp(1j * theta))
                 z_inside.append(np.exp(-1j * theta))
                 u_idx += 2
@@ -840,9 +910,7 @@ class GegenbauerFilterCompiler:
         elif len(h0_complex) > target_N:
             raise ValueError(f"Structured factor degree mismatch: got {len(h0_complex) - 1}, expected {target_N - 1}.")
 
-        r_h0 = np.convolve(np.real(h0_complex), np.real(h0_complex)[::-1])
-        scale = np.sqrt(max(1e-15, p_taps[center] / max(1e-15, r_h0[len(r_h0) // 2])))
-        h0_complex *= scale
+        h0_complex = _fit_spectral_factor_scale(h0_complex, p_taps)
 
         res = float(np.max(np.abs(np.convolve(np.real(h0_complex), np.real(h0_complex)[::-1]) - p_taps)))
         return h0_complex, res
@@ -884,23 +952,24 @@ class GegenbauerFilterCompiler:
         inside_roots = []
         for orbit in orbits:
             in_orbit = [r for r in orbit if abs(r) <= 1.0 + 1e-4]
-            half_len = max(1, len(orbit) // 2)
-            if len(in_orbit) == half_len:
+            half_len = len(orbit) // 2
+            if len(in_orbit) == half_len or len(in_orbit) == len(orbit):
                 inside_roots.extend(in_orbit)
-            elif len(in_orbit) == len(orbit):
-                inside_roots.extend(in_orbit)
-            else:
+            elif half_len > 0:
+                # Decompose reciprocal/conjugate orbit strictly
                 sorted_orb = sorted(orbit, key=lambda x: abs(x))
                 inside_roots.extend(sorted_orb[:half_len])
+            else:
+                raise ValueError(f"Structural orbit decomposition failure for root orbit: {orbit}")
 
-        if len(inside_roots) > M:
-            inside_roots = sorted(inside_roots, key=lambda x: abs(x))[:M]
+        if len(inside_roots) != M:
+            if len(inside_roots) > M:
+                inside_roots = sorted(inside_roots, key=lambda x: abs(x))[:M]
+            else:
+                raise ValueError(f"Reference root factorization degree mismatch: got {len(inside_roots)}, expected {M}.")
 
         h0_complex = np.poly(inside_roots)
-        center = (len(p_taps) - 1) // 2
-        r_h0 = np.convolve(np.real(h0_complex), np.real(h0_complex)[::-1])
-        scale = np.sqrt(max(1e-15, p_taps[center] / max(1e-15, r_h0[len(r_h0) // 2])))
-        h0_complex *= scale
+        h0_complex = _fit_spectral_factor_scale(h0_complex, p_taps)
 
         res = float(np.max(np.abs(np.convolve(np.real(h0_complex), np.real(h0_complex)[::-1]) - p_taps)))
         return h0_complex, res
@@ -1169,7 +1238,7 @@ class GegenbauerFilterCompiler:
             f"#define GEG_CUTOFF {spec.cutoff}f",
             f"#define GEG_LAMBDA {result.lam}f",
             f"#define GEG_BASIS_TERMS {result.basis_terms}",
-            f"#define GEG_E_TOTAL_BOUND {p.total}f",
+            f"#define GEG_E_TOTAL_ESTIMATE {p.total}f",
             f"#define GEG_Q15_SCALE {h0.q15_scale}f",
             f"#define GEG_Q23_SCALE {h0.q23_scale}f",
             f"#define GEG_Q31_SCALE {h0.q31_scale}f",
@@ -1235,7 +1304,7 @@ class GegenbauerFilterCompiler:
 
         if spec.kind in ("qmf", "asymmetric_qmf"):
             # Direct QMF compilation route via half-band power polynomial and spectral factorization
-            a_coeffs, p_taps, K, cond_val, res_aug, res_data, res_reg = self.solve_halfband_power_polynomial(spec)
+            a_coeffs, p_taps, K, cond_val, augmented_design_residual, data_design_residual, regularization_residual = self.solve_halfband_power_polynomial(spec)
             power_valid, min_P, max_P, hb_err = self.validate_power_polynomial(p_taps)
             if not power_valid:
                 raise ValueError(
@@ -1268,7 +1337,7 @@ class GegenbauerFilterCompiler:
                 q31_scale=h0_quant.q31_scale
             )
         else:
-            a_coeffs, K, cond_val, res_aug, res_data, res_reg = self.solve_coefficients(spec)
+            a_coeffs, K, cond_val, augmented_design_residual, data_design_residual, regularization_residual = self.solve_coefficients(spec)
             h0_float = self.transform_to_taps(a_coeffs, spec)
             h0_quant = self.quantize_taps(h0_float)
             h1_quant = None
@@ -1386,46 +1455,63 @@ class GegenbauerFilterCompiler:
             e_implementation=0.0
         )
 
+        # Layer VII & VIII tri-state verification status evaluation
         if self.asymptotic_mode == "none":
-            basis_asymptotic_validated = True
+            basis_asymptotic = VerificationStatus.NOT_APPLICABLE
+            asymptotic_diagnostic_passed = True
         else:
-            basis_asymptotic_validated = bool(asymp_err < 0.05)
-        # Separate design target metrics from prototype FIR specification thresholds
+            asymp_ok = bool(asymp_err < 0.05)
+            basis_asymptotic = VerificationStatus.VERIFIED if asymp_ok else VerificationStatus.FAILED
+            asymptotic_diagnostic_passed = asymp_ok
+
+        # Prototype FIR specification check
         pass_ripple_thresh = spec.passband_ripple_db * 3.0 if spec.kind in ("qmf", "asymmetric_qmf") else spec.passband_ripple_db * 2.0
-        prototype_fir_certified = (
+        proto_ok = (
             pass_ripple <= pass_ripple_thresh and
             stop_atten >= min(spec.stopband_atten_db * 0.5, 15.0)
         )
         if spec.kind in ("qmf", "asymmetric_qmf") and h1_quant is not None:
-            prototype_fir_certified = prototype_fir_certified and (
+            proto_ok = proto_ok and (
                 pass_ripple_h1 <= pass_ripple_thresh and
                 stop_atten_h1 >= min(spec.stopband_atten_db * 0.5, 15.0)
             )
-        
-        qmf_power_complementary = True
-        qmf_alias_cancellation = True
+        prototype_fir = VerificationStatus.VERIFIED if proto_ok else VerificationStatus.FAILED
+        specification_met = proto_ok
 
         if spec.kind in ("qmf", "asymmetric_qmf"):
-            qmf_power_complementary = (qmf_pow_lin <= 0.05)
-            qmf_alias_cancellation = (qmf_alias_lin <= 0.05)
+            factor_status = VerificationStatus.VERIFIED if factorization_certified else VerificationStatus.FAILED
+            qmf_pow_ok = bool(qmf_pow_lin <= 0.05)
+            qmf_alias_ok = bool(qmf_alias_lin <= 0.05)
+            qmf_power = VerificationStatus.VERIFIED if qmf_pow_ok else VerificationStatus.FAILED
+            qmf_alias = VerificationStatus.VERIFIED if qmf_alias_ok else VerificationStatus.FAILED
 
-        is_certified = (
-            basis_asymptotic_validated and
-            prototype_fir_certified and
-            qmf_power_complementary and
-            qmf_alias_cancellation and
-            factorization_certified
-        )
+            structural_certified = (
+                factor_status == VerificationStatus.VERIFIED and
+                qmf_power == VerificationStatus.VERIFIED and
+                qmf_alias == VerificationStatus.VERIFIED
+            )
+        else:
+            factor_status = VerificationStatus.NOT_APPLICABLE
+            qmf_power = VerificationStatus.NOT_APPLICABLE
+            qmf_alias = VerificationStatus.NOT_APPLICABLE
+
+            # For ordinary FIR, structural certification is given by realization verification (prototype_fir)
+            structural_certified = (prototype_fir == VerificationStatus.VERIFIED)
+
+        is_certified = structural_certified and specification_met
 
         payload = CertifiedEvaluationPayload(
             truth_status=truth_status,
             matching_status=matching_status,
             provenance=provenance,
-            basis_asymptotic_validated=basis_asymptotic_validated,
-            prototype_fir_certified=prototype_fir_certified,
-            qmf_power_complementary=qmf_power_complementary,
-            qmf_alias_cancellation=qmf_alias_cancellation,
-            factorization_certified=factorization_certified,
+            basis_asymptotic=basis_asymptotic,
+            prototype_fir=prototype_fir,
+            qmf_power=qmf_power,
+            qmf_alias=qmf_alias,
+            factorization=factor_status,
+            structural_certified=structural_certified,
+            specification_met=specification_met,
+            asymptotic_diagnostic_passed=asymptotic_diagnostic_passed,
             is_certified=is_certified
         )
 
@@ -1433,7 +1519,7 @@ class GegenbauerFilterCompiler:
         H0_final = np.abs(np.fft.fft(h0_quant.float64_taps, K_fft)[:K_fft // 2 + 1])
         omega_eval = 2.0 * np.pi * freq_grid
         D_eval, W_eval = self._build_spectral_target(spec, omega_eval)
-        final_data_fit_res = float(np.linalg.norm(np.sqrt(W_eval) * (H0_final - D_eval)) / max(np.linalg.norm(np.sqrt(W_eval) * D_eval), 1e-15))
+        final_realization_residual = float(np.linalg.norm(np.sqrt(W_eval) * (H0_final - D_eval)) / max(np.linalg.norm(np.sqrt(W_eval) * D_eval), 1e-15))
 
         prov_err = float(np.max(mixed_error(h0_quant.float64_taps, h0_quant.q15_taps / h0_quant.q15_scale)))
 
@@ -1444,12 +1530,16 @@ class GegenbauerFilterCompiler:
             basis_terms=K,
             operator_eigenvalues=op_eigs,
             sturm_liouville_energy=reg_energy,
-            projection_residual=final_data_fit_res,
-            quadrature_residual=res_aug,
+            projection_residual=final_realization_residual,
+            quadrature_residual=augmented_design_residual,
             conditioning=cond_val,
             asymptotic_sampled_discrepancy=asymp_err,
             truth_status=truth_status,
-            matching_status=matching_status
+            matching_status=matching_status,
+            augmented_design_residual=augmented_design_residual,
+            data_design_residual=data_design_residual,
+            regularization_residual=regularization_residual,
+            final_realization_residual=final_realization_residual
         )
 
         result = FilterResult(
@@ -1472,9 +1562,12 @@ class GegenbauerFilterCompiler:
             qmf_power_error_linear=qmf_pow_lin,
             qmf_alias_error_linear=qmf_alias_lin,
             regularization_energy=float(reg_energy),
-            fit_residual=res_aug,
-            data_fit_residual=final_data_fit_res,
-            regularization_residual=res_reg,
+            fit_residual=augmented_design_residual,
+            data_fit_residual=final_realization_residual,
+            regularization_residual=regularization_residual,
+            augmented_design_residual=augmented_design_residual,
+            data_design_residual=data_design_residual,
+            final_realization_residual=final_realization_residual,
             asymptotic_sampled_discrepancy=asymp_err,
             provenance_mixed_error=prov_err
         )
@@ -1588,7 +1681,10 @@ class GegenbauerFilterCompiler:
                             quad_indices.append(j)
                             used_c[j] = True
                 quad_roots = [raw_clusters[k]['rep'] for k in quad_indices]
-                quad_mult = min(raw_clusters[k]['mult'] for k in quad_indices)
+                multiplicities = [raw_clusters[k]['mult'] for k in quad_indices]
+                if len(set(multiplicities)) != 1:
+                    raise ValueError(f"Complex root orbit multiplicities disagree: {multiplicities}")
+                quad_mult = multiplicities[0]
                 kind = 'UNIT_PAIR' if abs(abs(r1) - 1.0) < 1e-3 else 'COMPLEX_QUARTET'
                 expected_size = 2 if kind == 'UNIT_PAIR' else 4
                 if len(quad_roots) != expected_size:
@@ -1647,9 +1743,20 @@ class GegenbauerFilterCompiler:
         best_candidate = None
         best_score = float('inf')
 
+        imag_tol = 1e-5
+        dc_tol = 1e-6
+
         for cand_h0_roots, cand_g0_roots in allocations:
-            h0_u = np.poly(cand_h0_roots).real if len(cand_h0_roots) > 0 else np.array([1.0])
-            g0_u = np.poly(cand_g0_roots).real if len(cand_g0_roots) > 0 else np.array([1.0])
+            h0_u_complex = np.poly(cand_h0_roots) if len(cand_h0_roots) > 0 else np.array([1.0 + 0j])
+            g0_u_complex = np.poly(cand_g0_roots) if len(cand_g0_roots) > 0 else np.array([1.0 + 0j])
+
+            h0_imag = float(np.max(np.abs(np.imag(h0_u_complex))))
+            g0_imag = float(np.max(np.abs(np.imag(g0_u_complex))))
+            if max(h0_imag, g0_imag) > imag_tol:
+                continue
+
+            h0_u = np.real(h0_u_complex)
+            g0_u = np.real(g0_u_complex)
 
             conv_u = np.convolve(h0_u, g0_u)
             c = float(p_prod[0] / conv_u[0]) if abs(conv_u[0]) > 1e-12 else 1.0
@@ -1658,26 +1765,62 @@ class GegenbauerFilterCompiler:
 
             # Pure reciprocal scale normalization preserving exact H0(z) G0(z) = P_prod(z) product polynomial
             h0_sum = float(np.sum(h0_c))
-            scale_h0 = np.sqrt(2.0) / h0_sum if abs(h0_sum) > 1e-12 else 1.0
+            if abs(h0_sum) <= dc_tol:
+                continue
+
+            scale_h0 = np.sqrt(2.0) / h0_sum
             h0_norm = h0_c * scale_h0
             g0_norm = g0_c / scale_h0
 
             sym_h0 = np.max(np.abs(h0_norm - h0_norm[::-1]))
             sym_g0 = np.max(np.abs(g0_norm - g0_norm[::-1]))
+
+            # Enforce symmetry structurally as a hard constraint
+            if max(sym_h0, sym_g0) > 1e-4:
+                continue
+
+            dc_err_h0 = abs(np.sum(h0_norm) - np.sqrt(2.0))
+            dc_err_g0 = abs(np.sum(g0_norm) - np.sqrt(2.0))
+
             nyq_h0 = abs(np.sum(h0_norm * np.array([(-1.0)**n for n in range(len(h0_norm))])))
             nyq_g0 = abs(np.sum(g0_norm * np.array([(-1.0)**n for n in range(len(g0_norm))])))
-            score = (sym_h0 + sym_g0) * 100.0 + (nyq_h0 + nyq_g0) * 10.0 + np.max(np.abs(h0_norm)) + np.max(np.abs(g0_norm))
+
+            # Evaluate response metrics over frequency grid
+            K_eval = 512
+            H0_eval = np.abs(np.fft.fft(h0_norm, K_eval)[:K_eval // 2 + 1])
+            G0_eval = np.abs(np.fft.fft(g0_norm, K_eval)[:K_eval // 2 + 1])
+            f_grid = np.arange(K_eval // 2 + 1) / float(K_eval)
+
+            p_idx = f_grid <= cutoff * 0.8
+            s_idx = f_grid >= cutoff * 1.2
+
+            ripple_h0 = (np.max(H0_eval[p_idx]) - np.min(H0_eval[p_idx])) if np.any(p_idx) else 0.0
+            ripple_g0 = (np.max(G0_eval[p_idx]) - np.min(G0_eval[p_idx])) if np.any(p_idx) else 0.0
+
+            stop_h0 = np.max(H0_eval[s_idx]) if np.any(s_idx) else 0.0
+            stop_g0 = np.max(G0_eval[s_idx]) if np.any(s_idx) else 0.0
+
+            score = (
+                (dc_err_h0 + dc_err_g0) * 50.0 +
+                (nyq_h0 + nyq_g0) * 20.0 +
+                (ripple_h0 + ripple_g0) * 10.0 +
+                (stop_h0 + stop_g0) * 10.0 +
+                0.1 * (np.max(np.abs(h0_norm)) + np.max(np.abs(g0_norm)))
+            )
 
             if score < best_score:
                 best_score = score
                 best_candidate = (h0_norm, g0_norm)
+
+        if best_candidate is None:
+            raise ValueError("No valid biorthogonal lowpass candidate satisfied symmetry and DC constraints.")
 
         h0_taps, g0_taps = best_candidate
 
         # Generate complementary highpass filters H1 and G1 for 2-channel Biorthogonal Bank
         # H1(z) = G0(-z) => h1[n] = (-1)^n * g0[n]
         # G1(z) = -H0(-z) => g1[n] = -(-1)^n * h0[n]
-        # This yields H0(z)G0(z) + H1(z)G1(z) = P(z) - P(-z) = 2 z^-delay (Perfect Reconstruction for odd delay)
+        # This yields H0(z)G0(z) + H1(z)G1(z) = P(z) + P(-z) = 2 z^-delay (Perfect Reconstruction for odd delay)
         # and H0(-z)G0(z) + H1(-z)G1(z) = H0(-z)G0(z) - G0(z)H0(-z) = 0 (Exact Alias Cancellation)
         h1_taps = np.array([((-1.0)**n) * g0_taps[n] for n in range(len(g0_taps))])
         g1_taps = np.array([-((-1.0)**n) * h0_taps[n] for n in range(len(h0_taps))])
