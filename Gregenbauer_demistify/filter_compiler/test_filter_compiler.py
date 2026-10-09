@@ -476,7 +476,56 @@ def test_layer_viii_provenance_and_truth_status():
     # Header macro checks
     assert '#define GEG_TRUTH_STATUS "PHYSICAL_SPHERE_GEOMETRY"' in res_phys.header_code
     assert '#define GEG_MATCHING_STATUS "SAMPLED_ASYMPTOTIC_MATCHING"' in res_phys.header_code
-    assert 'GEG_E_TOTAL_BOUND' in res_phys.header_code
+    assert 'GEG_E_TOTAL_ESTIMATE' in res_phys.header_code
+
+
+def test_exact_halfband_power_polynomial_factorization():
+    """
+    Tests exact halfband factorization for P(w) = 1/2 + 1/2 cos(3w).
+    p_taps = [0.25, 0.0, 0.0, 0.50, 0.0, 0.0, 0.25]
+    Exact factor h = [0.5, 0.0, 0.0, 0.5] with h * h_rev = p_taps.
+    """
+    compiler = GegenbauerFilterCompiler(lam=1.0)
+    p_taps = np.array([0.25, 0.0, 0.0, 0.50, 0.0, 0.0, 0.25])
+    target_N = 4
+
+    h0_cheb, res_cheb = compiler.factor_by_chebyshev_roots(p_taps, target_N)
+    h0_real = np.real(h0_cheb)
+
+    # Verify autocorrelation matches p_taps to near float64 machine precision
+    r_fact = np.convolve(h0_real, h0_real[::-1])
+    assert np.max(np.abs(r_fact - p_taps)) < 1e-12
+
+    # Verify factors match exact h = [0.5, 0.0, 0.0, 0.5] or [0.5, 0.0, 0.0, 0.5]
+    expected_h = np.array([0.5, 0.0, 0.0, 0.5])
+    assert np.max(np.abs(np.abs(h0_real) - expected_h)) < 1e-10
+
+
+def test_biorthogonal_odd_delay_pr_identity():
+    """
+    Tests biorthogonal perfect reconstruction identity for odd delay d = (order_h0 + order_g0) // 2.
+    E(z) - E(-z) = 2 z^-d (P_c(z) + P_c(-z)) = 2 z^-d.
+    """
+    compiler = GegenbauerFilterCompiler(lam=1.5)
+    pair = compiler.compile_biorthogonal_pair(order_h0=8, order_g0=6, cutoff=0.25)
+
+    h0_taps = pair["H0"].float64_taps
+    g0_taps = pair["G0"].float64_taps
+    h1_taps = pair["H1"].float64_taps
+    g1_taps = pair["G1"].float64_taps
+
+    K_fft = 2048
+    omega = 2.0 * np.pi * np.arange(K_fft) / float(K_fft)
+    delay = (8 + 6) // 2
+    expected_pr = 2.0 * np.exp(-1j * omega * delay)
+
+    H0 = np.fft.fft(h0_taps, K_fft)
+    G0 = np.fft.fft(g0_taps, K_fft)
+    H1 = np.fft.fft(h1_taps, K_fft)
+    G1 = np.fft.fft(g1_taps, K_fft)
+
+    pr_resp = H0 * G0 + H1 * G1
+    assert np.max(np.abs(pr_resp - expected_pr)) < 1e-5
 
 
 def test_filter_spec_edge_cases():
