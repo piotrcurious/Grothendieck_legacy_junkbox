@@ -88,6 +88,133 @@ class RootOrbit:
         return len(self.roots)
 
 
+class RootDecomposer:
+    """Shared Multiplicity-Aware Conjugate & Reciprocal Root Orbit Decomposition Engine."""
+
+    @staticmethod
+    def decompose_halfband_roots(p_taps: np.ndarray, total_z_degree: int, rel_tol: float = 1e-4, abs_tol: float = 1e-5) -> List[RootOrbit]:
+        center = (len(p_taps) - 1) // 2
+        M_prod = total_z_degree // 2
+        b_harmonics = np.zeros(M_prod + 1, dtype=np.float64)
+        b_harmonics[0] = p_taps[center]
+        for m in range(1, M_prod + 1):
+            if center + m < len(p_taps):
+                b_harmonics[m] = 2.0 * p_taps[center + m]
+
+        x_roots = np.polynomial.chebyshev.chebroots(b_harmonics)
+        roots = []
+        for x_val in x_roots:
+            disc = np.sqrt(x_val**2 - 1.0 + 0j)
+            roots.extend([x_val - disc, x_val + disc])
+
+        def same_root(a, b):
+            return abs(a - b) <= max(abs_tol, rel_tol * max(abs(a), abs(b)))
+
+        raw_clusters = []
+        used_r = [False] * len(roots)
+        for i in range(len(roots)):
+            if used_r[i]:
+                continue
+            group = [i]
+            used_r[i] = True
+            for j in range(i + 1, len(roots)):
+                if not used_r[j] and same_root(roots[j], roots[i]):
+                    group.append(j)
+                    used_r[j] = True
+            rep = np.mean([roots[k] for k in group])
+            raw_clusters.append({'rep': rep, 'mult': len(group)})
+
+        used_c = [False] * len(raw_clusters)
+        atomic_units = []
+
+        for i in range(len(raw_clusters)):
+            if used_c[i]:
+                continue
+            c1 = raw_clusters[i]
+            r1 = c1['rep']
+            m1 = c1['mult']
+            used_c[i] = True
+
+            if abs(np.imag(r1)) < 1e-3:
+                r1_real = float(np.real(r1))
+                if abs(abs(r1_real) - 1.0) < 1e-3:
+                    ep_val = 1.0 if r1_real > 0 else -1.0
+                    atomic_units.append(RootOrbit(
+                        kind='REAL_ENDPOINT',
+                        roots=np.array([ep_val]),
+                        multiplicity=m1,
+                        orbit_residual=abs(r1_real - ep_val)
+                    ))
+                else:
+                    recip_idx = -1
+                    for j in range(len(raw_clusters)):
+                        if not used_c[j] and abs(raw_clusters[j]['rep'] - 1.0 / r1_real) < 1e-2:
+                            recip_idx = j
+                            break
+                    if recip_idx != -1:
+                        c2 = raw_clusters[recip_idx]
+                        if m1 != c2['mult']:
+                            raise ValueError(f"Reciprocal orbit multiplicities disagree for root {r1_real:.6f}: {m1} vs {c2['mult']}.")
+                        used_c[recip_idx] = True
+                        atomic_units.append(RootOrbit(
+                            kind='REAL_RECIPROCAL_PAIR',
+                            roots=np.array([r1_real, float(np.real(c2['rep']))]),
+                            multiplicity=m1,
+                            orbit_residual=abs(r1_real * c2['rep'] - 1.0)
+                        ))
+                    else:
+                        raise ValueError(f"Unpaired real reciprocal root detected: {r1_real:.6f} without reciprocal partner.")
+            else:
+                is_unit = abs(abs(r1) - 1.0) < 1e-3
+                if is_unit:
+                    conj_idx = -1
+                    for j in range(len(raw_clusters)):
+                        if not used_c[j] and abs(raw_clusters[j]['rep'] - np.conj(r1)) < 1e-2:
+                            conj_idx = j
+                            break
+                    if conj_idx != -1:
+                        c2 = raw_clusters[conj_idx]
+                        if m1 != c2['mult']:
+                            raise ValueError(f"Unit circle conjugate orbit multiplicities disagree for root {r1}: {m1} vs {c2['mult']}.")
+                        used_c[conj_idx] = True
+                        unit_roots = np.array([r1, c2['rep']])
+                    else:
+                        unit_roots = np.array([r1, np.conj(r1)])
+                    atomic_units.append(RootOrbit(
+                        kind='UNIT_CIRCLE_PAIR',
+                        roots=unit_roots,
+                        multiplicity=m1,
+                        orbit_residual=abs(abs(r1) - 1.0)
+                    ))
+                else:
+                    quad_indices = [i]
+                    for j in range(len(raw_clusters)):
+                        if not used_c[j]:
+                            r2 = raw_clusters[j]['rep']
+                            if abs(r2 - np.conj(r1)) < 1e-2 or abs(r2 - 1.0 / r1) < 1e-2 or abs(r2 - 1.0 / np.conj(r1)) < 1e-2:
+                                quad_indices.append(j)
+                                used_c[j] = True
+                    multiplicities = [raw_clusters[k]['mult'] for k in quad_indices]
+                    if len(set(multiplicities)) != 1:
+                        raise ValueError(f"Complex root orbit multiplicities disagree: {multiplicities}")
+                    quad_mult = multiplicities[0]
+                    quad_roots = np.array([raw_clusters[k]['rep'] for k in quad_indices])
+                    if len(quad_roots) != 4:
+                        raise ValueError(f"Invalid root orbit size for COMPLEX_RECIPROCAL_CONJUGATE_QUARTET: got {len(quad_roots)}, expected 4.")
+                    atomic_units.append(RootOrbit(
+                        kind='COMPLEX_RECIPROCAL_CONJUGATE_QUARTET',
+                        roots=quad_roots,
+                        multiplicity=quad_mult,
+                        orbit_residual=0.0
+                    ))
+
+        orbit_total_size = sum(unit.size * unit.multiplicity for unit in atomic_units)
+        if orbit_total_size != total_z_degree:
+            raise ValueError(f"Root-orbit decomposition is not closed: got {orbit_total_size} roots, expected {total_z_degree}.")
+
+        return atomic_units
+
+
 @dataclass
 class FactorizationDiagnostics:
     """Layer VIII Spectral Factorization Quality & Invariant Diagnostics."""
@@ -171,9 +298,17 @@ class CertifiedEvaluationPayload:
         return self.factorization == VerificationStatus.VERIFIED
 
 
-def _fit_spectral_factor_scale(q: np.ndarray, p_taps: np.ndarray, tol: float = 1e-15) -> np.ndarray:
+def _fit_spectral_factor_scale(q: np.ndarray, p_taps: np.ndarray, tol: float = 1e-15, imag_tol: float = 1e-5) -> np.ndarray:
     """Least-squares optimal scalar recovery scaling for spectral factor q such that r = q * q_rev fits p_taps."""
-    q_real = np.real(q)
+    q_arr = np.asarray(q)
+    if not np.all(np.isfinite(q_arr)):
+        raise ValueError("Non-finite spectral-factor candidate.")
+
+    imag_res = float(np.max(np.abs(np.imag(q_arr)))) if np.iscomplexobj(q_arr) else 0.0
+    if imag_res > imag_tol:
+        raise ValueError(f"Candidate is not real within tolerance: imaginary residual {imag_res:.3e} exceeds {imag_tol:.3e}.")
+
+    q_real = np.real(q_arr).astype(np.float64)
     r = np.convolve(q_real, q_real[::-1])
     den = float(np.vdot(r, r).real)
     if den <= tol:
@@ -181,7 +316,7 @@ def _fit_spectral_factor_scale(q: np.ndarray, p_taps: np.ndarray, tol: float = 1
     s = float(np.vdot(r, p_taps).real / den)
     if s <= 0.0:
         raise ValueError(f"Spectral-factor scalar fit is non-positive: s={s:.6e}")
-    return q * math.sqrt(s)
+    return q_real * math.sqrt(s)
 
 
 def determine_truth_status(lam: float) -> TruthStatus:
@@ -1435,6 +1570,8 @@ class GegenbauerFilterCompiler:
                 if deg_int == 0:
                     continue
                 phi_exact = normalized_phi_recurrence(deg_int, self.lam, x_sample)
+                if self.basis_type == "unnormalized":
+                    phi_exact = phi_exact * float(c_n_1_val(deg_int, self.lam))
                 phi_asymp = self._eval_pure_asymptotic_basis(deg_int, omega_sample)
                 deg_errs.append(float(np.max(np.abs(phi_exact - phi_asymp))))
 
@@ -1464,19 +1601,42 @@ class GegenbauerFilterCompiler:
             basis_asymptotic = VerificationStatus.VERIFIED if asymp_ok else VerificationStatus.FAILED
             asymptotic_diagnostic_passed = asymp_ok
 
-        # Prototype FIR specification check
-        pass_ripple_thresh = spec.passband_ripple_db * 3.0 if spec.kind in ("qmf", "asymmetric_qmf") else spec.passband_ripple_db * 2.0
-        proto_ok = (
-            pass_ripple <= pass_ripple_thresh and
-            stop_atten >= min(spec.stopband_atten_db * 0.5, 15.0)
+        # Exact design target compliance
+        exact_pass_target = spec.passband_ripple_db
+        exact_stop_target = spec.stopband_atten_db
+
+        design_target_met = bool(
+            pass_ripple <= exact_pass_target and
+            stop_atten >= exact_stop_target
         )
         if spec.kind in ("qmf", "asymmetric_qmf") and h1_quant is not None:
-            proto_ok = proto_ok and (
-                pass_ripple_h1 <= pass_ripple_thresh and
-                stop_atten_h1 >= min(spec.stopband_atten_db * 0.5, 15.0)
+            design_target_met = design_target_met and bool(
+                pass_ripple_h1 <= exact_pass_target and
+                stop_atten_h1 >= exact_stop_target
             )
-        prototype_fir = VerificationStatus.VERIFIED if proto_ok else VerificationStatus.FAILED
-        specification_met = proto_ok
+
+        # Relaxed engineering acceptance limits
+        relaxed_pass_limit = exact_pass_target * 3.0 if spec.kind in ("qmf", "asymmetric_qmf") else exact_pass_target * 2.0
+        relaxed_stop_limit = min(exact_stop_target * 0.5, 15.0)
+
+        engineering_acceptance = bool(
+            pass_ripple <= relaxed_pass_limit and
+            stop_atten >= relaxed_stop_limit
+        )
+        if spec.kind in ("qmf", "asymmetric_qmf") and h1_quant is not None:
+            engineering_acceptance = engineering_acceptance and bool(
+                pass_ripple_h1 <= relaxed_pass_limit and
+                stop_atten_h1 >= relaxed_stop_limit
+            )
+
+        prototype_fir = VerificationStatus.VERIFIED if engineering_acceptance else VerificationStatus.FAILED
+        specification_met = design_target_met
+
+        # Realization properties verification (finite coefficients, non-empty taps)
+        realization_verified = bool(
+            np.all(np.isfinite(h0_quant.float64_taps)) and
+            len(h0_quant.float64_taps) == spec.order
+        )
 
         if spec.kind in ("qmf", "asymmetric_qmf"):
             factor_status = VerificationStatus.VERIFIED if factorization_certified else VerificationStatus.FAILED
@@ -1486,6 +1646,7 @@ class GegenbauerFilterCompiler:
             qmf_alias = VerificationStatus.VERIFIED if qmf_alias_ok else VerificationStatus.FAILED
 
             structural_certified = (
+                realization_verified and
                 factor_status == VerificationStatus.VERIFIED and
                 qmf_power == VerificationStatus.VERIFIED and
                 qmf_alias == VerificationStatus.VERIFIED
@@ -1495,8 +1656,8 @@ class GegenbauerFilterCompiler:
             qmf_power = VerificationStatus.NOT_APPLICABLE
             qmf_alias = VerificationStatus.NOT_APPLICABLE
 
-            # For ordinary FIR, structural certification is given by realization verification (prototype_fir)
-            structural_certified = (prototype_fir == VerificationStatus.VERIFIED)
+            # For ordinary FIR, structural certification is given by realization verification
+            structural_certified = realization_verified
 
         is_certified = structural_certified and specification_met
 
@@ -1605,10 +1766,21 @@ class GegenbauerFilterCompiler:
 
         _, p_taps, _, _, _, _, _ = self.solve_halfband_power_polynomial(p_spec)
 
-        # Set center tap to exactly 0.5 so half-band P(z) + P(-z) = z^-d delay scaling is exact
+        # Set center tap to Bootstrapped half-band value
         center = total_order // 2
         p_taps[center] = 0.5
         p_prod = 2.0 * p_taps
+
+        # Rescale off-center taps so P_prod(1) == 2.0 exactly while preserving P_prod(center) = 1.0
+        off_center_sum = float(np.sum(p_prod) - p_prod[center])
+        if abs(off_center_sum) > 1e-12:
+            p_prod[:center] *= (1.0 / off_center_sum)
+            p_prod[center + 1:] *= (1.0 / off_center_sum)
+
+        # Verify product polynomial DC gain before allocating roots
+        p_prod_dc = float(np.sum(p_prod))
+        if abs(p_prod_dc - 2.0) > 1e-3:
+            raise ValueError(f"Product polynomial DC gain {p_prod_dc:.6f} deviates from target 2.0 (requires H0(1)G0(1) = 2.0).")
 
         # Build atomic root clusters via Chebyshev x-domain roots in x = cos(w)
         M_prod = total_order
@@ -1817,6 +1989,15 @@ class GegenbauerFilterCompiler:
 
         h0_taps, g0_taps = best_candidate
 
+        # Hard postcondition check for individual lowpass factor DC gains H0(1) == sqrt(2) and G0(1) == sqrt(2)
+        h0_dc_val = float(np.sum(h0_taps))
+        g0_dc_val = float(np.sum(g0_taps))
+        target_dc = np.sqrt(2.0)
+        if abs(h0_dc_val - target_dc) > 1e-3 or abs(g0_dc_val - target_dc) > 1e-3:
+            raise ValueError(
+                f"Biorthogonal factor DC gain postcondition failed: H0(1)={h0_dc_val:.6f}, G0(1)={g0_dc_val:.6f}, expected sqrt(2)={target_dc:.6f}."
+            )
+
         # Generate complementary highpass filters H1 and G1 for 2-channel Biorthogonal Bank
         # H1(z) = G0(-z) => h1[n] = (-1)^n * g0[n]
         # G1(z) = -H0(-z) => g1[n] = -(-1)^n * h0[n]
@@ -1845,12 +2026,16 @@ class GegenbauerFilterCompiler:
 
         pr_complex = H0_f * G0_f + H1_f * G1_f
         pr_residual = float(np.max(np.abs(pr_complex - expected_pr)))
+        if pr_residual > 1e-5:
+            raise ValueError(f"Biorthogonal PR response residual {pr_residual:.4e} exceeds 1e-5 tolerance.")
 
         # Alias cancellation check H0(-z) G0(z) + H1(-z) G1(z) == 0
         H0_neg = np.fft.fft(h0_taps * np.array([(-1.0)**n for n in range(len(h0_taps))]), K_fft)
         H1_neg = np.fft.fft(h1_taps * np.array([(-1.0)**n for n in range(len(h1_taps))]), K_fft)
         alias_complex = H0_neg * G0_f + H1_neg * G1_f
         alias_residual = float(np.max(np.abs(alias_complex)))
+        if alias_residual > 1e-5:
+            raise ValueError(f"Biorthogonal alias cancellation residual {alias_residual:.4e} exceeds 1e-5 tolerance.")
 
         # Structural frequency domain relations H1(w) = G0(w+pi) and G1(w) = -H0(w+pi)
         G0_shift = np.roll(G0_f, K_fft // 2)
@@ -1863,7 +2048,7 @@ class GegenbauerFilterCompiler:
             "H1": self.quantize_taps(h1_taps),
             "G0": self.quantize_taps(g0_taps),
             "G1": self.quantize_taps(g1_taps),
-            "P": p_taps,
+            "P": p_prod * 0.5,
             "product_residual": product_residual,
             "pr_residual": pr_residual,
             "pr_error": pr_residual, # Backward compatibility alias
