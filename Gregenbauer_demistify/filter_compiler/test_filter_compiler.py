@@ -195,7 +195,7 @@ def test_qmf_pair_compilation():
     assert result.payload.factorization_certified is True
     assert result.payload.qmf_power_complementary is True
     assert result.payload.qmf_alias_cancellation is True
-    assert result.payload.is_certified is True
+    assert result.payload.structural_certified is True
 
 
 def test_asymmetric_qmf_compilation():
@@ -505,6 +505,7 @@ def test_biorthogonal_odd_delay_pr_identity():
     """
     Tests biorthogonal perfect reconstruction identity for odd delay d = (order_h0 + order_g0) // 2.
     E(z) - E(-z) = 2 z^-d (P_c(z) + P_c(-z)) = 2 z^-d.
+    Also verifies individual lowpass factor DC gains H0(1) == sqrt(2) and G0(1) == sqrt(2).
     """
     compiler = GegenbauerFilterCompiler(lam=1.5)
     pair = compiler.compile_biorthogonal_pair(order_h0=8, order_g0=6, cutoff=0.25)
@@ -513,6 +514,10 @@ def test_biorthogonal_odd_delay_pr_identity():
     g0_taps = pair["G0"].float64_taps
     h1_taps = pair["H1"].float64_taps
     g1_taps = pair["G1"].float64_taps
+
+    # Verify DC gains
+    assert abs(np.sum(h0_taps) - np.sqrt(2.0)) < 1e-5
+    assert abs(np.sum(g0_taps) - np.sqrt(2.0)) < 1e-5
 
     K_fft = 2048
     omega = 2.0 * np.pi * np.arange(K_fft) / float(K_fft)
