@@ -533,6 +533,51 @@ def test_biorthogonal_odd_delay_pr_identity():
     assert np.max(np.abs(pr_resp - expected_pr)) < 1e-5
 
 
+def test_epistemic_warrants_and_transformation_contracts():
+    """Verifies ClaimWarrant, EpistemicContract, TransformationContract, and WarrantedBoundSelector."""
+    from filter_compiler.compiler import (
+        ClaimWarrant,
+        WarrantDisposition,
+        EvidenceMethod,
+        EpistemicContract,
+        TransformationContract,
+        PropagationMode,
+        WarrantedBoundSelector
+    )
+
+    contract = EpistemicContract(target_name="H0", target_type="FIR_FILTER")
+    warrant = ClaimWarrant(
+        proposition="HALF_BAND_COMPLEMENTARITY",
+        target_type="FIR_FILTER",
+        domain="z in C",
+        disposition=WarrantDisposition.ESTABLISHED,
+        method=EvidenceMethod.ALGEBRAIC_PROOF
+    )
+    contract.add_warrant(warrant)
+
+    assert contract.get_warrant("HALF_BAND_COMPLEMENTARITY") is not None
+    assert contract.is_fully_established is True
+
+    tf = TransformationContract(
+        stage_name="SPECTRUM_CONVOLUTION",
+        input_target_type="LAURENT_POLYNOMIAL",
+        output_target_type="FIR_FILTER",
+        propagation_mode=PropagationMode.LIPSCHITZ_BOUNDED,
+        lipschitz_constant=1.0,
+        stage_error_bound=1e-6
+    )
+    assert tf.propagate_error(1e-4) == 1.0e-4 + 1e-6
+
+    # Test WarrantedBoundSelector release gate
+    spec = FilterSpec(kind="lowpass", order=31, cutoff=0.2)
+    res1 = GegenbauerFilterCompiler(lam=0.5).compile(spec)
+    res2 = GegenbauerFilterCompiler(lam=1.5).compile(spec)
+
+    best_cand, status = WarrantedBoundSelector.select_optimal_warranted_candidate([res1, res2], require_established_targets=False)
+    assert best_cand is not None
+    assert "OPTIMAL_WARRANTED_BOUND" in status
+
+
 def test_filter_spec_edge_cases():
     """Tests QMF odd-N rejection, transition band overlap validation, and clamped bandpass defaults."""
 
