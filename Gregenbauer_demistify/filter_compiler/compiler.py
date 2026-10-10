@@ -75,6 +75,85 @@ class VerificationStatus(Enum):
     FAILED = "FAILED"
 
 
+class WarrantDisposition(Enum):
+    """Disposition status of an epistemic claim warrant."""
+    ESTABLISHED = "ESTABLISHED"
+    CONTRADICTED = "CONTRADICTED"
+    OPEN = "OPEN"
+    NOT_EVALUATED = "NOT_EVALUATED"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+class EvidenceMethod(Enum):
+    """Evidence method licensing an epistemic claim."""
+    ALGEBRAIC_PROOF = "ALGEBRAIC_PROOF"
+    EXACT_ARITHMETIC = "EXACT_ARITHMETIC"
+    ANALYTIC_BOUND = "ANALYTIC_BOUND"
+    VALIDATED_NUMERICAL_BOUND = "VALIDATED_NUMERICAL_BOUND"
+    ORDINARY_NUMERICAL_DIAGNOSTIC = "ORDINARY_NUMERICAL_DIAGNOSTIC"
+    UNPROVED_SCHEMA = "UNPROVED_SCHEMA"
+
+
+@dataclass
+class ClaimWarrant:
+    """Epistemic warrant tracking proposition, evidence method, disposition, and validity bounds."""
+    proposition: str
+    target_type: str
+    domain: str
+    disposition: WarrantDisposition
+    method: EvidenceMethod
+    evidence_payload: dict = field(default_factory=dict)
+    assumptions: List[str] = field(default_factory=list)
+    invalidating_conditions: List[str] = field(default_factory=list)
+
+
+@dataclass
+class EpistemicContract:
+    """Contract preserving claims, warrants, and evidence graph for a computational target."""
+    target_name: str
+    target_type: str
+    warrants: List[ClaimWarrant] = field(default_factory=list)
+
+    def add_warrant(self, warrant: ClaimWarrant) -> None:
+        self.warrants.append(warrant)
+
+    def get_warrant(self, proposition: str) -> Optional[ClaimWarrant]:
+        for w in self.warrants:
+            if w.proposition == proposition:
+                return w
+        return None
+
+    @property
+    def is_fully_established(self) -> bool:
+        return len(self.warrants) > 0 and all(w.disposition == WarrantDisposition.ESTABLISHED for w in self.warrants)
+
+
+class PropagationMode(Enum):
+    """Compositional Error Propagation Behavior for Transformation Steps."""
+    EXACT_MORPHISM = "EXACT_MORPHISM"         # L_i = 1.0 (exact isometry/morphism)
+    NORM_PRESERVING = "NORM_PRESERVING"       # L_i = 1.0 (unitary transform e.g. T_lambda S_lambda)
+    LIPSCHITZ_BOUNDED = "LIPSCHITZ_BOUNDED"   # L_i > 0.0 (Lipschitz continuous mapping)
+    UNESTABLISHED = "UNESTABLISHED"           # Propagation constant not established
+
+
+@dataclass
+class TransformationContract:
+    """Transformation contract tracking staged perturbation chain F_{i+1} = Phi_i(F_i) + delta_i."""
+    stage_name: str
+    input_target_type: str
+    output_target_type: str
+    propagation_mode: PropagationMode
+    lipschitz_constant: float = 1.0
+    stage_error_bound: float = 0.0
+    input_contract: Optional[EpistemicContract] = None
+    output_contract: Optional[EpistemicContract] = None
+
+    def propagate_error(self, incoming_error: float) -> float:
+        if self.propagation_mode == PropagationMode.UNESTABLISHED:
+            return float('inf')
+        return self.lipschitz_constant * incoming_error + self.stage_error_bound
+
+
 @dataclass
 class RootOrbit:
     """Algebraic Root Orbit Unit for conjugate/reciprocal symmetry decomposition."""
@@ -541,6 +620,36 @@ class FilterResult:
         lines.append(f"Fixed-Point Quantization Noise (E_arithmetic): {self.payload.provenance.e_arithmetic:.6e}")
         lines.append(f"Total Error Estimate (E_total_estimate): {self.payload.provenance.total:.6e}")
         return "\n".join(lines)
+
+
+class WarrantedBoundSelector:
+    """Policy-based decision layer and release gate evaluating warranted error bounds across candidate results."""
+
+    @staticmethod
+    def select_optimal_warranted_candidate(
+        candidates: List[FilterResult],
+        require_established_targets: bool = True
+    ) -> Tuple[Optional[FilterResult], str]:
+        if not candidates:
+            return None, "NO_CANDIDATES"
+
+        eligible = []
+        for cand in candidates:
+            # Check target requirement
+            if require_established_targets and not cand.payload.specification_met:
+                continue
+
+            # Check for non-finite error or unestablished warrants
+            tot_err = cand.payload.provenance.total
+            if np.isfinite(tot_err):
+                eligible.append((cand, tot_err))
+
+        if not eligible:
+            return None, "NO_WARRANTED_BOUND"
+
+        eligible.sort(key=lambda x: x[1])
+        best_cand, best_err = eligible[0]
+        return best_cand, f"OPTIMAL_WARRANTED_BOUND_{best_err:.6e}"
 
 
 class GegenbauerFilterCompiler:
@@ -1565,6 +1674,7 @@ class GegenbauerFilterCompiler:
 
             # Compute asymptotic response error bound over active degrees
             deg_errs = []
+            weighted_response_bound = 0.0
             for deg_idx, deg in enumerate(basis_degrees):
                 deg_int = int(deg)
                 if deg_int == 0:
@@ -1573,7 +1683,10 @@ class GegenbauerFilterCompiler:
                 if self.basis_type == "unnormalized":
                     phi_exact = phi_exact * float(c_n_1_val(deg_int, self.lam))
                 phi_asymp = self._eval_pure_asymptotic_basis(deg_int, omega_sample)
-                deg_errs.append(float(np.max(np.abs(phi_exact - phi_asymp))))
+                max_eps_n = float(np.max(np.abs(phi_exact - phi_asymp)))
+                deg_errs.append(max_eps_n)
+                coeff_mag = float(np.abs(a_coeffs[deg_int])) if deg_int < len(a_coeffs) else 0.0
+                weighted_response_bound += coeff_mag * max_eps_n
 
             asymp_err = float(np.max(deg_errs)) if len(deg_errs) > 0 else 0.0
 
