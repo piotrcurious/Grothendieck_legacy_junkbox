@@ -93,14 +93,20 @@ class BiorthogonalResult:
     header_code: str
 
     def summary(self) -> str:
+        contract = self.pair_dict.get("epistemic_contract")
         lines = [
             "=== Gegenbauer Biorthogonal Filter Bank Execution Summary ===",
             f"Filter Type: BIORTHOGONAL | Order H0: {self.order_h0} | Order G0: {self.order_g0} | Cutoff: {self.cutoff} fs",
             f"Gegenbauer Lambda: {self.lam:.4f} | Sampling Rate: {self.sampling_rate} Hz",
             f"Half-Band Product Residual: {self.pair_dict['product_residual']:.6e}",
             f"Polyphase Perfect Reconstruction Error: {self.pair_dict['pr_error']:.6e}",
+            f"Alias Cancellation Residual: {self.pair_dict.get('alias_residual', 0.0):.6e}",
             "Filter Bank Taps: H0 (Analysis LP), H1 (Analysis HP), G0 (Synthesis LP), G1 (Synthesis HP)"
         ]
+        if contract is not None:
+            lines.append("Epistemic Contract Warrants:")
+            for w in contract.warrants:
+                lines.append(f"  • [{w.disposition.value}] {w.proposition} ({w.method.value})")
         return "\n".join(lines)
 from filter_compiler.audio_processor import (
     read_wav,
@@ -724,7 +730,13 @@ class GegenbauerFilterGUI(tk.Tk):
             return
         self.summary_text.config(state=tk.NORMAL)
         self.summary_text.delete("1.0", tk.END)
-        self.summary_text.insert(tk.END, self.current_result.summary())
+        summary_str = self.current_result.summary()
+        if hasattr(self.current_result, 'epistemic_contract') and self.current_result.epistemic_contract is not None:
+            contract = self.current_result.epistemic_contract
+            summary_str += "\nEpistemic Contract Warrants:\n"
+            for w in contract.warrants:
+                summary_str += f"  • [{w.disposition.value}] {w.proposition} ({w.method.value})\n"
+        self.summary_text.insert(tk.END, summary_str)
         self.summary_text.config(state=tk.DISABLED)
 
     def _update_freq_plots(self):
