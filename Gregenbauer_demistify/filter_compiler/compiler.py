@@ -109,9 +109,10 @@ class ClaimWarrant:
 
 @dataclass
 class EpistemicContract:
-    """Contract preserving claims, warrants, and evidence graph for a computational target."""
+    """Contract preserving claims, warrants, required scope, and evidence graph for a computational target."""
     target_name: str
     target_type: str
+    required_claims: List[str] = field(default_factory=list)
     warrants: List[ClaimWarrant] = field(default_factory=list)
 
     def add_warrant(self, warrant: ClaimWarrant) -> None:
@@ -123,8 +124,23 @@ class EpistemicContract:
                 return w
         return None
 
+    def missing_claims(self) -> List[str]:
+        present = {w.proposition for w in self.warrants}
+        return [claim for claim in self.required_claims if claim not in present]
+
+    def unresolved_claims(self) -> List[str]:
+        by_prop = {w.proposition: w for w in self.warrants}
+        unresolved = []
+        for claim in self.required_claims:
+            w = by_prop.get(claim)
+            if w is None or w.disposition != WarrantDisposition.ESTABLISHED:
+                unresolved.append(claim)
+        return unresolved
+
     @property
     def is_fully_established(self) -> bool:
+        if len(self.required_claims) > 0:
+            return len(self.unresolved_claims()) == 0
         return len(self.warrants) > 0 and all(w.disposition == WarrantDisposition.ESTABLISHED for w in self.warrants)
 
 
@@ -148,8 +164,18 @@ class TransformationContract:
     input_contract: Optional[EpistemicContract] = None
     output_contract: Optional[EpistemicContract] = None
 
+    def __post_init__(self):
+        if self.propagation_mode in (PropagationMode.EXACT_MORPHISM, PropagationMode.NORM_PRESERVING):
+            self.lipschitz_constant = 1.0
+        if self.lipschitz_constant < 0.0 or not np.isfinite(self.lipschitz_constant):
+            raise ValueError(f"Lipschitz constant must be finite and non-negative, got {self.lipschitz_constant}")
+        if self.stage_error_bound < 0.0 or not np.isfinite(self.stage_error_bound):
+            raise ValueError(f"Stage error bound must be finite and non-negative, got {self.stage_error_bound}")
+
     def propagate_error(self, incoming_error: float) -> float:
         if self.propagation_mode == PropagationMode.UNESTABLISHED:
+            return float('inf')
+        if not np.isfinite(incoming_error) or incoming_error < 0.0:
             return float('inf')
         return self.lipschitz_constant * incoming_error + self.stage_error_bound
 
@@ -258,7 +284,7 @@ class RootDecomposer:
                         used_c[conj_idx] = True
                         unit_roots = np.array([r1, c2['rep']])
                     else:
-                        unit_roots = np.array([r1, np.conj(r1)])
+                        raise ValueError(f"Unpaired unit circle conjugate root detected for {r1}: conjugate partner not found.")
                     atomic_units.append(RootOrbit(
                         kind='UNIT_CIRCLE_PAIR',
                         roots=unit_roots,
@@ -280,11 +306,20 @@ class RootDecomposer:
                     quad_roots = np.array([raw_clusters[k]['rep'] for k in quad_indices])
                     if len(quad_roots) != 4:
                         raise ValueError(f"Invalid root orbit size for COMPLEX_RECIPROCAL_CONJUGATE_QUARTET: got {len(quad_roots)}, expected 4.")
+                    # Compute actual orbit residual: max discrepancy from exact conjugate/reciprocal relations
+                    r_conj = np.conj(r1)
+                    r_recip = 1.0 / r1
+                    r_conj_recip = 1.0 / np.conj(r1)
+                    res_quad = float(max(
+                        min(abs(r - r_conj) for r in quad_roots),
+                        min(abs(r - r_recip) for r in quad_roots),
+                        min(abs(r - r_conj_recip) for r in quad_roots)
+                    ))
                     atomic_units.append(RootOrbit(
                         kind='COMPLEX_RECIPROCAL_CONJUGATE_QUARTET',
                         roots=quad_roots,
                         multiplicity=quad_mult,
-                        orbit_residual=0.0
+                        orbit_residual=res_quad
                     ))
 
         orbit_total_size = sum(unit.size * unit.multiplicity for unit in atomic_units)
@@ -571,6 +606,7 @@ class FilterResult:
     mu_reg: float
     h0_taps: QuantizedTaps
     payload: CertifiedEvaluationPayload
+    epistemic_contract: Optional[EpistemicContract] = None
     factorization: Optional[FactorizationDiagnostics] = None
     h1_taps: Optional[QuantizedTaps] = None
     spectral_design: Optional[GegenbauerSpectralDesign] = None
@@ -635,14 +671,20 @@ class WarrantedBoundSelector:
 
         eligible = []
         for cand in candidates:
-            # Check target requirement
-            if require_established_targets and not cand.payload.specification_met:
+            contract = cand.epistemic_contract
+            if contract is None:
                 continue
 
-            # Check for non-finite error or unestablished warrants
-            tot_err = cand.payload.provenance.total
-            if np.isfinite(tot_err):
-                eligible.append((cand, tot_err))
+            if require_established_targets and not contract.is_fully_established:
+                continue
+
+            real_warrant = contract.get_warrant("REALIZATION_VERIFIED")
+            if real_warrant is None or real_warrant.disposition != WarrantDisposition.ESTABLISHED:
+                continue
+
+            # Score by final realization residual and mixed error
+            score = cand.final_realization_residual + 0.1 * cand.provenance_mixed_error
+            eligible.append((cand, score))
 
         if not eligible:
             return None, "NO_WARRANTED_BOUND"
@@ -1789,6 +1831,50 @@ class GegenbauerFilterCompiler:
             is_certified=is_certified
         )
 
+        # Build comprehensive EpistemicContract with explicit claim warrants
+        epistemic_contract = EpistemicContract(
+            target_name=f"FilterResult_{spec.kind}_{spec.order}",
+            target_type="FIR_FILTER",
+            required_claims=["REALIZATION_VERIFIED", "DESIGN_SPECIFICATION_COMPLIANCE"]
+        )
+
+        epistemic_contract.add_warrant(ClaimWarrant(
+            proposition="REALIZATION_VERIFIED",
+            target_type="FIR_FILTER",
+            domain="TAPS_ARRAY",
+            disposition=WarrantDisposition.ESTABLISHED if realization_verified else WarrantDisposition.CONTRADICTED,
+            method=EvidenceMethod.EXACT_ARITHMETIC,
+            evidence_payload={"order": spec.order, "finite_taps": bool(np.all(np.isfinite(h0_quant.float64_taps)))}
+        ))
+
+        epistemic_contract.add_warrant(ClaimWarrant(
+            proposition="DESIGN_SPECIFICATION_COMPLIANCE",
+            target_type="DSP_SPECIFICATION",
+            domain="FREQUENCY_GRID",
+            disposition=WarrantDisposition.ESTABLISHED if design_target_met else WarrantDisposition.CONTRADICTED,
+            method=EvidenceMethod.ORDINARY_NUMERICAL_DIAGNOSTIC,
+            evidence_payload={"pass_ripple": float(pass_ripple), "stop_atten": float(stop_atten)}
+        ))
+
+        if spec.kind in ("qmf", "asymmetric_qmf"):
+            epistemic_contract.required_claims.extend(["POWER_COMPLEMENTARITY", "ALIAS_CANCELLATION"])
+            epistemic_contract.add_warrant(ClaimWarrant(
+                proposition="POWER_COMPLEMENTARITY",
+                target_type="HALF_BAND_POWER",
+                domain="FREQUENCY_GRID",
+                disposition=WarrantDisposition.ESTABLISHED if qmf_pow_ok else WarrantDisposition.CONTRADICTED,
+                method=EvidenceMethod.VALIDATED_NUMERICAL_BOUND,
+                evidence_payload={"qmf_power_error_linear": qmf_pow_lin}
+            ))
+            epistemic_contract.add_warrant(ClaimWarrant(
+                proposition="ALIAS_CANCELLATION",
+                target_type="CQF_BANK",
+                domain="FREQUENCY_GRID",
+                disposition=WarrantDisposition.ESTABLISHED if qmf_alias_ok else WarrantDisposition.CONTRADICTED,
+                method=EvidenceMethod.VALIDATED_NUMERICAL_BOUND,
+                evidence_payload={"qmf_alias_error_linear": qmf_alias_lin}
+            ))
+
         # Recompute final realization frequency fit residual from final normalized taps
         H0_final = np.abs(np.fft.fft(h0_quant.float64_taps, K_fft)[:K_fft // 2 + 1])
         omega_eval = 2.0 * np.pi * freq_grid
@@ -1823,6 +1909,7 @@ class GegenbauerFilterCompiler:
             mu_reg=self.mu_reg,
             h0_taps=h0_quant,
             payload=payload,
+            epistemic_contract=epistemic_contract,
             factorization=factor_diag,
             h1_taps=h1_quant,
             spectral_design=spectral_design,
