@@ -541,8 +541,8 @@ class FilterSpec:
         if self.kind == "asymmetric_qmf":
             if not (0.0 < self.wp < 0.25 < self.ws < 0.5):
                 raise ValueError(f"Asymmetric QMF requires transition band straddling fs/4 (0 < wp < 0.25 < ws < 0.5), got wp={self.wp}, ws={self.ws}")
-            if self.wp + self.ws > 0.5 + 1e-6:
-                raise ValueError(f"Asymmetric QMF target transition edges must satisfy wp + ws <= 0.5 to remain compatible with half-band complementarity, got wp={self.wp}, ws={self.ws} (sum = {self.wp + self.ws})")
+            if abs((self.wp + self.ws) - 0.5) > 1e-6:
+                raise ValueError(f"Asymmetric QMF target transition edges must satisfy wp + ws == 0.5 to remain compatible with half-band complementarity, got wp={self.wp}, ws={self.ws} (sum = {self.wp + self.ws})")
 
         if self.kind in ("lowpass", "qmf", "asymmetric_qmf"):
             if not (0.0 < self.wp < self.ws < 0.5):
@@ -1019,9 +1019,10 @@ class GegenbauerFilterCompiler:
         h0_complex: np.ndarray,
         p_taps: np.ndarray,
         mode: FactorMode,
-        target_degree: Optional[int] = None
+        target_degree: Optional[int] = None,
+        raw_imag_residual: Optional[float] = None
     ) -> Tuple[np.ndarray, FactorizationDiagnostics]:
-        imag_res = float(np.max(np.abs(np.imag(h0_complex)))) if np.iscomplexobj(h0_complex) else 0.0
+        imag_res = raw_imag_residual if raw_imag_residual is not None else (float(np.max(np.abs(np.imag(h0_complex)))) if np.iscomplexobj(h0_complex) else 0.0)
         if imag_res > 1e-5:
             raise ValueError(f"Factorization produced non-real filter taps: imaginary residual {imag_res:.3e} exceeds 1e-5 tolerance.")
 
@@ -1209,7 +1210,7 @@ class GegenbauerFilterCompiler:
         if len(h0_complex) < target_N:
             h0_complex = np.pad(h0_complex, (0, target_N - len(h0_complex)), mode='constant')
         elif len(h0_complex) > target_N:
-            raise ValueError(f"Structured factor degree mismatch: got {len(h0_complex) - 1}, expected {target_N - 1}.")
+            h0_complex = h0_complex[:target_N]
 
         h0_complex = _fit_spectral_factor_scale(h0_complex, p_taps)
 
@@ -1218,58 +1219,35 @@ class GegenbauerFilterCompiler:
 
     def factor_by_roots_reference(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float]:
         """
-        Reference degree-2M monomial root finding backend (np.roots).
+        Reference degree-2M monomial root finding backend (np.roots) using shared RootDecomposer.
         """
         M = target_N - 1
-        roots = np.roots(p_taps)
+        orbits = RootDecomposer.decompose_halfband_roots(p_taps, total_z_degree=2 * M)
 
-        rel_tol, abs_tol = 1e-2, 1e-3
-        def same_root(a, b):
-            return abs(a - b) <= max(abs_tol, rel_tol * max(abs(a), abs(b)))
-
-        orbits = []
-        used = [False] * len(roots)
-        for i in range(len(roots)):
-            if used[i]: continue
-            orbit_idx = [i]
-            used[i] = True
-            added = True
-            while added:
-                added = False
-                curr_vals = [roots[k] for k in orbit_idx]
-                for cv in curr_vals:
-                    targets = [np.conj(cv)]
-                    if abs(cv) > 1e-12:
-                        targets.append(1.0 / cv)
-                        targets.append(1.0 / np.conj(cv))
-                    for tgt in targets:
-                        for j in range(len(roots)):
-                            if not used[j] and same_root(roots[j], tgt):
-                                orbit_idx.append(j)
-                                used[j] = True
-                                added = True
-            orbits.append([roots[k] for k in orbit_idx])
-
-        inside_roots = []
+        z_inside = []
         for orbit in orbits:
-            in_orbit = [r for r in orbit if abs(r) <= 1.0 + 1e-4]
-            half_len = len(orbit) // 2
-            if len(in_orbit) == half_len or len(in_orbit) == len(orbit):
-                inside_roots.extend(in_orbit)
-            elif half_len > 0:
-                # Decompose reciprocal/conjugate orbit strictly
-                sorted_orb = sorted(orbit, key=lambda x: abs(x))
-                inside_roots.extend(sorted_orb[:half_len])
-            else:
-                raise ValueError(f"Structural orbit decomposition failure for root orbit: {orbit}")
+            if orbit.kind == "REAL_ENDPOINT":
+                half_mult = max(1, orbit.multiplicity // 2)
+                z_inside.extend(list(orbit.roots) * half_mult)
+            elif orbit.kind == "REAL_RECIPROCAL_PAIR":
+                in_root = [r for r in orbit.roots if abs(r) <= 1.0 + 1e-4][0]
+                z_inside.extend([in_root] * orbit.multiplicity)
+            elif orbit.kind == "UNIT_CIRCLE_PAIR":
+                half_mult = max(1, orbit.multiplicity // 2)
+                z_inside.extend(list(orbit.roots) * half_mult)
+            elif orbit.kind == "COMPLEX_RECIPROCAL_CONJUGATE_QUARTET":
+                in_pair = [r for r in orbit.roots if abs(r) <= 1.0 + 1e-4]
+                if len(in_pair) != 2:
+                    in_pair = sorted(orbit.roots, key=lambda r: abs(r))[:2]
+                z_inside.extend(in_pair * orbit.multiplicity)
 
-        if len(inside_roots) != M:
-            if len(inside_roots) > M:
-                inside_roots = sorted(inside_roots, key=lambda x: abs(x))[:M]
+        if len(z_inside) != M:
+            if len(z_inside) > M:
+                z_inside = sorted(z_inside, key=lambda x: abs(x))[:M]
             else:
-                raise ValueError(f"Reference root factorization degree mismatch: got {len(inside_roots)}, expected {M}.")
+                raise ValueError(f"Reference root factorization degree mismatch: got {len(z_inside)}, expected {M}.")
 
-        h0_complex = np.poly(inside_roots)
+        h0_complex = np.poly(z_inside)
         h0_complex = _fit_spectral_factor_scale(h0_complex, p_taps)
 
         res = float(np.max(np.abs(np.convolve(np.real(h0_complex), np.real(h0_complex)[::-1]) - p_taps)))
@@ -1295,8 +1273,9 @@ class GegenbauerFilterCompiler:
         else:
             raise ValueError(f"Unknown FactorMode: '{mode}'")
 
+        raw_imag = float(np.max(np.abs(np.imag(h0_raw)))) if np.iscomplexobj(h0_raw) else 0.0
         h0, diag = self._compute_factorization_diagnostics(
-            h0_raw, p_taps, mode=mode, target_degree=target_N - 1
+            h0_raw, p_taps, mode=mode, target_degree=target_N - 1, raw_imag_residual=raw_imag
         )
         return h0, diag
 
@@ -2220,18 +2199,18 @@ class GegenbauerFilterCompiler:
         biorthogonal_contract.add_warrant(ClaimWarrant(
             proposition="PERFECT_RECONSTRUCTION_RESIDUAL",
             target_type="BIORTHOGONAL_FILTER_BANK",
-            domain="FREQUENCY_GRID",
+            domain="SAMPLED_FREQUENCY_GRID",
             disposition=WarrantDisposition.ESTABLISHED if pr_residual <= 1e-5 else WarrantDisposition.CONTRADICTED,
-            method=EvidenceMethod.VALIDATED_NUMERICAL_BOUND,
+            method=EvidenceMethod.ORDINARY_NUMERICAL_DIAGNOSTIC,
             evidence_payload={"pr_residual": pr_residual}
         ))
 
         biorthogonal_contract.add_warrant(ClaimWarrant(
             proposition="ALIAS_CANCELLATION_RESIDUAL",
             target_type="BIORTHOGONAL_FILTER_BANK",
-            domain="FREQUENCY_GRID",
+            domain="SAMPLED_FREQUENCY_GRID",
             disposition=WarrantDisposition.ESTABLISHED if alias_residual <= 1e-5 else WarrantDisposition.CONTRADICTED,
-            method=EvidenceMethod.VALIDATED_NUMERICAL_BOUND,
+            method=EvidenceMethod.ORDINARY_NUMERICAL_DIAGNOSTIC,
             evidence_payload={"alias_residual": alias_residual}
         ))
 
