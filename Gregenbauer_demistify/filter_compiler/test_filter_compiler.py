@@ -542,20 +542,31 @@ def test_epistemic_warrants_and_transformation_contracts():
         EpistemicContract,
         TransformationContract,
         PropagationMode,
+        DiagnosticCandidateSelector,
         WarrantedBoundSelector
     )
 
     contract = EpistemicContract(target_name="H0", target_type="FIR_FILTER")
-    warrant = ClaimWarrant(
+    warrant1 = ClaimWarrant(
         proposition="HALF_BAND_COMPLEMENTARITY",
         target_type="FIR_FILTER",
         domain="z in C",
         disposition=WarrantDisposition.ESTABLISHED,
         method=EvidenceMethod.ALGEBRAIC_PROOF
     )
-    contract.add_warrant(warrant)
+    contract.add_warrant(warrant1)
 
-    assert contract.get_warrant("HALF_BAND_COMPLEMENTARITY") is not None
+    # Test unique proposition overwrite
+    warrant1_updated = ClaimWarrant(
+        proposition="HALF_BAND_COMPLEMENTARITY",
+        target_type="FIR_FILTER",
+        domain="z in C",
+        disposition=WarrantDisposition.ESTABLISHED,
+        method=EvidenceMethod.EXACT_ARITHMETIC
+    )
+    contract.add_warrant(warrant1_updated)
+    assert len(contract.warrants) == 1
+    assert contract.get_warrant("HALF_BAND_COMPLEMENTARITY").method == EvidenceMethod.EXACT_ARITHMETIC
     assert contract.is_fully_established is True
 
     tf = TransformationContract(
@@ -573,9 +584,17 @@ def test_epistemic_warrants_and_transformation_contracts():
     res1 = GegenbauerFilterCompiler(lam=0.5).compile(spec)
     res2 = GegenbauerFilterCompiler(lam=1.5).compile(spec)
 
-    best_cand, status = WarrantedBoundSelector.select_optimal_warranted_candidate([res1, res2], require_established_targets=False)
+    assert res1.epistemic_contract is not None
+    assert len(res1.epistemic_contract.warrants) >= 2
+
+    best_cand, status = DiagnosticCandidateSelector.select_best([res1, res2], require_established_targets=False)
     assert best_cand is not None
-    assert "OPTIMAL_WARRANTED_BOUND" in status
+    assert "BEST_DIAGNOSTIC_SCORE" in status
+
+    # Verify biorthogonal EpistemicContract generation
+    pair = GegenbauerFilterCompiler(lam=1.5).compile_biorthogonal_pair(order_h0=8, order_g0=6)
+    assert "epistemic_contract" in pair
+    assert pair["epistemic_contract"].is_fully_established is True
 
 
 def test_filter_spec_edge_cases():
