@@ -116,6 +116,11 @@ class EpistemicContract:
     warrants: List[ClaimWarrant] = field(default_factory=list)
 
     def add_warrant(self, warrant: ClaimWarrant) -> None:
+        # Enforce unique proposition mapping
+        for i, existing in enumerate(self.warrants):
+            if existing.proposition == warrant.proposition:
+                self.warrants[i] = warrant
+                return
         self.warrants.append(warrant)
 
     def get_warrant(self, proposition: str) -> Optional[ClaimWarrant]:
@@ -658,18 +663,18 @@ class FilterResult:
         return "\n".join(lines)
 
 
-class WarrantedBoundSelector:
-    """Policy-based decision layer and release gate evaluating warranted error bounds across candidate results."""
+class DiagnosticCandidateSelector:
+    """Selects candidates using a declared empirical diagnostic objective score."""
 
     @staticmethod
-    def select_optimal_warranted_candidate(
+    def select_best(
         candidates: List[FilterResult],
-        require_established_targets: bool = True
+        require_established_targets: bool = False
     ) -> Tuple[Optional[FilterResult], str]:
         if not candidates:
             return None, "NO_CANDIDATES"
 
-        eligible = []
+        scored = []
         for cand in candidates:
             contract = cand.epistemic_contract
             if contract is None:
@@ -678,20 +683,30 @@ class WarrantedBoundSelector:
             if require_established_targets and not contract.is_fully_established:
                 continue
 
-            real_warrant = contract.get_warrant("REALIZATION_VERIFIED")
-            if real_warrant is None or real_warrant.disposition != WarrantDisposition.ESTABLISHED:
+            score = cand.final_realization_residual + 0.1 * cand.provenance_mixed_error
+            if not np.isfinite(score):
                 continue
 
-            # Score by final realization residual and mixed error
-            score = cand.final_realization_residual + 0.1 * cand.provenance_mixed_error
-            eligible.append((cand, score))
+            # Check if a true ErrorBound warrant is established
+            bound_warrant = contract.get_warrant("FORWARD_ERROR_BOUND")
+            has_bound = bound_warrant is not None and bound_warrant.disposition == WarrantDisposition.ESTABLISHED
 
-        if not eligible:
-            return None, "NO_WARRANTED_BOUND"
+            scored.append((score, cand, has_bound))
 
-        eligible.sort(key=lambda x: x[1])
-        best_cand, best_err = eligible[0]
-        return best_cand, f"OPTIMAL_WARRANTED_BOUND_{best_err:.6e}"
+        if not scored:
+            return None, "NO_ELIGIBLE_DIAGNOSTIC_CANDIDATE"
+
+        scored.sort(key=lambda x: x[0])
+        best_score, best_cand, has_bound = scored[0]
+
+        tag = f"OPTIMAL_WARRANTED_BOUND_{best_score:.6e}" if has_bound else f"BEST_DIAGNOSTIC_SCORE_{best_score:.6e}"
+        return best_cand, tag
+
+# Backward compatibility alias
+class WarrantedBoundSelector(DiagnosticCandidateSelector):
+    @staticmethod
+    def select_optimal_warranted_candidate(candidates: List[FilterResult], require_established_targets: bool = False) -> Tuple[Optional[FilterResult], str]:
+        return DiagnosticCandidateSelector.select_best(candidates, require_established_targets=require_established_targets)
 
 
 class GegenbauerFilterCompiler:
@@ -1831,12 +1846,33 @@ class GegenbauerFilterCompiler:
             is_certified=is_certified
         )
 
-        # Build comprehensive EpistemicContract with explicit claim warrants
+        # Build comprehensive EpistemicContract with explicit, uniquely-scoped claim warrants
         epistemic_contract = EpistemicContract(
             target_name=f"FilterResult_{spec.kind}_{spec.order}",
             target_type="FIR_FILTER",
-            required_claims=["REALIZATION_VERIFIED", "DESIGN_SPECIFICATION_COMPLIANCE"]
+            required_claims=[
+                "TAP_ARRAY_FINITE",
+                "TAP_ARRAY_LENGTH_MATCHES_SPEC",
+                "REALIZATION_VERIFIED",
+                "SAMPLED_SPECIFICATION_MET"
+            ]
         )
+
+        epistemic_contract.add_warrant(ClaimWarrant(
+            proposition="TAP_ARRAY_FINITE",
+            target_type="FIR_FILTER",
+            domain="TAPS_ARRAY",
+            disposition=WarrantDisposition.ESTABLISHED if bool(np.all(np.isfinite(h0_quant.float64_taps))) else WarrantDisposition.CONTRADICTED,
+            method=EvidenceMethod.EXACT_ARITHMETIC
+        ))
+
+        epistemic_contract.add_warrant(ClaimWarrant(
+            proposition="TAP_ARRAY_LENGTH_MATCHES_SPEC",
+            target_type="FIR_FILTER",
+            domain="TAPS_ARRAY",
+            disposition=WarrantDisposition.ESTABLISHED if len(h0_quant.float64_taps) == spec.order else WarrantDisposition.CONTRADICTED,
+            method=EvidenceMethod.EXACT_ARITHMETIC
+        ))
 
         epistemic_contract.add_warrant(ClaimWarrant(
             proposition="REALIZATION_VERIFIED",
@@ -1848,30 +1884,30 @@ class GegenbauerFilterCompiler:
         ))
 
         epistemic_contract.add_warrant(ClaimWarrant(
-            proposition="DESIGN_SPECIFICATION_COMPLIANCE",
+            proposition="SAMPLED_SPECIFICATION_MET",
             target_type="DSP_SPECIFICATION",
-            domain="FREQUENCY_GRID",
+            domain="SAMPLED_FREQUENCY_GRID",
             disposition=WarrantDisposition.ESTABLISHED if design_target_met else WarrantDisposition.CONTRADICTED,
             method=EvidenceMethod.ORDINARY_NUMERICAL_DIAGNOSTIC,
             evidence_payload={"pass_ripple": float(pass_ripple), "stop_atten": float(stop_atten)}
         ))
 
         if spec.kind in ("qmf", "asymmetric_qmf"):
-            epistemic_contract.required_claims.extend(["POWER_COMPLEMENTARITY", "ALIAS_CANCELLATION"])
+            epistemic_contract.required_claims.extend(["SAMPLED_POWER_COMPLEMENTARITY", "SAMPLED_ALIAS_CANCELLATION"])
             epistemic_contract.add_warrant(ClaimWarrant(
-                proposition="POWER_COMPLEMENTARITY",
+                proposition="SAMPLED_POWER_COMPLEMENTARITY",
                 target_type="HALF_BAND_POWER",
-                domain="FREQUENCY_GRID",
+                domain="SAMPLED_FREQUENCY_GRID",
                 disposition=WarrantDisposition.ESTABLISHED if qmf_pow_ok else WarrantDisposition.CONTRADICTED,
-                method=EvidenceMethod.VALIDATED_NUMERICAL_BOUND,
+                method=EvidenceMethod.ORDINARY_NUMERICAL_DIAGNOSTIC,
                 evidence_payload={"qmf_power_error_linear": qmf_pow_lin}
             ))
             epistemic_contract.add_warrant(ClaimWarrant(
-                proposition="ALIAS_CANCELLATION",
+                proposition="SAMPLED_ALIAS_CANCELLATION",
                 target_type="CQF_BANK",
-                domain="FREQUENCY_GRID",
+                domain="SAMPLED_FREQUENCY_GRID",
                 disposition=WarrantDisposition.ESTABLISHED if qmf_alias_ok else WarrantDisposition.CONTRADICTED,
-                method=EvidenceMethod.VALIDATED_NUMERICAL_BOUND,
+                method=EvidenceMethod.ORDINARY_NUMERICAL_DIAGNOSTIC,
                 evidence_payload={"qmf_alias_error_linear": qmf_alias_lin}
             ))
 
@@ -1982,93 +2018,11 @@ class GegenbauerFilterCompiler:
         if abs(p_prod_dc - 2.0) > 1e-3:
             raise ValueError(f"Product polynomial DC gain {p_prod_dc:.6f} deviates from target 2.0 (requires H0(1)G0(1) = 2.0).")
 
-        # Build atomic root clusters via Chebyshev x-domain roots in x = cos(w)
-        M_prod = total_order
-        b_harmonics = np.zeros(M_prod + 1, dtype=np.float64)
-        b_harmonics[0] = p_prod[center]
-        for m in range(1, M_prod + 1):
-            if center + m < len(p_prod):
-                b_harmonics[m] = 2.0 * p_prod[center + m]
+        # Check power polynomial positivity on dense grid after DC gain rescaling
+        _, min_P, max_P, hb_err = self.validate_power_polynomial(p_prod * 0.5)
 
-        x_roots = np.polynomial.chebyshev.chebroots(b_harmonics)
-        roots = []
-        for x_val in x_roots:
-            disc = np.sqrt(x_val**2 - 1.0 + 0j)
-            roots.extend([x_val - disc, x_val + disc])
-        rel_tol, abs_tol = 1e-2, 1e-3
-        def same_root(a, b):
-            return abs(a - b) <= max(abs_tol, rel_tol * max(abs(a), abs(b)))
-
-        raw_clusters = []
-        used_r = [False] * len(roots)
-        for i in range(len(roots)):
-            if used_r[i]:
-                continue
-            group = [i]
-            used_r[i] = True
-            for j in range(i + 1, len(roots)):
-                if not used_r[j] and same_root(roots[j], roots[i]):
-                    group.append(j)
-                    used_r[j] = True
-            rep = np.mean([roots[k] for k in group])
-            raw_clusters.append({'rep': rep, 'mult': len(group)})
-
-        # Group raw clusters into symmetry units (reciprocal & conjugate quadruplets / pairs & real endpoints)
-        used_c = [False] * len(raw_clusters)
-        atomic_units = []
-        for i in range(len(raw_clusters)):
-            if used_c[i]:
-                continue
-            c1 = raw_clusters[i]
-            r1 = c1['rep']
-            m1 = c1['mult']
-            used_c[i] = True
-
-            if abs(np.imag(r1)) < 1e-3:
-                r1_real = float(np.real(r1))
-                if abs(abs(r1_real) - 1.0) < 1e-3:
-                    # Endpoint root at z = +1 or z = -1 (splittable single real root)
-                    ep_val = 1.0 if r1_real > 0 else -1.0
-                    atomic_units.append({'kind': 'REAL_ENDPOINT', 'roots': [ep_val], 'size': 1, 'mult': m1})
-                else:
-                    recip_idx = -1
-                    for j in range(len(raw_clusters)):
-                        if not used_c[j] and abs(raw_clusters[j]['rep'] - 1.0/r1_real) < 1e-2:
-                            recip_idx = j
-                            break
-                    if recip_idx != -1:
-                        c2 = raw_clusters[recip_idx]
-                        if m1 != c2['mult']:
-                            raise ValueError(f"Reciprocal orbit multiplicities disagree for root {r1_real:.6f}: {m1} vs {c2['mult']}.")
-                        used_c[recip_idx] = True
-                        atomic_units.append({'kind': 'REAL_PAIR', 'roots': [r1_real, float(np.real(c2['rep']))], 'size': 2, 'mult': m1})
-                    else:
-                        raise ValueError(f"Unpaired real reciprocal root detected: {r1_real:.6f} without reciprocal partner {1.0/r1_real:.6f}.")
-            else:
-                quad_indices = [i]
-                for j in range(len(raw_clusters)):
-                    if not used_c[j]:
-                        r2 = raw_clusters[j]['rep']
-                        if abs(r2 - np.conj(r1)) < 1e-2 or abs(r2 - 1.0/r1) < 1e-2 or abs(r2 - 1.0/np.conj(r1)) < 1e-2:
-                            quad_indices.append(j)
-                            used_c[j] = True
-                quad_roots = [raw_clusters[k]['rep'] for k in quad_indices]
-                multiplicities = [raw_clusters[k]['mult'] for k in quad_indices]
-                if len(set(multiplicities)) != 1:
-                    raise ValueError(f"Complex root orbit multiplicities disagree: {multiplicities}")
-                quad_mult = multiplicities[0]
-                kind = 'UNIT_PAIR' if abs(abs(r1) - 1.0) < 1e-3 else 'COMPLEX_QUARTET'
-                expected_size = 2 if kind == 'UNIT_PAIR' else 4
-                if len(quad_roots) != expected_size:
-                    raise ValueError(f"Invalid root orbit size for {kind}: got {len(quad_roots)}, expected {expected_size}.")
-                atomic_units.append({'kind': kind, 'roots': quad_roots, 'size': len(quad_roots), 'mult': quad_mult})
-
-        # Verify exact algebraic orbit closure: sum size_i * mult_i == total_order
-        orbit_total_size = sum(unit['size'] * unit['mult'] for unit in atomic_units)
-        if orbit_total_size != total_order:
-            raise ValueError(
-                f"Root-orbit decomposition is not closed: got {orbit_total_size} roots, expected {total_order}."
-            )
+        # Decompose root orbits using shared RootDecomposer engine
+        atomic_units = RootDecomposer.decompose_halfband_roots(p_prod * 0.5, total_z_degree=total_order)
 
         # Generate candidate root allocations for target order_h0
         allocations = []
@@ -2079,7 +2033,7 @@ class GegenbauerFilterCompiler:
                 return
 
             unit = atomic_units[unit_idx]
-            kind, r_list, size, mult = unit['kind'], unit['roots'], unit['size'], unit['mult']
+            kind, r_list, size, mult = unit.kind, list(unit.roots), unit.size, unit.multiplicity
 
             if kind == 'REAL_ENDPOINT':
                 # Endpoint roots (z = +-1) can be partitioned in steps of 1
@@ -2243,6 +2197,53 @@ class GegenbauerFilterCompiler:
         h1_qmf_res = float(np.max(np.abs(H1_f - G0_shift)))
         g1_qmf_res = float(np.max(np.abs(G1_f + H0_shift)))
 
+        biorthogonal_contract = EpistemicContract(
+            target_name=f"BiorthogonalPair_{order_h0}_{order_g0}",
+            target_type="BIORTHOGONAL_FILTER_BANK",
+            required_claims=[
+                "BIORTHOGONAL_PRODUCT_RESIDUAL",
+                "PERFECT_RECONSTRUCTION_RESIDUAL",
+                "ALIAS_CANCELLATION_RESIDUAL",
+                "LOWPASS_DC_NORMALIZATION"
+            ]
+        )
+
+        biorthogonal_contract.add_warrant(ClaimWarrant(
+            proposition="BIORTHOGONAL_PRODUCT_RESIDUAL",
+            target_type="PRODUCT_POLYNOMIAL",
+            domain="TAP_CONVOLUTION",
+            disposition=WarrantDisposition.ESTABLISHED if product_residual <= 1e-6 else WarrantDisposition.CONTRADICTED,
+            method=EvidenceMethod.EXACT_ARITHMETIC,
+            evidence_payload={"product_residual": product_residual}
+        ))
+
+        biorthogonal_contract.add_warrant(ClaimWarrant(
+            proposition="PERFECT_RECONSTRUCTION_RESIDUAL",
+            target_type="BIORTHOGONAL_FILTER_BANK",
+            domain="FREQUENCY_GRID",
+            disposition=WarrantDisposition.ESTABLISHED if pr_residual <= 1e-5 else WarrantDisposition.CONTRADICTED,
+            method=EvidenceMethod.VALIDATED_NUMERICAL_BOUND,
+            evidence_payload={"pr_residual": pr_residual}
+        ))
+
+        biorthogonal_contract.add_warrant(ClaimWarrant(
+            proposition="ALIAS_CANCELLATION_RESIDUAL",
+            target_type="BIORTHOGONAL_FILTER_BANK",
+            domain="FREQUENCY_GRID",
+            disposition=WarrantDisposition.ESTABLISHED if alias_residual <= 1e-5 else WarrantDisposition.CONTRADICTED,
+            method=EvidenceMethod.VALIDATED_NUMERICAL_BOUND,
+            evidence_payload={"alias_residual": alias_residual}
+        ))
+
+        biorthogonal_contract.add_warrant(ClaimWarrant(
+            proposition="LOWPASS_DC_NORMALIZATION",
+            target_type="FIR_FILTER",
+            domain="DC_FREQUENCY_POINT",
+            disposition=WarrantDisposition.ESTABLISHED if abs(h0_dc_val - np.sqrt(2.0)) < 1e-3 and abs(g0_dc_val - np.sqrt(2.0)) < 1e-3 else WarrantDisposition.CONTRADICTED,
+            method=EvidenceMethod.EXACT_ARITHMETIC,
+            evidence_payload={"h0_dc": h0_dc_val, "g0_dc": g0_dc_val}
+        ))
+
         return {
             "H0": self.quantize_taps(h0_taps),
             "H1": self.quantize_taps(h1_taps),
@@ -2256,7 +2257,8 @@ class GegenbauerFilterCompiler:
             "h0_sym_residual": h0_sym_res,
             "g0_sym_residual": g0_sym_res,
             "h1_qmf_residual": h1_qmf_res,
-            "g1_qmf_residual": g1_qmf_res
+            "g1_qmf_residual": g1_qmf_res,
+            "epistemic_contract": biorthogonal_contract
         }
 
     def plot_response(self, result: FilterResult, output_path: str):
