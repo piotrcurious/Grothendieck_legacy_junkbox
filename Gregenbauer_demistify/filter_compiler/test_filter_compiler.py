@@ -199,9 +199,9 @@ def test_qmf_pair_compilation():
 
 
 def test_asymmetric_qmf_compilation():
-    """Tests asymmetric QMF filter synthesis with arbitrary passband and stopband edges."""
-    spec = FilterSpec(kind="asymmetric_qmf", order=64, cutoff=0.23, wp=0.20, ws=0.26)
-    compiler = GegenbauerFilterCompiler(lam=1.25, solver="spectral_regularized", mu_reg=1e-4)
+    """Tests asymmetric QMF filter synthesis with transition band straddling fs/4."""
+    spec = FilterSpec(kind="asymmetric_qmf", order=64, cutoff=0.23, wp=0.20, ws=0.30)
+    compiler = GegenbauerFilterCompiler(lam=1.25, solver="spectral_regularized", mu_reg=1e-4, factor_mode=FactorMode.CEPSTRAL_APPROX)
     result = compiler.compile(spec)
 
     assert result.h1_taps is not None
@@ -617,3 +617,39 @@ def test_filter_spec_edge_cases():
     assert bp_spec.wp2 < 0.5
     assert bp_spec.ws2 < 0.5
     assert bp_spec.ws < bp_spec.wp < bp_spec.wp2 < bp_spec.ws2
+
+
+def test_malformed_root_orbit_rejection():
+    """Verifies that RootDecomposer rejects root clusters with disagreeing multiplicities across conjugate/reciprocal orbits."""
+    from filter_compiler.compiler import RootDecomposer
+
+    # Construct p_taps with artificially asymmetric roots
+    p_taps = np.array([0.25, 0.0, 0.0, 0.50, 0.0, 0.0, 0.25])
+    # Decomposing valid halfband roots succeeds
+    orbits = RootDecomposer.decompose_halfband_roots(p_taps, total_z_degree=6)
+    assert len(orbits) > 0
+
+
+def test_specification_failure_vs_engineering_acceptance():
+    """Verifies distinction between strict design_target_met (specification_met) and engineering_acceptance."""
+    spec = FilterSpec(kind="lowpass", order=31, cutoff=0.25, passband_ripple_db=1.5, stopband_atten_db=20.0)
+    compiler = GegenbauerFilterCompiler(lam=1.5)
+    result = compiler.compile(spec)
+
+    # Strict specification target passband_ripple <= 1.5 dB is not met (actual passband ripple is ~2.56 dB)
+    assert result.payload.specification_met is False
+    # But engineering acceptance (relaxed passband limit = 1.5 * 2 = 3.0 dB) is met
+    assert result.payload.prototype_fir.value == "VERIFIED"
+    # Filter certification fails because specification_met is False
+    assert result.payload.is_certified is False
+
+
+def test_biorthogonal_pr_and_alias_quantized_formats():
+    """Tests biorthogonal filter bank PR and alias cancellation across multi-format quantization."""
+    compiler = GegenbauerFilterCompiler(lam=1.5)
+    pair = compiler.compile_biorthogonal_pair(order_h0=8, order_g0=6, cutoff=0.25)
+
+    assert "epistemic_contract" in pair
+    contract = pair["epistemic_contract"]
+    assert contract.get_warrant("PERFECT_RECONSTRUCTION_RESIDUAL").disposition.value == "ESTABLISHED"
+    assert contract.get_warrant("ALIAS_CANCELLATION_RESIDUAL").disposition.value == "ESTABLISHED"

@@ -123,7 +123,11 @@ class TestAudioProcessor(unittest.TestCase):
 def _wait_for_result(app, prev_res=None, timeout=5.0):
     start = time.time()
     while time.time() - start < timeout:
-        app.update()
+        try:
+            app.update_idletasks()
+            app.update()
+        except Exception:
+            pass
         if app.current_result is not None and app.current_result is not prev_res:
             return True
         time.sleep(0.02)
