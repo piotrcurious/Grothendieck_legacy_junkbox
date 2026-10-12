@@ -725,8 +725,8 @@ class GegenbauerFilterCompiler:
         grid_samples: int = 2048,
         precision: PrecisionType = PrecisionType.FLOAT64
     ):
-        if not np.isfinite(lam) or lam <= -0.5:
-            raise ValueError(f"Lambda parameter must be finite and > -0.5, got {lam}")
+        if not np.isfinite(lam) or lam <= 0.0:
+            raise ValueError(f"Lambda parameter must be finite and > 0.0, got {lam}")
         if basis_terms is not None and basis_terms < 1:
             raise ValueError(f"basis_terms must be >= 1, got {basis_terms}")
         if mu_reg < 0.0:
@@ -965,17 +965,40 @@ class GegenbauerFilterCompiler:
         """Backward-compatibility alias for solve_parity_constrained_gegenbauer_response."""
         return self.solve_parity_constrained_gegenbauer_response(spec)
 
+    def validate_halfband_structure(self, p_taps: np.ndarray) -> Tuple[bool, float]:
+        """
+        Validates half-band coefficient structure, symmetry, center tap, and complementarity residual.
+        Returns (is_valid, max_halfband_err).
+        """
+        center = (len(p_taps) - 1) // 2
+        M = center
+
+        # Symmetry check p_taps[center-m] == p_taps[center+m]
+        sym_err = float(np.max(np.abs(p_taps[:center] - p_taps[center+1:][::-1]))) if center > 0 else 0.0
+
+        b_harmonics = np.zeros(M + 1, dtype=np.float64)
+        b_harmonics[0] = p_taps[center]
+        for m in range(1, M + 1):
+            if center + m < len(p_taps):
+                b_harmonics[m] = 2.0 * p_taps[center + m]
+
+        # Complementarity residual bound: |2 b0 - 1| + 2 * sum_{m>0, even} |b_m|
+        b_even_sum = 2.0 * float(np.sum(np.abs(b_harmonics[2::2]))) if len(b_harmonics) > 2 else 0.0
+        max_hb_err = float(abs(2.0 * b_harmonics[0] - 1.0) + b_even_sum + sym_err)
+
+        all_finite = bool(np.all(np.isfinite(p_taps)))
+        is_valid = all_finite and (max_hb_err <= 1e-4)
+        return is_valid, max_hb_err
+
     def validate_power_polynomial(self, p_taps: np.ndarray, grid_size: int = 2048) -> Tuple[bool, float, float, float]:
         """
         Validates half-band power polynomial P(z) using numerical critical point evaluation.
         Evaluates P(x) at endpoints x = +-1 and all real derivative roots P'(x) = 0 in [-1, 1].
         Returns (is_valid, min_P, max_P, max_halfband_err).
         """
+        hb_valid, max_hb_err = self.validate_halfband_structure(p_taps)
         center = (len(p_taps) - 1) // 2
         M = center
-
-        # First check coefficient symmetry p_taps[center-m] == p_taps[center+m]
-        sym_err = float(np.max(np.abs(p_taps[:center] - p_taps[center+1:][::-1]))) if center > 0 else 0.0
 
         b_harmonics = np.zeros(M + 1, dtype=np.float64)
         b_harmonics[0] = p_taps[center]
@@ -1006,13 +1029,9 @@ class GegenbauerFilterCompiler:
             min_P = float(np.min(vals))
             max_P = float(np.max(vals))
 
-        # Complementarity residual bound: |2 b0 - 1| + 2 * sum_{m>0, even} |b_m|
-        b_even_sum = 2.0 * float(np.sum(np.abs(b_harmonics[2::2]))) if len(b_harmonics) > 2 else 0.0
-        max_hb_err = float(abs(2.0 * b_harmonics[0] - 1.0) + b_even_sum + sym_err)
-
         tau_P = 1e-4 * max(1.0, abs(max_P))
         all_finite = bool(np.all(np.isfinite(p_taps)) and np.isfinite(min_P) and np.isfinite(max_P))
-        is_valid = all_finite and (min_P >= -tau_P) and (max_P <= 1.0 + 1e-3) and (max_hb_err <= 1e-4)
+        is_valid = hb_valid and all_finite and (min_P >= -tau_P) and (max_P <= 1.0 + 1e-3)
         return is_valid, min_P, max_P, max_hb_err
 
     def _compute_factorization_diagnostics(
@@ -1275,7 +1294,7 @@ class GegenbauerFilterCompiler:
             else:
                 raise ValueError(
                     f"Reference root selection produced {len(z_inside)} roots, expected {M}; "
-                    "refusing to pad roots."
+                    "root-orbit allocation is unresolved."
                 )
 
         h0_complex = np.poly(z_inside)
@@ -1897,13 +1916,23 @@ class GegenbauerFilterCompiler:
             evidence_payload={"order": spec.order, "finite_taps": bool(np.all(np.isfinite(h0_quant.float64_taps)))}
         ))
 
+        spec_evidence = {
+            "pass_ripple_h0": float(pass_ripple),
+            "stop_atten_h0": float(stop_atten),
+            "target_pass_ripple": float(exact_pass_target),
+            "target_stop_atten": float(exact_stop_target)
+        }
+        if spec.kind in ("qmf", "asymmetric_qmf") and h1_quant is not None:
+            spec_evidence["pass_ripple_h1"] = float(pass_ripple_h1)
+            spec_evidence["stop_atten_h1"] = float(stop_atten_h1)
+
         epistemic_contract.add_warrant(ClaimWarrant(
             proposition="SAMPLED_SPECIFICATION_MET",
             target_type="DSP_SPECIFICATION",
             domain="SAMPLED_FREQUENCY_GRID",
             disposition=WarrantDisposition.ESTABLISHED if design_target_met else WarrantDisposition.CONTRADICTED,
             method=EvidenceMethod.ORDINARY_NUMERICAL_DIAGNOSTIC,
-            evidence_payload={"pass_ripple": float(pass_ripple), "stop_atten": float(stop_atten)}
+            evidence_payload=spec_evidence
         ))
 
         if spec.kind in ("qmf", "asymmetric_qmf"):
@@ -2032,11 +2061,11 @@ class GegenbauerFilterCompiler:
         if abs(p_prod_dc - 2.0) > 1e-3:
             raise ValueError(f"Product polynomial DC gain {p_prod_dc:.6f} deviates from target 2.0 (requires H0(1)G0(1) = 2.0).")
 
-        # Check half-band complementarity residual for biorthogonal product polynomial
-        _, min_P, max_P, hb_err = self.validate_power_polynomial(p_prod * 0.5)
-        if hb_err > 1e-4:
+        # Check half-band coefficient structure and complementarity residual for biorthogonal product polynomial
+        hb_valid, hb_err = self.validate_halfband_structure(p_prod * 0.5)
+        if not hb_valid:
             raise ValueError(
-                f"Rescaled biorthogonal product polynomial failed half-band complementarity: "
+                f"Rescaled biorthogonal product polynomial failed half-band structure validation: "
                 f"halfband_residual={hb_err:.6e}"
             )
 
@@ -2129,6 +2158,8 @@ class GegenbauerFilterCompiler:
 
             nyq_h0 = abs(np.sum(h0_norm * np.array([(-1.0)**n for n in range(len(h0_norm))])))
             nyq_g0 = abs(np.sum(g0_norm * np.array([(-1.0)**n for n in range(len(g0_norm))])))
+
+            # Nyquist suppression contributes to optimization score
 
             # Evaluate response metrics over frequency grid
             K_eval = 512
@@ -2232,7 +2263,7 @@ class GegenbauerFilterCompiler:
             target_type="PRODUCT_POLYNOMIAL",
             domain="TAP_CONVOLUTION",
             disposition=WarrantDisposition.ESTABLISHED if product_residual <= 1e-6 else WarrantDisposition.CONTRADICTED,
-            method=EvidenceMethod.EXACT_ARITHMETIC,
+            method=EvidenceMethod.ORDINARY_NUMERICAL_DIAGNOSTIC,
             evidence_payload={"product_residual": product_residual}
         ))
 
