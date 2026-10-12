@@ -237,6 +237,7 @@ class RootDecomposer:
         used_c = [False] * len(raw_clusters)
         atomic_units = []
 
+        orbit_tol = max(abs_tol * 100, rel_tol * 10)
         for i in range(len(raw_clusters)):
             if used_c[i]:
                 continue
@@ -245,20 +246,23 @@ class RootDecomposer:
             m1 = c1['mult']
             used_c[i] = True
 
-            if abs(np.imag(r1)) < 1e-3:
+            if abs(np.imag(r1)) < orbit_tol:
                 r1_real = float(np.real(r1))
-                if abs(abs(r1_real) - 1.0) < 1e-3:
+                if abs(abs(r1_real) - 1.0) < orbit_tol:
                     ep_val = 1.0 if r1_real > 0 else -1.0
+                    res_ep = abs(r1_real - ep_val)
+                    if res_ep > orbit_tol:
+                        raise ValueError(f"REAL_ENDPOINT residual {res_ep:.4e} exceeds orbit tolerance {orbit_tol:.4e}.")
                     atomic_units.append(RootOrbit(
                         kind='REAL_ENDPOINT',
                         roots=np.array([ep_val]),
                         multiplicity=m1,
-                        orbit_residual=abs(r1_real - ep_val)
+                        orbit_residual=res_ep
                     ))
                 elif abs(r1_real) > 1e-12:
                     recip_idx = -1
                     for j in range(len(raw_clusters)):
-                        if not used_c[j] and abs(raw_clusters[j]['rep'] - 1.0 / r1_real) < 1e-2:
+                        if not used_c[j] and abs(raw_clusters[j]['rep'] - 1.0 / r1_real) < orbit_tol:
                             recip_idx = j
                             break
                     if recip_idx != -1:
@@ -266,20 +270,23 @@ class RootDecomposer:
                         if m1 != c2['mult']:
                             raise ValueError(f"Reciprocal orbit multiplicities disagree for root {r1_real:.6f}: {m1} vs {c2['mult']}.")
                         used_c[recip_idx] = True
+                        res_recip = abs(r1_real * float(np.real(c2['rep'])) - 1.0)
+                        if res_recip > orbit_tol:
+                            raise ValueError(f"REAL_RECIPROCAL_PAIR residual {res_recip:.4e} exceeds orbit tolerance {orbit_tol:.4e}.")
                         atomic_units.append(RootOrbit(
                             kind='REAL_RECIPROCAL_PAIR',
                             roots=np.array([r1_real, float(np.real(c2['rep']))]),
                             multiplicity=m1,
-                            orbit_residual=abs(r1_real * c2['rep'] - 1.0)
+                            orbit_residual=res_recip
                         ))
                     else:
                         raise ValueError(f"Unpaired real reciprocal root detected: {r1_real:.6f} without reciprocal partner.")
             else:
-                is_unit = abs(abs(r1) - 1.0) < 1e-3
+                is_unit = abs(abs(r1) - 1.0) < orbit_tol
                 if is_unit:
                     conj_idx = -1
                     for j in range(len(raw_clusters)):
-                        if not used_c[j] and abs(raw_clusters[j]['rep'] - np.conj(r1)) < 1e-2:
+                        if not used_c[j] and abs(raw_clusters[j]['rep'] - np.conj(r1)) < orbit_tol:
                             conj_idx = j
                             break
                     if conj_idx != -1:
@@ -290,11 +297,14 @@ class RootDecomposer:
                         unit_roots = np.array([r1, c2['rep']])
                     else:
                         raise ValueError(f"Unpaired unit circle conjugate root detected for {r1}: conjugate partner not found.")
+                    res_unit = abs(abs(r1) - 1.0)
+                    if res_unit > orbit_tol:
+                        raise ValueError(f"UNIT_CIRCLE_PAIR residual {res_unit:.4e} exceeds orbit tolerance {orbit_tol:.4e}.")
                     atomic_units.append(RootOrbit(
                         kind='UNIT_CIRCLE_PAIR',
                         roots=unit_roots,
                         multiplicity=m1,
-                        orbit_residual=abs(abs(r1) - 1.0)
+                        orbit_residual=res_unit
                     ))
                 else:
                     quad_indices = [i]
@@ -661,7 +671,8 @@ class FilterResult:
             f"Asymptotic Matching Certification: {self.payload.matching_status.value}",
             f"Certifications: Basis={self.payload.basis_asymptotic.value} | Prototype={self.payload.prototype_fir.value}"
             f" | QMF Power={self.payload.qmf_power.value} | QMF Alias={self.payload.qmf_alias.value}"
-            f" | Factorization={self.payload.factorization.value} | Total={self.payload.is_certified}",
+            f" | Factorization={self.payload.factorization.value}",
+            f"Status: SampledDesignTargetsMet={self.payload.sampled_design_targets_met} | ContinuousSpecificationCertified={self.payload.continuous_specification_certified} | TotalCertified={self.payload.is_certified}",
             f"Passband Ripple: {self.passband_ripple_actual:.4f} dB | Stopband Attenuation: {self.stopband_atten_actual:.2f} dB",
         ]
         if self.factorization is not None:
@@ -1295,27 +1306,27 @@ class GegenbauerFilterCompiler:
 
         z_inside = []
         for orbit in orbits:
-            in_orbit = [r for r in orbit if abs(r) <= 1.0 + 1e-4]
             half_len = len(orbit) // 2
-            if len(in_orbit) == half_len or len(in_orbit) == len(orbit):
+            is_unit = all(abs(abs(r) - 1.0) < 1e-2 for r in orbit)
+            if is_unit:
+                pos_imag = [r for r in orbit if np.imag(r) > 1e-6]
+                neg_imag = [r for r in orbit if np.imag(r) < -1e-6]
+                reals = [r for r in orbit if abs(np.imag(r)) <= 1e-6]
+                z_inside.extend(pos_imag[:len(pos_imag) // 2])
+                z_inside.extend(neg_imag[:len(neg_imag) // 2])
+                z_inside.extend(reals[:len(reals) // 2])
+            else:
+                in_orbit = [r for r in orbit if abs(r) < 1.0 - 1e-4]
                 z_inside.extend(in_orbit)
-            elif half_len > 0:
-                sorted_orb = sorted(orbit, key=lambda x: abs(x))
-                z_inside.extend(sorted_orb[:half_len])
 
         if len(z_inside) != M:
-            if len(z_inside) > M:
-                z_inside = sorted(z_inside, key=lambda x: abs(x))[:M]
-            else:
-                raise ValueError(
-                    f"Reference root selection produced {len(z_inside)} roots, expected {M}; "
-                    "refusing to pad roots."
-                )
+            raise ValueError(
+                f"Reference root selection produced {len(z_inside)} roots, expected {M}; "
+                "refusing to discard or pad roots."
+            )
 
         h0_complex = np.poly(z_inside)
         raw_imag = float(np.max(np.abs(np.imag(h0_complex)))) if np.iscomplexobj(h0_complex) else 0.0
-        if raw_imag > 1e-5:
-            raise ValueError(f"Root selection produced non-real polynomial factor: imaginary residual {raw_imag:.3e} exceeds 1e-5.")
 
         h0_real = _fit_spectral_factor_scale(h0_complex, p_taps)
 
@@ -1594,6 +1605,8 @@ class GegenbauerFilterCompiler:
             f"#define GEG_LAMBDA {result.lam}f",
             f"#define GEG_BASIS_TERMS {result.basis_terms}",
             f"#define GEG_E_TOTAL_ESTIMATE {p.total}f",
+            f"#define GEG_SAMPLED_DESIGN_TARGETS_MET {1 if result.payload.sampled_design_targets_met else 0}",
+            f"#define GEG_CONTINUOUS_SPECIFICATION_CERTIFIED {1 if result.payload.continuous_specification_certified else 0}",
             f"#define GEG_Q15_SCALE {h0.q15_scale}f",
             f"#define GEG_Q23_SCALE {h0.q23_scale}f",
             f"#define GEG_Q31_SCALE {h0.q31_scale}f",
@@ -1885,11 +1898,6 @@ class GegenbauerFilterCompiler:
 
             # For ordinary FIR, structural certification is given by realization verification
             structural_certified = realization_verified
-
-        # Continuous specification certification requires analytical enclosure
-        continuous_specification_certified = False
-
-        is_certified = structural_certified and specification_met
 
         sampled_design_targets_met = bool(structural_certified and specification_met)
         continuous_specification_certified = False
