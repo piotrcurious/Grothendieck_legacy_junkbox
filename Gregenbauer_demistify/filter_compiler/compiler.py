@@ -1209,6 +1209,7 @@ class GegenbauerFilterCompiler:
         Structured Chebyshev x-domain root factorization with unit-circle conjugate pairing.
         Converts P(z) = b0 + sum_{m=1}^M b_m T_m(x) into degree-M polynomial in x = cos(w).
         Finds degree-M roots in x and lifts z_j = x_j - sqrt(x_j^2 - 1) to enforce exact reciprocal symmetry.
+        Selection is verified by strict degree postconditions (len(z_inside) == M) and raw imaginary component residual checks.
         Returns (h0_taps, residual, raw_imag_residual).
         """
         M = target_N - 1
@@ -2462,6 +2463,7 @@ class GegenbauerFilterCompiler:
         best_res = None
         best_score = float('inf')
         use_solver = solver if solver is not None else self.solver
+        failures = []
 
         for lam in lambda_candidates:
             for mu in mu_candidates:
@@ -2486,14 +2488,20 @@ class GegenbauerFilterCompiler:
 
                     score += res.payload.provenance.total * 100.0
 
+                    # Strictly prioritize candidates that satisfy sampled design targets
                     if not res.payload.sampled_design_targets_met:
                         score += 1e5
 
                     if score < best_score:
                         best_score = score
                         best_res = res
-                except Exception:
+                except Exception as exc:
+                    failures.append((lam, mu, type(exc).__name__, str(exc)))
                     continue
+
+        if best_res is None:
+            details = "; ".join(f"lambda={lam:.2f}, mu={mu:.1e}: {kind}: {msg}" for lam, mu, kind, msg in failures)
+            raise RuntimeError(f"No candidate compiled successfully in pareto_search. Details: {details}")
 
         return best_res
 
