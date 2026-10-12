@@ -1089,6 +1089,7 @@ class GegenbauerFilterCompiler:
             freq_res_rel=freq_res_rel,
             imag_res=imag_res,
             min_P=min_P,
+            max_P=max_P,
             halfband_residual=hb_err
         )
 
@@ -1119,6 +1120,7 @@ class GegenbauerFilterCompiler:
         freq_res_rel: float,
         imag_res: float,
         min_P: float,
+        max_P: float = 1.0,
         halfband_residual: float = 0.0
     ) -> bool:
         """Single-source authority for certifying spectral factor diagnostic payloads."""
@@ -1129,6 +1131,7 @@ class GegenbauerFilterCompiler:
             freq_res_rel <= 1e-2 and
             imag_res <= 1e-5 and
             min_P >= -1e-3 and
+            max_P <= 1.0 + 1e-3 and
             halfband_residual <= 1e-3
         )
 
@@ -1278,24 +1281,19 @@ class GegenbauerFilterCompiler:
 
         z_inside = []
         for orbit in orbits:
-            in_orbit = [r for r in orbit if abs(r) <= 1.0 + 1e-4]
-            half_len = len(orbit) // 2
-            if len(in_orbit) == half_len or len(in_orbit) == len(orbit):
-                z_inside.extend(in_orbit)
-            elif half_len > 0:
-                sorted_orb = sorted(orbit, key=lambda x: abs(x))
-                z_inside.extend(sorted_orb[:half_len])
+            is_unit = all(abs(abs(r) - 1.0) < 1e-3 for r in orbit)
+            if is_unit:
+                half_len = len(orbit) // 2
+                z_inside.extend(orbit[:half_len])
             else:
-                raise ValueError(f"Structural orbit decomposition failure for root orbit: {orbit}")
+                in_orbit = [r for r in orbit if abs(r) < 1.0 - 1e-4]
+                z_inside.extend(in_orbit)
 
         if len(z_inside) != M:
-            if len(z_inside) > M:
-                z_inside = sorted(z_inside, key=lambda x: abs(x))[:M]
-            else:
-                raise ValueError(
-                    f"Reference root selection produced {len(z_inside)} roots, expected {M}; "
-                    "root-orbit allocation is unresolved."
-                )
+            raise ValueError(
+                f"Reference root selection produced {len(z_inside)} roots, expected {M}; "
+                "refusing to discard or pad roots."
+            )
 
         h0_complex = np.poly(z_inside)
         raw_imag = float(np.max(np.abs(np.imag(h0_complex)))) if np.iscomplexobj(h0_complex) else 0.0
@@ -1316,6 +1314,13 @@ class GegenbauerFilterCompiler:
         Dispatches to Structured Chebyshev x-domain root lifting, Cepstral approximation, or Reference Root backends.
         Returns (h0_taps, diagnostics).
         """
+        power_valid, min_P, max_P, hb_err = self.validate_power_polynomial(p_taps)
+        if not power_valid:
+            raise ValueError(
+                "Cannot factor an invalid power polynomial: "
+                f"min_P={min_P:.6e}, max_P={max_P:.6e}, halfband_residual={hb_err:.6e}"
+            )
+
         if mode == FactorMode.STRUCTURED_CHEBYSHEV:
             h0_raw, _, raw_imag = self.factor_by_chebyshev_roots(p_taps, target_N)
         elif mode == FactorMode.CEPSTRAL_APPROX:
@@ -1917,10 +1922,13 @@ class GegenbauerFilterCompiler:
         ))
 
         spec_evidence = {
+            "grid_size": K_fft,
             "pass_ripple_h0": float(pass_ripple),
             "stop_atten_h0": float(stop_atten),
             "target_pass_ripple": float(exact_pass_target),
-            "target_stop_atten": float(exact_stop_target)
+            "target_stop_atten": float(exact_stop_target),
+            "passband_edge": float(spec.wp),
+            "stopband_edge": float(spec.ws)
         }
         if spec.kind in ("qmf", "asymmetric_qmf") and h1_quant is not None:
             spec_evidence["pass_ripple_h1"] = float(pass_ripple_h1)
@@ -2072,39 +2080,37 @@ class GegenbauerFilterCompiler:
         # Decompose root orbits using shared RootDecomposer engine
         atomic_units = RootDecomposer.decompose_halfband_roots(p_prod * 0.5, total_z_degree=total_order)
 
-        # Generate candidate root allocations for target order_h0
+        # Precompute suffix sums of remaining orbit degrees for reachability pruning
+        unit_degrees = [u.size * u.multiplicity for u in atomic_units]
+        suffix_degrees = [0] * (len(atomic_units) + 1)
+        for idx in range(len(atomic_units) - 1, -1, -1):
+            suffix_degrees[idx] = suffix_degrees[idx + 1] + unit_degrees[idx]
+
         allocations = []
         def search_allocations(unit_idx, current_deg_h0, current_h0_roots, current_g0_roots):
+            if current_deg_h0 > order_h0:
+                return
+            if current_deg_h0 + suffix_degrees[unit_idx] < order_h0:
+                return
+
             if unit_idx == len(atomic_units):
                 if current_deg_h0 == order_h0:
                     allocations.append((current_h0_roots, current_g0_roots))
                 return
 
             unit = atomic_units[unit_idx]
-            kind, r_list, size, mult = unit.kind, list(unit.roots), unit.size, unit.multiplicity
+            r_list, size, mult = list(unit.roots), unit.size, unit.multiplicity
 
-            if kind == 'REAL_ENDPOINT':
-                # Endpoint roots (z = +-1) can be partitioned in steps of 1
-                for k in range(0, mult + 1):
-                    if current_deg_h0 + k * size <= order_h0:
-                        search_allocations(
-                            unit_idx + 1,
-                            current_deg_h0 + k * size,
-                            current_h0_roots + r_list * k,
-                            current_g0_roots + r_list * (mult - k)
-                        )
-            else:
-                # Pair / Quartet multiplicity allocation
-                for k in range(0, mult + 1):
-                    if current_deg_h0 + k * size <= order_h0:
-                        search_allocations(
-                            unit_idx + 1,
-                            current_deg_h0 + k * size,
-                            current_h0_roots + r_list * k,
-                            current_g0_roots + r_list * (mult - k)
-                        )
+            for k in range(0, mult + 1):
+                if current_deg_h0 + k * size <= order_h0:
+                    search_allocations(
+                        unit_idx + 1,
+                        current_deg_h0 + k * size,
+                        current_h0_roots + r_list * k,
+                        current_g0_roots + r_list * (mult - k)
+                    )
 
-        # Use degree-bounded branch & bound pruning search
+        # Use degree-bounded branch & bound pruning search with suffix-sum reachability
         search_allocations(0, 0, [], [])
 
         if not allocations:
@@ -2201,6 +2207,10 @@ class GegenbauerFilterCompiler:
             raise ValueError(
                 f"Biorthogonal factor DC gain postcondition failed: H0(1)={h0_dc_val:.6f}, G0(1)={g0_dc_val:.6f}, expected sqrt(2)={target_dc:.6f}."
             )
+
+        # Nyquist response metrics
+        nyq_h0_val = abs(float(np.sum(h0_taps * np.array([(-1.0)**n for n in range(len(h0_taps))]))))
+        nyq_g0_val = abs(float(np.sum(g0_taps * np.array([(-1.0)**n for n in range(len(g0_taps))]))))
 
         # Generate complementary highpass filters H1 and G1 for 2-channel Biorthogonal Bank
         # H1(z) = G0(-z) => h1[n] = (-1)^n * g0[n]
