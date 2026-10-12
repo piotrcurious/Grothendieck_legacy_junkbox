@@ -1272,6 +1272,7 @@ class GegenbauerFilterCompiler:
         """
         Independent reference monomial degree-2M root finding backend (np.roots).
         Finds raw monomial z-roots of P(z) = sum p_k z^{k-M} and groups reciprocal/conjugate orbits.
+        Enforces orbit multiplicity structure and conjugate-closure validation.
         Returns (h0_taps, residual, raw_imag_residual).
         """
         M = target_N - 1
@@ -2464,32 +2465,35 @@ class GegenbauerFilterCompiler:
 
         for lam in lambda_candidates:
             for mu in mu_candidates:
-                compiler = GegenbauerFilterCompiler(
-                    lam=lam,
-                    basis_terms=self.basis_terms,
-                    basis_type=self.basis_type,
-                    solver=use_solver,
-                    mu_reg=mu,
-                    reg_power=self.reg_power,
-                    asymptotic_mode=self.asymptotic_mode,
-                    factor_mode=self.factor_mode,
-                    grid_samples=self.grid_samples,
-                    precision=self.ctx.precision
-                )
-                res = compiler.compile(spec)
+                try:
+                    compiler = GegenbauerFilterCompiler(
+                        lam=lam,
+                        basis_terms=self.basis_terms,
+                        basis_type=self.basis_type,
+                        solver=use_solver,
+                        mu_reg=mu,
+                        reg_power=self.reg_power,
+                        asymptotic_mode=self.asymptotic_mode,
+                        factor_mode=self.factor_mode,
+                        grid_samples=self.grid_samples,
+                        precision=self.ctx.precision
+                    )
+                    res = compiler.compile(spec)
 
-                score = res.passband_ripple_actual * 10.0 - res.stopband_atten_actual
-                if res.spec.kind in ("qmf", "asymmetric_qmf"):
-                    score += res.qmf_power_complementarity_max_db * 20.0 + res.qmf_alias_distortion_max_db
+                    score = res.passband_ripple_actual * 10.0 - res.stopband_atten_actual
+                    if res.spec.kind in ("qmf", "asymmetric_qmf"):
+                        score += res.qmf_power_complementarity_max_db * 20.0 + res.qmf_alias_distortion_max_db
 
-                score += res.payload.provenance.total * 100.0
+                    score += res.payload.provenance.total * 100.0
 
-                if not res.payload.is_certified:
-                    score += 1e5
+                    if not res.payload.sampled_design_targets_met:
+                        score += 1e5
 
-                if score < best_score:
-                    best_score = score
-                    best_res = res
+                    if score < best_score:
+                        best_score = score
+                        best_res = res
+                except Exception:
+                    continue
 
         return best_res
 
