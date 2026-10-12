@@ -255,7 +255,7 @@ class RootDecomposer:
                         multiplicity=m1,
                         orbit_residual=abs(r1_real - ep_val)
                     ))
-                else:
+                elif abs(r1_real) > 1e-12:
                     recip_idx = -1
                     for j in range(len(raw_clusters)):
                         if not used_c[j] and abs(raw_clusters[j]['rep'] - 1.0 / r1_real) < 1e-2:
@@ -520,7 +520,7 @@ class FilterSpec:
         if self.kind in ("qmf", "asymmetric_qmf") and self.order % 2 != 0:
             raise ValueError(f"QMF filter pair requires an even tap length N, got {self.order}.")
 
-        if self.kind == "qmf":
+        if self.kind in ("qmf", "asymmetric_qmf"):
             self.cutoff = 0.25
 
         if self.kind == "bandpass":
@@ -699,7 +699,7 @@ class DiagnosticCandidateSelector:
         scored.sort(key=lambda x: x[0])
         best_score, best_cand, has_bound = scored[0]
 
-        tag = f"OPTIMAL_WARRANTED_BOUND_{best_score:.6e}" if has_bound else f"BEST_DIAGNOSTIC_SCORE_{best_score:.6e}"
+        tag = f"BEST_DIAGNOSTIC_SCORE_{best_score:.6e}"
         return best_cand, tag
 
 # Backward compatibility alias
@@ -725,8 +725,8 @@ class GegenbauerFilterCompiler:
         grid_samples: int = 2048,
         precision: PrecisionType = PrecisionType.FLOAT64
     ):
-        if lam <= -0.5:
-            raise ValueError(f"Lambda parameter must be > -0.5, got {lam}")
+        if not np.isfinite(lam) or lam <= -0.5:
+            raise ValueError(f"Lambda parameter must be finite and > -0.5, got {lam}")
         if basis_terms is not None and basis_terms < 1:
             raise ValueError(f"basis_terms must be >= 1, got {basis_terms}")
         if mu_reg < 0.0:
@@ -1011,7 +1011,8 @@ class GegenbauerFilterCompiler:
         max_hb_err = float(abs(2.0 * b_harmonics[0] - 1.0) + b_even_sum + sym_err)
 
         tau_P = 1e-4 * max(1.0, abs(max_P))
-        is_valid = (min_P >= -tau_P) and (max_hb_err <= 1e-4)
+        all_finite = bool(np.all(np.isfinite(p_taps)) and np.isfinite(min_P) and np.isfinite(max_P))
+        is_valid = all_finite and (min_P >= -tau_P) and (max_P <= 1.0 + 1e-3) and (max_hb_err <= 1e-4)
         return is_valid, min_P, max_P, max_hb_err
 
     def _compute_factorization_diagnostics(
@@ -1112,11 +1113,11 @@ class GegenbauerFilterCompiler:
             halfband_residual <= 1e-3
         )
 
-    def spectral_factor_cepstral(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float]:
+    def spectral_factor_cepstral(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float, float]:
         """
-        Constructs an FFT/cepstrum approximation to the minimum-phase spectral factor and truncates it to target_N taps.
+        Constructs an FFT/cepstrum approximation to the minimum-phase spectral factor.
         Operates on positive trigonometric power polynomial P(w) >= 0.
-        Returns (h0_taps, residual).
+        Returns (h0_taps, residual, raw_imag_residual).
         """
         M = target_N - 1
         center = (len(p_taps) - 1) // 2
@@ -1142,26 +1143,26 @@ class GegenbauerFilterCompiler:
 
         # Minimum-phase spectral response H_min(w) = exp(FFT(c_min))
         H_min = np.exp(np.fft.fft(c_min))
-        h_full = np.fft.ifft(H_min).real
+        h_full = np.fft.ifft(H_min)
 
         # Truncate to target N taps
-        h0 = h_full[:target_N]
+        h0_cand = h_full[:target_N]
+        raw_imag = float(np.max(np.abs(np.imag(h0_cand)))) if np.iscomplexobj(h0_cand) else 0.0
 
         # Scale h0 via optimal least-squares scalar fit
-        h0 = _fit_spectral_factor_scale(h0, p_taps)
+        h0 = _fit_spectral_factor_scale(h0_cand, p_taps)
 
         # Autocorrelation residual
         r_fact = np.convolve(h0, h0[::-1])
         res = float(np.max(np.abs(r_fact - p_taps)))
-        return h0, res
+        return h0, res, raw_imag
 
-    def factor_by_chebyshev_roots(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float]:
+    def factor_by_chebyshev_roots(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float, float]:
         """
         Structured Chebyshev x-domain root factorization with unit-circle conjugate pairing.
         Converts P(z) = b0 + sum_{m=1}^M b_m T_m(x) into degree-M polynomial in x = cos(w).
         Finds degree-M roots in x and lifts z_j = x_j - sqrt(x_j^2 - 1) to enforce exact reciprocal symmetry.
-        Symmetrically pairs unit-circle roots x in [-1, 1] as e^{j theta} and e^{-j theta} to preserve real FIR taps.
-        Returns (h0_taps, residual).
+        Returns (h0_taps, residual, raw_imag_residual).
         """
         M = target_N - 1
         center = (len(p_taps) - 1) // 2
@@ -1206,52 +1207,84 @@ class GegenbauerFilterCompiler:
                 z_inside.append(xr - disc)
                 u_idx += 1
 
+        if len(z_inside) != M:
+            raise ValueError(
+                f"Root selection produced degree {len(z_inside)}, "
+                f"expected {M}; refusing to truncate or pad."
+            )
+
         h0_complex = np.poly(z_inside)
-        if len(h0_complex) < target_N:
-            h0_complex = np.pad(h0_complex, (0, target_N - len(h0_complex)), mode='constant')
-        elif len(h0_complex) > target_N:
-            h0_complex = h0_complex[:target_N]
+        raw_imag = float(np.max(np.abs(np.imag(h0_complex)))) if np.iscomplexobj(h0_complex) else 0.0
 
-        h0_complex = _fit_spectral_factor_scale(h0_complex, p_taps)
+        h0_real = _fit_spectral_factor_scale(h0_complex, p_taps)
 
-        res = float(np.max(np.abs(np.convolve(np.real(h0_complex), np.real(h0_complex)[::-1]) - p_taps)))
-        return h0_complex, res
+        res = float(np.max(np.abs(np.convolve(h0_real, h0_real[::-1]) - p_taps)))
+        return h0_real, res, raw_imag
 
-    def factor_by_roots_reference(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float]:
+    def factor_by_roots_reference(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float, float]:
         """
-        Reference degree-2M monomial root finding backend (np.roots) using shared RootDecomposer.
+        Independent reference monomial degree-2M root finding backend (np.roots).
+        Finds raw monomial z-roots of P(z) = sum p_k z^{k-M} and groups reciprocal/conjugate orbits.
+        Returns (h0_taps, residual, raw_imag_residual).
         """
         M = target_N - 1
-        orbits = RootDecomposer.decompose_halfband_roots(p_taps, total_z_degree=2 * M)
+        roots = np.roots(p_taps)
+
+        rel_tol, abs_tol = 1e-2, 1e-3
+        def same_root(a, b):
+            return abs(a - b) <= max(abs_tol, rel_tol * max(abs(a), abs(b)))
+
+        orbits = []
+        used = [False] * len(roots)
+        for i in range(len(roots)):
+            if used[i]: continue
+            orbit_idx = [i]
+            used[i] = True
+            added = True
+            while added:
+                added = False
+                curr_vals = [roots[k] for k in orbit_idx]
+                for cv in curr_vals:
+                    targets = [np.conj(cv)]
+                    if abs(cv) > 1e-12:
+                        targets.append(1.0 / cv)
+                        targets.append(1.0 / np.conj(cv))
+                    for tgt in targets:
+                        for j in range(len(roots)):
+                            if not used[j] and same_root(roots[j], tgt):
+                                orbit_idx.append(j)
+                                used[j] = True
+                                added = True
+            orbits.append([roots[k] for k in orbit_idx])
 
         z_inside = []
         for orbit in orbits:
-            if orbit.kind == "REAL_ENDPOINT":
-                half_mult = max(1, orbit.multiplicity // 2)
-                z_inside.extend(list(orbit.roots) * half_mult)
-            elif orbit.kind == "REAL_RECIPROCAL_PAIR":
-                in_root = [r for r in orbit.roots if abs(r) <= 1.0 + 1e-4][0]
-                z_inside.extend([in_root] * orbit.multiplicity)
-            elif orbit.kind == "UNIT_CIRCLE_PAIR":
-                half_mult = max(1, orbit.multiplicity // 2)
-                z_inside.extend(list(orbit.roots) * half_mult)
-            elif orbit.kind == "COMPLEX_RECIPROCAL_CONJUGATE_QUARTET":
-                in_pair = [r for r in orbit.roots if abs(r) <= 1.0 + 1e-4]
-                if len(in_pair) != 2:
-                    in_pair = sorted(orbit.roots, key=lambda r: abs(r))[:2]
-                z_inside.extend(in_pair * orbit.multiplicity)
+            in_orbit = [r for r in orbit if abs(r) <= 1.0 + 1e-4]
+            half_len = len(orbit) // 2
+            if len(in_orbit) == half_len or len(in_orbit) == len(orbit):
+                z_inside.extend(in_orbit)
+            elif half_len > 0:
+                sorted_orb = sorted(orbit, key=lambda x: abs(x))
+                z_inside.extend(sorted_orb[:half_len])
+            else:
+                raise ValueError(f"Structural orbit decomposition failure for root orbit: {orbit}")
 
         if len(z_inside) != M:
             if len(z_inside) > M:
                 z_inside = sorted(z_inside, key=lambda x: abs(x))[:M]
             else:
-                raise ValueError(f"Reference root factorization degree mismatch: got {len(z_inside)}, expected {M}.")
+                raise ValueError(
+                    f"Reference root selection produced {len(z_inside)} roots, expected {M}; "
+                    "refusing to pad roots."
+                )
 
         h0_complex = np.poly(z_inside)
-        h0_complex = _fit_spectral_factor_scale(h0_complex, p_taps)
+        raw_imag = float(np.max(np.abs(np.imag(h0_complex)))) if np.iscomplexobj(h0_complex) else 0.0
 
-        res = float(np.max(np.abs(np.convolve(np.real(h0_complex), np.real(h0_complex)[::-1]) - p_taps)))
-        return h0_complex, res
+        h0_real = _fit_spectral_factor_scale(h0_complex, p_taps)
+
+        res = float(np.max(np.abs(np.convolve(h0_real, h0_real[::-1]) - p_taps)))
+        return h0_real, res, raw_imag
 
     def spectral_factor_power_polynomial(
         self,
@@ -1265,15 +1298,14 @@ class GegenbauerFilterCompiler:
         Returns (h0_taps, diagnostics).
         """
         if mode == FactorMode.STRUCTURED_CHEBYSHEV:
-            h0_raw, _ = self.factor_by_chebyshev_roots(p_taps, target_N)
+            h0_raw, _, raw_imag = self.factor_by_chebyshev_roots(p_taps, target_N)
         elif mode == FactorMode.CEPSTRAL_APPROX:
-            h0_raw, _ = self.spectral_factor_cepstral(p_taps, target_N)
+            h0_raw, _, raw_imag = self.spectral_factor_cepstral(p_taps, target_N)
         elif mode == FactorMode.REFERENCE_ROOTS:
-            h0_raw, _ = self.factor_by_roots_reference(p_taps, target_N)
+            h0_raw, _, raw_imag = self.factor_by_roots_reference(p_taps, target_N)
         else:
             raise ValueError(f"Unknown FactorMode: '{mode}'")
 
-        raw_imag = float(np.max(np.abs(np.imag(h0_raw)))) if np.iscomplexobj(h0_raw) else 0.0
         h0, diag = self._compute_factorization_diagnostics(
             h0_raw, p_taps, mode=mode, target_degree=target_N - 1, raw_imag_residual=raw_imag
         )
@@ -1295,7 +1327,7 @@ class GegenbauerFilterCompiler:
             if spec.kind in ("qmf", "asymmetric_qmf"):
                 K = min(M, max(16, N // 2))
             else:
-                K = max(4, int(np.sqrt(N)) + 2)
+                K = M
         K = min(K, M)
 
         mu = self.mu_reg
@@ -1716,15 +1748,18 @@ class GegenbauerFilterCompiler:
                 if deg_int == 0:
                     continue
                 phi_exact = normalized_phi_recurrence(deg_int, self.lam, x_sample)
-                if self.basis_type == "unnormalized":
-                    phi_exact = phi_exact * float(c_n_1_val(deg_int, self.lam))
                 phi_asymp = self._eval_pure_asymptotic_basis(deg_int, omega_sample)
+                if self.basis_type == "unnormalized":
+                    c1 = float(c_n_1_val(deg_int, self.lam))
+                    phi_exact = phi_exact * c1
+                    phi_asymp = phi_asymp * c1
+
                 max_eps_n = float(np.max(np.abs(phi_exact - phi_asymp)))
                 deg_errs.append(max_eps_n)
                 coeff_mag = float(np.abs(a_coeffs[deg_int])) if deg_int < len(a_coeffs) else 0.0
                 weighted_response_bound += coeff_mag * max_eps_n
 
-            asymp_err = float(np.max(deg_errs)) if len(deg_errs) > 0 else 0.0
+            asymp_err = float(weighted_response_bound)
 
             if asymp_err < 0.05 and self.lam > 0:
                 matching_status = MatchingStatus.SAMPLED_ASYMPTOTIC_MATCHING
@@ -1997,8 +2032,13 @@ class GegenbauerFilterCompiler:
         if abs(p_prod_dc - 2.0) > 1e-3:
             raise ValueError(f"Product polynomial DC gain {p_prod_dc:.6f} deviates from target 2.0 (requires H0(1)G0(1) = 2.0).")
 
-        # Check power polynomial positivity on dense grid after DC gain rescaling
+        # Check half-band complementarity residual for biorthogonal product polynomial
         _, min_P, max_P, hb_err = self.validate_power_polynomial(p_prod * 0.5)
+        if hb_err > 1e-4:
+            raise ValueError(
+                f"Rescaled biorthogonal product polynomial failed half-band complementarity: "
+                f"halfband_residual={hb_err:.6e}"
+            )
 
         # Decompose root orbits using shared RootDecomposer engine
         atomic_units = RootDecomposer.decompose_halfband_roots(p_prod * 0.5, total_z_degree=total_order)

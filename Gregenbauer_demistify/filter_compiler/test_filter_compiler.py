@@ -489,7 +489,7 @@ def test_exact_halfband_power_polynomial_factorization():
     p_taps = np.array([0.25, 0.0, 0.0, 0.50, 0.0, 0.0, 0.25])
     target_N = 4
 
-    h0_cheb, res_cheb = compiler.factor_by_chebyshev_roots(p_taps, target_N)
+    h0_cheb, res_cheb, raw_imag = compiler.factor_by_chebyshev_roots(p_taps, target_N)
     h0_real = np.real(h0_cheb)
 
     # Verify autocorrelation matches p_taps to near float64 machine precision
@@ -632,13 +632,13 @@ def test_malformed_root_orbit_rejection():
 
 def test_specification_failure_vs_engineering_acceptance():
     """Verifies distinction between strict design_target_met (specification_met) and engineering_acceptance."""
-    spec = FilterSpec(kind="lowpass", order=31, cutoff=0.25, passband_ripple_db=1.5, stopband_atten_db=20.0)
+    spec = FilterSpec(kind="lowpass", order=31, cutoff=0.25, passband_ripple_db=0.5, stopband_atten_db=40.0)
     compiler = GegenbauerFilterCompiler(lam=1.5)
     result = compiler.compile(spec)
 
-    # Strict specification target passband_ripple <= 1.5 dB is not met (actual passband ripple is ~2.56 dB)
+    # Strict specification target passband_ripple <= 0.5 dB and stopband_atten >= 40 dB are not met
     assert result.payload.specification_met is False
-    # But engineering acceptance (relaxed passband limit = 1.5 * 2 = 3.0 dB) is met
+    # But engineering acceptance (passband <= 1.0 dB and stopband >= 15.0 dB) is met
     assert result.payload.prototype_fir.value == "VERIFIED"
     # Filter certification fails because specification_met is False
     assert result.payload.is_certified is False
