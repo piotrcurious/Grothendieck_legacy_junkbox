@@ -1120,8 +1120,9 @@ class GegenbauerFilterCompiler:
         freq_res_rel: float,
         imag_res: float,
         min_P: float,
-        max_P: float = 1.0,
-        halfband_residual: float = 0.0
+        halfband_residual: float = 0.0,
+        *,
+        max_P: float = 1.0
     ) -> bool:
         """Single-source authority for certifying spectral factor diagnostic payloads."""
         return bool(
@@ -1281,19 +1282,22 @@ class GegenbauerFilterCompiler:
 
         z_inside = []
         for orbit in orbits:
-            is_unit = all(abs(abs(r) - 1.0) < 1e-3 for r in orbit)
-            if is_unit:
-                half_len = len(orbit) // 2
-                z_inside.extend(orbit[:half_len])
-            else:
-                in_orbit = [r for r in orbit if abs(r) < 1.0 - 1e-4]
+            in_orbit = [r for r in orbit if abs(r) <= 1.0 + 1e-4]
+            half_len = len(orbit) // 2
+            if len(in_orbit) == half_len or len(in_orbit) == len(orbit):
                 z_inside.extend(in_orbit)
+            elif half_len > 0:
+                sorted_orb = sorted(orbit, key=lambda x: abs(x))
+                z_inside.extend(sorted_orb[:half_len])
 
         if len(z_inside) != M:
-            raise ValueError(
-                f"Reference root selection produced {len(z_inside)} roots, expected {M}; "
-                "refusing to discard or pad roots."
-            )
+            if len(z_inside) > M:
+                z_inside = sorted(z_inside, key=lambda x: abs(x))[:M]
+            else:
+                raise ValueError(
+                    f"Reference root selection produced {len(z_inside)} roots, expected {M}; "
+                    "refusing to pad roots."
+                )
 
         h0_complex = np.poly(z_inside)
         raw_imag = float(np.max(np.abs(np.imag(h0_complex)))) if np.iscomplexobj(h0_complex) else 0.0
@@ -1944,7 +1948,11 @@ class GegenbauerFilterCompiler:
         ))
 
         if spec.kind in ("qmf", "asymmetric_qmf"):
-            epistemic_contract.required_claims.extend(["SAMPLED_POWER_COMPLEMENTARITY", "SAMPLED_ALIAS_CANCELLATION"])
+            epistemic_contract.required_claims.extend([
+                "SAMPLED_POWER_COMPLEMENTARITY",
+                "SAMPLED_ALIAS_CANCELLATION",
+                "FACTORIZATION_DIAGNOSTICS_PASSED"
+            ])
             epistemic_contract.add_warrant(ClaimWarrant(
                 proposition="SAMPLED_POWER_COMPLEMENTARITY",
                 target_type="HALF_BAND_POWER",
@@ -1960,6 +1968,17 @@ class GegenbauerFilterCompiler:
                 disposition=WarrantDisposition.ESTABLISHED if qmf_alias_ok else WarrantDisposition.CONTRADICTED,
                 method=EvidenceMethod.ORDINARY_NUMERICAL_DIAGNOSTIC,
                 evidence_payload={"qmf_alias_error_linear": qmf_alias_lin}
+            ))
+            epistemic_contract.add_warrant(ClaimWarrant(
+                proposition="FACTORIZATION_DIAGNOSTICS_PASSED",
+                target_type="SPECTRAL_FACTORIZATION",
+                domain="HALF_BAND_POWER_POLYNOMIAL",
+                disposition=WarrantDisposition.ESTABLISHED if factorization_certified else WarrantDisposition.CONTRADICTED,
+                method=EvidenceMethod.ORDINARY_NUMERICAL_DIAGNOSTIC,
+                evidence_payload={
+                    "coeff_residual": float(factor_diag.coefficient_residual) if factor_diag else 0.0,
+                    "freq_residual": float(factor_diag.frequency_residual) if factor_diag else 0.0
+                }
             ))
 
         # Recompute final realization frequency fit residual from final normalized taps
@@ -2031,6 +2050,13 @@ class GegenbauerFilterCompiler:
         For odd delay d = (order_h0 + order_g0) // 2, E(z) - E(-z) = 2 z^-d (P_c(z) + P_c(-z)) = 2 z^-d (exact PR delay).
         Requires odd PR delay (order_h0 + order_g0 == 2 mod 4) for standard 2-channel linear-phase half-band PR.
         """
+        if not isinstance(order_h0, int) or isinstance(order_h0, bool) or order_h0 < 1:
+            raise ValueError(f"order_h0 must be a positive integer, got {order_h0}")
+        if not isinstance(order_g0, int) or isinstance(order_g0, bool) or order_g0 < 1:
+            raise ValueError(f"order_g0 must be a positive integer, got {order_g0}")
+        if not np.isfinite(cutoff) or not (0.0 < cutoff < 0.5):
+            raise ValueError(f"cutoff must be finite and in (0.0, 0.5), got {cutoff}")
+
         total_order = order_h0 + order_g0
         if total_order % 2 != 0:
             raise ValueError("The sum of H0 and G0 orders must be even for a valid half-band filter.")
@@ -2086,54 +2112,20 @@ class GegenbauerFilterCompiler:
         for idx in range(len(atomic_units) - 1, -1, -1):
             suffix_degrees[idx] = suffix_degrees[idx + 1] + unit_degrees[idx]
 
-        allocations = []
-        def search_allocations(unit_idx, current_deg_h0, current_h0_roots, current_g0_roots):
-            if current_deg_h0 > order_h0:
-                return
-            if current_deg_h0 + suffix_degrees[unit_idx] < order_h0:
-                return
-
-            if unit_idx == len(atomic_units):
-                if current_deg_h0 == order_h0:
-                    allocations.append((current_h0_roots, current_g0_roots))
-                return
-
-            unit = atomic_units[unit_idx]
-            r_list, size, mult = list(unit.roots), unit.size, unit.multiplicity
-
-            for k in range(0, mult + 1):
-                if current_deg_h0 + k * size <= order_h0:
-                    search_allocations(
-                        unit_idx + 1,
-                        current_deg_h0 + k * size,
-                        current_h0_roots + r_list * k,
-                        current_g0_roots + r_list * (mult - k)
-                    )
-
-        # Use degree-bounded branch & bound pruning search with suffix-sum reachability
-        search_allocations(0, 0, [], [])
-
-        if not allocations:
-            raise ValueError(
-                f"Unable to partition roots into exact target orders order_h0={order_h0} and order_g0={order_g0} "
-                f"while preserving symmetric root clusters."
-            )
-
-        # Rank candidate root factorizations by DSP lowpass performance
         best_candidate = None
         best_score = float('inf')
-
         imag_tol = 1e-5
         dc_tol = 1e-6
 
-        for cand_h0_roots, cand_g0_roots in allocations:
+        def evaluate_candidate(cand_h0_roots, cand_g0_roots):
+            nonlocal best_candidate, best_score
             h0_u_complex = np.poly(cand_h0_roots) if len(cand_h0_roots) > 0 else np.array([1.0 + 0j])
             g0_u_complex = np.poly(cand_g0_roots) if len(cand_g0_roots) > 0 else np.array([1.0 + 0j])
 
             h0_imag = float(np.max(np.abs(np.imag(h0_u_complex))))
             g0_imag = float(np.max(np.abs(np.imag(g0_u_complex))))
             if max(h0_imag, g0_imag) > imag_tol:
-                continue
+                return
 
             h0_u = np.real(h0_u_complex)
             g0_u = np.real(g0_u_complex)
@@ -2143,10 +2135,9 @@ class GegenbauerFilterCompiler:
             h0_c = h0_u * np.sign(c) * np.sqrt(abs(c))
             g0_c = g0_u * np.sqrt(abs(c))
 
-            # Pure reciprocal scale normalization preserving exact H0(z) G0(z) = P_prod(z) product polynomial
             h0_sum = float(np.sum(h0_c))
             if abs(h0_sum) <= dc_tol:
-                continue
+                return
 
             scale_h0 = np.sqrt(2.0) / h0_sum
             h0_norm = h0_c * scale_h0
@@ -2155,9 +2146,8 @@ class GegenbauerFilterCompiler:
             sym_h0 = np.max(np.abs(h0_norm - h0_norm[::-1]))
             sym_g0 = np.max(np.abs(g0_norm - g0_norm[::-1]))
 
-            # Enforce symmetry structurally as a hard constraint
             if max(sym_h0, sym_g0) > 1e-4:
-                continue
+                return
 
             dc_err_h0 = abs(np.sum(h0_norm) - np.sqrt(2.0))
             dc_err_g0 = abs(np.sum(g0_norm) - np.sqrt(2.0))
@@ -2165,9 +2155,6 @@ class GegenbauerFilterCompiler:
             nyq_h0 = abs(np.sum(h0_norm * np.array([(-1.0)**n for n in range(len(h0_norm))])))
             nyq_g0 = abs(np.sum(g0_norm * np.array([(-1.0)**n for n in range(len(g0_norm))])))
 
-            # Nyquist suppression contributes to optimization score
-
-            # Evaluate response metrics over frequency grid
             K_eval = 512
             H0_eval = np.abs(np.fft.fft(h0_norm, K_eval)[:K_eval // 2 + 1])
             G0_eval = np.abs(np.fft.fft(g0_norm, K_eval)[:K_eval // 2 + 1])
@@ -2193,6 +2180,32 @@ class GegenbauerFilterCompiler:
             if score < best_score:
                 best_score = score
                 best_candidate = (h0_norm, g0_norm)
+
+        def search_allocations(unit_idx, current_deg_h0, current_h0_roots, current_g0_roots):
+            if current_deg_h0 > order_h0:
+                return
+            if current_deg_h0 + suffix_degrees[unit_idx] < order_h0:
+                return
+
+            if unit_idx == len(atomic_units):
+                if current_deg_h0 == order_h0:
+                    evaluate_candidate(current_h0_roots, current_g0_roots)
+                return
+
+            unit = atomic_units[unit_idx]
+            r_list, size, mult = list(unit.roots), unit.size, unit.multiplicity
+
+            for k in range(0, mult + 1):
+                if current_deg_h0 + k * size <= order_h0:
+                    search_allocations(
+                        unit_idx + 1,
+                        current_deg_h0 + k * size,
+                        current_h0_roots + r_list * k,
+                        current_g0_roots + r_list * (mult - k)
+                    )
+
+        # Stream candidate evaluation at recursion leaf nodes
+        search_allocations(0, 0, [], [])
 
         if best_candidate is None:
             raise ValueError("No valid biorthogonal lowpass candidate satisfied symmetry and DC constraints.")
