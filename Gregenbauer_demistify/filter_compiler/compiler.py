@@ -311,15 +311,27 @@ class RootDecomposer:
                     quad_roots = np.array([raw_clusters[k]['rep'] for k in quad_indices])
                     if len(quad_roots) != 4:
                         raise ValueError(f"Invalid root orbit size for COMPLEX_RECIPROCAL_CONJUGATE_QUARTET: got {len(quad_roots)}, expected 4.")
-                    # Compute actual orbit residual: max discrepancy from exact conjugate/reciprocal relations
-                    r_conj = np.conj(r1)
-                    r_recip = 1.0 / r1
-                    r_conj_recip = 1.0 / np.conj(r1)
-                    res_quad = float(max(
-                        min(abs(r - r_conj) for r in quad_roots),
-                        min(abs(r - r_recip) for r in quad_roots),
-                        min(abs(r - r_conj_recip) for r in quad_roots)
-                    ))
+
+                    # Enforce strict 1-to-1 matching across expected quartet targets: r1, conj(r1), 1/r1, 1/conj(r1)
+                    targets = [r1, np.conj(r1), 1.0 / r1, 1.0 / np.conj(r1)]
+                    matched_q = [False] * 4
+                    res_matches = []
+                    for tgt in targets:
+                        best_match_idx = -1
+                        best_dist = float('inf')
+                        for q_idx in range(4):
+                            if not matched_q[q_idx]:
+                                dist = abs(quad_roots[q_idx] - tgt)
+                                if dist < best_dist:
+                                    best_dist = dist
+                                    best_match_idx = q_idx
+                        if best_match_idx != -1 and best_dist <= 1e-2:
+                            matched_q[best_match_idx] = True
+                            res_matches.append(best_dist)
+                        else:
+                            raise ValueError(f"Complex quartet failed strict 1-to-1 matching target {tgt}: best distance {best_dist:.4e} exceeds 1e-2.")
+
+                    res_quad = float(max(res_matches)) if len(res_matches) > 0 else 0.0
                     atomic_units.append(RootOrbit(
                         kind='COMPLEX_RECIPROCAL_CONJUGATE_QUARTET',
                         roots=quad_roots,
@@ -1283,22 +1295,19 @@ class GegenbauerFilterCompiler:
 
         z_inside = []
         for orbit in orbits:
-            in_orbit = [r for r in orbit if abs(r) <= 1.0 + 1e-4]
-            half_len = len(orbit) // 2
-            if len(in_orbit) == half_len or len(in_orbit) == len(orbit):
+            is_unit = all(abs(abs(r) - 1.0) < 1e-3 for r in orbit)
+            if is_unit:
+                half_len = max(1, len(orbit) // 2)
+                z_inside.extend(orbit[:half_len])
+            else:
+                in_orbit = [r for r in orbit if abs(r) < 1.0 - 1e-4]
                 z_inside.extend(in_orbit)
-            elif half_len > 0:
-                sorted_orb = sorted(orbit, key=lambda x: abs(x))
-                z_inside.extend(sorted_orb[:half_len])
 
         if len(z_inside) != M:
-            if len(z_inside) > M:
-                z_inside = sorted(z_inside, key=lambda x: abs(x))[:M]
-            else:
-                raise ValueError(
-                    f"Reference root selection produced {len(z_inside)} roots, expected {M}; "
-                    "refusing to pad roots."
-                )
+            raise ValueError(
+                f"Reference root selection produced {len(z_inside)} roots, expected {M}; "
+                "refusing to discard or pad roots."
+            )
 
         h0_complex = np.poly(z_inside)
         raw_imag = float(np.max(np.abs(np.imag(h0_complex)))) if np.iscomplexobj(h0_complex) else 0.0
@@ -1871,6 +1880,9 @@ class GegenbauerFilterCompiler:
 
             # For ordinary FIR, structural certification is given by realization verification
             structural_certified = realization_verified
+
+        # Continuous specification certification requires analytical enclosure
+        continuous_specification_certified = False
 
         is_certified = structural_certified and specification_met
 
