@@ -405,6 +405,8 @@ class CertifiedEvaluationPayload:
     factorization: VerificationStatus = VerificationStatus.NOT_APPLICABLE
     structural_certified: bool = False
     specification_met: bool = False
+    sampled_design_targets_met: bool = False
+    continuous_specification_certified: bool = False
     asymptotic_diagnostic_passed: bool = False
     is_certified: bool = False
 
@@ -453,8 +455,6 @@ def _fit_spectral_factor_scale(q: np.ndarray, p_taps: np.ndarray, tol: float = 1
 def determine_truth_status(lam: float) -> TruthStatus:
     if abs(lam) < 1e-12:
         raise ValueError("Gegenbauer parameter lambda=0 is a singular limit; use Chebyshev polynomial limit T_n(x).")
-    if -0.5 < lam < 0.0:
-        return TruthStatus.LIMIT_CIRCLE_SUBCRITICAL
     if lam > 0 and abs(2.0 * lam - round(2.0 * lam)) < 1e-12:
         return TruthStatus.PHYSICAL_SPHERE_GEOMETRY
     return TruthStatus.ANALYTIC_CONTINUATION
@@ -526,11 +526,11 @@ class FilterSpec:
         if self.order < 3:
             raise ValueError("Filter order must be >= 3")
 
+        if not np.isfinite(self.cutoff) or not (0.0 < self.cutoff < 0.5):
+            raise ValueError(f"Cutoff must be finite and in (0.0, 0.5), got {self.cutoff}")
+
         if self.kind in ("qmf", "asymmetric_qmf"):
             self.cutoff = 0.25
-
-        if not (0.0 < self.cutoff < 0.5):
-            raise ValueError(f"Cutoff must be in (0.0, 0.5), got {self.cutoff}")
 
         # QMF filter pairs require an even tap length
         if self.kind in ("qmf", "asymmetric_qmf") and self.order % 2 != 0:
@@ -1295,22 +1295,27 @@ class GegenbauerFilterCompiler:
 
         z_inside = []
         for orbit in orbits:
-            is_unit = all(abs(abs(r) - 1.0) < 1e-3 for r in orbit)
-            if is_unit:
-                half_len = max(1, len(orbit) // 2)
-                z_inside.extend(orbit[:half_len])
-            else:
-                in_orbit = [r for r in orbit if abs(r) < 1.0 - 1e-4]
+            in_orbit = [r for r in orbit if abs(r) <= 1.0 + 1e-4]
+            half_len = len(orbit) // 2
+            if len(in_orbit) == half_len or len(in_orbit) == len(orbit):
                 z_inside.extend(in_orbit)
+            elif half_len > 0:
+                sorted_orb = sorted(orbit, key=lambda x: abs(x))
+                z_inside.extend(sorted_orb[:half_len])
 
         if len(z_inside) != M:
-            raise ValueError(
-                f"Reference root selection produced {len(z_inside)} roots, expected {M}; "
-                "refusing to discard or pad roots."
-            )
+            if len(z_inside) > M:
+                z_inside = sorted(z_inside, key=lambda x: abs(x))[:M]
+            else:
+                raise ValueError(
+                    f"Reference root selection produced {len(z_inside)} roots, expected {M}; "
+                    "refusing to pad roots."
+                )
 
         h0_complex = np.poly(z_inside)
         raw_imag = float(np.max(np.abs(np.imag(h0_complex)))) if np.iscomplexobj(h0_complex) else 0.0
+        if raw_imag > 1e-5:
+            raise ValueError(f"Root selection produced non-real polynomial factor: imaginary residual {raw_imag:.3e} exceeds 1e-5.")
 
         h0_real = _fit_spectral_factor_scale(h0_complex, p_taps)
 
@@ -1886,6 +1891,9 @@ class GegenbauerFilterCompiler:
 
         is_certified = structural_certified and specification_met
 
+        sampled_design_targets_met = bool(structural_certified and specification_met)
+        continuous_specification_certified = False
+
         payload = CertifiedEvaluationPayload(
             truth_status=truth_status,
             matching_status=matching_status,
@@ -1897,8 +1905,10 @@ class GegenbauerFilterCompiler:
             factorization=factor_status,
             structural_certified=structural_certified,
             specification_met=specification_met,
+            sampled_design_targets_met=sampled_design_targets_met,
+            continuous_specification_certified=continuous_specification_certified,
             asymptotic_diagnostic_passed=asymptotic_diagnostic_passed,
-            is_certified=is_certified
+            is_certified=continuous_specification_certified
         )
 
         # Build comprehensive EpistemicContract with explicit, uniquely-scoped claim warrants
