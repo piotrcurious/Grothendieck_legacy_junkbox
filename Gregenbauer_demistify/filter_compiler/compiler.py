@@ -513,15 +513,16 @@ class FilterSpec:
             raise ValueError(f"Unknown filter kind: '{self.kind}'")
         if self.order < 3:
             raise ValueError("Filter order must be >= 3")
+
+        if self.kind in ("qmf", "asymmetric_qmf"):
+            self.cutoff = 0.25
+
         if not (0.0 < self.cutoff < 0.5):
             raise ValueError(f"Cutoff must be in (0.0, 0.5), got {self.cutoff}")
 
         # QMF filter pairs require an even tap length
         if self.kind in ("qmf", "asymmetric_qmf") and self.order % 2 != 0:
             raise ValueError(f"QMF filter pair requires an even tap length N, got {self.order}.")
-
-        if self.kind in ("qmf", "asymmetric_qmf"):
-            self.cutoff = 0.25
 
         if self.kind == "bandpass":
             if self.wp is None: self.wp = max(0.02, self.cutoff - 0.05)
@@ -2313,7 +2314,7 @@ class GegenbauerFilterCompiler:
             target_type="FIR_FILTER",
             domain="DC_FREQUENCY_POINT",
             disposition=WarrantDisposition.ESTABLISHED if abs(h0_dc_val - np.sqrt(2.0)) < 1e-3 and abs(g0_dc_val - np.sqrt(2.0)) < 1e-3 else WarrantDisposition.CONTRADICTED,
-            method=EvidenceMethod.EXACT_ARITHMETIC,
+            method=EvidenceMethod.ORDINARY_NUMERICAL_DIAGNOSTIC,
             evidence_payload={"h0_dc": h0_dc_val, "g0_dc": g0_dc_val}
         ))
 
