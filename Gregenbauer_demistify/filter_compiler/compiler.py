@@ -202,6 +202,166 @@ class RootDecomposer:
     """Shared Multiplicity-Aware Conjugate & Reciprocal Root Orbit Decomposition Engine."""
 
     @staticmethod
+    def decompose_z_roots(roots: np.ndarray, total_z_degree: int, rel_tol: float = 1e-4, abs_tol: float = 1e-5) -> List[RootOrbit]:
+        if len(roots) != total_z_degree:
+            raise ValueError(f"Root count mismatch: got {len(roots)}, expected {total_z_degree}.")
+
+        roots = np.asarray(roots, dtype=np.complex128)
+
+        def same_root(a, b, tol):
+            return abs(a - b) <= tol
+
+        used = [False] * len(roots)
+        raw_clusters = []
+        for i in range(len(roots)):
+            if used[i]:
+                continue
+            group = [i]
+            used[i] = True
+            r_i = roots[i]
+            tol_i = max(abs_tol, rel_tol * max(1.0, abs(r_i)))
+            for j in range(i + 1, len(roots)):
+                if not used[j] and same_root(roots[j], r_i, tol_i):
+                    group.append(j)
+                    used[j] = True
+            rep = np.mean([roots[k] for k in group])
+            raw_clusters.append({'rep': rep, 'mult': len(group)})
+
+        used_c = [False] * len(raw_clusters)
+        atomic_units = []
+
+        for i in range(len(raw_clusters)):
+            if used_c[i]:
+                continue
+            c1 = raw_clusters[i]
+            r1 = c1['rep']
+            m1 = c1['mult']
+            tol1 = max(abs_tol, rel_tol * max(1.0, abs(r1)))
+            used_c[i] = True
+
+            # 1. Real Endpoint (|Im(r1)| <= tol1 and ||Re(r1)| - 1| <= tol1)
+            if abs(np.imag(r1)) <= tol1 and abs(abs(np.real(r1)) - 1.0) <= tol1:
+                ep_val = 1.0 if np.real(r1) > 0 else -1.0
+                res_ep = float(abs(r1 - ep_val))
+                atomic_units.append(RootOrbit(
+                    kind='REAL_ENDPOINT',
+                    roots=np.array([ep_val], dtype=np.float64),
+                    multiplicity=m1,
+                    orbit_residual=res_ep
+                ))
+
+            # 2. Real Reciprocal Pair (|Im(r1)| <= tol1, non-endpoint)
+            elif abs(np.imag(r1)) <= tol1:
+                r1_real = float(np.real(r1))
+                if abs(r1_real) < 1e-12:
+                    raise ValueError(f"Zero root detected at index {i}; half-band polynomials cannot have zero roots.")
+                target_recip = 1.0 / r1_real
+                recip_idx = -1
+                best_dist = float('inf')
+                for j in range(len(raw_clusters)):
+                    if not used_c[j]:
+                        r2_candidate = raw_clusters[j]['rep']
+                        dist = abs(r2_candidate - target_recip)
+                        if dist <= tol1 * 10.0 and dist < best_dist:
+                            best_dist = dist
+                            recip_idx = j
+
+                if recip_idx != -1:
+                    c2 = raw_clusters[recip_idx]
+                    if m1 != c2['mult']:
+                        raise ValueError(f"Reciprocal orbit multiplicities disagree for root {r1_real:.6f}: {m1} vs {c2['mult']}.")
+                    used_c[recip_idx] = True
+                    r2_real = float(np.real(c2['rep']))
+                    res_recip = float(abs(r1_real * r2_real - 1.0))
+                    atomic_units.append(RootOrbit(
+                        kind='REAL_RECIPROCAL_PAIR',
+                        roots=np.array([r1_real, r2_real], dtype=np.float64),
+                        multiplicity=m1,
+                        orbit_residual=res_recip
+                    ))
+                else:
+                    raise ValueError(f"Unpaired real reciprocal root detected for {r1_real:.6f} (target reciprocal {target_recip:.6f} not found within tol={tol1 * 10.0:.3e}).")
+
+            # 3. Unit-Circle Conjugate Pair (|r1| == 1, Im(r1) != 0)
+            elif abs(abs(r1) - 1.0) <= tol1 * 10.0:
+                target_conj = np.conj(r1)
+                conj_idx = -1
+                best_dist = float('inf')
+                for j in range(len(raw_clusters)):
+                    if not used_c[j]:
+                        r2_candidate = raw_clusters[j]['rep']
+                        dist = abs(r2_candidate - target_conj)
+                        if dist <= tol1 * 10.0 and dist < best_dist:
+                            best_dist = dist
+                            conj_idx = j
+
+                if conj_idx != -1:
+                    c2 = raw_clusters[conj_idx]
+                    if m1 != c2['mult']:
+                        raise ValueError(f"Unit circle conjugate orbit multiplicities disagree for root {r1}: {m1} vs {c2['mult']}.")
+                    used_c[conj_idx] = True
+                    r2_unit = c2['rep']
+                    res_unit = float(max(abs(abs(r1) - 1.0), abs(r1 - np.conj(r2_unit))))
+                    atomic_units.append(RootOrbit(
+                        kind='UNIT_CIRCLE_PAIR',
+                        roots=np.array([r1, r2_unit], dtype=np.complex128),
+                        multiplicity=m1,
+                        orbit_residual=res_unit
+                    ))
+                else:
+                    raise ValueError(f"Unpaired unit circle conjugate root detected for {r1} (conjugate partner not found within tol={tol1 * 10.0:.3e}).")
+
+            # 4. Complex Reciprocal Conjugate Quartet (Off unit circle, Im(r1) != 0)
+            else:
+                target_conj = np.conj(r1)
+                target_recip = 1.0 / r1
+                target_conj_recip = 1.0 / np.conj(r1)
+
+                targets = [target_conj, target_recip, target_conj_recip]
+                matched_indices = []
+
+                for tgt in targets:
+                    best_j = -1
+                    best_d = float('inf')
+                    tgt_tol = max(abs_tol * 100.0, rel_tol * 10.0 * max(1.0, abs(tgt)))
+                    for j in range(len(raw_clusters)):
+                        if not used_c[j] and j not in matched_indices:
+                            dist = abs(raw_clusters[j]['rep'] - tgt)
+                            if dist <= tgt_tol and dist < best_d:
+                                best_d = dist
+                                best_j = j
+                    if best_j != -1:
+                        matched_indices.append(best_j)
+                    else:
+                        raise ValueError(f"Complex quartet member missing target {tgt} for root {r1} within tol={tgt_tol:.3e}.")
+
+                mults = [m1] + [raw_clusters[j]['mult'] for j in matched_indices]
+                if len(set(mults)) != 1:
+                    raise ValueError(f"Complex root orbit multiplicities disagree across quartet: {mults}")
+
+                for j in matched_indices:
+                    used_c[j] = True
+
+                quad_roots = np.array([r1] + [raw_clusters[j]['rep'] for j in matched_indices], dtype=np.complex128)
+                res_q1 = abs(quad_roots[1] - np.conj(quad_roots[0]))
+                res_q2 = abs(quad_roots[2] * quad_roots[0] - 1.0)
+                res_q3 = abs(quad_roots[3] * np.conj(quad_roots[0]) - 1.0)
+                res_quad = float(max(res_q1, res_q2, res_q3))
+
+                atomic_units.append(RootOrbit(
+                    kind='COMPLEX_RECIPROCAL_CONJUGATE_QUARTET',
+                    roots=quad_roots,
+                    multiplicity=m1,
+                    orbit_residual=res_quad
+                ))
+
+        total_roots_found = sum(u.size * u.multiplicity for u in atomic_units)
+        if total_roots_found != total_z_degree:
+            raise ValueError(f"Root orbit decomposition not closed: found {total_roots_found} roots, expected {total_z_degree}.")
+
+        return atomic_units
+
+    @staticmethod
     def decompose_halfband_roots(p_taps: np.ndarray, total_z_degree: int, rel_tol: float = 1e-4, abs_tol: float = 1e-5) -> List[RootOrbit]:
         center = (len(p_taps) - 1) // 2
         M_prod = total_z_degree // 2
@@ -217,143 +377,7 @@ class RootDecomposer:
             disc = np.sqrt(x_val**2 - 1.0 + 0j)
             roots.extend([x_val - disc, x_val + disc])
 
-        def same_root(a, b):
-            return abs(a - b) <= max(abs_tol, rel_tol * max(abs(a), abs(b)))
-
-        raw_clusters = []
-        used_r = [False] * len(roots)
-        for i in range(len(roots)):
-            if used_r[i]:
-                continue
-            group = [i]
-            used_r[i] = True
-            for j in range(i + 1, len(roots)):
-                if not used_r[j] and same_root(roots[j], roots[i]):
-                    group.append(j)
-                    used_r[j] = True
-            rep = np.mean([roots[k] for k in group])
-            raw_clusters.append({'rep': rep, 'mult': len(group)})
-
-        used_c = [False] * len(raw_clusters)
-        atomic_units = []
-
-        orbit_tol = max(abs_tol * 100, rel_tol * 10)
-        for i in range(len(raw_clusters)):
-            if used_c[i]:
-                continue
-            c1 = raw_clusters[i]
-            r1 = c1['rep']
-            m1 = c1['mult']
-            used_c[i] = True
-
-            if abs(np.imag(r1)) < orbit_tol:
-                r1_real = float(np.real(r1))
-                if abs(abs(r1_real) - 1.0) < orbit_tol:
-                    ep_val = 1.0 if r1_real > 0 else -1.0
-                    res_ep = abs(r1_real - ep_val)
-                    if res_ep > orbit_tol:
-                        raise ValueError(f"REAL_ENDPOINT residual {res_ep:.4e} exceeds orbit tolerance {orbit_tol:.4e}.")
-                    atomic_units.append(RootOrbit(
-                        kind='REAL_ENDPOINT',
-                        roots=np.array([ep_val]),
-                        multiplicity=m1,
-                        orbit_residual=res_ep
-                    ))
-                elif abs(r1_real) > 1e-12:
-                    recip_idx = -1
-                    for j in range(len(raw_clusters)):
-                        if not used_c[j] and abs(raw_clusters[j]['rep'] - 1.0 / r1_real) < orbit_tol:
-                            recip_idx = j
-                            break
-                    if recip_idx != -1:
-                        c2 = raw_clusters[recip_idx]
-                        if m1 != c2['mult']:
-                            raise ValueError(f"Reciprocal orbit multiplicities disagree for root {r1_real:.6f}: {m1} vs {c2['mult']}.")
-                        used_c[recip_idx] = True
-                        res_recip = abs(r1_real * float(np.real(c2['rep'])) - 1.0)
-                        if res_recip > orbit_tol:
-                            raise ValueError(f"REAL_RECIPROCAL_PAIR residual {res_recip:.4e} exceeds orbit tolerance {orbit_tol:.4e}.")
-                        atomic_units.append(RootOrbit(
-                            kind='REAL_RECIPROCAL_PAIR',
-                            roots=np.array([r1_real, float(np.real(c2['rep']))]),
-                            multiplicity=m1,
-                            orbit_residual=res_recip
-                        ))
-                    else:
-                        raise ValueError(f"Unpaired real reciprocal root detected: {r1_real:.6f} without reciprocal partner.")
-            else:
-                is_unit = abs(abs(r1) - 1.0) < orbit_tol
-                if is_unit:
-                    conj_idx = -1
-                    for j in range(len(raw_clusters)):
-                        if not used_c[j] and abs(raw_clusters[j]['rep'] - np.conj(r1)) < orbit_tol:
-                            conj_idx = j
-                            break
-                    if conj_idx != -1:
-                        c2 = raw_clusters[conj_idx]
-                        if m1 != c2['mult']:
-                            raise ValueError(f"Unit circle conjugate orbit multiplicities disagree for root {r1}: {m1} vs {c2['mult']}.")
-                        used_c[conj_idx] = True
-                        unit_roots = np.array([r1, c2['rep']])
-                    else:
-                        raise ValueError(f"Unpaired unit circle conjugate root detected for {r1}: conjugate partner not found.")
-                    res_unit = abs(abs(r1) - 1.0)
-                    if res_unit > orbit_tol:
-                        raise ValueError(f"UNIT_CIRCLE_PAIR residual {res_unit:.4e} exceeds orbit tolerance {orbit_tol:.4e}.")
-                    atomic_units.append(RootOrbit(
-                        kind='UNIT_CIRCLE_PAIR',
-                        roots=unit_roots,
-                        multiplicity=m1,
-                        orbit_residual=res_unit
-                    ))
-                else:
-                    quad_indices = [i]
-                    for j in range(len(raw_clusters)):
-                        if not used_c[j]:
-                            r2 = raw_clusters[j]['rep']
-                            if abs(r2 - np.conj(r1)) < 1e-2 or abs(r2 - 1.0 / r1) < 1e-2 or abs(r2 - 1.0 / np.conj(r1)) < 1e-2:
-                                quad_indices.append(j)
-                                used_c[j] = True
-                    multiplicities = [raw_clusters[k]['mult'] for k in quad_indices]
-                    if len(set(multiplicities)) != 1:
-                        raise ValueError(f"Complex root orbit multiplicities disagree: {multiplicities}")
-                    quad_mult = multiplicities[0]
-                    quad_roots = np.array([raw_clusters[k]['rep'] for k in quad_indices])
-                    if len(quad_roots) != 4:
-                        raise ValueError(f"Invalid root orbit size for COMPLEX_RECIPROCAL_CONJUGATE_QUARTET: got {len(quad_roots)}, expected 4.")
-
-                    # Enforce strict 1-to-1 matching across expected quartet targets: r1, conj(r1), 1/r1, 1/conj(r1)
-                    targets = [r1, np.conj(r1), 1.0 / r1, 1.0 / np.conj(r1)]
-                    matched_q = [False] * 4
-                    res_matches = []
-                    for tgt in targets:
-                        best_match_idx = -1
-                        best_dist = float('inf')
-                        for q_idx in range(4):
-                            if not matched_q[q_idx]:
-                                dist = abs(quad_roots[q_idx] - tgt)
-                                if dist < best_dist:
-                                    best_dist = dist
-                                    best_match_idx = q_idx
-                        if best_match_idx != -1 and best_dist <= 1e-2:
-                            matched_q[best_match_idx] = True
-                            res_matches.append(best_dist)
-                        else:
-                            raise ValueError(f"Complex quartet failed strict 1-to-1 matching target {tgt}: best distance {best_dist:.4e} exceeds 1e-2.")
-
-                    res_quad = float(max(res_matches)) if len(res_matches) > 0 else 0.0
-                    atomic_units.append(RootOrbit(
-                        kind='COMPLEX_RECIPROCAL_CONJUGATE_QUARTET',
-                        roots=quad_roots,
-                        multiplicity=quad_mult,
-                        orbit_residual=res_quad
-                    ))
-
-        orbit_total_size = sum(unit.size * unit.multiplicity for unit in atomic_units)
-        if orbit_total_size != total_z_degree:
-            raise ValueError(f"Root-orbit decomposition is not closed: got {orbit_total_size} roots, expected {total_z_degree}.")
-
-        return atomic_units
+        return RootDecomposer.decompose_z_roots(np.array(roots), total_z_degree, rel_tol=rel_tol, abs_tol=abs_tol)
 
 
 @dataclass
@@ -396,8 +420,14 @@ class ErrorEstimateProvenance:
     e_implementation: float = 0.0
 
     @property
-    def total(self) -> float:
+    def mixed_error_estimate(self) -> float:
+        """Returns the unweighted sum of sampled analytic, arithmetic, conditioning, and implementation error heuristics."""
         return self.e_analytic + self.e_arithmetic + self.e_conditioning + self.e_implementation
+
+    @property
+    def total(self) -> float:
+        """Backward-compatibility alias for mixed_error_estimate."""
+        return self.mixed_error_estimate
 
 ErrorBoundProvenance = ErrorEstimateProvenance
 
@@ -747,7 +777,9 @@ class GegenbauerFilterCompiler:
         asymptotic_mode: str = "auto",
         factor_mode: FactorMode = FactorMode.STRUCTURED_CHEBYSHEV,
         grid_samples: int = 2048,
-        precision: PrecisionType = PrecisionType.FLOAT64
+        precision: PrecisionType = PrecisionType.FLOAT64,
+        qmf_power_tol: float = 0.05,
+        qmf_alias_tol: float = 0.05
     ):
         if not np.isfinite(lam) or lam <= 0.0:
             raise ValueError(f"Lambda parameter must be finite and > 0.0, got {lam}")
@@ -775,6 +807,8 @@ class GegenbauerFilterCompiler:
         self.asymptotic_mode = asymptotic_mode
         self.factor_mode = factor_mode
         self.grid_samples = grid_samples
+        self.qmf_power_tol = float(qmf_power_tol)
+        self.qmf_alias_tol = float(qmf_alias_tol)
         if precision != PrecisionType.FLOAT64:
             raise NotImplementedError("Only PrecisionType.FLOAT64 execution is currently implemented.")
         self.ctx = NumericalContext(precision=precision, base=NumericalBase.BASE_2)
@@ -1272,54 +1306,38 @@ class GegenbauerFilterCompiler:
     def factor_by_roots_reference(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float, float]:
         """
         Independent reference monomial degree-2M root finding backend (np.roots).
-        Finds raw monomial z-roots of P(z) = sum p_k z^{k-M} and groups reciprocal/conjugate orbits using tolerance heuristics.
+        Finds raw monomial z-roots of P(z) = sum p_k z^{k-M} and groups reciprocal/conjugate orbits via RootDecomposer.
         Selection is guarded by degree and raw imaginary component residual checks.
         Returns (h0_taps, residual, raw_imag_residual).
         """
         M = target_N - 1
-        roots = np.roots(p_taps)
+        raw_roots = np.roots(p_taps)
 
-        rel_tol, abs_tol = 1e-2, 1e-3
-        def same_root(a, b):
-            return abs(a - b) <= max(abs_tol, rel_tol * max(abs(a), abs(b)))
+        if len(raw_roots) != 2 * M:
+            raise ValueError(f"np.roots produced {len(raw_roots)} roots, expected {2 * M}.")
 
-        orbits = []
-        used = [False] * len(roots)
-        for i in range(len(roots)):
-            if used[i]: continue
-            orbit_idx = [i]
-            used[i] = True
-            added = True
-            while added:
-                added = False
-                curr_vals = [roots[k] for k in orbit_idx]
-                for cv in curr_vals:
-                    targets = [np.conj(cv)]
-                    if abs(cv) > 1e-12:
-                        targets.append(1.0 / cv)
-                        targets.append(1.0 / np.conj(cv))
-                    for tgt in targets:
-                        for j in range(len(roots)):
-                            if not used[j] and same_root(roots[j], tgt):
-                                orbit_idx.append(j)
-                                used[j] = True
-                                added = True
-            orbits.append([roots[k] for k in orbit_idx])
+        # Decompose orbits via shared RootDecomposer engine
+        atomic_units = RootDecomposer.decompose_z_roots(raw_roots, total_z_degree=2 * M, rel_tol=1e-3, abs_tol=1e-4)
 
         z_inside = []
-        for orbit in orbits:
-            half_len = len(orbit) // 2
-            is_unit = all(abs(abs(r) - 1.0) < 1e-2 for r in orbit)
-            if is_unit:
-                pos_imag = [r for r in orbit if np.imag(r) > 1e-6]
-                neg_imag = [r for r in orbit if np.imag(r) < -1e-6]
-                reals = [r for r in orbit if abs(np.imag(r)) <= 1e-6]
-                z_inside.extend(pos_imag[:len(pos_imag) // 2])
-                z_inside.extend(neg_imag[:len(neg_imag) // 2])
-                z_inside.extend(reals[:len(reals) // 2])
-            else:
-                in_orbit = [r for r in orbit if abs(r) < 1.0 - 1e-4]
-                z_inside.extend(in_orbit)
+        for unit in atomic_units:
+            m = unit.multiplicity
+            if unit.kind == 'REAL_ENDPOINT':
+                half_m = m // 2
+                if 2 * half_m != m:
+                    raise ValueError(f"Odd endpoint root multiplicity {m} in reference factorizer.")
+                z_inside.extend(list(unit.roots) * half_m)
+            elif unit.kind == 'REAL_RECIPROCAL_PAIR':
+                r_inside = [r for r in unit.roots if abs(r) <= 1.0 + 1e-5]
+                z_inside.extend([r_inside[0]] * m)
+            elif unit.kind == 'UNIT_CIRCLE_PAIR':
+                half_m = m // 2
+                if 2 * half_m != m:
+                    half_m = max(1, m // 2)
+                z_inside.extend(list(unit.roots) * half_m)
+            elif unit.kind == 'COMPLEX_RECIPROCAL_CONJUGATE_QUARTET':
+                in_unit = [r for r in unit.roots if abs(r) <= 1.0 + 1e-5]
+                z_inside.extend(in_unit * m)
 
         if len(z_inside) != M:
             raise ValueError(
@@ -1882,8 +1900,8 @@ class GegenbauerFilterCompiler:
 
         if spec.kind in ("qmf", "asymmetric_qmf"):
             factor_status = VerificationStatus.VERIFIED if factorization_certified else VerificationStatus.FAILED
-            qmf_pow_ok = bool(qmf_pow_lin <= 0.05)
-            qmf_alias_ok = bool(qmf_alias_lin <= 0.05)
+            qmf_pow_ok = bool(qmf_pow_lin <= self.qmf_power_tol)
+            qmf_alias_ok = bool(qmf_alias_lin <= self.qmf_alias_tol)
             qmf_power = VerificationStatus.VERIFIED if qmf_pow_ok else VerificationStatus.FAILED
             qmf_alias = VerificationStatus.VERIFIED if qmf_alias_ok else VerificationStatus.FAILED
 
@@ -2460,8 +2478,16 @@ class GegenbauerFilterCompiler:
         mu_candidates: List[float] = [0.0, 1e-4],
         solver: Optional[str] = None,
         *,
-        allow_infeasible_fallback: bool = True
+        allow_infeasible_fallback: bool = False
     ) -> FilterResult:
+        """
+        Evaluates candidate filter designs across a grid of parameter values (lambda, mu_reg).
+
+        Note: Despite the legacy name `pareto_search`, this method evaluates candidates against a
+        weighted scalar objective score and returns the single best candidate. It prioritizes candidates
+        that satisfy `sampled_design_targets_met`. If `allow_infeasible_fallback=False` (default), it raises
+        a RuntimeError if no candidate satisfies the sampled design specification.
+        """
         use_solver = solver if solver is not None else self.solver
         compile_failures = []
         score_failures = []
