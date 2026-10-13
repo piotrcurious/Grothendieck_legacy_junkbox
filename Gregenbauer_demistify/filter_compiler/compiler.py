@@ -1208,7 +1208,7 @@ class GegenbauerFilterCompiler:
         """
         Structured Chebyshev x-domain root factorization with unit-circle conjugate pairing.
         Converts P(z) = b0 + sum_{m=1}^M b_m T_m(x) into degree-M polynomial in x = cos(w).
-        Finds degree-M roots in x and lifts z_j = x_j - sqrt(x_j^2 - 1) to enforce exact reciprocal symmetry.
+        Finds degree-M roots in x using chebroots and lifts z_j = x_j - sqrt(x_j^2 - 1) with tolerance-based pairing.
         Selection is verified by strict degree postconditions (len(z_inside) == M) and raw imaginary component residual checks.
         Returns (h0_taps, residual, raw_imag_residual).
         """
@@ -1272,8 +1272,8 @@ class GegenbauerFilterCompiler:
     def factor_by_roots_reference(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float, float]:
         """
         Independent reference monomial degree-2M root finding backend (np.roots).
-        Finds raw monomial z-roots of P(z) = sum p_k z^{k-M} and groups reciprocal/conjugate orbits.
-        Enforces orbit multiplicity structure and conjugate-closure validation.
+        Finds raw monomial z-roots of P(z) = sum p_k z^{k-M} and groups reciprocal/conjugate orbits using tolerance heuristics.
+        Selection is verified by strict degree postconditions (len(z_inside) == M) and raw imaginary component residual checks.
         Returns (h0_taps, residual, raw_imag_residual).
         """
         M = target_N - 1
@@ -2460,10 +2460,10 @@ class GegenbauerFilterCompiler:
         mu_candidates: List[float] = [0.0, 1e-4],
         solver: Optional[str] = None
     ) -> FilterResult:
-        best_res = None
-        best_score = float('inf')
         use_solver = solver if solver is not None else self.solver
-        failures = []
+        compile_failures = []
+        feasible_candidates = []
+        infeasible_candidates = []
 
         for lam in lambda_candidates:
             for mu in mu_candidates:
@@ -2488,22 +2488,30 @@ class GegenbauerFilterCompiler:
 
                     score += res.payload.provenance.total * 100.0
 
-                    # Strictly prioritize candidates that satisfy sampled design targets
-                    if not res.payload.sampled_design_targets_met:
-                        score += 1e5
+                    if not np.isfinite(score):
+                        compile_failures.append((lam, mu, "NonFiniteScore", f"Computed score is non-finite: {score}"))
+                        continue
 
-                    if score < best_score:
-                        best_score = score
-                        best_res = res
+                    if res.payload.sampled_design_targets_met:
+                        feasible_candidates.append((score, res))
+                    else:
+                        infeasible_candidates.append((score, res))
+
                 except Exception as exc:
-                    failures.append((lam, mu, type(exc).__name__, str(exc)))
+                    compile_failures.append((lam, mu, type(exc).__name__, str(exc)))
                     continue
 
-        if best_res is None:
-            details = "; ".join(f"lambda={lam:.2f}, mu={mu:.1e}: {kind}: {msg}" for lam, mu, kind, msg in failures)
-            raise RuntimeError(f"No candidate compiled successfully in pareto_search. Details: {details}")
+        # Strict feasibility partitioning: prefer feasible set first
+        if len(feasible_candidates) > 0:
+            feasible_candidates.sort(key=lambda x: x[0])
+            return feasible_candidates[0][1]
 
-        return best_res
+        if len(infeasible_candidates) > 0:
+            infeasible_candidates.sort(key=lambda x: x[0])
+            return infeasible_candidates[0][1]
+
+        details = "; ".join(f"lambda={lam:.2f}, mu={mu:.1e}: {kind}: {msg}" for lam, mu, kind, msg in compile_failures)
+        raise RuntimeError(f"No candidate produced a valid result in pareto_search. Failure details: {details}")
 
 def main():
     pass
