@@ -1209,7 +1209,7 @@ class GegenbauerFilterCompiler:
         Structured Chebyshev x-domain root factorization with unit-circle conjugate pairing.
         Converts P(z) = b0 + sum_{m=1}^M b_m T_m(x) into degree-M polynomial in x = cos(w).
         Finds degree-M roots in x using chebroots and lifts z_j = x_j - sqrt(x_j^2 - 1) with tolerance-based pairing.
-        Selection is verified by strict degree postconditions (len(z_inside) == M) and raw imaginary component residual checks.
+        Selection is guarded by degree and raw imaginary component residual checks.
         Returns (h0_taps, residual, raw_imag_residual).
         """
         M = target_N - 1
@@ -1273,7 +1273,7 @@ class GegenbauerFilterCompiler:
         """
         Independent reference monomial degree-2M root finding backend (np.roots).
         Finds raw monomial z-roots of P(z) = sum p_k z^{k-M} and groups reciprocal/conjugate orbits using tolerance heuristics.
-        Selection is verified by strict degree postconditions (len(z_inside) == M) and raw imaginary component residual checks.
+        Selection is guarded by degree and raw imaginary component residual checks.
         Returns (h0_taps, residual, raw_imag_residual).
         """
         M = target_N - 1
@@ -2458,10 +2458,13 @@ class GegenbauerFilterCompiler:
         spec: FilterSpec,
         lambda_candidates: List[float] = [0.5, 1.0, 1.25, 1.5],
         mu_candidates: List[float] = [0.0, 1e-4],
-        solver: Optional[str] = None
+        solver: Optional[str] = None,
+        *,
+        allow_infeasible_fallback: bool = True
     ) -> FilterResult:
         use_solver = solver if solver is not None else self.solver
         compile_failures = []
+        score_failures = []
         feasible_candidates = []
         infeasible_candidates = []
 
@@ -2481,37 +2484,44 @@ class GegenbauerFilterCompiler:
                         precision=self.ctx.precision
                     )
                     res = compiler.compile(spec)
-
-                    score = res.passband_ripple_actual * 10.0 - res.stopband_atten_actual
-                    if res.spec.kind in ("qmf", "asymmetric_qmf"):
-                        score += res.qmf_power_complementarity_max_db * 20.0 + res.qmf_alias_distortion_max_db
-
-                    score += res.payload.provenance.total * 100.0
-
-                    if not np.isfinite(score):
-                        compile_failures.append((lam, mu, "NonFiniteScore", f"Computed score is non-finite: {score}"))
-                        continue
-
-                    if res.payload.sampled_design_targets_met:
-                        feasible_candidates.append((score, res))
-                    else:
-                        infeasible_candidates.append((score, res))
-
                 except Exception as exc:
                     compile_failures.append((lam, mu, type(exc).__name__, str(exc)))
                     continue
 
-        # Strict feasibility partitioning: prefer feasible set first
+                score = res.passband_ripple_actual * 10.0 - res.stopband_atten_actual
+                if res.spec.kind in ("qmf", "asymmetric_qmf"):
+                    score += res.qmf_power_complementarity_max_db * 20.0 + res.qmf_alias_distortion_max_db
+
+                score += res.payload.provenance.total * 100.0
+
+                if not np.isfinite(score):
+                    score_failures.append((lam, mu, "NonFiniteScore", f"Computed score is non-finite: {score}"))
+                    continue
+
+                if res.payload.sampled_design_targets_met:
+                    feasible_candidates.append((score, res))
+                else:
+                    infeasible_candidates.append((score, res))
+
+        # Prefer feasible candidate set first
         if len(feasible_candidates) > 0:
             feasible_candidates.sort(key=lambda x: x[0])
             return feasible_candidates[0][1]
 
-        if len(infeasible_candidates) > 0:
+        if allow_infeasible_fallback and len(infeasible_candidates) > 0:
             infeasible_candidates.sort(key=lambda x: x[0])
             return infeasible_candidates[0][1]
 
-        details = "; ".join(f"lambda={lam:.2f}, mu={mu:.1e}: {kind}: {msg}" for lam, mu, kind, msg in compile_failures)
-        raise RuntimeError(f"No candidate produced a valid result in pareto_search. Failure details: {details}")
+        all_errs = []
+        if compile_failures:
+            all_errs.append("Compilation failures: " + "; ".join(f"lambda={l:.2f}, mu={m:.1e}: {k}: {msg}" for l, m, k, msg in compile_failures))
+        if score_failures:
+            all_errs.append("Score failures: " + "; ".join(f"lambda={l:.2f}, mu={m:.1e}: {k}: {msg}" for l, m, k, msg in score_failures))
+        if len(infeasible_candidates) > 0 and not allow_infeasible_fallback:
+            all_errs.append(f"{len(infeasible_candidates)} candidate(s) compiled but none satisfied sampled design targets (allow_infeasible_fallback=False).")
+
+        details = " | ".join(all_errs) if all_errs else "No candidates evaluated."
+        raise RuntimeError(f"No candidate produced a feasible result in pareto_search. Details: {details}")
 
 def main():
     pass
