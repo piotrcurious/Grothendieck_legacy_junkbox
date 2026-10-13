@@ -422,16 +422,28 @@ def test_quadrature_solver():
 
 
 def test_pareto_search():
-    """Tests Pareto parameter search over (lambda, mu) space."""
+    """Tests Pareto parameter search over (lambda, mu) space with opt-in fallback and strict rejection."""
     spec = FilterSpec(kind="lowpass", order=31, cutoff=0.25)
     compiler = GegenbauerFilterCompiler()
+
+    # Opt-in fallback returns best candidate when no candidate meets strict spec
     best_result = compiler.pareto_search(
         spec,
         lambda_candidates=[1.0, 1.5],
-        mu_candidates=[0.0, 1e-4]
+        mu_candidates=[0.0, 1e-4],
+        allow_infeasible_fallback=True
     )
     assert isinstance(best_result, FilterResult)
     assert best_result.lam in [1.0, 1.5]
+
+    # Default allow_infeasible_fallback=False raises RuntimeError when no candidate meets strict spec
+    with pytest.raises(RuntimeError, match="No candidate produced a feasible result"):
+        compiler.pareto_search(
+            spec,
+            lambda_candidates=[1.0, 1.5],
+            mu_candidates=[0.0, 1e-4],
+            allow_infeasible_fallback=False
+        )
 
 
 def test_header_and_plot_output():

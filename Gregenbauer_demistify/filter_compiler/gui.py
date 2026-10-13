@@ -686,7 +686,8 @@ class GegenbauerFilterGUI(tk.Tk):
                         spec,
                         lambda_candidates=[1.0, 1.5],
                         mu_candidates=[0.0, 1e-4],
-                        solver=compiler_kwargs['solver']
+                        solver=compiler_kwargs['solver'],
+                        allow_infeasible_fallback=True
                     )
                     res_q.put(("ok", best_res))
             except Exception as ex:
