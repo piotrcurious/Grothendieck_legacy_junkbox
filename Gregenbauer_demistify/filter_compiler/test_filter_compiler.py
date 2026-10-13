@@ -642,6 +642,54 @@ def test_malformed_root_orbit_rejection():
     assert len(orbits) > 0
 
 
+def test_root_decomposer_targeted_orbit_cases():
+    """
+    Tests RootDecomposer against explicit orbit cases:
+    1. Real reciprocal pair
+    2. Complex reciprocal-conjugate quartet
+    3. Endpoint roots (+1, -1)
+    4. Valid even-multiplicity unit-circle pair
+    5. Strict rejection of odd-multiplicity unit-circle root in factorizer
+    """
+    from filter_compiler.compiler import RootDecomposer
+
+    # Case 1: Real reciprocal pair (2, 0.5)
+    roots_recip = np.array([2.0, 0.5])
+    orbits_recip = RootDecomposer.decompose_z_roots(roots_recip, total_z_degree=2)
+    assert len(orbits_recip) == 1
+    assert orbits_recip[0].kind == 'REAL_RECIPROCAL_PAIR'
+    assert orbits_recip[0].orbit_residual < 1e-12
+
+    # Case 2: Complex reciprocal-conjugate quartet (2+j, 2-j, 1/(2+j), 1/(2-j))
+    z0 = 2.0 + 1.0j
+    roots_quartet = np.array([z0, np.conj(z0), 1.0 / z0, 1.0 / np.conj(z0)])
+    orbits_quartet = RootDecomposer.decompose_z_roots(roots_quartet, total_z_degree=4)
+    assert len(orbits_quartet) == 1
+    assert orbits_quartet[0].kind == 'COMPLEX_RECIPROCAL_CONJUGATE_QUARTET'
+
+    # Case 3: Endpoint roots (+1, -1) with even multiplicity
+    roots_ep = np.array([1.0, 1.0, -1.0, -1.0])
+    orbits_ep = RootDecomposer.decompose_z_roots(roots_ep, total_z_degree=4)
+    ep_kinds = [u.kind for u in orbits_ep]
+    assert ep_kinds.count('REAL_ENDPOINT') == 2
+
+    # Case 4: Valid even-multiplicity unit-circle pair (exp(j pi/3), exp(-j pi/3)) with mult 2
+    u0 = np.exp(1j * np.pi / 3.0)
+    roots_uc = np.array([u0, u0, np.conj(u0), np.conj(u0)])
+    orbits_uc = RootDecomposer.decompose_z_roots(roots_uc, total_z_degree=4)
+    assert len(orbits_uc) == 1
+    assert orbits_uc[0].kind == 'UNIT_CIRCLE_PAIR'
+    assert orbits_uc[0].multiplicity == 2
+
+    # Case 5: Odd-multiplicity unit-circle root rejection in reference factorizer
+    # Single pair on unit circle (mult 1 => odd unit-circle root in factorizer)
+    p_odd_uc = np.poly([u0, np.conj(u0)]).real
+    # Rescale to form symmetric Laurent polynomial p_taps
+    compiler = GegenbauerFilterCompiler()
+    with pytest.raises(ValueError, match="Odd unit-circle root multiplicity"):
+        compiler.factor_by_roots_reference(p_odd_uc, target_N=2)
+
+
 def test_specification_failure_vs_engineering_acceptance():
     """Verifies distinction between strict design_target_met (specification_met) and engineering_acceptance."""
     spec = FilterSpec(kind="lowpass", order=31, cutoff=0.25, passband_ripple_db=0.5, stopband_atten_db=40.0)
