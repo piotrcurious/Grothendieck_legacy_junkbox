@@ -186,9 +186,9 @@ class TestGUIIntegration(unittest.TestCase):
         prev_res = app.current_result
         app.kind_var.set("asymmetric_qmf")
         app.order_var.set(32)
-        app.cutoff_var.set(0.23)
+        app.cutoff_var.set(0.25)
         app.wp_var.set("0.20")
-        app.ws_var.set("0.26")
+        app.ws_var.set("0.30")
         app.solver_var.set("least_squares")
         app.basis_type_var.set("unnormalized")
         app._on_compile()
