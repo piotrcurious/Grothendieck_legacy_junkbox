@@ -241,7 +241,7 @@ class RootDecomposer:
         used_c = [False] * len(raw_clusters)
         atomic_units = []
 
-        max_orbit_res = max(1e-2, rel_tol * 10.0)
+        max_orbit_res = max(abs_tol * 10.0, rel_tol * 10.0)
 
         for i in range(len(raw_clusters)):
             if used_c[i]:
@@ -253,7 +253,7 @@ class RootDecomposer:
             used_c[i] = True
 
             # 1. Real Endpoint (|Im(r1)| <= tol1 and ||Re(r1)| - 1| <= tol1)
-            if abs(np.imag(r1)) <= max(tol1, abs_tol) and abs(abs(np.real(r1)) - 1.0) <= max(tol1 * 10.0, abs_tol * 10.0):
+            if abs(np.imag(r1)) <= tol1 and abs(abs(np.real(r1)) - 1.0) <= tol1:
                 ep_val = 1.0 if np.real(r1) > 0 else -1.0
                 res_ep = float(abs(r1 - ep_val))
                 atomic_units.append(RootOrbit(
@@ -384,7 +384,16 @@ class RootDecomposer:
 
     @staticmethod
     def decompose_halfband_roots(p_taps: np.ndarray, total_z_degree: int, rel_tol: float = 1e-4, abs_tol: float = 1e-5) -> List[RootOrbit]:
+        if not isinstance(p_taps, np.ndarray):
+            p_taps = np.asarray(p_taps, dtype=np.float64)
+        if p_taps.ndim != 1 or not np.all(np.isfinite(p_taps)) or len(p_taps) % 2 == 0:
+            raise ValueError("p_taps must be a 1D finite real array of odd length 2M + 1.")
+        if not isinstance(total_z_degree, int) or isinstance(total_z_degree, bool) or total_z_degree < 1:
+            raise ValueError(f"total_z_degree must be a positive integer, got {total_z_degree}.")
         center = (len(p_taps) - 1) // 2
+        if 2 * center != total_z_degree:
+            raise ValueError(f"p_taps length {len(p_taps)} is inconsistent with total_z_degree {total_z_degree} (expected 2M + 1 = {total_z_degree + 1}).")
+
         M_prod = total_z_degree // 2
         b_harmonics = np.zeros(M_prod + 1, dtype=np.float64)
         b_harmonics[0] = p_taps[center]
@@ -609,6 +618,11 @@ class FilterSpec:
         # QMF filter pairs require an even tap length
         if self.kind in ("qmf", "asymmetric_qmf") and self.order % 2 != 0:
             raise ValueError(f"QMF filter pair requires an even tap length N, got {self.order}.")
+
+        for edge_name, edge_val in [('wp', self.wp), ('ws', self.ws), ('wp2', self.wp2), ('ws2', self.ws2)]:
+            if edge_val is not None:
+                if not isinstance(edge_val, (int, float)) or isinstance(edge_val, bool) or not np.isfinite(edge_val) or not (0.0 < edge_val < 0.5):
+                    raise ValueError(f"Frequency edge {edge_name} must be finite and in (0.0, 0.5), got {edge_val}")
 
         if self.kind == "bandpass":
             if self.wp is None: self.wp = max(0.02, self.cutoff - 0.05)
@@ -1323,7 +1337,9 @@ class GegenbauerFilterCompiler:
                 half_m = m // 2
                 z_inside.extend(list(unit.roots) * half_m)
             elif unit.kind == 'COMPLEX_RECIPROCAL_CONJUGATE_QUARTET':
-                in_unit = [r for r in unit.roots if abs(r) <= 1.0 + 1e-5]
+                in_unit = [r for r in unit.roots if abs(r) < 1.0]
+                if len(in_unit) != 2:
+                    raise ValueError(f"Ambiguous reciprocal-conjugate quartet: expected 2 inside roots, found {len(in_unit)}.")
                 z_inside.extend(in_unit * m)
 
         if len(z_inside) != M:
@@ -1378,7 +1394,9 @@ class GegenbauerFilterCompiler:
                 half_m = m // 2
                 z_inside.extend(list(unit.roots) * half_m)
             elif unit.kind == 'COMPLEX_RECIPROCAL_CONJUGATE_QUARTET':
-                in_unit = [r for r in unit.roots if abs(r) <= 1.0 + 1e-5]
+                in_unit = [r for r in unit.roots if abs(r) < 1.0]
+                if len(in_unit) != 2:
+                    raise ValueError(f"Ambiguous reciprocal-conjugate quartet: expected 2 inside roots, found {len(in_unit)}.")
                 z_inside.extend(in_unit * m)
 
         if len(z_inside) != M:
