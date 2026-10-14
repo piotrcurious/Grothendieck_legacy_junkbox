@@ -69,6 +69,319 @@ class FactorMode(Enum):
 
 
 @dataclass
+class RootOrbit:
+    """Algebraic Root Orbit Unit for conjugate/reciprocal symmetry decomposition."""
+    kind: str  # REAL_ENDPOINT, REAL_RECIPROCAL_PAIR, UNIT_CIRCLE_PAIR, COMPLEX_RECIPROCAL_CONJUGATE_QUARTET
+    roots: np.ndarray
+    multiplicity: int
+    orbit_residual: float
+
+    @property
+    def size(self) -> int:
+        return len(self.roots)
+
+
+class RootDecomposer:
+    """Shared Multiplicity-Aware Conjugate & Reciprocal Root Orbit Decomposition Engine."""
+
+    @staticmethod
+    def decompose_z_roots(
+        roots: np.ndarray,
+        total_z_degree: int,
+        rel_tol: float = 1e-4,
+        abs_tol: float = 1e-5,
+        orbit_residual_tol: Optional[float] = None
+    ) -> List[RootOrbit]:
+        if not isinstance(roots, np.ndarray):
+            roots = np.asarray(roots)
+        if roots.ndim != 1 or not np.all(np.isfinite(roots)):
+            raise ValueError("roots must be a 1D array of finite complex numbers.")
+        if not isinstance(total_z_degree, int) or isinstance(total_z_degree, bool) or total_z_degree < 1:
+            raise ValueError(f"total_z_degree must be a positive integer, got {total_z_degree}.")
+        if not isinstance(rel_tol, (int, float)) or isinstance(rel_tol, bool) or not np.isfinite(rel_tol) or rel_tol < 0.0:
+            raise ValueError(f"rel_tol must be finite and >= 0.0, got {rel_tol}")
+        if not isinstance(abs_tol, (int, float)) or isinstance(abs_tol, bool) or not np.isfinite(abs_tol) or abs_tol < 0.0:
+            raise ValueError(f"abs_tol must be finite and >= 0.0, got {abs_tol}")
+        if orbit_residual_tol is not None:
+            if not isinstance(orbit_residual_tol, (int, float)) or isinstance(orbit_residual_tol, bool) or not np.isfinite(orbit_residual_tol) or orbit_residual_tol < 0.0:
+                raise ValueError(f"orbit_residual_tol must be finite and >= 0.0, got {orbit_residual_tol}")
+
+        if len(roots) != total_z_degree:
+            raise ValueError(f"Root count mismatch: got {len(roots)}, expected {total_z_degree}.")
+
+        roots = roots.astype(np.complex128)
+
+        def same_root(a, b, tol):
+            return abs(a - b) <= tol
+
+        used = [False] * len(roots)
+        raw_clusters = []
+        cluster_tol = max(abs_tol, rel_tol * 0.05)
+        for i in range(len(roots)):
+            if used[i]:
+                continue
+            group = [i]
+            used[i] = True
+            r_i = roots[i]
+            tol_i = max(cluster_tol, cluster_tol * abs(r_i))
+            for j in range(i + 1, len(roots)):
+                if not used[j] and same_root(roots[j], r_i, tol_i):
+                    group.append(j)
+                    used[j] = True
+            rep = np.mean([roots[k] for k in group])
+            raw_clusters.append({'rep': rep, 'mult': len(group)})
+
+        used_c = [False] * len(raw_clusters)
+        atomic_units = []
+
+        max_orbit_res = float(orbit_residual_tol) if orbit_residual_tol is not None else max(abs_tol * 5.0, rel_tol * 5.0)
+
+        for i in range(len(raw_clusters)):
+            if used_c[i]:
+                continue
+            c1 = raw_clusters[i]
+            r1 = c1['rep']
+            m1 = c1['mult']
+            tol1 = max(abs_tol, rel_tol * abs(r1))
+
+            # 1. Real Endpoint (|Im(r1)| <= tol1 and ||Re(r1)| - 1| <= tol1)
+            is_ep_candidate = abs(np.imag(r1)) <= tol1 and abs(abs(np.real(r1)) - 1.0) <= tol1
+            if is_ep_candidate:
+                ep_val = 1.0 if np.real(r1) > 0 else -1.0
+                res_ep = float(abs(r1 - ep_val))
+
+                # Check if a distinct real reciprocal partner exists with smaller residual
+                r1_real = float(np.real(r1))
+                has_better_recip_partner = False
+                if abs(r1_real) > 1e-12:
+                    target_recip = 1.0 / r1_real
+                    match_tol = max(abs_tol * 10.0, rel_tol * abs(target_recip))
+                    for j in range(len(raw_clusters)):
+                        if j != i and not used_c[j]:
+                            r2_cand = raw_clusters[j]['rep']
+                            if abs(np.imag(r2_cand)) <= max(tol1 * 10.0, abs_tol * 10.0):
+                                dist = abs(r2_cand - target_recip)
+                                if dist <= match_tol:
+                                    res_recip_cand = float(abs(r1_real * float(np.real(r2_cand)) - 1.0))
+                                    if res_recip_cand < res_ep:
+                                        has_better_recip_partner = True
+                                        break
+
+                if not has_better_recip_partner:
+                    if m1 % 2 != 0:
+                        raise ValueError(f"Real endpoint root at {ep_val} has odd multiplicity {m1}; endpoint roots in symmetric P(z) must have even multiplicity.")
+                    used_c[i] = True
+                    if res_ep > max_orbit_res:
+                        raise ValueError(f"Real endpoint residual {res_ep:.4e} exceeds threshold {max_orbit_res:.4e}.")
+                    atomic_units.append(RootOrbit(
+                        kind='REAL_ENDPOINT',
+                        roots=np.array([ep_val], dtype=np.float64),
+                        multiplicity=m1,
+                        orbit_residual=res_ep
+                    ))
+                else:
+                    is_ep_candidate = False
+
+            if not is_ep_candidate:
+                # Fall through to Real Reciprocal Pair or Unit-Circle / Quartet
+
+                # 2. Real Reciprocal Pair (|Im(r1)| <= tol1, non-endpoint)
+                if abs(np.imag(r1)) <= tol1:
+                    r1_real = float(np.real(r1))
+                    if abs(r1_real) < 1e-12:
+                        raise ValueError(f"Zero root detected at index {i}; half-band polynomials cannot have zero roots.")
+                    target_recip = 1.0 / r1_real
+                    recip_idx = -1
+                    best_dist = float('inf')
+                    match_tol = max(abs_tol * 10.0, rel_tol * abs(target_recip))
+                    for j in range(len(raw_clusters)):
+                        if not used_c[j] and j != i:
+                            r2_candidate = raw_clusters[j]['rep']
+                            if abs(np.imag(r2_candidate)) <= max(tol1 * 10.0, abs_tol * 10.0):
+                                dist = abs(r2_candidate - target_recip)
+                                if dist <= match_tol and dist < best_dist:
+                                    best_dist = dist
+                                    recip_idx = j
+
+                    if recip_idx != -1:
+                        c2 = raw_clusters[recip_idx]
+                        if m1 != c2['mult']:
+                            raise ValueError(f"Reciprocal orbit multiplicities disagree for root {r1_real:.6f}: {m1} vs {c2['mult']}.")
+                        used_c[i] = True
+                        used_c[recip_idx] = True
+                        r2_real = float(np.real(c2['rep']))
+                        res_recip = float(abs(r1_real * r2_real - 1.0))
+                        if res_recip > max_orbit_res:
+                            raise ValueError(f"Real reciprocal pair residual {res_recip:.4e} exceeds threshold {max_orbit_res:.4e} for {r1_real:.6f} and {r2_real:.6f}.")
+                        atomic_units.append(RootOrbit(
+                            kind='REAL_RECIPROCAL_PAIR',
+                            roots=np.array([r1_real, r2_real], dtype=np.float64),
+                            multiplicity=m1,
+                            orbit_residual=res_recip
+                        ))
+                    else:
+                        raise ValueError(f"Unpaired real reciprocal root detected for {r1_real:.6f} (target reciprocal {target_recip:.6f} not found within tol={match_tol:.3e}).")
+
+                # 3. Unit-Circle Conjugate Pair (|r1| == 1, Im(r1) != 0)
+                elif abs(abs(r1) - 1.0) <= max(abs_tol, rel_tol * abs(r1)):
+                    target_conj = np.conj(r1)
+                    conj_idx = -1
+                    best_dist = float('inf')
+                    match_tol = max(abs_tol * 10.0, rel_tol * abs(r1))
+                    for j in range(len(raw_clusters)):
+                        if not used_c[j] and j != i:
+                            r2_candidate = raw_clusters[j]['rep']
+                            dist = abs(r2_candidate - target_conj)
+                            if dist <= match_tol and dist < best_dist:
+                                best_dist = dist
+                                conj_idx = j
+
+                    if conj_idx != -1:
+                        c2 = raw_clusters[conj_idx]
+                        used_c[i] = True
+                        used_c[conj_idx] = True
+                        r2_unit = c2['rep']
+
+                        # Look for nearby unit-circle root pair to merge perturbed simple roots into double root
+                        nearby_idx = -1
+                        nearby_conj_idx = -1
+                        if m1 % 2 != 0:
+                            for k in range(len(raw_clusters)):
+                                if not used_c[k]:
+                                    r_k = raw_clusters[k]['rep']
+                                    if abs(abs(r_k) - 1.0) <= match_tol and abs(r_k - r1) <= match_tol * 5.0 and abs(r_k - r1) > 1e-12:
+                                        # Find its conjugate
+                                        for l in range(len(raw_clusters)):
+                                            if not used_c[l] and l != k and abs(raw_clusters[l]['rep'] - np.conj(r_k)) <= match_tol:
+                                                nearby_idx = k
+                                                nearby_conj_idx = l
+                                                break
+                                        if nearby_idx != -1:
+                                            break
+
+                        if nearby_idx != -1 and nearby_conj_idx != -1:
+                            used_c[nearby_idx] = True
+                            used_c[nearby_conj_idx] = True
+                            r1 = 0.5 * (r1 + raw_clusters[nearby_idx]['rep'])
+                            r2_unit = 0.5 * (r2_unit + raw_clusters[nearby_conj_idx]['rep'])
+                            m1 = m1 + raw_clusters[nearby_idx]['mult']
+
+                        res_unit = float(max(abs(abs(r1) - 1.0), abs(r1 - np.conj(r2_unit))))
+                        atomic_units.append(RootOrbit(
+                            kind='UNIT_CIRCLE_PAIR',
+                            roots=np.array([r1, r2_unit], dtype=np.complex128),
+                            multiplicity=m1,
+                            orbit_residual=res_unit
+                        ))
+                    else:
+                        raise ValueError(f"Unpaired unit circle conjugate root detected for {r1} (conjugate partner not found within tol={match_tol:.3e}).")
+
+                # 4. Complex Reciprocal Conjugate Quartet (Off unit circle, Im(r1) != 0)
+                else:
+                    target_conj = np.conj(r1)
+                    target_recip = 1.0 / r1
+                    target_conj_recip = 1.0 / np.conj(r1)
+
+                    targets = [target_conj, target_recip, target_conj_recip]
+                    matched_indices = []
+
+                    for tgt in targets:
+                        best_j = -1
+                        best_d = float('inf')
+                        tgt_tol = max(abs_tol * 10.0, rel_tol * abs(tgt))
+                        for j in range(len(raw_clusters)):
+                            if not used_c[j] and j != i and j not in matched_indices:
+                                dist = abs(raw_clusters[j]['rep'] - tgt)
+                                if dist <= tgt_tol and dist < best_d:
+                                    best_d = dist
+                                    best_j = j
+                        if best_j != -1:
+                            matched_indices.append(best_j)
+                        else:
+                            raise ValueError(f"Complex quartet member missing target {tgt} for root {r1} within tol={tgt_tol:.3e}.")
+
+                    mults = [m1] + [raw_clusters[j]['mult'] for j in matched_indices]
+                    if len(set(mults)) != 1:
+                        raise ValueError(f"Complex root orbit multiplicities disagree across quartet: {mults}")
+
+                    used_c[i] = True
+                    for j in matched_indices:
+                        used_c[j] = True
+
+                    quad_roots = np.array([r1] + [raw_clusters[j]['rep'] for j in matched_indices], dtype=np.complex128)
+                    res_q1 = abs(quad_roots[1] - np.conj(quad_roots[0]))
+                    res_q2 = abs(quad_roots[2] * quad_roots[0] - 1.0)
+                    res_q3 = abs(quad_roots[3] * np.conj(quad_roots[0]) - 1.0)
+                    res_quad = float(max(res_q1, res_q2, res_q3))
+                    if res_quad > max_orbit_res:
+                        raise ValueError(f"Complex quartet residual {res_quad:.4e} exceeds threshold {max_orbit_res:.4e}.")
+
+                    atomic_units.append(RootOrbit(
+                        kind='COMPLEX_RECIPROCAL_CONJUGATE_QUARTET',
+                        roots=quad_roots,
+                        multiplicity=m1,
+                        orbit_residual=res_quad
+                    ))
+
+        total_roots_found = sum(u.size * u.multiplicity for u in atomic_units)
+        if total_roots_found != total_z_degree:
+            raise ValueError(f"Root orbit decomposition not closed: found {total_roots_found} roots, expected {total_z_degree}.")
+
+        return atomic_units
+
+    @staticmethod
+    def decompose_halfband_roots(
+        p_taps: np.ndarray,
+        total_z_degree: int,
+        rel_tol: float = 1e-4,
+        abs_tol: float = 1e-5,
+        orbit_residual_tol: Optional[float] = None
+    ) -> List[RootOrbit]:
+        if not isinstance(p_taps, np.ndarray):
+            p_taps = np.asarray(p_taps)
+        if (
+            p_taps.ndim != 1
+            or not np.isrealobj(p_taps)
+            or not np.all(np.isfinite(p_taps))
+            or len(p_taps) % 2 == 0
+        ):
+            raise ValueError("p_taps must be a 1D finite real array of odd length 2M + 1.")
+        p_taps = p_taps.astype(np.float64, copy=False)
+
+        if not isinstance(total_z_degree, int) or isinstance(total_z_degree, bool) or total_z_degree < 1:
+            raise ValueError(f"total_z_degree must be a positive integer, got {total_z_degree}.")
+        center = (len(p_taps) - 1) // 2
+        if 2 * center != total_z_degree:
+            raise ValueError(f"p_taps length {len(p_taps)} is inconsistent with total_z_degree {total_z_degree} (expected 2M + 1 = {total_z_degree + 1}).")
+
+        if center > 0:
+            sym_err = float(np.max(np.abs(p_taps[:center] - p_taps[center + 1:][::-1])))
+            if sym_err > 1e-4:
+                raise ValueError(f"p_taps is not symmetric: symmetry residual {sym_err:.4e} exceeds 1e-4.")
+
+        M_prod = total_z_degree // 2
+        b_harmonics = np.zeros(M_prod + 1, dtype=np.float64)
+        b_harmonics[0] = p_taps[center]
+        for m in range(1, M_prod + 1):
+            if center + m < len(p_taps):
+                b_harmonics[m] = 2.0 * p_taps[center + m]
+
+        x_roots = np.polynomial.chebyshev.chebroots(b_harmonics)
+        roots = []
+        for x_val in x_roots:
+            disc = np.sqrt(x_val**2 - 1.0 + 0j)
+            roots.extend([x_val - disc, x_val + disc])
+
+        return RootDecomposer.decompose_z_roots(
+            np.array(roots),
+            total_z_degree,
+            rel_tol=rel_tol,
+            abs_tol=abs_tol,
+            orbit_residual_tol=orbit_residual_tol
+        )
+
+
+@dataclass
 class FactorizationDiagnostics:
     """Layer VIII Spectral Factorization Quality & Invariant Diagnostics."""
     mode: FactorMode
@@ -114,18 +427,71 @@ class ErrorEstimateProvenance:
 ErrorBoundProvenance = ErrorEstimateProvenance
 
 
+class VerificationStatus(Enum):
+    """Tri-state verification status for layer-wise filter certification."""
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+    VERIFIED = "VERIFIED"
+    FAILED = "FAILED"
+
+
 @dataclass
 class CertifiedEvaluationPayload:
     """Layer VIII Certified Evaluation Payload separating diagnostics from certified bounds."""
     truth_status: TruthStatus
     matching_status: MatchingStatus
     provenance: ErrorEstimateProvenance
-    basis_asymptotic_validated: bool = False
-    prototype_fir_certified: bool = False
-    qmf_power_complementary: bool = False
-    qmf_alias_cancellation: bool = False
-    factorization_certified: bool = False
+    basis_asymptotic: VerificationStatus = VerificationStatus.NOT_APPLICABLE
+    prototype_fir: VerificationStatus = VerificationStatus.NOT_APPLICABLE
+    qmf_power: VerificationStatus = VerificationStatus.NOT_APPLICABLE
+    qmf_alias: VerificationStatus = VerificationStatus.NOT_APPLICABLE
+    factorization: VerificationStatus = VerificationStatus.NOT_APPLICABLE
+    structural_certified: bool = False
+    specification_met: bool = False
+    sampled_design_targets_met: bool = False
+    continuous_specification_certified: bool = False
+    asymptotic_diagnostic_passed: bool = False
     is_certified: bool = False
+
+    @property
+    def basis_asymptotic_validated(self) -> bool:
+        return self.basis_asymptotic == VerificationStatus.VERIFIED
+
+    @property
+    def prototype_fir_certified(self) -> bool:
+        return self.prototype_fir == VerificationStatus.VERIFIED
+
+    @property
+    def qmf_power_complementary(self) -> bool:
+        return self.qmf_power == VerificationStatus.VERIFIED
+
+    @property
+    def qmf_alias_cancellation(self) -> bool:
+        return self.qmf_alias == VerificationStatus.VERIFIED
+
+    @property
+    def factorization_certified(self) -> bool:
+        return self.factorization == VerificationStatus.VERIFIED
+
+
+def _fit_spectral_factor_scale(q: np.ndarray, p_taps: np.ndarray, tol: float = 1e-15, imag_tol: float = 1e-5) -> np.ndarray:
+    """Least-squares optimal scalar recovery scaling for spectral factor q such that r = q * q_rev fits p_taps."""
+    q_arr = np.asarray(q)
+    if not np.all(np.isfinite(q_arr)):
+        raise ValueError("Non-finite spectral-factor candidate.")
+
+    imag_res = float(np.max(np.abs(np.imag(q_arr)))) if np.iscomplexobj(q_arr) else 0.0
+    if imag_res > imag_tol:
+        raise ValueError(f"Candidate is not real within tolerance: imaginary residual {imag_res:.3e} exceeds {imag_tol:.3e}.")
+
+    q_real = np.real(q_arr).astype(np.float64)
+    r = np.convolve(q_real, q_real[::-1])
+    den = float(np.vdot(r, r).real)
+    if den <= tol:
+        raise ValueError("Degenerate spectral factor candidate.")
+    s = float(np.vdot(r, p_taps).real / den)
+    if s <= 0.0:
+        raise ValueError(f"Spectral-factor scalar fit is non-positive: s={s:.6e}")
+    return q_real * math.sqrt(s)
 
 
 def determine_truth_status(lam: float) -> TruthStatus:
@@ -194,20 +560,39 @@ class FilterSpec:
     stopband_atten_db: float = 60.0
 
     def __post_init__(self):
+        if not isinstance(self.kind, str):
+            raise TypeError(f"Filter kind must be a string, got {type(self.kind).__name__}")
+
+        if not isinstance(self.order, int) or isinstance(self.order, bool) or not np.isfinite(self.order) or self.order < 3:
+            raise ValueError(f"Filter order must be an integer >= 3, got {self.order}")
+
+        if not isinstance(self.sampling_rate, (int, float)) or isinstance(self.sampling_rate, bool) or not np.isfinite(self.sampling_rate) or self.sampling_rate <= 0:
+            raise ValueError(f"Sampling rate must be finite and > 0, got {self.sampling_rate}")
+
+        if not isinstance(self.passband_ripple_db, (int, float)) or isinstance(self.passband_ripple_db, bool) or not np.isfinite(self.passband_ripple_db) or self.passband_ripple_db <= 0:
+            raise ValueError(f"Passband ripple must be finite and > 0, got {self.passband_ripple_db}")
+
+        if not isinstance(self.stopband_atten_db, (int, float)) or isinstance(self.stopband_atten_db, bool) or not np.isfinite(self.stopband_atten_db) or self.stopband_atten_db <= 0:
+            raise ValueError(f"Stopband attenuation must be finite and > 0, got {self.stopband_atten_db}")
+
         self.kind = self.kind.lower()
         if self.kind not in ("lowpass", "highpass", "bandpass", "qmf", "asymmetric_qmf"):
             raise ValueError(f"Unknown filter kind: '{self.kind}'")
-        if self.order < 3:
-            raise ValueError("Filter order must be >= 3")
-        if not (0.0 < self.cutoff < 0.5):
-            raise ValueError(f"Cutoff must be in (0.0, 0.5), got {self.cutoff}")
+
+        if not isinstance(self.cutoff, (int, float)) or isinstance(self.cutoff, bool) or not np.isfinite(self.cutoff) or not (0.0 < self.cutoff < 0.5):
+            raise ValueError(f"Cutoff must be finite and in (0.0, 0.5), got {self.cutoff}")
+
+        if self.kind in ("qmf", "asymmetric_qmf"):
+            self.cutoff = 0.25
 
         # QMF filter pairs require an even tap length
         if self.kind in ("qmf", "asymmetric_qmf") and self.order % 2 != 0:
             raise ValueError(f"QMF filter pair requires an even tap length N, got {self.order}.")
 
-        if self.kind == "qmf":
-            self.cutoff = 0.25
+        for edge_name, edge_val in [('wp', self.wp), ('ws', self.ws), ('wp2', self.wp2), ('ws2', self.ws2)]:
+            if edge_val is not None:
+                if not isinstance(edge_val, (int, float)) or isinstance(edge_val, bool) or not np.isfinite(edge_val) or not (0.0 < edge_val < 0.5):
+                    raise ValueError(f"Frequency edge {edge_name} must be finite and in (0.0, 0.5), got {edge_val}")
 
         if self.kind == "bandpass":
             if self.wp is None: self.wp = max(0.02, self.cutoff - 0.05)
@@ -227,8 +612,8 @@ class FilterSpec:
         if self.kind == "asymmetric_qmf":
             if not (0.0 < self.wp < 0.25 < self.ws < 0.5):
                 raise ValueError(f"Asymmetric QMF requires transition band straddling fs/4 (0 < wp < 0.25 < ws < 0.5), got wp={self.wp}, ws={self.ws}")
-            if self.wp + self.ws > 0.5 + 1e-6:
-                raise ValueError(f"Asymmetric QMF target transition edges must satisfy wp + ws <= 0.5 to remain compatible with half-band complementarity, got wp={self.wp}, ws={self.ws} (sum = {self.wp + self.ws})")
+            if abs((self.wp + self.ws) - 0.5) > 1e-6:
+                raise ValueError(f"Asymmetric QMF target transition edges must satisfy wp + ws == 0.5 to remain compatible with half-band complementarity, got wp={self.wp}, ws={self.ws} (sum = {self.wp + self.ws})")
 
         if self.kind in ("lowpass", "qmf", "asymmetric_qmf"):
             if not (0.0 < self.wp < self.ws < 0.5):
@@ -278,6 +663,10 @@ class GegenbauerSpectralDesign:
     asymptotic_sampled_discrepancy: float
     truth_status: TruthStatus
     matching_status: MatchingStatus
+    augmented_design_residual: float = 0.0
+    data_design_residual: float = 0.0
+    regularization_residual: float = 0.0
+    final_realization_residual: float = 0.0
 
     @property
     def asymptotic_error_bound(self) -> float:
@@ -309,6 +698,9 @@ class FilterResult:
     fit_residual: float = 0.0
     data_fit_residual: float = 0.0
     regularization_residual: float = 0.0
+    augmented_design_residual: float = 0.0
+    data_design_residual: float = 0.0
+    final_realization_residual: float = 0.0
     asymptotic_sampled_discrepancy: float = 0.0
     provenance_mixed_error: float = 0.0
 
@@ -324,9 +716,10 @@ class FilterResult:
             f"Gegenbauer Lambda: {self.lam:.4f} | Basis Terms: {self.basis_terms}",
             f"Truth Status Topology: {self.payload.truth_status.value}",
             f"Asymptotic Matching Certification: {self.payload.matching_status.value}",
-            f"Certifications: Basis={self.payload.basis_asymptotic_validated} | Prototype={self.payload.prototype_fir_certified}"
-            f" | QMF Power={self.payload.qmf_power_complementary} | QMF Alias={self.payload.qmf_alias_cancellation}"
-            f" | Factorization={self.payload.factorization_certified} | Total={self.payload.is_certified}",
+            f"Certifications: Basis={self.payload.basis_asymptotic.value} | Prototype={self.payload.prototype_fir.value}"
+            f" | QMF Power={self.payload.qmf_power.value} | QMF Alias={self.payload.qmf_alias.value}"
+            f" | Factorization={self.payload.factorization.value}",
+            f"Status: SampledDesignTargetsMet={self.payload.sampled_design_targets_met} | ContinuousSpecificationCertified={self.payload.continuous_specification_certified} | TotalCertified={self.payload.is_certified}",
             f"Passband Ripple: {self.passband_ripple_actual:.4f} dB | Stopband Attenuation: {self.stopband_atten_actual:.2f} dB",
         ]
         if self.factorization is not None:
@@ -337,7 +730,7 @@ class FilterResult:
         lines.append(f"Sturm-Liouville Regularization Energy: {self.regularization_energy:.6e}")
         lines.append(f"Asymptotic Sampled Discrepancy (E_analytic): {self.payload.provenance.e_analytic:.6e}")
         lines.append(f"Fixed-Point Quantization Noise (E_arithmetic): {self.payload.provenance.e_arithmetic:.6e}")
-        lines.append(f"Certified Total Error Bound (E_total): {self.payload.provenance.total:.6e}")
+        lines.append(f"Total Error Estimate (E_total_estimate): {self.payload.provenance.total:.6e}")
         return "\n".join(lines)
 
 
@@ -355,24 +748,32 @@ class GegenbauerFilterCompiler:
         asymptotic_mode: str = "auto",
         factor_mode: FactorMode = FactorMode.STRUCTURED_CHEBYSHEV,
         grid_samples: int = 2048,
-        precision: PrecisionType = PrecisionType.FLOAT64
+        precision: PrecisionType = PrecisionType.FLOAT64,
+        qmf_power_tol: float = 0.05,
+        qmf_alias_tol: float = 0.05
     ):
-        if lam <= -0.5:
-            raise ValueError(f"Lambda parameter must be > -0.5, got {lam}")
-        if basis_terms is not None and basis_terms < 1:
-            raise ValueError(f"basis_terms must be >= 1, got {basis_terms}")
-        if mu_reg < 0.0:
-            raise ValueError(f"mu_reg must be >= 0.0, got {mu_reg}")
-        if reg_power < 0:
-            raise ValueError(f"reg_power must be >= 0, got {reg_power}")
+        if not isinstance(lam, (int, float)) or isinstance(lam, bool) or not np.isfinite(lam) or lam <= 0.0:
+            raise ValueError(f"Lambda parameter must be finite and > 0.0, got {lam}")
+        if basis_terms is not None and (not isinstance(basis_terms, int) or isinstance(basis_terms, bool) or basis_terms < 1):
+            raise ValueError(f"basis_terms must be an integer >= 1, got {basis_terms}")
+        if not isinstance(mu_reg, (int, float)) or isinstance(mu_reg, bool) or not np.isfinite(mu_reg) or mu_reg < 0.0:
+            raise ValueError(f"mu_reg must be finite and >= 0.0, got {mu_reg}")
+        if not isinstance(reg_power, int) or isinstance(reg_power, bool) or reg_power < 0:
+            raise ValueError(f"reg_power must be an integer >= 0, got {reg_power}")
+        if not isinstance(grid_samples, int) or isinstance(grid_samples, bool) or grid_samples < 16:
+            raise ValueError(f"grid_samples must be an integer >= 16, got {grid_samples}")
+        if not isinstance(qmf_power_tol, (int, float)) or isinstance(qmf_power_tol, bool) or not np.isfinite(qmf_power_tol) or qmf_power_tol <= 0.0:
+            raise ValueError(f"qmf_power_tol must be finite and > 0.0, got {qmf_power_tol}")
+        if not isinstance(qmf_alias_tol, (int, float)) or isinstance(qmf_alias_tol, bool) or not np.isfinite(qmf_alias_tol) or qmf_alias_tol <= 0.0:
+            raise ValueError(f"qmf_alias_tol must be finite and > 0.0, got {qmf_alias_tol}")
+        if not isinstance(factor_mode, FactorMode):
+            raise TypeError(f"factor_mode must be an instance of FactorMode, got {type(factor_mode).__name__}")
         if basis_type not in ("normalized", "unnormalized"):
             raise ValueError(f"Unknown basis_type: '{basis_type}'")
         if solver not in ("spectral_regularized", "quadrature", "least_squares"):
             raise ValueError(f"Unknown solver mode: '{solver}'")
         if asymptotic_mode not in ("auto", "bessel", "wkb", "composite", "none"):
             raise ValueError(f"Unknown asymptotic_mode: '{asymptotic_mode}'")
-        if grid_samples < 16:
-            raise ValueError(f"grid_samples must be >= 16, got {grid_samples}")
 
         self.lam = float(lam)
         self.basis_terms = basis_terms
@@ -383,6 +784,8 @@ class GegenbauerFilterCompiler:
         self.asymptotic_mode = asymptotic_mode
         self.factor_mode = factor_mode
         self.grid_samples = grid_samples
+        self.qmf_power_tol = float(qmf_power_tol)
+        self.qmf_alias_tol = float(qmf_alias_tol)
         if precision != PrecisionType.FLOAT64:
             raise NotImplementedError("Only PrecisionType.FLOAT64 execution is currently implemented.")
         self.ctx = NumericalContext(precision=precision, base=NumericalBase.BASE_2)
@@ -593,17 +996,40 @@ class GegenbauerFilterCompiler:
         """Backward-compatibility alias for solve_parity_constrained_gegenbauer_response."""
         return self.solve_parity_constrained_gegenbauer_response(spec)
 
+    def validate_halfband_structure(self, p_taps: np.ndarray) -> Tuple[bool, float]:
+        """
+        Validates half-band coefficient structure, symmetry, center tap, and complementarity residual.
+        Returns (is_valid, max_halfband_err).
+        """
+        center = (len(p_taps) - 1) // 2
+        M = center
+
+        # Symmetry check p_taps[center-m] == p_taps[center+m]
+        sym_err = float(np.max(np.abs(p_taps[:center] - p_taps[center+1:][::-1]))) if center > 0 else 0.0
+
+        b_harmonics = np.zeros(M + 1, dtype=np.float64)
+        b_harmonics[0] = p_taps[center]
+        for m in range(1, M + 1):
+            if center + m < len(p_taps):
+                b_harmonics[m] = 2.0 * p_taps[center + m]
+
+        # Complementarity residual bound: |2 b0 - 1| + 2 * sum_{m>0, even} |b_m|
+        b_even_sum = 2.0 * float(np.sum(np.abs(b_harmonics[2::2]))) if len(b_harmonics) > 2 else 0.0
+        max_hb_err = float(abs(2.0 * b_harmonics[0] - 1.0) + b_even_sum + sym_err)
+
+        all_finite = bool(np.all(np.isfinite(p_taps)))
+        is_valid = all_finite and (max_hb_err <= 1e-4)
+        return is_valid, max_hb_err
+
     def validate_power_polynomial(self, p_taps: np.ndarray, grid_size: int = 2048) -> Tuple[bool, float, float, float]:
         """
         Validates half-band power polynomial P(z) using numerical critical point evaluation.
         Evaluates P(x) at endpoints x = +-1 and all real derivative roots P'(x) = 0 in [-1, 1].
         Returns (is_valid, min_P, max_P, max_halfband_err).
         """
+        hb_valid, max_hb_err = self.validate_halfband_structure(p_taps)
         center = (len(p_taps) - 1) // 2
         M = center
-
-        # First check coefficient symmetry p_taps[center-m] == p_taps[center+m]
-        sym_err = float(np.max(np.abs(p_taps[:center] - p_taps[center+1:][::-1]))) if center > 0 else 0.0
 
         b_harmonics = np.zeros(M + 1, dtype=np.float64)
         b_harmonics[0] = p_taps[center]
@@ -634,12 +1060,9 @@ class GegenbauerFilterCompiler:
             min_P = float(np.min(vals))
             max_P = float(np.max(vals))
 
-        # Complementarity residual bound: |2 b0 - 1| + 2 * sum_{m>0, even} |b_m|
-        b_even_sum = 2.0 * float(np.sum(np.abs(b_harmonics[2::2]))) if len(b_harmonics) > 2 else 0.0
-        max_hb_err = float(abs(2.0 * b_harmonics[0] - 1.0) + b_even_sum + sym_err)
-
         tau_P = 1e-4 * max(1.0, abs(max_P))
-        is_valid = (min_P >= -tau_P) and (max_hb_err <= 1e-4)
+        all_finite = bool(np.all(np.isfinite(p_taps)) and np.isfinite(min_P) and np.isfinite(max_P))
+        is_valid = hb_valid and all_finite and (min_P >= -tau_P) and (max_P <= 1.0 + 1e-3)
         return is_valid, min_P, max_P, max_hb_err
 
     def _compute_factorization_diagnostics(
@@ -647,9 +1070,10 @@ class GegenbauerFilterCompiler:
         h0_complex: np.ndarray,
         p_taps: np.ndarray,
         mode: FactorMode,
-        target_degree: Optional[int] = None
+        target_degree: Optional[int] = None,
+        raw_imag_residual: Optional[float] = None
     ) -> Tuple[np.ndarray, FactorizationDiagnostics]:
-        imag_res = float(np.max(np.abs(np.imag(h0_complex)))) if np.iscomplexobj(h0_complex) else 0.0
+        imag_res = raw_imag_residual if raw_imag_residual is not None else (float(np.max(np.abs(np.imag(h0_complex)))) if np.iscomplexobj(h0_complex) else 0.0)
         if imag_res > 1e-5:
             raise ValueError(f"Factorization produced non-real filter taps: imaginary residual {imag_res:.3e} exceeds 1e-5 tolerance.")
 
@@ -739,11 +1163,11 @@ class GegenbauerFilterCompiler:
             halfband_residual <= 1e-3
         )
 
-    def spectral_factor_cepstral(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float]:
+    def spectral_factor_cepstral(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float, float]:
         """
-        Constructs an FFT/cepstrum approximation to the minimum-phase spectral factor and truncates it to target_N taps.
+        Constructs an FFT/cepstrum approximation to the minimum-phase spectral factor.
         Operates on positive trigonometric power polynomial P(w) >= 0.
-        Returns (h0_taps, residual).
+        Returns (h0_taps, residual, raw_imag_residual).
         """
         M = target_N - 1
         center = (len(p_taps) - 1) // 2
@@ -769,141 +1193,145 @@ class GegenbauerFilterCompiler:
 
         # Minimum-phase spectral response H_min(w) = exp(FFT(c_min))
         H_min = np.exp(np.fft.fft(c_min))
-        h_full = np.fft.ifft(H_min).real
+        h_full = np.fft.ifft(H_min)
 
         # Truncate to target N taps
-        h0 = h_full[:target_N]
+        h0_cand = h_full[:target_N]
+        raw_imag = float(np.max(np.abs(np.imag(h0_cand)))) if np.iscomplexobj(h0_cand) else 0.0
 
-        # Scale h0 so convolution h0 * h0[::-1] matches center tap
-        r_h0 = np.convolve(h0, h0[::-1])
-        scale = np.sqrt(max(1e-15, p_taps[center] / max(1e-15, r_h0[len(r_h0) // 2])))
-        h0 *= scale
+        # Scale h0 via optimal least-squares scalar fit
+        h0 = _fit_spectral_factor_scale(h0_cand, p_taps)
 
         # Autocorrelation residual
         r_fact = np.convolve(h0, h0[::-1])
         res = float(np.max(np.abs(r_fact - p_taps)))
-        return h0, res
+        return h0, res, raw_imag
 
-    def factor_by_chebyshev_roots(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float]:
+    def factor_by_chebyshev_roots(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float, float]:
         """
-        Structured Chebyshev x-domain root factorization with unit-circle conjugate pairing.
+        Structured Chebyshev x-domain root factorization with RootDecomposer orbit matching.
         Converts P(z) = b0 + sum_{m=1}^M b_m T_m(x) into degree-M polynomial in x = cos(w).
-        Finds degree-M roots in x and lifts z_j = x_j - sqrt(x_j^2 - 1) to enforce exact reciprocal symmetry.
-        Symmetrically pairs unit-circle roots x in [-1, 1] as e^{j theta} and e^{-j theta} to preserve real FIR taps.
-        Returns (h0_taps, residual).
+        Finds degree-M roots in x using chebroots, lifts z = x +- sqrt(x^2 - 1), and decomposes orbits via RootDecomposer.
+        Guarded by reconstructed coefficient residual gates and degree checks.
+        Returns (h0_taps, residual, raw_imag_residual).
         """
         M = target_N - 1
         center = (len(p_taps) - 1) // 2
 
-        # Extract Fourier cosine coefficients b_m
         b_harmonics = np.zeros(M + 1, dtype=np.float64)
         b_harmonics[0] = p_taps[center]
         for m in range(1, M + 1):
             if center + m < len(p_taps):
                 b_harmonics[m] = 2.0 * p_taps[center + m]
 
-        # Chebyshev roots in x = cos(w)
         x_roots = np.polynomial.chebyshev.chebroots(b_harmonics)
-
-        # Lift x_roots to z_roots in unit circle |z| <= 1 with conjugate pairing for interior x roots
-        z_inside = []
-        unit_x = [x for x in x_roots if abs(np.imag(x)) < 1e-6 and -1.0 - 1e-4 <= x.real <= 1.0 + 1e-4]
-        off_x = [x for x in x_roots if x not in unit_x]
-
-        # Process off-unit-circle roots
-        for x_val in off_x:
+        z_all = []
+        for x_val in x_roots:
             disc = np.sqrt(x_val**2 - 1.0 + 0j)
-            z1 = x_val - disc
-            z2 = x_val + disc
-            z_sel = z1 if abs(z1) <= 1.0 + 1e-4 else z2
-            z_inside.append(z_sel)
+            z_all.extend([x_val - disc, x_val + disc])
 
-        # Process unit-circle roots x in [-1, 1] as conjugate pairs e^{+-j theta}
-        unit_reals = sorted([np.clip(x.real, -1.0, 1.0) for x in unit_x])
-        u_idx = 0
-        while u_idx < len(unit_reals):
-            xr = unit_reals[u_idx]
-            theta = np.arccos(xr)
-            if u_idx + 1 < len(unit_reals) and abs(unit_reals[u_idx + 1] - xr) < 1e-3:
-                # Pair double root as e^{+j theta} and e^{-j theta}
-                z_inside.append(np.exp(1j * theta))
-                z_inside.append(np.exp(-1j * theta))
-                u_idx += 2
-            else:
-                disc = np.sqrt(xr**2 - 1.0 + 0j)
-                z_inside.append(xr - disc)
-                u_idx += 1
+        if len(z_all) != 2 * M:
+            raise ValueError(f"Chebyshev root lifting produced {len(z_all)} z-roots, expected {2 * M}.")
+
+        atomic_units = RootDecomposer.decompose_z_roots(np.array(z_all), total_z_degree=2 * M, rel_tol=1e-3, abs_tol=1e-4, orbit_residual_tol=1e-3)
+
+        z_inside = []
+        for unit in atomic_units:
+            m = unit.multiplicity
+            if unit.kind == 'REAL_ENDPOINT':
+                half_m = m // 2
+                if 2 * half_m != m:
+                    raise ValueError(f"Odd endpoint root multiplicity {m} in Chebyshev factorizer.")
+                z_inside.extend(list(unit.roots) * half_m)
+            elif unit.kind == 'REAL_RECIPROCAL_PAIR':
+                r_inside = min(unit.roots, key=lambda r: abs(r))
+                z_inside.extend([r_inside] * m)
+            elif unit.kind == 'UNIT_CIRCLE_PAIR':
+                if m % 2 != 0:
+                    raise ValueError(f"Odd unit-circle root multiplicity {m}; spectral factor is not admissible.")
+                half_m = m // 2
+                z_inside.extend(list(unit.roots) * half_m)
+            elif unit.kind == 'COMPLEX_RECIPROCAL_CONJUGATE_QUARTET':
+                in_unit = [r for r in unit.roots if abs(r) < 1.0]
+                if len(in_unit) != 2:
+                    raise ValueError(f"Ambiguous reciprocal-conjugate quartet: expected 2 inside roots, found {len(in_unit)}.")
+                z_inside.extend(in_unit * m)
+
+        if len(z_inside) != M:
+            raise ValueError(
+                f"Chebyshev root selection produced degree {len(z_inside)}, "
+                f"expected {M}; refusing to truncate or pad."
+            )
 
         h0_complex = np.poly(z_inside)
-        if len(h0_complex) < target_N:
-            h0_complex = np.pad(h0_complex, (0, target_N - len(h0_complex)), mode='constant')
-        elif len(h0_complex) > target_N:
-            raise ValueError(f"Structured factor degree mismatch: got {len(h0_complex) - 1}, expected {target_N - 1}.")
+        raw_imag = float(np.max(np.abs(np.imag(h0_complex)))) if np.iscomplexobj(h0_complex) else 0.0
 
-        r_h0 = np.convolve(np.real(h0_complex), np.real(h0_complex)[::-1])
-        scale = np.sqrt(max(1e-15, p_taps[center] / max(1e-15, r_h0[len(r_h0) // 2])))
-        h0_complex *= scale
+        h0_real = _fit_spectral_factor_scale(np.real(h0_complex), p_taps)
 
-        res = float(np.max(np.abs(np.convolve(np.real(h0_complex), np.real(h0_complex)[::-1]) - p_taps)))
-        return h0_complex, res
+        r_fact = np.convolve(h0_real, h0_real[::-1])
+        res_abs = float(np.max(np.abs(r_fact - p_taps)))
+        res_rel = res_abs / max(1.0, float(np.max(np.abs(p_taps))))
+        if res_rel > 1e-2:
+            raise ValueError(f"Chebyshev factorization relative coefficient residual {res_rel:.4e} exceeds 1e-2 gate.")
 
-    def factor_by_roots_reference(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float]:
+        return h0_real, res_abs, raw_imag
+
+    def factor_by_roots_reference(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float, float]:
         """
-        Reference degree-2M monomial root finding backend (np.roots).
+        Independent reference monomial degree-2M root finding backend (np.roots).
+        Finds raw monomial z-roots of P(z) = sum p_k z^{k-M} and groups reciprocal/conjugate orbits via RootDecomposer.
+        Selection is guarded by degree and raw imaginary component residual checks.
+        Returns (h0_taps, residual, raw_imag_residual).
         """
         M = target_N - 1
-        roots = np.roots(p_taps)
+        raw_roots = np.roots(p_taps)
 
-        rel_tol, abs_tol = 1e-2, 1e-3
-        def same_root(a, b):
-            return abs(a - b) <= max(abs_tol, rel_tol * max(abs(a), abs(b)))
+        if len(raw_roots) != 2 * M:
+            raise ValueError(f"np.roots produced {len(raw_roots)} roots, expected {2 * M}.")
 
-        orbits = []
-        used = [False] * len(roots)
-        for i in range(len(roots)):
-            if used[i]: continue
-            orbit_idx = [i]
-            used[i] = True
-            added = True
-            while added:
-                added = False
-                curr_vals = [roots[k] for k in orbit_idx]
-                for cv in curr_vals:
-                    targets = [np.conj(cv)]
-                    if abs(cv) > 1e-12:
-                        targets.append(1.0 / cv)
-                        targets.append(1.0 / np.conj(cv))
-                    for tgt in targets:
-                        for j in range(len(roots)):
-                            if not used[j] and same_root(roots[j], tgt):
-                                orbit_idx.append(j)
-                                used[j] = True
-                                added = True
-            orbits.append([roots[k] for k in orbit_idx])
+        # Decompose orbits via shared RootDecomposer engine
+        atomic_units = RootDecomposer.decompose_z_roots(raw_roots, total_z_degree=2 * M, rel_tol=1e-3, abs_tol=1e-4, orbit_residual_tol=1e-3)
 
-        inside_roots = []
-        for orbit in orbits:
-            in_orbit = [r for r in orbit if abs(r) <= 1.0 + 1e-4]
-            half_len = max(1, len(orbit) // 2)
-            if len(in_orbit) == half_len:
-                inside_roots.extend(in_orbit)
-            elif len(in_orbit) == len(orbit):
-                inside_roots.extend(in_orbit)
-            else:
-                sorted_orb = sorted(orbit, key=lambda x: abs(x))
-                inside_roots.extend(sorted_orb[:half_len])
+        z_inside = []
+        for unit in atomic_units:
+            m = unit.multiplicity
+            if unit.kind == 'REAL_ENDPOINT':
+                half_m = m // 2
+                if 2 * half_m != m:
+                    raise ValueError(f"Odd endpoint root multiplicity {m} in reference factorizer.")
+                z_inside.extend(list(unit.roots) * half_m)
+            elif unit.kind == 'REAL_RECIPROCAL_PAIR':
+                r_inside = min(unit.roots, key=lambda r: abs(r))
+                z_inside.extend([r_inside] * m)
+            elif unit.kind == 'UNIT_CIRCLE_PAIR':
+                if m % 2 != 0:
+                    raise ValueError(f"Odd unit-circle root multiplicity {m}; spectral factor is not admissible.")
+                half_m = m // 2
+                z_inside.extend(list(unit.roots) * half_m)
+            elif unit.kind == 'COMPLEX_RECIPROCAL_CONJUGATE_QUARTET':
+                in_unit = [r for r in unit.roots if abs(r) < 1.0]
+                if len(in_unit) != 2:
+                    raise ValueError(f"Ambiguous reciprocal-conjugate quartet: expected 2 inside roots, found {len(in_unit)}.")
+                z_inside.extend(in_unit * m)
 
-        if len(inside_roots) > M:
-            inside_roots = sorted(inside_roots, key=lambda x: abs(x))[:M]
+        if len(z_inside) != M:
+            raise ValueError(
+                f"Reference root selection produced {len(z_inside)} roots, expected {M}; "
+                "refusing to discard or pad roots."
+            )
 
-        h0_complex = np.poly(inside_roots)
-        center = (len(p_taps) - 1) // 2
-        r_h0 = np.convolve(np.real(h0_complex), np.real(h0_complex)[::-1])
-        scale = np.sqrt(max(1e-15, p_taps[center] / max(1e-15, r_h0[len(r_h0) // 2])))
-        h0_complex *= scale
+        h0_complex = np.poly(z_inside)
+        raw_imag = float(np.max(np.abs(np.imag(h0_complex)))) if np.iscomplexobj(h0_complex) else 0.0
 
-        res = float(np.max(np.abs(np.convolve(np.real(h0_complex), np.real(h0_complex)[::-1]) - p_taps)))
-        return h0_complex, res
+        h0_real = _fit_spectral_factor_scale(np.real(h0_complex), p_taps)
+
+        r_fact = np.convolve(h0_real, h0_real[::-1])
+        res_abs = float(np.max(np.abs(r_fact - p_taps)))
+        res_rel = res_abs / max(1.0, float(np.max(np.abs(p_taps))))
+        if res_rel > 1e-2:
+            raise ValueError(f"Reference root factorization relative coefficient residual {res_rel:.4e} exceeds 1e-2 gate.")
+
+        return h0_real, res_abs, raw_imag
 
     def spectral_factor_power_polynomial(
         self,
@@ -916,17 +1344,24 @@ class GegenbauerFilterCompiler:
         Dispatches to Structured Chebyshev x-domain root lifting, Cepstral approximation, or Reference Root backends.
         Returns (h0_taps, diagnostics).
         """
+        power_valid, min_P, max_P, hb_err = self.validate_power_polynomial(p_taps)
+        if not power_valid:
+            raise ValueError(
+                "Cannot factor an invalid power polynomial: "
+                f"min_P={min_P:.6e}, max_P={max_P:.6e}, halfband_residual={hb_err:.6e}"
+            )
+
         if mode == FactorMode.STRUCTURED_CHEBYSHEV:
-            h0_raw, _ = self.factor_by_chebyshev_roots(p_taps, target_N)
+            h0_raw, _, raw_imag = self.factor_by_chebyshev_roots(p_taps, target_N)
         elif mode == FactorMode.CEPSTRAL_APPROX:
-            h0_raw, _ = self.spectral_factor_cepstral(p_taps, target_N)
+            h0_raw, _, raw_imag = self.spectral_factor_cepstral(p_taps, target_N)
         elif mode == FactorMode.REFERENCE_ROOTS:
-            h0_raw, _ = self.factor_by_roots_reference(p_taps, target_N)
+            h0_raw, _, raw_imag = self.factor_by_roots_reference(p_taps, target_N)
         else:
             raise ValueError(f"Unknown FactorMode: '{mode}'")
 
         h0, diag = self._compute_factorization_diagnostics(
-            h0_raw, p_taps, mode=mode, target_degree=target_N - 1
+            h0_raw, p_taps, mode=mode, target_degree=target_N - 1, raw_imag_residual=raw_imag
         )
         return h0, diag
 
@@ -1169,7 +1604,9 @@ class GegenbauerFilterCompiler:
             f"#define GEG_CUTOFF {spec.cutoff}f",
             f"#define GEG_LAMBDA {result.lam}f",
             f"#define GEG_BASIS_TERMS {result.basis_terms}",
-            f"#define GEG_E_TOTAL_BOUND {p.total}f",
+            f"#define GEG_E_TOTAL_ESTIMATE {p.total}f",
+            f"#define GEG_SAMPLED_DESIGN_TARGETS_MET {1 if result.payload.sampled_design_targets_met else 0}",
+            f"#define GEG_CONTINUOUS_SPECIFICATION_CERTIFIED {1 if result.payload.continuous_specification_certified else 0}",
             f"#define GEG_Q15_SCALE {h0.q15_scale}f",
             f"#define GEG_Q23_SCALE {h0.q23_scale}f",
             f"#define GEG_Q31_SCALE {h0.q31_scale}f",
@@ -1235,7 +1672,7 @@ class GegenbauerFilterCompiler:
 
         if spec.kind in ("qmf", "asymmetric_qmf"):
             # Direct QMF compilation route via half-band power polynomial and spectral factorization
-            a_coeffs, p_taps, K, cond_val, res_aug, res_data, res_reg = self.solve_halfband_power_polynomial(spec)
+            a_coeffs, p_taps, K, cond_val, augmented_design_residual, data_design_residual, regularization_residual = self.solve_halfband_power_polynomial(spec)
             power_valid, min_P, max_P, hb_err = self.validate_power_polynomial(p_taps)
             if not power_valid:
                 raise ValueError(
@@ -1268,7 +1705,7 @@ class GegenbauerFilterCompiler:
                 q31_scale=h0_quant.q31_scale
             )
         else:
-            a_coeffs, K, cond_val, res_aug, res_data, res_reg = self.solve_coefficients(spec)
+            a_coeffs, K, cond_val, augmented_design_residual, data_design_residual, regularization_residual = self.solve_coefficients(spec)
             h0_float = self.transform_to_taps(a_coeffs, spec)
             h0_quant = self.quantize_taps(h0_float)
             h1_quant = None
@@ -1361,15 +1798,24 @@ class GegenbauerFilterCompiler:
 
             # Compute asymptotic response error bound over active degrees
             deg_errs = []
+            weighted_response_bound = 0.0
             for deg_idx, deg in enumerate(basis_degrees):
                 deg_int = int(deg)
                 if deg_int == 0:
                     continue
                 phi_exact = normalized_phi_recurrence(deg_int, self.lam, x_sample)
                 phi_asymp = self._eval_pure_asymptotic_basis(deg_int, omega_sample)
-                deg_errs.append(float(np.max(np.abs(phi_exact - phi_asymp))))
+                if self.basis_type == "unnormalized":
+                    c1 = float(c_n_1_val(deg_int, self.lam))
+                    phi_exact = phi_exact * c1
+                    phi_asymp = phi_asymp * c1
 
-            asymp_err = float(np.max(deg_errs)) if len(deg_errs) > 0 else 0.0
+                max_eps_n = float(np.max(np.abs(phi_exact - phi_asymp)))
+                deg_errs.append(max_eps_n)
+                coeff_mag = float(np.abs(a_coeffs[deg_int])) if deg_int < len(a_coeffs) else 0.0
+                weighted_response_bound += coeff_mag * max_eps_n
+
+            asymp_err = float(weighted_response_bound)
 
             if asymp_err < 0.05 and self.lam > 0:
                 matching_status = MatchingStatus.SAMPLED_ASYMPTOTIC_MATCHING
@@ -1386,54 +1832,98 @@ class GegenbauerFilterCompiler:
             e_implementation=0.0
         )
 
+        # Layer VII & VIII tri-state verification status evaluation
         if self.asymptotic_mode == "none":
-            basis_asymptotic_validated = True
+            basis_asymptotic = VerificationStatus.NOT_APPLICABLE
+            asymptotic_diagnostic_passed = True
         else:
-            basis_asymptotic_validated = bool(asymp_err < 0.05)
-        # Separate design target metrics from prototype FIR specification thresholds
-        pass_ripple_thresh = spec.passband_ripple_db * 3.0 if spec.kind in ("qmf", "asymmetric_qmf") else spec.passband_ripple_db * 2.0
-        prototype_fir_certified = (
-            pass_ripple <= pass_ripple_thresh and
-            stop_atten >= min(spec.stopband_atten_db * 0.5, 15.0)
+            asymp_ok = bool(asymp_err < 0.05)
+            basis_asymptotic = VerificationStatus.VERIFIED if asymp_ok else VerificationStatus.FAILED
+            asymptotic_diagnostic_passed = asymp_ok
+
+        # Exact design target compliance
+        exact_pass_target = spec.passband_ripple_db
+        exact_stop_target = spec.stopband_atten_db
+
+        design_target_met = bool(
+            pass_ripple <= exact_pass_target and
+            stop_atten >= exact_stop_target
         )
         if spec.kind in ("qmf", "asymmetric_qmf") and h1_quant is not None:
-            prototype_fir_certified = prototype_fir_certified and (
-                pass_ripple_h1 <= pass_ripple_thresh and
-                stop_atten_h1 >= min(spec.stopband_atten_db * 0.5, 15.0)
+            design_target_met = design_target_met and bool(
+                pass_ripple_h1 <= exact_pass_target and
+                stop_atten_h1 >= exact_stop_target
             )
 
-        qmf_power_complementary = True
-        qmf_alias_cancellation = True
+        # Relaxed engineering acceptance limits
+        relaxed_pass_limit = max(exact_pass_target * 3.0, 1.0) if spec.kind in ("qmf", "asymmetric_qmf") else max(exact_pass_target * 2.0, 10.0)
+        relaxed_stop_limit = min(exact_stop_target * 0.5, 15.0)
+
+        engineering_acceptance = bool(
+            pass_ripple <= relaxed_pass_limit and
+            stop_atten >= relaxed_stop_limit
+        )
+        if spec.kind in ("qmf", "asymmetric_qmf") and h1_quant is not None:
+            engineering_acceptance = engineering_acceptance and bool(
+                pass_ripple_h1 <= relaxed_pass_limit and
+                stop_atten_h1 >= relaxed_stop_limit
+            )
+
+        prototype_fir = VerificationStatus.VERIFIED if engineering_acceptance else VerificationStatus.FAILED
+        specification_met = design_target_met
+
+        # Realization properties verification (finite coefficients, non-empty taps)
+        realization_verified = bool(
+            np.all(np.isfinite(h0_quant.float64_taps)) and
+            len(h0_quant.float64_taps) == spec.order
+        )
 
         if spec.kind in ("qmf", "asymmetric_qmf"):
-            qmf_power_complementary = (qmf_pow_lin <= 0.05)
-            qmf_alias_cancellation = (qmf_alias_lin <= 0.05)
+            factor_status = VerificationStatus.VERIFIED if factorization_certified else VerificationStatus.FAILED
+            qmf_pow_ok = bool(qmf_pow_lin <= self.qmf_power_tol)
+            qmf_alias_ok = bool(qmf_alias_lin <= self.qmf_alias_tol)
+            qmf_power = VerificationStatus.VERIFIED if qmf_pow_ok else VerificationStatus.FAILED
+            qmf_alias = VerificationStatus.VERIFIED if qmf_alias_ok else VerificationStatus.FAILED
 
-        is_certified = (
-            basis_asymptotic_validated and
-            prototype_fir_certified and
-            qmf_power_complementary and
-            qmf_alias_cancellation and
-            factorization_certified
-        )
+            structural_certified = (
+                realization_verified and
+                factor_status == VerificationStatus.VERIFIED and
+                qmf_power == VerificationStatus.VERIFIED and
+                qmf_alias == VerificationStatus.VERIFIED
+            )
+        else:
+            factor_status = VerificationStatus.NOT_APPLICABLE
+            qmf_power = VerificationStatus.NOT_APPLICABLE
+            qmf_alias = VerificationStatus.NOT_APPLICABLE
+
+            # For ordinary FIR, structural certification is given by realization verification
+            structural_certified = realization_verified
+
+        sampled_design_targets_met = bool(structural_certified and specification_met)
+        continuous_specification_certified = False
 
         payload = CertifiedEvaluationPayload(
             truth_status=truth_status,
             matching_status=matching_status,
             provenance=provenance,
-            basis_asymptotic_validated=basis_asymptotic_validated,
-            prototype_fir_certified=prototype_fir_certified,
-            qmf_power_complementary=qmf_power_complementary,
-            qmf_alias_cancellation=qmf_alias_cancellation,
-            factorization_certified=factorization_certified,
-            is_certified=is_certified
+            basis_asymptotic=basis_asymptotic,
+            prototype_fir=prototype_fir,
+            qmf_power=qmf_power,
+            qmf_alias=qmf_alias,
+            factorization=factor_status,
+            structural_certified=structural_certified,
+            specification_met=specification_met,
+            sampled_design_targets_met=sampled_design_targets_met,
+            continuous_specification_certified=continuous_specification_certified,
+            asymptotic_diagnostic_passed=asymptotic_diagnostic_passed,
+            is_certified=continuous_specification_certified
         )
 
         # Recompute final realization frequency fit residual from final normalized taps
         H0_final = np.abs(np.fft.fft(h0_quant.float64_taps, K_fft)[:K_fft // 2 + 1])
         omega_eval = 2.0 * np.pi * freq_grid
         D_eval, W_eval = self._build_spectral_target(spec, omega_eval)
-        final_data_fit_res = float(np.linalg.norm(np.sqrt(W_eval) * (H0_final - D_eval)) / max(np.linalg.norm(np.sqrt(W_eval) * D_eval), 1e-15))
+        final_realization_residual = float(np.linalg.norm(np.sqrt(W_eval) * (H0_final - D_eval)) / max(np.linalg.norm(np.sqrt(W_eval) * D_eval), 1e-15))
 
         prov_err = float(np.max(mixed_error(h0_quant.float64_taps, h0_quant.q15_taps / h0_quant.q15_scale)))
 
@@ -1444,12 +1934,16 @@ class GegenbauerFilterCompiler:
             basis_terms=K,
             operator_eigenvalues=op_eigs,
             sturm_liouville_energy=reg_energy,
-            projection_residual=final_data_fit_res,
-            quadrature_residual=res_aug,
+            projection_residual=final_realization_residual,
+            quadrature_residual=augmented_design_residual,
             conditioning=cond_val,
             asymptotic_sampled_discrepancy=asymp_err,
             truth_status=truth_status,
-            matching_status=matching_status
+            matching_status=matching_status,
+            augmented_design_residual=augmented_design_residual,
+            data_design_residual=data_design_residual,
+            regularization_residual=regularization_residual,
+            final_realization_residual=final_realization_residual
         )
 
         result = FilterResult(
@@ -1472,9 +1966,12 @@ class GegenbauerFilterCompiler:
             qmf_power_error_linear=qmf_pow_lin,
             qmf_alias_error_linear=qmf_alias_lin,
             regularization_energy=float(reg_energy),
-            fit_residual=res_aug,
-            data_fit_residual=final_data_fit_res,
-            regularization_residual=res_reg,
+            fit_residual=augmented_design_residual,
+            data_fit_residual=final_realization_residual,
+            regularization_residual=regularization_residual,
+            augmented_design_residual=augmented_design_residual,
+            data_design_residual=data_design_residual,
+            final_realization_residual=final_realization_residual,
             asymptotic_sampled_discrepancy=asymp_err,
             provenance_mixed_error=prov_err
         )
@@ -1517,160 +2014,131 @@ class GegenbauerFilterCompiler:
         p_taps[center] = 0.5
         p_prod = 2.0 * p_taps
 
-        # Build atomic root clusters via Chebyshev x-domain roots in x = cos(w)
-        M_prod = total_order
-        b_harmonics = np.zeros(M_prod + 1, dtype=np.float64)
-        b_harmonics[0] = p_prod[center]
-        for m in range(1, M_prod + 1):
-            if center + m < len(p_prod):
-                b_harmonics[m] = 2.0 * p_prod[center + m]
+        # Rescale off-center taps so P_prod(1) == 2.0 exactly while preserving P_prod(center) = 1.0
+        off_center_sum = float(np.sum(p_prod) - p_prod[center])
+        if abs(off_center_sum) > 1e-12:
+            p_prod[:center] *= (1.0 / off_center_sum)
+            p_prod[center + 1:] *= (1.0 / off_center_sum)
 
-        x_roots = np.polynomial.chebyshev.chebroots(b_harmonics)
-        roots = []
-        for x_val in x_roots:
-            disc = np.sqrt(x_val**2 - 1.0 + 0j)
-            roots.extend([x_val - disc, x_val + disc])
-        rel_tol, abs_tol = 1e-2, 1e-3
-        def same_root(a, b):
-            return abs(a - b) <= max(abs_tol, rel_tol * max(abs(a), abs(b)))
+        # Verify product polynomial DC gain before allocating roots
+        p_prod_dc = float(np.sum(p_prod))
+        if abs(p_prod_dc - 2.0) > 1e-3:
+            raise ValueError(f"Product polynomial DC gain {p_prod_dc:.6f} deviates from target 2.0 (requires H0(1)G0(1) = 2.0).")
 
-        raw_clusters = []
-        used_r = [False] * len(roots)
-        for i in range(len(roots)):
-            if used_r[i]:
-                continue
-            group = [i]
-            used_r[i] = True
-            for j in range(i + 1, len(roots)):
-                if not used_r[j] and same_root(roots[j], roots[i]):
-                    group.append(j)
-                    used_r[j] = True
-            rep = np.mean([roots[k] for k in group])
-            raw_clusters.append({'rep': rep, 'mult': len(group)})
-
-        # Group raw clusters into symmetry units (reciprocal & conjugate quadruplets / pairs & real endpoints)
-        used_c = [False] * len(raw_clusters)
-        atomic_units = []
-        for i in range(len(raw_clusters)):
-            if used_c[i]:
-                continue
-            c1 = raw_clusters[i]
-            r1 = c1['rep']
-            m1 = c1['mult']
-            used_c[i] = True
-
-            if abs(np.imag(r1)) < 1e-3:
-                r1_real = float(np.real(r1))
-                if abs(abs(r1_real) - 1.0) < 1e-3:
-                    # Endpoint root at z = +1 or z = -1 (splittable single real root)
-                    ep_val = 1.0 if r1_real > 0 else -1.0
-                    atomic_units.append({'kind': 'REAL_ENDPOINT', 'roots': [ep_val], 'size': 1, 'mult': m1})
-                else:
-                    recip_idx = -1
-                    for j in range(len(raw_clusters)):
-                        if not used_c[j] and abs(raw_clusters[j]['rep'] - 1.0/r1_real) < 1e-2:
-                            recip_idx = j
-                            break
-                    if recip_idx != -1:
-                        c2 = raw_clusters[recip_idx]
-                        if m1 != c2['mult']:
-                            raise ValueError(f"Reciprocal orbit multiplicities disagree for root {r1_real:.6f}: {m1} vs {c2['mult']}.")
-                        used_c[recip_idx] = True
-                        atomic_units.append({'kind': 'REAL_PAIR', 'roots': [r1_real, float(np.real(c2['rep']))], 'size': 2, 'mult': m1})
-                    else:
-                        raise ValueError(f"Unpaired real reciprocal root detected: {r1_real:.6f} without reciprocal partner {1.0/r1_real:.6f}.")
-            else:
-                quad_indices = [i]
-                for j in range(len(raw_clusters)):
-                    if not used_c[j]:
-                        r2 = raw_clusters[j]['rep']
-                        if abs(r2 - np.conj(r1)) < 1e-2 or abs(r2 - 1.0/r1) < 1e-2 or abs(r2 - 1.0/np.conj(r1)) < 1e-2:
-                            quad_indices.append(j)
-                            used_c[j] = True
-                quad_roots = [raw_clusters[k]['rep'] for k in quad_indices]
-                quad_mult = min(raw_clusters[k]['mult'] for k in quad_indices)
-                kind = 'UNIT_PAIR' if abs(abs(r1) - 1.0) < 1e-3 else 'COMPLEX_QUARTET'
-                expected_size = 2 if kind == 'UNIT_PAIR' else 4
-                if len(quad_roots) != expected_size:
-                    raise ValueError(f"Invalid root orbit size for {kind}: got {len(quad_roots)}, expected {expected_size}.")
-                atomic_units.append({'kind': kind, 'roots': quad_roots, 'size': len(quad_roots), 'mult': quad_mult})
-
-        # Verify exact algebraic orbit closure: sum size_i * mult_i == total_order
-        orbit_total_size = sum(unit['size'] * unit['mult'] for unit in atomic_units)
-        if orbit_total_size != total_order:
+        # Check half-band coefficient structure and complementarity residual for biorthogonal product polynomial
+        hb_valid, hb_err = self.validate_halfband_structure(p_prod * 0.5)
+        if not hb_valid:
             raise ValueError(
-                f"Root-orbit decomposition is not closed: got {orbit_total_size} roots, expected {total_order}."
+                f"Rescaled biorthogonal product polynomial failed half-band structure validation: "
+                f"halfband_residual={hb_err:.6e}"
             )
 
-        # Generate candidate root allocations for target order_h0
-        allocations = []
-        def search_allocations(unit_idx, current_deg_h0, current_h0_roots, current_g0_roots):
-            if unit_idx == len(atomic_units):
-                if current_deg_h0 == order_h0:
-                    allocations.append((current_h0_roots, current_g0_roots))
-                return
+        # Decompose root orbits using shared RootDecomposer engine
+        atomic_units = RootDecomposer.decompose_halfband_roots(p_prod * 0.5, total_z_degree=total_order)
 
-            unit = atomic_units[unit_idx]
-            kind, r_list, size, mult = unit['kind'], unit['roots'], unit['size'], unit['mult']
+        # Precompute suffix sums of remaining orbit degrees for reachability pruning
+        unit_degrees = [u.size * u.multiplicity for u in atomic_units]
+        suffix_degrees = [0] * (len(atomic_units) + 1)
+        for idx in range(len(atomic_units) - 1, -1, -1):
+            suffix_degrees[idx] = suffix_degrees[idx + 1] + unit_degrees[idx]
 
-            if kind == 'REAL_ENDPOINT':
-                # Endpoint roots (z = +-1) can be partitioned in steps of 1
-                for k in range(0, mult + 1):
-                    if current_deg_h0 + k * size <= order_h0:
-                        search_allocations(
-                            unit_idx + 1,
-                            current_deg_h0 + k * size,
-                            current_h0_roots + r_list * k,
-                            current_g0_roots + r_list * (mult - k)
-                        )
-            else:
-                # Pair / Quartet multiplicity allocation
-                for k in range(0, mult + 1):
-                    if current_deg_h0 + k * size <= order_h0:
-                        search_allocations(
-                            unit_idx + 1,
-                            current_deg_h0 + k * size,
-                            current_h0_roots + r_list * k,
-                            current_g0_roots + r_list * (mult - k)
-                        )
-
-        # Use degree-bounded branch & bound pruning search
-        search_allocations(0, 0, [], [])
-
-        if not allocations:
-            raise ValueError(
-                f"Unable to partition roots into exact target orders order_h0={order_h0} and order_g0={order_g0} "
-                f"while preserving symmetric root clusters."
-            )
-
-        # Rank candidate root factorizations by DSP lowpass performance
         best_candidate = None
         best_score = float('inf')
+        imag_tol = 1e-5
+        dc_tol = 1e-6
 
-        for cand_h0_roots, cand_g0_roots in allocations:
-            h0_u = np.poly(cand_h0_roots).real if len(cand_h0_roots) > 0 else np.array([1.0])
-            g0_u = np.poly(cand_g0_roots).real if len(cand_g0_roots) > 0 else np.array([1.0])
+        def evaluate_candidate(cand_h0_roots, cand_g0_roots):
+            nonlocal best_candidate, best_score
+            h0_u_complex = np.poly(cand_h0_roots) if len(cand_h0_roots) > 0 else np.array([1.0 + 0j])
+            g0_u_complex = np.poly(cand_g0_roots) if len(cand_g0_roots) > 0 else np.array([1.0 + 0j])
+
+            h0_imag = float(np.max(np.abs(np.imag(h0_u_complex))))
+            g0_imag = float(np.max(np.abs(np.imag(g0_u_complex))))
+            if max(h0_imag, g0_imag) > imag_tol:
+                return
+
+            h0_u = np.real(h0_u_complex)
+            g0_u = np.real(g0_u_complex)
 
             conv_u = np.convolve(h0_u, g0_u)
             c = float(p_prod[0] / conv_u[0]) if abs(conv_u[0]) > 1e-12 else 1.0
             h0_c = h0_u * np.sign(c) * np.sqrt(abs(c))
             g0_c = g0_u * np.sqrt(abs(c))
 
-            # Pure reciprocal scale normalization preserving exact H0(z) G0(z) = P_prod(z) product polynomial
             h0_sum = float(np.sum(h0_c))
-            scale_h0 = np.sqrt(2.0) / h0_sum if abs(h0_sum) > 1e-12 else 1.0
+            if abs(h0_sum) <= dc_tol:
+                return
+
+            scale_h0 = np.sqrt(2.0) / h0_sum
             h0_norm = h0_c * scale_h0
             g0_norm = g0_c / scale_h0
 
             sym_h0 = np.max(np.abs(h0_norm - h0_norm[::-1]))
             sym_g0 = np.max(np.abs(g0_norm - g0_norm[::-1]))
+
+            if max(sym_h0, sym_g0) > 1e-4:
+                return
+
+            dc_err_h0 = abs(np.sum(h0_norm) - np.sqrt(2.0))
+            dc_err_g0 = abs(np.sum(g0_norm) - np.sqrt(2.0))
+
             nyq_h0 = abs(np.sum(h0_norm * np.array([(-1.0)**n for n in range(len(h0_norm))])))
             nyq_g0 = abs(np.sum(g0_norm * np.array([(-1.0)**n for n in range(len(g0_norm))])))
-            score = (sym_h0 + sym_g0) * 100.0 + (nyq_h0 + nyq_g0) * 10.0 + np.max(np.abs(h0_norm)) + np.max(np.abs(g0_norm))
+
+            K_eval = 512
+            H0_eval = np.abs(np.fft.fft(h0_norm, K_eval)[:K_eval // 2 + 1])
+            G0_eval = np.abs(np.fft.fft(g0_norm, K_eval)[:K_eval // 2 + 1])
+            f_grid = np.arange(K_eval // 2 + 1) / float(K_eval)
+
+            p_idx = f_grid <= cutoff * 0.8
+            s_idx = f_grid >= cutoff * 1.2
+
+            ripple_h0 = (np.max(H0_eval[p_idx]) - np.min(H0_eval[p_idx])) if np.any(p_idx) else 0.0
+            ripple_g0 = (np.max(G0_eval[p_idx]) - np.min(G0_eval[p_idx])) if np.any(p_idx) else 0.0
+
+            stop_h0 = np.max(H0_eval[s_idx]) if np.any(s_idx) else 0.0
+            stop_g0 = np.max(G0_eval[s_idx]) if np.any(s_idx) else 0.0
+
+            score = (
+                (dc_err_h0 + dc_err_g0) * 50.0 +
+                (nyq_h0 + nyq_g0) * 20.0 +
+                (ripple_h0 + ripple_g0) * 10.0 +
+                (stop_h0 + stop_g0) * 10.0 +
+                0.1 * (np.max(np.abs(h0_norm)) + np.max(np.abs(g0_norm)))
+            )
 
             if score < best_score:
                 best_score = score
                 best_candidate = (h0_norm, g0_norm)
+
+        def search_allocations(unit_idx, current_deg_h0, current_h0_roots, current_g0_roots):
+            if current_deg_h0 > order_h0:
+                return
+            if current_deg_h0 + suffix_degrees[unit_idx] < order_h0:
+                return
+
+            if unit_idx == len(atomic_units):
+                if current_deg_h0 == order_h0:
+                    evaluate_candidate(current_h0_roots, current_g0_roots)
+                return
+
+            unit = atomic_units[unit_idx]
+            r_list, size, mult = list(unit.roots), unit.size, unit.multiplicity
+
+            for k in range(0, mult + 1):
+                if current_deg_h0 + k * size <= order_h0:
+                    search_allocations(
+                        unit_idx + 1,
+                        current_deg_h0 + k * size,
+                        current_h0_roots + r_list * k,
+                        current_g0_roots + r_list * (mult - k)
+                    )
+
+        # Stream candidate evaluation at recursion leaf nodes
+        search_allocations(0, 0, [], [])
+
+        if best_candidate is None:
+            raise ValueError("No valid biorthogonal lowpass candidate satisfied symmetry and DC constraints.")
 
         h0_taps, g0_taps = best_candidate
 
@@ -1720,7 +2188,7 @@ class GegenbauerFilterCompiler:
             "H1": self.quantize_taps(h1_taps),
             "G0": self.quantize_taps(g0_taps),
             "G1": self.quantize_taps(g1_taps),
-            "P": p_taps,
+            "P": p_prod * 0.5,
             "product_residual": product_residual,
             "pr_residual": pr_residual,
             "pr_error": pr_residual, # Backward compatibility alias

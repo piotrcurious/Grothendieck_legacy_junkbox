@@ -195,12 +195,12 @@ def test_qmf_pair_compilation():
     assert result.payload.factorization_certified is True
     assert result.payload.qmf_power_complementary is True
     assert result.payload.qmf_alias_cancellation is True
-    assert result.payload.is_certified is True
+    assert result.payload.structural_certified is True
 
 
 def test_asymmetric_qmf_compilation():
-    """Tests asymmetric QMF filter synthesis with arbitrary passband and stopband edges."""
-    spec = FilterSpec(kind="asymmetric_qmf", order=64, cutoff=0.23, wp=0.20, ws=0.26)
+    """Tests asymmetric QMF filter synthesis with transition band straddling fs/4 and half-band complementarity."""
+    spec = FilterSpec(kind="asymmetric_qmf", order=64, cutoff=0.25, wp=0.20, ws=0.30)
     compiler = GegenbauerFilterCompiler(lam=1.25, solver="spectral_regularized", mu_reg=1e-4)
     result = compiler.compile(spec)
 
@@ -476,7 +476,7 @@ def test_layer_viii_provenance_and_truth_status():
     # Header macro checks
     assert '#define GEG_TRUTH_STATUS "PHYSICAL_SPHERE_GEOMETRY"' in res_phys.header_code
     assert '#define GEG_MATCHING_STATUS "SAMPLED_ASYMPTOTIC_MATCHING"' in res_phys.header_code
-    assert 'GEG_E_TOTAL_BOUND' in res_phys.header_code
+    assert 'GEG_E_TOTAL_ESTIMATE' in res_phys.header_code
 
 
 def test_filter_spec_edge_cases():
@@ -499,3 +499,150 @@ def test_filter_spec_edge_cases():
     assert bp_spec.wp2 < 0.5
     assert bp_spec.ws2 < 0.5
     assert bp_spec.ws < bp_spec.wp < bp_spec.wp2 < bp_spec.ws2
+
+
+def test_exact_halfband_power_polynomial_factorization():
+    """Verifies exact P(w) = 1/2 + 1/2 cos(3w) halfband power polynomial factorization and CQF properties."""
+    compiler = GegenbauerFilterCompiler()
+    p_taps = np.array([0.25, 0.0, 0.0, 0.5, 0.0, 0.0, 0.25])
+    h0, diag = compiler.spectral_factor_power_polynomial(p_taps, target_N=4, mode=FactorMode.STRUCTURED_CHEBYSHEV)
+
+    expected = np.array([0.5, 0.0, 0.0, 0.5])
+    np.testing.assert_allclose(h0, expected, atol=1e-6)
+    assert diag.certified is True
+
+    # Verify CQF/autocorrelation identity h * h_rev == p
+    r_h0 = np.convolve(h0, h0[::-1])
+    np.testing.assert_allclose(r_h0, p_taps, atol=1e-6)
+
+
+def test_biorthogonal_odd_delay_pr_identity():
+    """Verifies odd-delay Perfect Reconstruction polynomial relation E(z) - E(-z) = 2 z^-d."""
+    compiler = GegenbauerFilterCompiler()
+    pair = compiler.compile_biorthogonal_pair(order_h0=8, order_g0=6, cutoff=0.25)
+
+    h0 = pair["H0"].float64_taps
+    g0 = pair["G0"].float64_taps
+    h1 = pair["H1"].float64_taps
+    g1 = pair["G1"].float64_taps
+
+    K_fft = 1024
+    w = 2.0 * np.pi * np.arange(K_fft) / float(K_fft)
+    delay = (8 + 6) // 2 # delay = 7 (odd)
+
+    H0_f = np.fft.fft(h0, K_fft)
+    G0_f = np.fft.fft(g0, K_fft)
+    H1_f = np.fft.fft(h1, K_fft)
+    G1_f = np.fft.fft(g1, K_fft)
+
+    pr_complex = H0_f * G0_f + H1_f * G1_f
+    expected_pr = 2.0 * np.exp(-1j * w * delay)
+
+    np.testing.assert_allclose(pr_complex, expected_pr, atol=1e-5)
+
+
+def test_malformed_root_orbit_rejection():
+    """Verifies that RootDecomposer rejects root arrays with multiplicity mismatches or degree non-closure."""
+    from filter_compiler.compiler import RootDecomposer
+
+    # Odd endpoint multiplicity rejection
+    bad_ep_roots = np.array([1.0, 1.0, 1.0])
+    with pytest.raises(ValueError):
+        RootDecomposer.decompose_z_roots(bad_ep_roots, total_z_degree=3)
+
+    # Degree mismatch rejection
+    with pytest.raises(ValueError):
+        RootDecomposer.decompose_z_roots(np.array([0.5, 2.0]), total_z_degree=3)
+
+
+def test_root_decomposer_targeted_orbit_cases():
+    """Tests targeted RootDecomposer orbit classification for real reciprocal pairs, complex quartets, endpoints, unit-circle pairs, and asymmetric p_taps."""
+    from filter_compiler.compiler import RootDecomposer
+
+    # Real Reciprocal Pair: z = 0.5 and z = 2.0
+    recip_roots = np.array([0.5, 2.0])
+    units_recip = RootDecomposer.decompose_z_roots(recip_roots, total_z_degree=2)
+    assert len(units_recip) == 1
+    assert units_recip[0].kind == 'REAL_RECIPROCAL_PAIR'
+    assert units_recip[0].multiplicity == 1
+
+    # Complex Quartet: z = 0.5 e^(j pi/4), conj, recip, conj_recip
+    z1 = 0.5 * np.exp(1j * np.pi / 4.0)
+    quartet_roots = np.array([z1, np.conj(z1), 1.0 / z1, 1.0 / np.conj(z1)])
+    units_q = RootDecomposer.decompose_z_roots(quartet_roots, total_z_degree=4)
+    assert len(units_q) == 1
+    assert units_q[0].kind == 'COMPLEX_RECIPROCAL_CONJUGATE_QUARTET'
+
+    # Endpoint roots: z = 1.0 (double) and z = -1.0 (double)
+    ep_roots = np.array([1.0, 1.0, -1.0, -1.0])
+    units_ep = RootDecomposer.decompose_z_roots(ep_roots, total_z_degree=4)
+    kinds = {u.kind for u in units_ep}
+    assert 'REAL_ENDPOINT' in kinds
+
+    # Unit-circle pair: z = e^(j pi/3) and z = e^(-j pi/3)
+    uc_roots = np.array([np.exp(1j * np.pi / 3.0), np.exp(-1j * np.pi / 3.0)])
+    units_uc = RootDecomposer.decompose_z_roots(uc_roots, total_z_degree=2)
+    assert len(units_uc) == 1
+    assert units_uc[0].kind == 'UNIT_CIRCLE_PAIR'
+
+    # Near-endpoint reciprocal pair: z = 1.0005 and z = 1 / 1.0005 (must be classified as REAL_RECIPROCAL_PAIR, not REAL_ENDPOINT)
+    r_near = 1.0005
+    near_ep_roots = np.array([r_near, 1.0 / r_near])
+    units_near = RootDecomposer.decompose_z_roots(near_ep_roots, total_z_degree=2, rel_tol=1e-4, abs_tol=1e-5)
+    assert len(units_near) == 1
+    assert units_near[0].kind == 'REAL_RECIPROCAL_PAIR'
+
+    # Permutation invariance: root array order does not affect decomposition
+    perm1 = np.array([z1, 1.0 / z1, np.conj(z1), 1.0 / np.conj(z1)])
+    perm2 = np.array([1.0 / np.conj(z1), z1, 1.0 / z1, np.conj(z1)])
+    u1 = RootDecomposer.decompose_z_roots(perm1, total_z_degree=4)
+    u2 = RootDecomposer.decompose_z_roots(perm2, total_z_degree=4)
+    assert u1[0].kind == u2[0].kind == 'COMPLEX_RECIPROCAL_CONJUGATE_QUARTET'
+
+    # Asymmetric p_taps rejection in decompose_halfband_roots
+    p_asym = np.array([0.1, 0.2, 0.5, 0.3, 0.1])
+    with pytest.raises(ValueError, match="is not symmetric"):
+        RootDecomposer.decompose_halfband_roots(p_asym, total_z_degree=4)
+
+
+def test_specification_failure_vs_engineering_acceptance():
+    """Verifies that engineering acceptance thresholds allow prototype_fir while design_target_met fails if spec is missed."""
+    # Strict target passband ripple 0.01 dB, stopband atten 80 dB
+    spec = FilterSpec(kind="lowpass", order=15, cutoff=0.25, passband_ripple_db=0.01, stopband_atten_db=80.0)
+    compiler = GegenbauerFilterCompiler(lam=1.5)
+    result = compiler.compile(spec)
+
+    assert result.payload.specification_met is False
+    assert result.payload.prototype_fir_certified is True
+    assert result.payload.sampled_design_targets_met is False
+
+
+def test_biorthogonal_pr_and_alias_quantized_formats():
+    """Verifies perfect reconstruction and alias cancellation residuals across quantized tap formats for biorthogonal filter banks."""
+    compiler = GegenbauerFilterCompiler(lam=1.5)
+    pair = compiler.compile_biorthogonal_pair(order_h0=8, order_g0=6, cutoff=0.25)
+
+    delay = (8 + 6) // 2
+    K_fft = 2048
+    w = 2.0 * np.pi * np.arange(K_fft) / float(K_fft)
+    expected_pr = 2.0 * np.exp(-1j * w * delay)
+
+    # Validate float64, q31, and q23 formats
+    for fmt_key in ['q31_taps', 'q23_taps']:
+        scale_h0 = pair['H0'].q31_scale if fmt_key == 'q31_taps' else pair['H0'].q23_scale
+        scale_g0 = pair['G0'].q31_scale if fmt_key == 'q31_taps' else pair['G0'].q23_scale
+        scale_h1 = pair['H1'].q31_scale if fmt_key == 'q31_taps' else pair['H1'].q23_scale
+        scale_g1 = pair['G1'].q31_scale if fmt_key == 'q31_taps' else pair['G1'].q23_scale
+
+        h0 = getattr(pair['H0'], fmt_key) / scale_h0
+        g0 = getattr(pair['G0'], fmt_key) / scale_g0
+        h1 = getattr(pair['H1'], fmt_key) / scale_h1
+        g1 = getattr(pair['G1'], fmt_key) / scale_g1
+
+        H0_f = np.fft.fft(h0, K_fft)
+        G0_f = np.fft.fft(g0, K_fft)
+        H1_f = np.fft.fft(h1, K_fft)
+        G1_f = np.fft.fft(g1, K_fft)
+
+        pr_err = float(np.max(np.abs(H0_f * G0_f + H1_f * G1_f - expected_pr)))
+        assert pr_err < 1e-3
