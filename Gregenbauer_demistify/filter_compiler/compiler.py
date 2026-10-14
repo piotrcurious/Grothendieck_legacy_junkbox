@@ -203,10 +203,21 @@ class RootDecomposer:
 
     @staticmethod
     def decompose_z_roots(roots: np.ndarray, total_z_degree: int, rel_tol: float = 1e-4, abs_tol: float = 1e-5) -> List[RootOrbit]:
+        if not isinstance(roots, np.ndarray):
+            roots = np.asarray(roots, dtype=np.complex128)
+        if roots.ndim != 1 or not np.all(np.isfinite(roots)):
+            raise ValueError("roots must be a 1D array of finite complex numbers.")
+        if not isinstance(total_z_degree, int) or isinstance(total_z_degree, bool) or total_z_degree < 1:
+            raise ValueError(f"total_z_degree must be a positive integer, got {total_z_degree}.")
+        if not isinstance(rel_tol, (int, float)) or isinstance(rel_tol, bool) or not np.isfinite(rel_tol) or rel_tol < 0.0:
+            raise ValueError(f"rel_tol must be finite and >= 0.0, got {rel_tol}")
+        if not isinstance(abs_tol, (int, float)) or isinstance(abs_tol, bool) or not np.isfinite(abs_tol) or abs_tol < 0.0:
+            raise ValueError(f"abs_tol must be finite and >= 0.0, got {abs_tol}")
+
         if len(roots) != total_z_degree:
             raise ValueError(f"Root count mismatch: got {len(roots)}, expected {total_z_degree}.")
 
-        roots = np.asarray(roots, dtype=np.complex128)
+        roots = roots.astype(np.complex128)
 
         def same_root(a, b, tol):
             return abs(a - b) <= tol
@@ -230,6 +241,8 @@ class RootDecomposer:
         used_c = [False] * len(raw_clusters)
         atomic_units = []
 
+        max_orbit_res = max(1e-2, rel_tol * 10.0)
+
         for i in range(len(raw_clusters)):
             if used_c[i]:
                 continue
@@ -240,7 +253,7 @@ class RootDecomposer:
             used_c[i] = True
 
             # 1. Real Endpoint (|Im(r1)| <= tol1 and ||Re(r1)| - 1| <= tol1)
-            if abs(np.imag(r1)) <= max(tol1, 1e-4) and abs(abs(np.real(r1)) - 1.0) <= max(tol1 * 10.0, 1e-3):
+            if abs(np.imag(r1)) <= max(tol1, abs_tol) and abs(abs(np.real(r1)) - 1.0) <= max(tol1 * 10.0, abs_tol * 10.0):
                 ep_val = 1.0 if np.real(r1) > 0 else -1.0
                 res_ep = float(abs(r1 - ep_val))
                 atomic_units.append(RootOrbit(
@@ -251,14 +264,14 @@ class RootDecomposer:
                 ))
 
             # 2. Real Reciprocal Pair (|Im(r1)| <= tol1, non-endpoint)
-            elif abs(np.imag(r1)) <= max(tol1, 1e-4):
+            elif abs(np.imag(r1)) <= max(tol1, abs_tol):
                 r1_real = float(np.real(r1))
                 if abs(r1_real) < 1e-12:
                     raise ValueError(f"Zero root detected at index {i}; half-band polynomials cannot have zero roots.")
                 target_recip = 1.0 / r1_real
                 recip_idx = -1
                 best_dist = float('inf')
-                match_tol = max(abs_tol * 10.0, rel_tol * abs(target_recip), 1e-2)
+                match_tol = max(abs_tol * 10.0, rel_tol * abs(target_recip))
                 for j in range(len(raw_clusters)):
                     if not used_c[j]:
                         r2_candidate = raw_clusters[j]['rep']
@@ -274,8 +287,8 @@ class RootDecomposer:
                     used_c[recip_idx] = True
                     r2_real = float(np.real(c2['rep']))
                     res_recip = float(abs(r1_real * r2_real - 1.0))
-                    if res_recip > 0.05:
-                        raise ValueError(f"Real reciprocal pair residual {res_recip:.4e} exceeds acceptance limit 0.05 for {r1_real:.6f} and {r2_real:.6f}.")
+                    if res_recip > max_orbit_res:
+                        raise ValueError(f"Real reciprocal pair residual {res_recip:.4e} exceeds threshold {max_orbit_res:.4e} for {r1_real:.6f} and {r2_real:.6f}.")
                     atomic_units.append(RootOrbit(
                         kind='REAL_RECIPROCAL_PAIR',
                         roots=np.array([r1_real, r2_real], dtype=np.float64),
@@ -286,11 +299,11 @@ class RootDecomposer:
                     raise ValueError(f"Unpaired real reciprocal root detected for {r1_real:.6f} (target reciprocal {target_recip:.6f} not found within tol={match_tol:.3e}).")
 
             # 3. Unit-Circle Conjugate Pair (|r1| == 1, Im(r1) != 0)
-            elif abs(abs(r1) - 1.0) <= max(tol1 * 10.0, 1e-2):
+            elif abs(abs(r1) - 1.0) <= max(tol1 * 10.0, abs_tol * 10.0):
                 target_conj = np.conj(r1)
                 conj_idx = -1
                 best_dist = float('inf')
-                match_tol = max(abs_tol * 10.0, rel_tol * abs(r1), 1e-2)
+                match_tol = max(abs_tol * 10.0, rel_tol * abs(r1))
                 for j in range(len(raw_clusters)):
                     if not used_c[j]:
                         r2_candidate = raw_clusters[j]['rep']
@@ -306,8 +319,8 @@ class RootDecomposer:
                     used_c[conj_idx] = True
                     r2_unit = c2['rep']
                     res_unit = float(max(abs(abs(r1) - 1.0), abs(r1 - np.conj(r2_unit))))
-                    if res_unit > 0.05:
-                        raise ValueError(f"Unit circle orbit residual {res_unit:.4e} exceeds acceptance limit 0.05.")
+                    if res_unit > max_orbit_res:
+                        raise ValueError(f"Unit circle orbit residual {res_unit:.4e} exceeds threshold {max_orbit_res:.4e}.")
                     atomic_units.append(RootOrbit(
                         kind='UNIT_CIRCLE_PAIR',
                         roots=np.array([r1, r2_unit], dtype=np.complex128),
@@ -329,7 +342,7 @@ class RootDecomposer:
                 for tgt in targets:
                     best_j = -1
                     best_d = float('inf')
-                    tgt_tol = max(abs_tol * 10.0, rel_tol * abs(tgt), 0.02)
+                    tgt_tol = max(abs_tol * 10.0, rel_tol * abs(tgt))
                     for j in range(len(raw_clusters)):
                         if not used_c[j] and j not in matched_indices:
                             dist = abs(raw_clusters[j]['rep'] - tgt)
@@ -353,8 +366,8 @@ class RootDecomposer:
                 res_q2 = abs(quad_roots[2] * quad_roots[0] - 1.0)
                 res_q3 = abs(quad_roots[3] * np.conj(quad_roots[0]) - 1.0)
                 res_quad = float(max(res_q1, res_q2, res_q3))
-                if res_quad > 0.05:
-                    raise ValueError(f"Complex quartet residual {res_quad:.4e} exceeds acceptance limit 0.05.")
+                if res_quad > max_orbit_res:
+                    raise ValueError(f"Complex quartet residual {res_quad:.4e} exceeds threshold {max_orbit_res:.4e}.")
 
                 atomic_units.append(RootOrbit(
                     kind='COMPLEX_RECIPROCAL_CONJUGATE_QUARTET',
@@ -568,6 +581,9 @@ class FilterSpec:
     stopband_atten_db: float = 60.0
 
     def __post_init__(self):
+        if not isinstance(self.kind, str):
+            raise TypeError(f"Filter kind must be a string, got {type(self.kind).__name__}")
+
         if not isinstance(self.order, int) or isinstance(self.order, bool) or not np.isfinite(self.order) or self.order < 3:
             raise ValueError(f"Filter order must be an integer >= 3, got {self.order}")
 
@@ -813,6 +829,8 @@ class GegenbauerFilterCompiler:
             raise ValueError(f"qmf_power_tol must be finite and > 0.0, got {qmf_power_tol}")
         if not isinstance(qmf_alias_tol, (int, float)) or isinstance(qmf_alias_tol, bool) or not np.isfinite(qmf_alias_tol) or qmf_alias_tol <= 0.0:
             raise ValueError(f"qmf_alias_tol must be finite and > 0.0, got {qmf_alias_tol}")
+        if not isinstance(factor_mode, FactorMode):
+            raise TypeError(f"factor_mode must be an instance of FactorMode, got {type(factor_mode).__name__}")
         if basis_type not in ("normalized", "unnormalized"):
             raise ValueError(f"Unknown basis_type: '{basis_type}'")
         if solver not in ("spectral_regularized", "quadrature", "least_squares"):
@@ -1297,8 +1315,8 @@ class GegenbauerFilterCompiler:
                     raise ValueError(f"Odd endpoint root multiplicity {m} in Chebyshev factorizer.")
                 z_inside.extend(list(unit.roots) * half_m)
             elif unit.kind == 'REAL_RECIPROCAL_PAIR':
-                r_inside = [r for r in unit.roots if abs(r) <= 1.0 + 1e-5]
-                z_inside.extend([r_inside[0]] * m)
+                r_inside = min(unit.roots, key=lambda r: abs(r))
+                z_inside.extend([r_inside] * m)
             elif unit.kind == 'UNIT_CIRCLE_PAIR':
                 if m % 2 != 0:
                     raise ValueError(f"Odd unit-circle root multiplicity {m}; spectral factor is not admissible.")
@@ -1319,11 +1337,13 @@ class GegenbauerFilterCompiler:
 
         h0_real = _fit_spectral_factor_scale(h0_complex, p_taps)
 
-        res = float(np.max(np.abs(np.convolve(h0_real, h0_real[::-1]) - p_taps)))
-        if res > 0.05:
-            raise ValueError(f"Chebyshev factorization coefficient residual {res:.4e} exceeds acceptance gate 0.05.")
+        r_fact = np.convolve(h0_real, h0_real[::-1])
+        res_abs = float(np.max(np.abs(r_fact - p_taps)))
+        res_rel = res_abs / max(1.0, float(np.max(np.abs(p_taps))))
+        if res_rel > 1e-2:
+            raise ValueError(f"Chebyshev factorization relative coefficient residual {res_rel:.4e} exceeds 1e-2 gate.")
 
-        return h0_real, res, raw_imag
+        return h0_real, res_abs, raw_imag
 
     def factor_by_roots_reference(self, p_taps: np.ndarray, target_N: int) -> Tuple[np.ndarray, float, float]:
         """
@@ -1350,8 +1370,8 @@ class GegenbauerFilterCompiler:
                     raise ValueError(f"Odd endpoint root multiplicity {m} in reference factorizer.")
                 z_inside.extend(list(unit.roots) * half_m)
             elif unit.kind == 'REAL_RECIPROCAL_PAIR':
-                r_inside = [r for r in unit.roots if abs(r) <= 1.0 + 1e-5]
-                z_inside.extend([r_inside[0]] * m)
+                r_inside = min(unit.roots, key=lambda r: abs(r))
+                z_inside.extend([r_inside] * m)
             elif unit.kind == 'UNIT_CIRCLE_PAIR':
                 if m % 2 != 0:
                     raise ValueError(f"Odd unit-circle root multiplicity {m}; spectral factor is not admissible.")
@@ -1372,8 +1392,13 @@ class GegenbauerFilterCompiler:
 
         h0_real = _fit_spectral_factor_scale(h0_complex, p_taps)
 
-        res = float(np.max(np.abs(np.convolve(h0_real, h0_real[::-1]) - p_taps)))
-        return h0_real, res, raw_imag
+        r_fact = np.convolve(h0_real, h0_real[::-1])
+        res_abs = float(np.max(np.abs(r_fact - p_taps)))
+        res_rel = res_abs / max(1.0, float(np.max(np.abs(p_taps))))
+        if res_rel > 1e-2:
+            raise ValueError(f"Reference root factorization relative coefficient residual {res_rel:.4e} exceeds 1e-2 gate.")
+
+        return h0_real, res_abs, raw_imag
 
     def spectral_factor_power_polynomial(
         self,
