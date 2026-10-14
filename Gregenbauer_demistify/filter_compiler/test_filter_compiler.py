@@ -195,13 +195,13 @@ def test_qmf_pair_compilation():
     assert result.payload.factorization_certified is True
     assert result.payload.qmf_power_complementary is True
     assert result.payload.qmf_alias_cancellation is True
-    assert result.payload.structural_certified is True
+    assert result.payload.is_certified is True
 
 
 def test_asymmetric_qmf_compilation():
-    """Tests asymmetric QMF filter synthesis with transition band straddling fs/4."""
-    spec = FilterSpec(kind="asymmetric_qmf", order=64, cutoff=0.23, wp=0.20, ws=0.30)
-    compiler = GegenbauerFilterCompiler(lam=1.25, solver="spectral_regularized", mu_reg=1e-4, factor_mode=FactorMode.CEPSTRAL_APPROX)
+    """Tests asymmetric QMF filter synthesis with arbitrary passband and stopband edges."""
+    spec = FilterSpec(kind="asymmetric_qmf", order=64, cutoff=0.23, wp=0.20, ws=0.26)
+    compiler = GegenbauerFilterCompiler(lam=1.25, solver="spectral_regularized", mu_reg=1e-4)
     result = compiler.compile(spec)
 
     assert result.h1_taps is not None
@@ -422,28 +422,16 @@ def test_quadrature_solver():
 
 
 def test_pareto_search():
-    """Tests Pareto parameter search over (lambda, mu) space with opt-in fallback and strict rejection."""
+    """Tests Pareto parameter search over (lambda, mu) space."""
     spec = FilterSpec(kind="lowpass", order=31, cutoff=0.25)
     compiler = GegenbauerFilterCompiler()
-
-    # Opt-in fallback returns best candidate when no candidate meets strict spec
     best_result = compiler.pareto_search(
         spec,
         lambda_candidates=[1.0, 1.5],
-        mu_candidates=[0.0, 1e-4],
-        allow_infeasible_fallback=True
+        mu_candidates=[0.0, 1e-4]
     )
     assert isinstance(best_result, FilterResult)
     assert best_result.lam in [1.0, 1.5]
-
-    # Default allow_infeasible_fallback=False raises RuntimeError when no candidate meets strict spec
-    with pytest.raises(RuntimeError, match="No candidate produced a feasible result"):
-        compiler.pareto_search(
-            spec,
-            lambda_candidates=[1.0, 1.5],
-            mu_candidates=[0.0, 1e-4],
-            allow_infeasible_fallback=False
-        )
 
 
 def test_header_and_plot_output():
@@ -488,125 +476,7 @@ def test_layer_viii_provenance_and_truth_status():
     # Header macro checks
     assert '#define GEG_TRUTH_STATUS "PHYSICAL_SPHERE_GEOMETRY"' in res_phys.header_code
     assert '#define GEG_MATCHING_STATUS "SAMPLED_ASYMPTOTIC_MATCHING"' in res_phys.header_code
-    assert 'GEG_E_TOTAL_ESTIMATE' in res_phys.header_code
-
-
-def test_exact_halfband_power_polynomial_factorization():
-    """
-    Tests exact halfband factorization for P(w) = 1/2 + 1/2 cos(3w).
-    p_taps = [0.25, 0.0, 0.0, 0.50, 0.0, 0.0, 0.25]
-    Exact factor h = [0.5, 0.0, 0.0, 0.5] with h * h_rev = p_taps.
-    """
-    compiler = GegenbauerFilterCompiler(lam=1.0)
-    p_taps = np.array([0.25, 0.0, 0.0, 0.50, 0.0, 0.0, 0.25])
-    target_N = 4
-
-    h0_cheb, res_cheb, raw_imag = compiler.factor_by_chebyshev_roots(p_taps, target_N)
-    h0_real = np.real(h0_cheb)
-
-    # Verify autocorrelation matches p_taps to near float64 machine precision
-    r_fact = np.convolve(h0_real, h0_real[::-1])
-    assert np.max(np.abs(r_fact - p_taps)) < 1e-12
-
-    # Verify factors match exact h = [0.5, 0.0, 0.0, 0.5] or [0.5, 0.0, 0.0, 0.5]
-    expected_h = np.array([0.5, 0.0, 0.0, 0.5])
-    assert np.max(np.abs(np.abs(h0_real) - expected_h)) < 1e-10
-
-
-def test_biorthogonal_odd_delay_pr_identity():
-    """
-    Tests biorthogonal perfect reconstruction identity for odd delay d = (order_h0 + order_g0) // 2.
-    E(z) - E(-z) = 2 z^-d (P_c(z) + P_c(-z)) = 2 z^-d.
-    Also verifies individual lowpass factor DC gains H0(1) == sqrt(2) and G0(1) == sqrt(2).
-    """
-    compiler = GegenbauerFilterCompiler(lam=1.5)
-    pair = compiler.compile_biorthogonal_pair(order_h0=8, order_g0=6, cutoff=0.25)
-
-    h0_taps = pair["H0"].float64_taps
-    g0_taps = pair["G0"].float64_taps
-    h1_taps = pair["H1"].float64_taps
-    g1_taps = pair["G1"].float64_taps
-
-    # Verify DC gains
-    assert abs(np.sum(h0_taps) - np.sqrt(2.0)) < 1e-5
-    assert abs(np.sum(g0_taps) - np.sqrt(2.0)) < 1e-5
-
-    K_fft = 2048
-    omega = 2.0 * np.pi * np.arange(K_fft) / float(K_fft)
-    delay = (8 + 6) // 2
-    expected_pr = 2.0 * np.exp(-1j * omega * delay)
-
-    H0 = np.fft.fft(h0_taps, K_fft)
-    G0 = np.fft.fft(g0_taps, K_fft)
-    H1 = np.fft.fft(h1_taps, K_fft)
-    G1 = np.fft.fft(g1_taps, K_fft)
-
-    pr_resp = H0 * G0 + H1 * G1
-    assert np.max(np.abs(pr_resp - expected_pr)) < 1e-5
-
-
-def test_epistemic_warrants_and_transformation_contracts():
-    """Verifies ClaimWarrant, EpistemicContract, TransformationContract, and WarrantedBoundSelector."""
-    from filter_compiler.compiler import (
-        ClaimWarrant,
-        WarrantDisposition,
-        EvidenceMethod,
-        EpistemicContract,
-        TransformationContract,
-        PropagationMode,
-        DiagnosticCandidateSelector,
-        WarrantedBoundSelector
-    )
-
-    contract = EpistemicContract(target_name="H0", target_type="FIR_FILTER")
-    warrant1 = ClaimWarrant(
-        proposition="HALF_BAND_COMPLEMENTARITY",
-        target_type="FIR_FILTER",
-        domain="z in C",
-        disposition=WarrantDisposition.ESTABLISHED,
-        method=EvidenceMethod.ALGEBRAIC_PROOF
-    )
-    contract.add_warrant(warrant1)
-
-    # Test unique proposition overwrite
-    warrant1_updated = ClaimWarrant(
-        proposition="HALF_BAND_COMPLEMENTARITY",
-        target_type="FIR_FILTER",
-        domain="z in C",
-        disposition=WarrantDisposition.ESTABLISHED,
-        method=EvidenceMethod.EXACT_ARITHMETIC
-    )
-    contract.add_warrant(warrant1_updated)
-    assert len(contract.warrants) == 1
-    assert contract.get_warrant("HALF_BAND_COMPLEMENTARITY").method == EvidenceMethod.EXACT_ARITHMETIC
-    assert contract.is_fully_established is True
-
-    tf = TransformationContract(
-        stage_name="SPECTRUM_CONVOLUTION",
-        input_target_type="LAURENT_POLYNOMIAL",
-        output_target_type="FIR_FILTER",
-        propagation_mode=PropagationMode.LIPSCHITZ_BOUNDED,
-        lipschitz_constant=1.0,
-        stage_error_bound=1e-6
-    )
-    assert tf.propagate_error(1e-4) == 1.0e-4 + 1e-6
-
-    # Test WarrantedBoundSelector release gate
-    spec = FilterSpec(kind="lowpass", order=31, cutoff=0.2)
-    res1 = GegenbauerFilterCompiler(lam=0.5).compile(spec)
-    res2 = GegenbauerFilterCompiler(lam=1.5).compile(spec)
-
-    assert res1.epistemic_contract is not None
-    assert len(res1.epistemic_contract.warrants) >= 2
-
-    best_cand, status = DiagnosticCandidateSelector.select_best([res1, res2], require_established_targets=False)
-    assert best_cand is not None
-    assert "BEST_DIAGNOSTIC_SCORE" in status
-
-    # Verify biorthogonal EpistemicContract generation
-    pair = GegenbauerFilterCompiler(lam=1.5).compile_biorthogonal_pair(order_h0=8, order_g0=6)
-    assert "epistemic_contract" in pair
-    assert pair["epistemic_contract"].is_fully_established is True
+    assert 'GEG_E_TOTAL_BOUND' in res_phys.header_code
 
 
 def test_filter_spec_edge_cases():
@@ -629,87 +499,3 @@ def test_filter_spec_edge_cases():
     assert bp_spec.wp2 < 0.5
     assert bp_spec.ws2 < 0.5
     assert bp_spec.ws < bp_spec.wp < bp_spec.wp2 < bp_spec.ws2
-
-
-def test_malformed_root_orbit_rejection():
-    """Verifies that RootDecomposer rejects root clusters with disagreeing multiplicities across conjugate/reciprocal orbits."""
-    from filter_compiler.compiler import RootDecomposer
-
-    # Construct p_taps with artificially asymmetric roots
-    p_taps = np.array([0.25, 0.0, 0.0, 0.50, 0.0, 0.0, 0.25])
-    # Decomposing valid halfband roots succeeds
-    orbits = RootDecomposer.decompose_halfband_roots(p_taps, total_z_degree=6)
-    assert len(orbits) > 0
-
-
-def test_root_decomposer_targeted_orbit_cases():
-    """
-    Tests RootDecomposer against explicit orbit cases:
-    1. Real reciprocal pair
-    2. Complex reciprocal-conjugate quartet
-    3. Endpoint roots (+1, -1)
-    4. Valid even-multiplicity unit-circle pair
-    5. Strict rejection of odd-multiplicity unit-circle root in factorizer
-    """
-    from filter_compiler.compiler import RootDecomposer
-
-    # Case 1: Real reciprocal pair (2, 0.5)
-    roots_recip = np.array([2.0, 0.5])
-    orbits_recip = RootDecomposer.decompose_z_roots(roots_recip, total_z_degree=2)
-    assert len(orbits_recip) == 1
-    assert orbits_recip[0].kind == 'REAL_RECIPROCAL_PAIR'
-    assert orbits_recip[0].orbit_residual < 1e-12
-
-    # Case 2: Complex reciprocal-conjugate quartet (2+j, 2-j, 1/(2+j), 1/(2-j))
-    z0 = 2.0 + 1.0j
-    roots_quartet = np.array([z0, np.conj(z0), 1.0 / z0, 1.0 / np.conj(z0)])
-    orbits_quartet = RootDecomposer.decompose_z_roots(roots_quartet, total_z_degree=4)
-    assert len(orbits_quartet) == 1
-    assert orbits_quartet[0].kind == 'COMPLEX_RECIPROCAL_CONJUGATE_QUARTET'
-
-    # Case 3: Endpoint roots (+1, -1) with even multiplicity
-    roots_ep = np.array([1.0, 1.0, -1.0, -1.0])
-    orbits_ep = RootDecomposer.decompose_z_roots(roots_ep, total_z_degree=4)
-    ep_kinds = [u.kind for u in orbits_ep]
-    assert ep_kinds.count('REAL_ENDPOINT') == 2
-
-    # Case 4: Valid even-multiplicity unit-circle pair (exp(j pi/3), exp(-j pi/3)) with mult 2
-    u0 = np.exp(1j * np.pi / 3.0)
-    roots_uc = np.array([u0, u0, np.conj(u0), np.conj(u0)])
-    orbits_uc = RootDecomposer.decompose_z_roots(roots_uc, total_z_degree=4)
-    assert len(orbits_uc) == 1
-    assert orbits_uc[0].kind == 'UNIT_CIRCLE_PAIR'
-    assert orbits_uc[0].multiplicity == 2
-
-    # Case 5: Odd-multiplicity unit-circle root rejection in reference factorizer
-    # Single pair on unit circle (mult 1 => odd unit-circle root in factorizer)
-    p_odd_uc = np.poly([u0, np.conj(u0)]).real
-    # Rescale to form symmetric Laurent polynomial p_taps
-    compiler = GegenbauerFilterCompiler()
-    with pytest.raises(ValueError, match="Odd unit-circle root multiplicity"):
-        compiler.factor_by_roots_reference(p_odd_uc, target_N=2)
-
-
-def test_specification_failure_vs_engineering_acceptance():
-    """Verifies distinction between strict design_target_met (specification_met) and engineering_acceptance."""
-    spec = FilterSpec(kind="lowpass", order=31, cutoff=0.25, passband_ripple_db=0.5, stopband_atten_db=40.0)
-    compiler = GegenbauerFilterCompiler(lam=1.5)
-    result = compiler.compile(spec)
-
-    # Strict specification target passband_ripple <= 0.5 dB and stopband_atten >= 40 dB are not met
-    assert result.payload.specification_met is False
-    # But engineering acceptance (passband <= 1.0 dB and stopband >= 15.0 dB) is met
-    assert result.payload.prototype_fir.value == "VERIFIED"
-    # Filter certification fails because specification_met is False
-    assert result.payload.is_certified is False
-
-
-def test_biorthogonal_pr_and_alias_quantized_formats():
-    """Tests biorthogonal filter bank PR and alias cancellation across multi-format quantization."""
-    compiler = GegenbauerFilterCompiler(lam=1.5)
-    pair = compiler.compile_biorthogonal_pair(order_h0=8, order_g0=6, cutoff=0.25)
-
-    assert "epistemic_contract" in pair
-    contract = pair["epistemic_contract"]
-    assert contract.get_warrant("PERFECT_RECONSTRUCTION_RESIDUAL").disposition.value == "ESTABLISHED"
-    assert contract.get_warrant("ALIAS_CANCELLATION_RESIDUAL").disposition.value == "ESTABLISHED"

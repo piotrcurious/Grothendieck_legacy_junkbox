@@ -123,11 +123,7 @@ class TestAudioProcessor(unittest.TestCase):
 def _wait_for_result(app, prev_res=None, timeout=5.0):
     start = time.time()
     while time.time() - start < timeout:
-        try:
-            app.update_idletasks()
-            app.update()
-        except Exception:
-            pass
+        app.update()
         if app.current_result is not None and app.current_result is not prev_res:
             return True
         time.sleep(0.02)
@@ -162,7 +158,7 @@ class TestGUIIntegration(unittest.TestCase):
 
         orig_pareto = GegenbauerFilterCompiler.pareto_search
         def fast_pareto(self, spec, **kwargs):
-            return orig_pareto(self, spec, lambda_candidates=[1.0, 1.5], mu_candidates=[1e-4], solver=kwargs.get('solver'), allow_infeasible_fallback=True)
+            return orig_pareto(self, spec, lambda_candidates=[1.0, 1.5], mu_candidates=[1e-4], solver=kwargs.get('solver'))
 
         GegenbauerFilterCompiler.pareto_search = fast_pareto
         with patch('tkinter.messagebox.showinfo'):
@@ -192,7 +188,7 @@ class TestGUIIntegration(unittest.TestCase):
         app.order_var.set(32)
         app.cutoff_var.set(0.23)
         app.wp_var.set("0.20")
-        app.ws_var.set("0.30")
+        app.ws_var.set("0.26")
         app.solver_var.set("least_squares")
         app.basis_type_var.set("unnormalized")
         app._on_compile()
