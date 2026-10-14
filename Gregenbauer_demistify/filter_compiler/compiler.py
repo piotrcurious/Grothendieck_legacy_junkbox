@@ -68,6 +68,319 @@ class FactorMode(Enum):
     REFERENCE_ROOTS = "REFERENCE_ROOTS"           # Reference monomial degree-2M root finding backend
 
 
+# =============================================================================
+# LAYER 1: ALGEBRAIC INVARIANTS & POLYNOMIAL PROBLEM SPECIFICATION
+# =============================================================================
+
+@dataclass
+class AlgebraicInvariants:
+    """Layer 1: Exact algebraic problem invariants independently derived from specification."""
+    order: int                                   # Filter tap length N
+    degree: int                                  # Monomial/Laurent degree M = N - 1
+    symmetry_class: SymmetryClass                # Type I-IV symmetry class
+    independent_dim: int                         # Independent coefficient dimension K_max
+    is_halfband: bool                            # Half-band / QMF parity identity P(z) + P(-z) = 1
+    is_real: bool = True                         # Real coefficient field R
+    requires_positivity: bool = False            # P(e^{jw}) >= 0 on unit circle
+    endpoint_mult_plus1: int = 0                 # Prescribed zero multiplicity at x = +1 (z = 1)
+    endpoint_mult_minus1: int = 0                # Prescribed zero multiplicity at x = -1 (z = -1)
+    exact_vanishing: List[float] = field(default_factory=list) # Prescribed zeros in x = cos(w)
+
+
+class InvariantExtractor:
+    """Layer 1: Extract algebraic invariants independently of solver state."""
+
+    @staticmethod
+    def extract(spec: 'FilterSpec') -> AlgebraicInvariants:
+        N = spec.order
+        M = N - 1
+        sym = spec.symmetry_class
+        is_hb = spec.kind in ("qmf", "asymmetric_qmf")
+        requires_pos = spec.kind in ("qmf", "asymmetric_qmf")
+
+        if sym == SymmetryClass.TYPE_I:
+            ind_dim = (N + 1) // 2
+        elif sym == SymmetryClass.TYPE_II:
+            ind_dim = N // 2
+        elif sym == SymmetryClass.TYPE_III:
+            ind_dim = (N - 1) // 2
+        elif sym == SymmetryClass.TYPE_IV:
+            ind_dim = N // 2
+        else:
+            ind_dim = (N + 1) // 2
+
+        # Symmetry-forced endpoint multiplicities
+        m_plus = 0
+        m_minus = 0
+        if sym == SymmetryClass.TYPE_II:
+            m_minus = 1
+        elif sym == SymmetryClass.TYPE_III:
+            m_plus = 1
+            m_minus = 1
+        elif sym == SymmetryClass.TYPE_IV:
+            m_plus = 1
+
+        return AlgebraicInvariants(
+            order=N,
+            degree=M,
+            symmetry_class=sym,
+            independent_dim=ind_dim,
+            is_halfband=is_hb,
+            is_real=True,
+            requires_positivity=requires_pos,
+            endpoint_mult_plus1=m_plus,
+            endpoint_mult_minus1=m_minus,
+        )
+
+
+# =============================================================================
+# LAYER 2: STRUCTURAL DECOMPOSITION & CHEBYSHEV REDUCTION
+# =============================================================================
+
+@dataclass
+class DecompositionClass:
+    """Layer 2: Admissible structural factorization class prior to coefficient solving."""
+    class_id: str
+    target_degree: int                          # Monomial or spectral factor degree M
+    chebyshev_reduced_degree: int               # Reduced degree in x = z + z^{-1} = 2 cos(w)
+    allowed_orbit_kinds: List[str]              # Orbit types permitted in this class
+    endpoint_constraints: dict                  # Parity/multiplicity rules at x = +-1
+    symmetry_class: SymmetryClass
+    is_admissible: bool = True
+    infeasibility_reason: Optional[str] = None
+
+
+class DecompositionClassEnumerator:
+    """Layer 2: Deterministically enumerate admissible structural classes."""
+
+    @staticmethod
+    def enumerate_classes(invariants: AlgebraicInvariants) -> List[DecompositionClass]:
+        classes = []
+        M = invariants.degree
+
+        if invariants.is_halfband:
+            cheb_deg = M # Center-to-edge degree M in x = cos(w)
+            # Enumerate admissible reciprocal/conjugate orbit structural classes
+            orbit_patterns = [
+                ('REAL_RECIPROCAL_PAIR', 'REAL_ENDPOINT'),
+                ('COMPLEX_RECIPROCAL_CONJUGATE_QUARTET', 'UNIT_CIRCLE_PAIR')
+            ]
+            for idx, pattern in enumerate(orbit_patterns):
+                cls = DecompositionClass(
+                    class_id=f"HALFBAND_PRODUCT_DEG_{2*M}_BRANCH_{idx}",
+                    target_degree=M,
+                    chebyshev_reduced_degree=cheb_deg,
+                    allowed_orbit_kinds=list(pattern),
+                    endpoint_constraints={'x_plus1_even': True, 'x_minus1_even': True},
+                    symmetry_class=invariants.symmetry_class,
+                    is_admissible=True
+                )
+                classes.append(cls)
+        else:
+            cls = DecompositionClass(
+                class_id=f"FIR_{invariants.symmetry_class.value}_ORDER_{invariants.order}",
+                target_degree=M,
+                chebyshev_reduced_degree=invariants.independent_dim,
+                allowed_orbit_kinds=[
+                    'REAL_ENDPOINT',
+                    'REAL_RECIPROCAL_PAIR',
+                    'UNIT_CIRCLE_PAIR',
+                    'COMPLEX_RECIPROCAL_CONJUGATE_QUARTET'
+                ],
+                endpoint_constraints={
+                    'x_plus1_mult': invariants.endpoint_mult_plus1,
+                    'x_minus1_mult': invariants.endpoint_mult_minus1
+                },
+                symmetry_class=invariants.symmetry_class,
+                is_admissible=True
+            )
+            classes.append(cls)
+
+        return classes
+
+
+# =============================================================================
+# LAYER 3: CANDIDATE MAP CONSTRAINT GRAPH & EARLY PRUNING STAGES 1-3
+# =============================================================================
+
+@dataclass
+class CandidateNode:
+    """Layer 3: Decision graph node representing a partial or complete factorization assignment."""
+    node_id: str
+    parent_id: Optional[str]
+    decomposition_class: DecompositionClass
+    symmetry_class: SymmetryClass
+    factor_degree_partition: Tuple[int, ...]
+    orbit_assignments: List[str] = field(default_factory=list)
+    multiplicity_constraints: dict = field(default_factory=dict)
+    endpoint_constraints: dict = field(default_factory=dict)
+    identity_constraints: dict = field(default_factory=dict)
+    survived_stage1: bool = False
+    survived_stage2: bool = False
+    survived_stage3: bool = False
+    rejection_reason: Optional[str] = None
+    solver_plan: Optional[str] = None
+    verification_state: str = "NOT_APPLICABLE"
+
+
+class CandidateMap:
+    """Layer 3: Constraint graph tracking generated, pruned, solved, and verified candidate branches."""
+
+    def __init__(self, invariants: AlgebraicInvariants, classes: List[DecompositionClass]):
+        self.invariants = invariants
+        self.classes = classes
+        self.nodes: dict[str, CandidateNode] = {}
+        self.pruning_statistics: dict[str, int] = {
+            'generated': 0,
+            'stage1_exact_structural_rejected': 0,
+            'stage2_decomposition_feasibility_rejected': 0,
+            'stage3_necessary_bounds_rejected': 0,
+            'surviving_branches': 0
+        }
+        self._build_initial_graph()
+
+    def _build_initial_graph(self):
+        for idx, cls in enumerate(self.classes):
+            node_id = f"BRANCH_{idx}_{cls.class_id}"
+            node = CandidateNode(
+                node_id=node_id,
+                parent_id=None,
+                decomposition_class=cls,
+                symmetry_class=cls.symmetry_class,
+                factor_degree_partition=(cls.target_degree,),
+                solver_plan=None
+            )
+            self.nodes[node_id] = node
+            self.pruning_statistics['generated'] += 1
+
+    def apply_stage1_exact_structural_rejection(self) -> int:
+        """Stage 1: Cheap exact structural rejection (degree, symmetry, endpoint parity)."""
+        rejected_count = 0
+        for node in self.nodes.values():
+            if node.rejection_reason is not None:
+                continue
+
+            # Check order N >= 3
+            if self.invariants.order < 3:
+                node.rejection_reason = f"Stage 1 Reject: order N={self.invariants.order} < 3"
+                rejected_count += 1
+                continue
+
+            # Check QMF even length requirement
+            if self.invariants.is_halfband and self.invariants.order % 2 != 0:
+                node.rejection_reason = f"Stage 1 Reject: QMF filter order N={self.invariants.order} must be even"
+                rejected_count += 1
+                continue
+
+            # Check endpoint multiplicity constraints
+            if self.invariants.is_halfband:
+                # Real endpoint roots of symmetric P(z) must have even multiplicity
+                ep_rule = node.decomposition_class.endpoint_constraints
+                if ep_rule.get('x_plus1_even') and self.invariants.endpoint_mult_plus1 % 2 != 0:
+                    node.rejection_reason = f"Stage 1 Reject: Endpoint x=+1 multiplicity {self.invariants.endpoint_mult_plus1} must be even"
+                    rejected_count += 1
+                    continue
+
+            node.survived_stage1 = True
+
+        self.pruning_statistics['stage1_exact_structural_rejected'] += rejected_count
+        return rejected_count
+
+    def apply_stage2_decomposition_feasibility(self) -> int:
+        """Stage 2: Decomposition feasibility (orbit multiplicities, degree closure)."""
+        rejected_count = 0
+        for node in self.nodes.values():
+            if not node.survived_stage1 or node.rejection_reason is not None:
+                continue
+
+            # Degree partition sum must equal total degree M
+            if sum(node.factor_degree_partition) != self.invariants.degree:
+                node.rejection_reason = f"Stage 2 Reject: Factor degree sum {sum(node.factor_degree_partition)} != {self.invariants.degree}"
+                rejected_count += 1
+                continue
+
+            node.survived_stage2 = True
+
+        self.pruning_statistics['stage2_decomposition_feasibility_rejected'] += rejected_count
+        return rejected_count
+
+    def apply_stage3_necessary_numerical_bounds(self, p_taps: Optional[np.ndarray] = None) -> int:
+        """Stage 3: Necessary numerical bounds & cheap positivity check."""
+        rejected_count = 0
+        for node in self.nodes.values():
+            if not node.survived_stage2 or node.rejection_reason is not None:
+                continue
+
+            if p_taps is not None and self.invariants.requires_positivity:
+                # Cheap necessary nonnegativity test: P(1) >= 0 and P(-1) >= 0
+                center = (len(p_taps) - 1) // 2
+                p_plus1 = float(np.sum(p_taps))
+                p_minus1 = float(np.sum(p_taps * np.array([(-1.0)**(k - center) for k in range(len(p_taps))])))
+
+                if p_plus1 < -1e-3 or p_minus1 < -1e-3:
+                    node.rejection_reason = f"Stage 3 Reject: Endpoint positivity violation: P(+1)={p_plus1:.3e}, P(-1)={p_minus1:.3e}"
+                    rejected_count += 1
+                    continue
+
+            node.survived_stage3 = True
+
+        self.pruning_statistics['stage3_necessary_bounds_rejected'] += rejected_count
+        surviving = sum(1 for n in self.nodes.values() if n.survived_stage3 and n.rejection_reason is None)
+        self.pruning_statistics['surviving_branches'] = surviving
+        return rejected_count
+
+
+# =============================================================================
+# LAYER 5: INDEPENDENT VERIFIER
+# =============================================================================
+
+class IndependentVerifier:
+    """Layer 5: Independent verification of identities and specifications without trusting search."""
+
+    @staticmethod
+    def verify_power_polynomial(p_taps: np.ndarray, grid_size: int = 2048) -> Tuple[bool, float, float, float]:
+        """Verify non-negativity and half-band complementarity residual of power polynomial P(z)."""
+        center = (len(p_taps) - 1) // 2
+        M = center
+
+        # Symmetry check
+        sym_err = float(np.max(np.abs(p_taps[:center] - p_taps[center+1:][::-1]))) if center > 0 else 0.0
+
+        b_harmonics = np.zeros(M + 1, dtype=np.float64)
+        b_harmonics[0] = p_taps[center]
+        for m in range(1, M + 1):
+            if center + m < len(p_taps):
+                b_harmonics[m] = 2.0 * p_taps[center + m]
+
+        b_even_sum = 2.0 * float(np.sum(np.abs(b_harmonics[2::2]))) if len(b_harmonics) > 2 else 0.0
+        max_hb_err = float(abs(2.0 * b_harmonics[0] - 1.0) + b_even_sum + sym_err)
+
+        b_der = np.polynomial.chebyshev.chebder(b_harmonics)
+        crit_pts = [-1.0, 1.0]
+
+        if len(b_der) > 0:
+            crit_roots = np.polynomial.chebyshev.chebroots(b_der)
+            for r in crit_roots:
+                if abs(np.imag(r)) < 1e-6 and -1.0 <= r.real <= 1.0:
+                    crit_pts.append(float(r.real))
+
+        vals = np.polynomial.chebyshev.chebval(crit_pts, b_harmonics)
+        if grid_size > 0:
+            x_dense = np.linspace(-1.0, 1.0, grid_size)
+            vals_dense = np.polynomial.chebyshev.chebval(x_dense, b_harmonics)
+            min_P = min(float(np.min(vals)), float(np.min(vals_dense)))
+            max_P = max(float(np.max(vals)), float(np.max(vals_dense)))
+        else:
+            min_P = float(np.min(vals))
+            max_P = float(np.max(vals))
+
+        tau_P = 1e-4 * max(1.0, abs(max_P))
+        all_finite = bool(np.all(np.isfinite(p_taps)) and np.isfinite(min_P) and np.isfinite(max_P))
+        is_valid = all_finite and (max_hb_err <= 1e-4) and (min_P >= -tau_P) and (max_P <= 1.0 + 1e-3)
+
+        return is_valid, min_P, max_P, max_hb_err
+
+
 @dataclass
 class RootOrbit:
     """Algebraic Root Orbit Unit for conjugate/reciprocal symmetry decomposition."""
@@ -1031,47 +1344,10 @@ class GegenbauerFilterCompiler:
 
     def validate_power_polynomial(self, p_taps: np.ndarray, grid_size: int = 2048) -> Tuple[bool, float, float, float]:
         """
-        Validates half-band power polynomial P(z) using numerical critical point evaluation.
-        Evaluates P(x) at endpoints x = +-1 and all real derivative roots P'(x) = 0 in [-1, 1].
+        Validates half-band power polynomial P(z) using Layer 5 IndependentVerifier.
         Returns (is_valid, min_P, max_P, max_halfband_err).
         """
-        hb_valid, max_hb_err = self.validate_halfband_structure(p_taps)
-        center = (len(p_taps) - 1) // 2
-        M = center
-
-        b_harmonics = np.zeros(M + 1, dtype=np.float64)
-        b_harmonics[0] = p_taps[center]
-        for m in range(1, M + 1):
-            if center + m < len(p_taps):
-                b_harmonics[m] = 2.0 * p_taps[center + m]
-
-        # Compute Chebyshev derivative P'(x)
-        b_der = np.polynomial.chebyshev.chebder(b_harmonics)
-        crit_pts = [-1.0, 1.0]
-
-        if len(b_der) > 0:
-            crit_roots = np.polynomial.chebyshev.chebroots(b_der)
-            for r in crit_roots:
-                if abs(np.imag(r)) < 1e-6 and -1.0 <= r.real <= 1.0:
-                    crit_pts.append(float(r.real))
-
-        # Evaluate P(x) at endpoints and critical points
-        vals = np.polynomial.chebyshev.chebval(crit_pts, b_harmonics)
-
-        # Dense grid check to verify critical point extrema
-        if grid_size > 0:
-            x_dense = np.linspace(-1.0, 1.0, grid_size)
-            vals_dense = np.polynomial.chebyshev.chebval(x_dense, b_harmonics)
-            min_P = min(float(np.min(vals)), float(np.min(vals_dense)))
-            max_P = max(float(np.max(vals)), float(np.max(vals_dense)))
-        else:
-            min_P = float(np.min(vals))
-            max_P = float(np.max(vals))
-
-        tau_P = 1e-4 * max(1.0, abs(max_P))
-        all_finite = bool(np.all(np.isfinite(p_taps)) and np.isfinite(min_P) and np.isfinite(max_P))
-        is_valid = hb_valid and all_finite and (min_P >= -tau_P) and (max_P <= 1.0 + 1e-3)
-        return is_valid, min_P, max_P, max_hb_err
+        return IndependentVerifier.verify_power_polynomial(p_taps, grid_size=grid_size)
 
     def _compute_factorization_diagnostics(
         self,
@@ -1675,19 +1951,44 @@ class GegenbauerFilterCompiler:
     def compile(self, spec: FilterSpec) -> FilterResult:
         truth_status = determine_truth_status(self.lam)
 
+        # ---------------------------------------------------------------------
+        # LAYER 1: ALGEBRAIC INVARIANTS
+        # ---------------------------------------------------------------------
+        invariants = InvariantExtractor.extract(spec)
+
+        # ---------------------------------------------------------------------
+        # LAYER 2: STRUCTURAL DECOMPOSITION CLASSES
+        # ---------------------------------------------------------------------
+        classes = DecompositionClassEnumerator.enumerate_classes(invariants)
+
+        # ---------------------------------------------------------------------
+        # LAYER 3: CANDIDATE MAP & EARLY PRUNING STAGES 1-3
+        # ---------------------------------------------------------------------
+        cmap = CandidateMap(invariants, classes)
+        cmap.apply_stage1_exact_structural_rejection()
+        cmap.apply_stage2_decomposition_feasibility()
+
         factor_diag = None
         factorization_certified = True
 
         if spec.kind in ("qmf", "asymmetric_qmf"):
             # Direct QMF compilation route via half-band power polynomial and spectral factorization
             a_coeffs, p_taps, K, cond_val, augmented_design_residual, data_design_residual, regularization_residual = self.solve_halfband_power_polynomial(spec)
-            power_valid, min_P, max_P, hb_err = self.validate_power_polynomial(p_taps)
+
+            # Apply Stage 3 pruning check on candidate map
+            cmap.apply_stage3_necessary_numerical_bounds(p_taps)
+
+            # LAYER 5: Independent Verification
+            power_valid, min_P, max_P, hb_err = IndependentVerifier.verify_power_polynomial(p_taps)
             if not power_valid:
                 raise ValueError(
                     f"Invalid half-band power polynomial: min P = {min_P:.3e}, max P = {max_P:.3e}, "
                     f"halfband_error = {hb_err:.3e} exceeds positivity/complementarity tolerance."
                 )
 
+            # -----------------------------------------------------------------
+            # LAYER 4: BRANCH-LOCAL SOLVER
+            # -----------------------------------------------------------------
             h0_float, factor_diag = self.spectral_factor_power_polynomial(p_taps, target_N=spec.order, mode=self.factor_mode)
             factorization_certified = factor_diag.certified
             h0_quant = self.quantize_taps(h0_float)

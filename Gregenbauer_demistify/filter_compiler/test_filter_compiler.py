@@ -646,3 +646,66 @@ def test_biorthogonal_pr_and_alias_quantized_formats():
 
         pr_err = float(np.max(np.abs(H0_f * G0_f + H1_f * G1_f - expected_pr)))
         assert pr_err < 1e-3
+
+
+def test_five_layer_architecture_invariants_and_candidate_map():
+    """Verifies Layer 1-5 architectural components: InvariantExtractor, DecompositionClassEnumerator, CandidateMap, and IndependentVerifier."""
+    from filter_compiler.compiler import (
+        InvariantExtractor,
+        DecompositionClassEnumerator,
+        CandidateMap,
+        IndependentVerifier
+    )
+
+    # 1. Invariant extraction for Lowpass and QMF specs
+    lp_spec = FilterSpec(kind="lowpass", order=31, cutoff=0.25)
+    lp_inv = InvariantExtractor.extract(lp_spec)
+    assert lp_inv.order == 31
+    assert lp_inv.degree == 30
+    assert lp_inv.independent_dim == 16
+    assert lp_inv.is_halfband is False
+
+    qmf_spec = FilterSpec(kind="qmf", order=32, cutoff=0.25)
+    qmf_inv = InvariantExtractor.extract(qmf_spec)
+    assert qmf_inv.order == 32
+    assert qmf_inv.degree == 31
+    assert qmf_inv.is_halfband is True
+    assert qmf_inv.requires_positivity is True
+
+    # 2. Structural decomposition class enumeration
+    lp_classes = DecompositionClassEnumerator.enumerate_classes(lp_inv)
+    assert len(lp_classes) == 1
+    assert "FIR_TYPE_I_ORDER_31" in lp_classes[0].class_id
+
+    qmf_classes = DecompositionClassEnumerator.enumerate_classes(qmf_inv)
+    assert len(qmf_classes) == 2
+    assert "HALFBAND_PRODUCT" in qmf_classes[0].class_id
+
+    # 3. Candidate map construction and 3-stage early pruning
+    cmap = CandidateMap(qmf_inv, qmf_classes)
+    assert cmap.pruning_statistics['generated'] == 2
+
+    s1_pruned = cmap.apply_stage1_exact_structural_rejection()
+    assert s1_pruned == 0
+    s2_pruned = cmap.apply_stage2_decomposition_feasibility()
+    assert s2_pruned == 0
+
+    p_taps_good = np.array([0.25, 0.0, 0.0, 0.5, 0.0, 0.0, 0.25])
+    s3_pruned = cmap.apply_stage3_necessary_numerical_bounds(p_taps_good)
+    assert s3_pruned == 0
+    assert cmap.pruning_statistics['surviving_branches'] == 2
+
+    # 4. Layer 5 IndependentVerifier
+    is_valid, min_P, max_P, hb_err = IndependentVerifier.verify_power_polynomial(p_taps_good)
+    assert is_valid is True
+    assert abs(min_P) < 1e-12
+    assert abs(max_P - 1.0) < 1e-12
+
+    # Verify Stage 3 rejection on negative p_taps
+    p_taps_bad = np.array([-1.0, 0.0, -1.0])
+    cmap_bad = CandidateMap(qmf_inv, qmf_classes)
+    cmap_bad.apply_stage1_exact_structural_rejection()
+    cmap_bad.apply_stage2_decomposition_feasibility()
+    s3_bad = cmap_bad.apply_stage3_necessary_numerical_bounds(p_taps_bad)
+    assert s3_bad == 2
+    assert cmap_bad.pruning_statistics['surviving_branches'] == 0
