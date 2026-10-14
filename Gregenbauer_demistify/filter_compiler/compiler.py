@@ -388,6 +388,8 @@ class RootOrbit:
     roots: np.ndarray
     multiplicity: int
     orbit_residual: float
+    matching_margin: float = 0.0
+    classification_status: str = "EXACT_ORBIT"
 
     @property
     def size(self) -> int:
@@ -764,6 +766,11 @@ class CertifiedEvaluationPayload:
     continuous_specification_certified: bool = False
     asymptotic_diagnostic_passed: bool = False
     is_certified: bool = False
+    # Explicit evidence level and metric semantics
+    evidence_level: str = "DIAGNOSTICS_PASSED"     # DIAGNOSTICS_PASSED, FACTOR_IDENTITY_VALIDATED, CONTINUOUS_SPECIFICATION_CERTIFIED
+    engineering_acceptance_met: bool = False     # Compliance with relaxed engineering acceptance profile
+    sampled_passband_ripple: float = 0.0          # Sampled grid passband ripple (dB)
+    sampled_stopband_attenuation: float = 0.0     # Sampled grid stopband attenuation (dB)
 
     @property
     def basis_asymptotic_validated(self) -> bool:
@@ -1362,7 +1369,8 @@ class GegenbauerFilterCompiler:
 
         r_fact = np.convolve(h0, h0[::-1])
         coeff_res_abs = float(np.max(np.abs(r_fact - p_taps)))
-        coeff_res_rel = coeff_res_abs / max(1.0, float(np.max(np.abs(p_taps))))
+        p_taps_norm = max(float(np.max(np.abs(p_taps))), 1e-12)
+        coeff_res_rel = coeff_res_abs / p_taps_norm
 
         K_fft = 4096
         w = 2.0 * np.pi * np.arange(K_fft) / float(K_fft)
@@ -1373,7 +1381,7 @@ class GegenbauerFilterCompiler:
         H0_f = np.fft.fft(h0, K_fft)
         H0_pow = np.abs(H0_f)**2
         freq_res_abs = float(np.max(np.abs(H0_pow - P_w)))
-        freq_res_rel = freq_res_abs / max(1.0, float(max_P))
+        freq_res_rel = freq_res_abs / max(float(max_P), 1e-12)
 
         non_zero = np.where(np.abs(h0) > 1e-12)[0]
         if len(non_zero) == 0:
@@ -2203,6 +2211,8 @@ class GegenbauerFilterCompiler:
         sampled_design_targets_met = bool(structural_certified and specification_met)
         continuous_specification_certified = False
 
+        evidence_lvl = "FACTOR_IDENTITY_VALIDATED" if structural_certified else "DIAGNOSTICS_PASSED"
+
         payload = CertifiedEvaluationPayload(
             truth_status=truth_status,
             matching_status=matching_status,
@@ -2217,7 +2227,11 @@ class GegenbauerFilterCompiler:
             sampled_design_targets_met=sampled_design_targets_met,
             continuous_specification_certified=continuous_specification_certified,
             asymptotic_diagnostic_passed=asymptotic_diagnostic_passed,
-            is_certified=continuous_specification_certified
+            is_certified=continuous_specification_certified,
+            evidence_level=evidence_lvl,
+            engineering_acceptance_met=engineering_acceptance,
+            sampled_passband_ripple=float(pass_ripple),
+            sampled_stopband_attenuation=float(stop_atten)
         )
 
         # Recompute final realization frequency fit residual from final normalized taps
@@ -2288,6 +2302,14 @@ class GegenbauerFilterCompiler:
         For odd delay d = (order_h0 + order_g0) // 2, E(z) - E(-z) = 2 z^-d (P_c(z) + P_c(-z)) = 2 z^-d (exact PR delay).
         Requires odd PR delay (order_h0 + order_g0 == 2 mod 4) for standard 2-channel linear-phase half-band PR.
         """
+        # Strict input validation
+        if not isinstance(order_h0, int) or isinstance(order_h0, bool) or order_h0 < 1:
+            raise ValueError(f"order_h0 must be a positive integer, got {order_h0}")
+        if not isinstance(order_g0, int) or isinstance(order_g0, bool) or order_g0 < 1:
+            raise ValueError(f"order_g0 must be a positive integer, got {order_g0}")
+        if not isinstance(cutoff, (int, float)) or isinstance(cutoff, bool) or not np.isfinite(cutoff) or not (0.0 < cutoff < 0.5):
+            raise ValueError(f"cutoff must be finite and in (0.0, 0.5), got {cutoff}")
+
         total_order = order_h0 + order_g0
         if total_order % 2 != 0:
             raise ValueError("The sum of H0 and G0 orders must be even for a valid half-band filter.")
@@ -2471,12 +2493,16 @@ class GegenbauerFilterCompiler:
 
         pr_complex = H0_f * G0_f + H1_f * G1_f
         pr_residual = float(np.max(np.abs(pr_complex - expected_pr)))
+        if pr_residual > 1e-4:
+            raise ValueError(f"Biorthogonal PR residual {pr_residual:.4e} exceeds hard gate tolerance 1e-4.")
 
         # Alias cancellation check H0(-z) G0(z) + H1(-z) G1(z) == 0
         H0_neg = np.fft.fft(h0_taps * np.array([(-1.0)**n for n in range(len(h0_taps))]), K_fft)
         H1_neg = np.fft.fft(h1_taps * np.array([(-1.0)**n for n in range(len(h1_taps))]), K_fft)
         alias_complex = H0_neg * G0_f + H1_neg * G1_f
         alias_residual = float(np.max(np.abs(alias_complex)))
+        if alias_residual > 1e-4:
+            raise ValueError(f"Biorthogonal alias cancellation residual {alias_residual:.4e} exceeds hard gate tolerance 1e-4.")
 
         # Structural frequency domain relations H1(w) = G0(w+pi) and G1(w) = -H0(w+pi)
         G0_shift = np.roll(G0_f, K_fft // 2)

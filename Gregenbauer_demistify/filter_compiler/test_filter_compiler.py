@@ -709,3 +709,51 @@ def test_five_layer_architecture_invariants_and_candidate_map():
     s3_bad = cmap_bad.apply_stage3_necessary_numerical_bounds(p_taps_bad)
     assert s3_bad == 2
     assert cmap_bad.pruning_statistics['surviving_branches'] == 0
+
+
+def test_root_order_permutation_invariance():
+    """Verifies that RootDecomposer orbit classification is invariant to root input permutations."""
+    from filter_compiler.compiler import RootDecomposer
+
+    r1 = 0.6 + 0.3j
+    r2 = 0.6 - 0.3j
+    r3 = 1.0 / r1
+    r4 = 1.0 / r2
+
+    roots_orig = np.array([r1, r2, r3, r4])
+    roots_perm = np.array([r4, r1, r3, r2])
+
+    units_orig = RootDecomposer.decompose_z_roots(roots_orig, total_z_degree=4)
+    units_perm = RootDecomposer.decompose_z_roots(roots_perm, total_z_degree=4)
+
+    assert len(units_orig) == len(units_perm) == 1
+    assert units_orig[0].kind == units_perm[0].kind == 'COMPLEX_RECIPROCAL_CONJUGATE_QUARTET'
+
+
+def test_biorthogonal_input_validation_and_pr_gates():
+    """Verifies that compile_biorthogonal_pair strictly validates inputs and raises ValueError on invalid parameters."""
+    compiler = GegenbauerFilterCompiler(lam=1.5)
+
+    # Invalid order_h0
+    with pytest.raises(ValueError, match="order_h0 must be a positive integer"):
+        compiler.compile_biorthogonal_pair(order_h0=-2, order_g0=6)
+
+    # Invalid order_g0
+    with pytest.raises(ValueError, match="order_g0 must be a positive integer"):
+        compiler.compile_biorthogonal_pair(order_h0=8, order_g0=0)
+
+    # Invalid cutoff
+    with pytest.raises(ValueError, match="cutoff must be finite"):
+        compiler.compile_biorthogonal_pair(order_h0=8, order_g0=6, cutoff=0.8)
+
+
+def test_certified_payload_evidence_levels():
+    """Verifies CertifiedEvaluationPayload evidence_level, sampled_passband_ripple, and engineering_acceptance_met semantics."""
+    spec = FilterSpec(kind="qmf", order=32, cutoff=0.25)
+    compiler = GegenbauerFilterCompiler(lam=1.5)
+    result = compiler.compile(spec)
+
+    assert result.payload.evidence_level == "FACTOR_IDENTITY_VALIDATED"
+    assert result.payload.sampled_passband_ripple == result.passband_ripple_actual
+    assert result.payload.sampled_stopband_attenuation == result.stopband_atten_actual
+    assert isinstance(result.payload.engineering_acceptance_met, bool)
