@@ -202,9 +202,15 @@ class RootDecomposer:
     """Shared Multiplicity-Aware Conjugate & Reciprocal Root Orbit Decomposition Engine."""
 
     @staticmethod
-    def decompose_z_roots(roots: np.ndarray, total_z_degree: int, rel_tol: float = 1e-4, abs_tol: float = 1e-5) -> List[RootOrbit]:
+    def decompose_z_roots(
+        roots: np.ndarray,
+        total_z_degree: int,
+        rel_tol: float = 1e-4,
+        abs_tol: float = 1e-5,
+        orbit_residual_tol: Optional[float] = None
+    ) -> List[RootOrbit]:
         if not isinstance(roots, np.ndarray):
-            roots = np.asarray(roots, dtype=np.complex128)
+            roots = np.asarray(roots)
         if roots.ndim != 1 or not np.all(np.isfinite(roots)):
             raise ValueError("roots must be a 1D array of finite complex numbers.")
         if not isinstance(total_z_degree, int) or isinstance(total_z_degree, bool) or total_z_degree < 1:
@@ -213,6 +219,9 @@ class RootDecomposer:
             raise ValueError(f"rel_tol must be finite and >= 0.0, got {rel_tol}")
         if not isinstance(abs_tol, (int, float)) or isinstance(abs_tol, bool) or not np.isfinite(abs_tol) or abs_tol < 0.0:
             raise ValueError(f"abs_tol must be finite and >= 0.0, got {abs_tol}")
+        if orbit_residual_tol is not None:
+            if not isinstance(orbit_residual_tol, (int, float)) or isinstance(orbit_residual_tol, bool) or not np.isfinite(orbit_residual_tol) or orbit_residual_tol < 0.0:
+                raise ValueError(f"orbit_residual_tol must be finite and >= 0.0, got {orbit_residual_tol}")
 
         if len(roots) != total_z_degree:
             raise ValueError(f"Root count mismatch: got {len(roots)}, expected {total_z_degree}.")
@@ -241,7 +250,7 @@ class RootDecomposer:
         used_c = [False] * len(raw_clusters)
         atomic_units = []
 
-        max_orbit_res = max(abs_tol * 10.0, rel_tol * 10.0)
+        max_orbit_res = float(orbit_residual_tol) if orbit_residual_tol is not None else max(abs_tol * 5.0, rel_tol * 5.0)
 
         for i in range(len(raw_clusters)):
             if used_c[i]:
@@ -264,7 +273,7 @@ class RootDecomposer:
                 ))
 
             # 2. Real Reciprocal Pair (|Im(r1)| <= tol1, non-endpoint)
-            elif abs(np.imag(r1)) <= max(tol1, abs_tol):
+            elif abs(np.imag(r1)) <= tol1:
                 r1_real = float(np.real(r1))
                 if abs(r1_real) < 1e-12:
                     raise ValueError(f"Zero root detected at index {i}; half-band polynomials cannot have zero roots.")
@@ -275,10 +284,11 @@ class RootDecomposer:
                 for j in range(len(raw_clusters)):
                     if not used_c[j]:
                         r2_candidate = raw_clusters[j]['rep']
-                        dist = abs(r2_candidate - target_recip)
-                        if dist <= match_tol and dist < best_dist:
-                            best_dist = dist
-                            recip_idx = j
+                        if abs(np.imag(r2_candidate)) <= max(tol1 * 10.0, abs_tol * 10.0):
+                            dist = abs(r2_candidate - target_recip)
+                            if dist <= match_tol and dist < best_dist:
+                                best_dist = dist
+                                recip_idx = j
 
                 if recip_idx != -1:
                     c2 = raw_clusters[recip_idx]
@@ -299,7 +309,7 @@ class RootDecomposer:
                     raise ValueError(f"Unpaired real reciprocal root detected for {r1_real:.6f} (target reciprocal {target_recip:.6f} not found within tol={match_tol:.3e}).")
 
             # 3. Unit-Circle Conjugate Pair (|r1| == 1, Im(r1) != 0)
-            elif abs(abs(r1) - 1.0) <= max(tol1 * 10.0, abs_tol * 10.0):
+            elif abs(abs(r1) - 1.0) <= max(abs_tol, rel_tol * abs(r1)):
                 target_conj = np.conj(r1)
                 conj_idx = -1
                 best_dist = float('inf')
@@ -383,11 +393,24 @@ class RootDecomposer:
         return atomic_units
 
     @staticmethod
-    def decompose_halfband_roots(p_taps: np.ndarray, total_z_degree: int, rel_tol: float = 1e-4, abs_tol: float = 1e-5) -> List[RootOrbit]:
+    def decompose_halfband_roots(
+        p_taps: np.ndarray,
+        total_z_degree: int,
+        rel_tol: float = 1e-4,
+        abs_tol: float = 1e-5,
+        orbit_residual_tol: Optional[float] = None
+    ) -> List[RootOrbit]:
         if not isinstance(p_taps, np.ndarray):
-            p_taps = np.asarray(p_taps, dtype=np.float64)
-        if p_taps.ndim != 1 or not np.all(np.isfinite(p_taps)) or len(p_taps) % 2 == 0:
+            p_taps = np.asarray(p_taps)
+        if (
+            p_taps.ndim != 1
+            or not np.isrealobj(p_taps)
+            or not np.all(np.isfinite(p_taps))
+            or len(p_taps) % 2 == 0
+        ):
             raise ValueError("p_taps must be a 1D finite real array of odd length 2M + 1.")
+        p_taps = p_taps.astype(np.float64, copy=False)
+
         if not isinstance(total_z_degree, int) or isinstance(total_z_degree, bool) or total_z_degree < 1:
             raise ValueError(f"total_z_degree must be a positive integer, got {total_z_degree}.")
         center = (len(p_taps) - 1) // 2
@@ -407,7 +430,13 @@ class RootDecomposer:
             disc = np.sqrt(x_val**2 - 1.0 + 0j)
             roots.extend([x_val - disc, x_val + disc])
 
-        return RootDecomposer.decompose_z_roots(np.array(roots), total_z_degree, rel_tol=rel_tol, abs_tol=abs_tol)
+        return RootDecomposer.decompose_z_roots(
+            np.array(roots),
+            total_z_degree,
+            rel_tol=rel_tol,
+            abs_tol=abs_tol,
+            orbit_residual_tol=orbit_residual_tol
+        )
 
 
 @dataclass
