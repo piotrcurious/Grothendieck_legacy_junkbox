@@ -565,6 +565,8 @@ def test_root_decomposer_targeted_orbit_cases():
     assert len(units_recip) == 1
     assert units_recip[0].kind == 'REAL_RECIPROCAL_PAIR'
     assert units_recip[0].multiplicity == 1
+    assert units_recip[0].classification_status in ("EXACT_ORBIT", "NUMERICALLY_MATCHED")
+    assert isinstance(units_recip[0].matching_margin, float)
 
     # Complex Quartet: z = 0.5 e^(j pi/4), conj, recip, conj_recip
     z1 = 0.5 * np.exp(1j * np.pi / 4.0)

@@ -488,11 +488,14 @@ class RootDecomposer:
                     used_c[i] = True
                     if res_ep > max_orbit_res:
                         raise ValueError(f"Real endpoint residual {res_ep:.4e} exceeds threshold {max_orbit_res:.4e}.")
+                    ep_match_tol = max(abs_tol * 10.0, rel_tol)
                     atomic_units.append(RootOrbit(
                         kind='REAL_ENDPOINT',
                         roots=np.array([ep_val], dtype=np.float64),
                         multiplicity=m1,
-                        orbit_residual=res_ep
+                        orbit_residual=res_ep,
+                        matching_margin=float(ep_match_tol - res_ep),
+                        classification_status="EXACT_ORBIT" if res_ep < 1e-12 else "NUMERICALLY_MATCHED"
                     ))
                 else:
                     is_ep_candidate = False
@@ -532,7 +535,9 @@ class RootDecomposer:
                             kind='REAL_RECIPROCAL_PAIR',
                             roots=np.array([r1_real, r2_real], dtype=np.float64),
                             multiplicity=m1,
-                            orbit_residual=res_recip
+                            orbit_residual=res_recip,
+                            matching_margin=float(match_tol - res_recip),
+                            classification_status="EXACT_ORBIT" if res_recip < 1e-12 else "NUMERICALLY_MATCHED"
                         ))
                     else:
                         raise ValueError(f"Unpaired real reciprocal root detected for {r1_real:.6f} (target reciprocal {target_recip:.6f} not found within tol={match_tol:.3e}).")
@@ -639,11 +644,14 @@ class RootDecomposer:
                     if res_quad > max_orbit_res:
                         raise ValueError(f"Complex quartet residual {res_quad:.4e} exceeds threshold {max_orbit_res:.4e}.")
 
+                    tgt_tol_max = max(abs_tol * 10.0, rel_tol * max(abs(tgt) for tgt in targets))
                     atomic_units.append(RootOrbit(
                         kind='COMPLEX_RECIPROCAL_CONJUGATE_QUARTET',
                         roots=quad_roots,
                         multiplicity=m1,
-                        orbit_residual=res_quad
+                        orbit_residual=res_quad,
+                        matching_margin=float(tgt_tol_max - res_quad),
+                        classification_status="EXACT_ORBIT" if res_quad < 1e-12 else "NUMERICALLY_MATCHED"
                     ))
 
         total_roots_found = sum(u.size * u.multiplicity for u in atomic_units)
@@ -820,18 +828,20 @@ def coefficient_residuals(
     floor: float = 1e-12,
 ) -> Tuple[float, float]:
     """Computes scale-normalized absolute and relative coefficient residuals."""
-    rec = np.asarray(reconstructed, dtype=np.float64)
-    tgt = np.asarray(target, dtype=np.float64)
+    rec = np.asarray(reconstructed)
+    tgt = np.asarray(target)
 
+    if rec.ndim != 1 or tgt.ndim != 1 or rec.size == 0 or tgt.size == 0:
+        raise ValueError("Coefficient arrays must be non-empty 1D arrays.")
     if rec.shape != tgt.shape:
         raise ValueError(f"Shape mismatch in coefficient residual calculation: {rec.shape} != {tgt.shape}")
-    if not np.all(np.isfinite(rec)):
-        raise ValueError("Reconstructed coefficients contain non-finite values.")
-    if not np.all(np.isfinite(tgt)):
-        raise ValueError("Target coefficients contain non-finite values.")
+    if not np.isfinite(floor) or floor <= 0:
+        raise ValueError("floor must be finite and positive.")
+    if not np.all(np.isfinite(rec)) or not np.all(np.isfinite(tgt)):
+        raise ValueError("Coefficient arrays contain non-finite values.")
 
     abs_res = float(np.max(np.abs(rec - tgt)))
-    scale = max(float(np.max(np.abs(tgt))), floor)
+    scale = max(float(np.max(np.abs(tgt))), float(floor))
     return abs_res, abs_res / scale
 
 
@@ -2593,6 +2603,10 @@ class GegenbauerFilterCompiler:
             "G1": self.quantize_taps(g1_taps),
             "P": p_prod * 0.5,
             "product_residual": product_residual,
+            "pr_coeff_residual": pr_coeff_residual,
+            "alias_coeff_residual": alias_coeff_residual,
+            "pr_fft_residual": pr_residual,
+            "alias_fft_residual": alias_residual,
             "pr_residual": pr_residual,
             "pr_error": pr_residual, # Backward compatibility alias
             "alias_residual": alias_residual,
