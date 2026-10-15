@@ -557,20 +557,25 @@ class RootDecomposer:
                         used_c[conj_idx] = True
                         r2_unit = c2['rep']
 
-                        # Look for nearby unit-circle root pair to merge perturbed simple roots into double root
+                        c2_mult = c2['mult']
+                        if m1 != c2_mult:
+                            raise ValueError(f"Unit-circle conjugate orbit multiplicities disagree for root {r1}: {m1} vs {c2_mult}.")
+
+                        # Look for nearby unit-circle root pair to resolve numerical splitting of double unit-circle roots
                         nearby_idx = -1
                         nearby_conj_idx = -1
+                        status_str = "NUMERICALLY_MATCHED"
                         if m1 % 2 != 0:
                             for k in range(len(raw_clusters)):
                                 if not used_c[k]:
                                     r_k = raw_clusters[k]['rep']
                                     if abs(abs(r_k) - 1.0) <= match_tol and abs(r_k - r1) <= match_tol * 5.0 and abs(r_k - r1) > 1e-12:
-                                        # Find its conjugate
                                         for l in range(len(raw_clusters)):
                                             if not used_c[l] and l != k and abs(raw_clusters[l]['rep'] - np.conj(r_k)) <= match_tol:
-                                                nearby_idx = k
-                                                nearby_conj_idx = l
-                                                break
+                                                if raw_clusters[k]['mult'] == raw_clusters[l]['mult']:
+                                                    nearby_idx = k
+                                                    nearby_conj_idx = l
+                                                    break
                                         if nearby_idx != -1:
                                             break
 
@@ -580,13 +585,16 @@ class RootDecomposer:
                             r1 = 0.5 * (r1 + raw_clusters[nearby_idx]['rep'])
                             r2_unit = 0.5 * (r2_unit + raw_clusters[nearby_conj_idx]['rep'])
                             m1 = m1 + raw_clusters[nearby_idx]['mult']
+                            status_str = "NUMERICALLY_SPLIT_RESOLVED"
 
                         res_unit = float(max(abs(abs(r1) - 1.0), abs(r1 - np.conj(r2_unit))))
                         atomic_units.append(RootOrbit(
                             kind='UNIT_CIRCLE_PAIR',
                             roots=np.array([r1, r2_unit], dtype=np.complex128),
                             multiplicity=m1,
-                            orbit_residual=res_unit
+                            orbit_residual=res_unit,
+                            matching_margin=float(match_tol - res_unit),
+                            classification_status=status_str
                         ))
                     else:
                         raise ValueError(f"Unpaired unit circle conjugate root detected for {r1} (conjugate partner not found within tol={match_tol:.3e}).")
@@ -750,11 +758,24 @@ class VerificationStatus(Enum):
 
 
 @dataclass
+class VerificationEvidence:
+    """Explicit underlying evidence payload for filter compiler verification levels."""
+    realization_finite: bool = False
+    realization_shape_valid: bool = False
+    reconstruction_identity_validated: bool = False
+    power_complementarity_diagnostic_passed: bool = False
+    alias_cancellation_diagnostic_passed: bool = False
+    sampled_specification_met: bool = False
+    continuous_specification_certified: bool = False
+
+
+@dataclass
 class CertifiedEvaluationPayload:
     """Layer VIII Certified Evaluation Payload separating diagnostics from certified bounds."""
     truth_status: TruthStatus
     matching_status: MatchingStatus
     provenance: ErrorEstimateProvenance
+    evidence: VerificationEvidence = field(default_factory=VerificationEvidence)
     basis_asymptotic: VerificationStatus = VerificationStatus.NOT_APPLICABLE
     prototype_fir: VerificationStatus = VerificationStatus.NOT_APPLICABLE
     qmf_power: VerificationStatus = VerificationStatus.NOT_APPLICABLE
@@ -791,6 +812,27 @@ class CertifiedEvaluationPayload:
     @property
     def factorization_certified(self) -> bool:
         return self.factorization == VerificationStatus.VERIFIED
+
+
+def coefficient_residuals(
+    reconstructed: np.ndarray,
+    target: np.ndarray,
+    floor: float = 1e-12,
+) -> Tuple[float, float]:
+    """Computes scale-normalized absolute and relative coefficient residuals."""
+    rec = np.asarray(reconstructed, dtype=np.float64)
+    tgt = np.asarray(target, dtype=np.float64)
+
+    if rec.shape != tgt.shape:
+        raise ValueError(f"Shape mismatch in coefficient residual calculation: {rec.shape} != {tgt.shape}")
+    if not np.all(np.isfinite(rec)):
+        raise ValueError("Reconstructed coefficients contain non-finite values.")
+    if not np.all(np.isfinite(tgt)):
+        raise ValueError("Target coefficients contain non-finite values.")
+
+    abs_res = float(np.max(np.abs(rec - tgt)))
+    scale = max(float(np.max(np.abs(tgt))), floor)
+    return abs_res, abs_res / scale
 
 
 def _fit_spectral_factor_scale(q: np.ndarray, p_taps: np.ndarray, tol: float = 1e-15, imag_tol: float = 1e-5) -> np.ndarray:
@@ -1368,9 +1410,7 @@ class GegenbauerFilterCompiler:
         _, min_P, max_P, hb_err = self.validate_power_polynomial(p_taps)
 
         r_fact = np.convolve(h0, h0[::-1])
-        coeff_res_abs = float(np.max(np.abs(r_fact - p_taps)))
-        p_taps_norm = max(float(np.max(np.abs(p_taps))), 1e-12)
-        coeff_res_rel = coeff_res_abs / p_taps_norm
+        coeff_res_abs, coeff_res_rel = coefficient_residuals(r_fact, p_taps)
 
         K_fft = 4096
         w = 2.0 * np.pi * np.arange(K_fft) / float(K_fft)
@@ -1553,8 +1593,7 @@ class GegenbauerFilterCompiler:
         h0_real = _fit_spectral_factor_scale(np.real(h0_complex), p_taps)
 
         r_fact = np.convolve(h0_real, h0_real[::-1])
-        res_abs = float(np.max(np.abs(r_fact - p_taps)))
-        res_rel = res_abs / max(1.0, float(np.max(np.abs(p_taps))))
+        res_abs, res_rel = coefficient_residuals(r_fact, p_taps)
         if res_rel > 1e-2:
             raise ValueError(f"Chebyshev factorization relative coefficient residual {res_rel:.4e} exceeds 1e-2 gate.")
 
@@ -1610,8 +1649,7 @@ class GegenbauerFilterCompiler:
         h0_real = _fit_spectral_factor_scale(np.real(h0_complex), p_taps)
 
         r_fact = np.convolve(h0_real, h0_real[::-1])
-        res_abs = float(np.max(np.abs(r_fact - p_taps)))
-        res_rel = res_abs / max(1.0, float(np.max(np.abs(p_taps))))
+        res_abs, res_rel = coefficient_residuals(r_fact, p_taps)
         if res_rel > 1e-2:
             raise ValueError(f"Reference root factorization relative coefficient residual {res_rel:.4e} exceeds 1e-2 gate.")
 
@@ -1978,6 +2016,10 @@ class GegenbauerFilterCompiler:
             # Apply Stage 3 pruning check on candidate map
             cmap.apply_stage3_necessary_numerical_bounds(p_taps)
 
+            # Enforce CandidateMap execution gating
+            if cmap.pruning_statistics['surviving_branches'] == 0:
+                raise RuntimeError("CandidateMap constraint graph pruned all candidate branches; no admissible design family survived Stage 1-3 pruning.")
+
             # LAYER 5: Independent Verification
             power_valid, min_P, max_P, hb_err = IndependentVerifier.verify_power_polynomial(p_taps)
             if not power_valid:
@@ -2211,12 +2253,30 @@ class GegenbauerFilterCompiler:
         sampled_design_targets_met = bool(structural_certified and specification_met)
         continuous_specification_certified = False
 
-        evidence_lvl = "FACTOR_IDENTITY_VALIDATED" if structural_certified else "DIAGNOSTICS_PASSED"
+        reconstruction_id_val = bool(spec.kind in ("qmf", "asymmetric_qmf") and factorization_certified)
+
+        evidence = VerificationEvidence(
+            realization_finite=bool(np.all(np.isfinite(h0_quant.float64_taps))),
+            realization_shape_valid=bool(len(h0_quant.float64_taps) == spec.order),
+            reconstruction_identity_validated=reconstruction_id_val,
+            power_complementarity_diagnostic_passed=bool(spec.kind in ("qmf", "asymmetric_qmf") and qmf_pow_lin <= self.qmf_power_tol),
+            alias_cancellation_diagnostic_passed=bool(spec.kind in ("qmf", "asymmetric_qmf") and qmf_alias_lin <= self.qmf_alias_tol),
+            sampled_specification_met=specification_met,
+            continuous_specification_certified=continuous_specification_certified
+        )
+
+        if continuous_specification_certified:
+            evidence_lvl = "CONTINUOUS_SPECIFICATION_CERTIFIED"
+        elif reconstruction_id_val:
+            evidence_lvl = "FACTOR_IDENTITY_VALIDATED"
+        else:
+            evidence_lvl = "DIAGNOSTICS_PASSED"
 
         payload = CertifiedEvaluationPayload(
             truth_status=truth_status,
             matching_status=matching_status,
             provenance=provenance,
+            evidence=evidence,
             basis_asymptotic=basis_asymptotic,
             prototype_fir=prototype_fir,
             qmf_power=qmf_power,
@@ -2481,6 +2541,22 @@ class GegenbauerFilterCompiler:
 
         h0_sym_res = float(np.max(np.abs(h0_taps - h0_taps[::-1])))
         g0_sym_res = float(np.max(np.abs(g0_taps - g0_taps[::-1])))
+
+        # Coefficient-domain Exact PR Identity Verification: h0 * g0 + h1 * g1 == 2 * delta[n - delay]
+        pr_coeff_seq = np.convolve(h0_taps, g0_taps) + np.convolve(h1_taps, g1_taps)
+        target_pr_seq = np.zeros_like(pr_coeff_seq)
+        target_pr_seq[delay] = 2.0
+        pr_coeff_residual = float(np.max(np.abs(pr_coeff_seq - target_pr_seq)))
+        if pr_coeff_residual > 1e-4:
+            raise ValueError(f"Coefficient-domain biorthogonal PR residual {pr_coeff_residual:.4e} exceeds hard gate 1e-4.")
+
+        # Coefficient-domain Exact Alias Cancellation Verification: h0_mod * g0 + h1_mod * g1 == 0
+        h0_mod = h0_taps * np.array([(-1.0)**n for n in range(len(h0_taps))])
+        h1_mod = h1_taps * np.array([(-1.0)**n for n in range(len(h1_taps))])
+        alias_coeff_seq = np.convolve(h0_mod, g0_taps) + np.convolve(h1_mod, g1_taps)
+        alias_coeff_residual = float(np.max(np.abs(alias_coeff_seq)))
+        if alias_coeff_residual > 1e-4:
+            raise ValueError(f"Coefficient-domain biorthogonal alias residual {alias_coeff_residual:.4e} exceeds hard gate 1e-4.")
 
         K_fft = 4096
         omega = 2.0 * np.pi * np.arange(K_fft) / float(K_fft)
