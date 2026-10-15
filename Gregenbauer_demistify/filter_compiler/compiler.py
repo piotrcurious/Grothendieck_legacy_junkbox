@@ -150,6 +150,23 @@ class DecompositionClass:
     infeasibility_reason: Optional[str] = None
 
 
+def _generate_integer_partitions(n: int, max_parts: int = 2) -> List[Tuple[int, ...]]:
+    """Helper to generate integer partitions of n into at most max_parts positive parts."""
+    if n <= 0:
+        return [(0,)]
+    def _helper(target, max_val, remaining_parts):
+        if target == 0:
+            return [()]
+        if remaining_parts == 0:
+            return []
+        res = []
+        for i in range(min(target, max_val), 0, -1):
+            for p in _helper(target - i, i, remaining_parts - 1):
+                res.append((i,) + p)
+        return res
+    return _helper(n, n, max_parts)
+
+
 class DecompositionClassEnumerator:
     """Layer 2: Deterministically enumerate admissible structural classes."""
 
@@ -239,19 +256,23 @@ class CandidateMap:
         }
         self._build_initial_graph()
 
-    def _build_initial_graph(self):
+    def _build_initial_graph(self, max_parts: int = 1):
+        self.nodes = {}
+        self.pruning_statistics['generated'] = 0
+        partitions = _generate_integer_partitions(self.invariants.degree, max_parts=max_parts)
         for idx, cls in enumerate(self.classes):
-            node_id = f"BRANCH_{idx}_{cls.class_id}"
-            node = CandidateNode(
-                node_id=node_id,
-                parent_id=None,
-                decomposition_class=cls,
-                symmetry_class=cls.symmetry_class,
-                factor_degree_partition=(cls.target_degree,),
-                solver_plan=None
-            )
-            self.nodes[node_id] = node
-            self.pruning_statistics['generated'] += 1
+            for p_idx, part in enumerate(partitions):
+                node_id = f"BRANCH_{idx}_PART_{p_idx}_{cls.class_id}"
+                node = CandidateNode(
+                    node_id=node_id,
+                    parent_id=None,
+                    decomposition_class=cls,
+                    symmetry_class=cls.symmetry_class,
+                    factor_degree_partition=part,
+                    solver_plan=None
+                )
+                self.nodes[node_id] = node
+                self.pruning_statistics['generated'] += 1
 
     def apply_stage1_exact_structural_rejection(self) -> int:
         """Stage 1: Cheap exact structural rejection (degree, symmetry, endpoint parity)."""

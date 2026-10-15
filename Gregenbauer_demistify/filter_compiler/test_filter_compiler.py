@@ -713,6 +713,24 @@ def test_five_layer_architecture_invariants_and_candidate_map():
     assert cmap_bad.pruning_statistics['surviving_branches'] == 0
 
 
+def test_dynamic_integer_partitions_and_multi_part_candidate_map():
+    """Verifies integer partition generation and multi-part CandidateMap graph construction."""
+    from filter_compiler.compiler import _generate_integer_partitions, InvariantExtractor, DecompositionClassEnumerator, CandidateMap, FilterSpec
+
+    parts_deg3_m2 = _generate_integer_partitions(3, max_parts=2)
+    assert parts_deg3_m2 == [(3,), (2, 1)]
+
+    spec = FilterSpec(kind="qmf", order=8, cutoff=0.25)
+    inv = InvariantExtractor.extract(spec)
+    classes = DecompositionClassEnumerator.enumerate_classes(inv)
+
+    # Instantiate candidate map with max_parts=2
+    cmap = CandidateMap(inv, classes)
+    cmap._build_initial_graph(max_parts=2)
+    # 2 classes * partitions of degree 7 with max_parts 2
+    assert cmap.pruning_statistics['generated'] > len(classes)
+
+
 def test_root_order_permutation_invariance():
     """Verifies that RootDecomposer orbit classification is invariant to root input permutations."""
     from filter_compiler.compiler import RootDecomposer
