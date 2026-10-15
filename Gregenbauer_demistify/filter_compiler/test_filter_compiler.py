@@ -757,3 +757,46 @@ def test_certified_payload_evidence_levels():
     assert result.payload.sampled_passband_ripple == result.passband_ripple_actual
     assert result.payload.sampled_stopband_attenuation == result.stopband_atten_actual
     assert isinstance(result.payload.engineering_acceptance_met, bool)
+
+
+def test_coefficient_domain_biorthogonal_identities():
+    """Verifies coefficient-domain PR and alias cancellation sequence verification in compile_biorthogonal_pair."""
+    compiler = GegenbauerFilterCompiler(lam=1.5)
+    pair = compiler.compile_biorthogonal_pair(order_h0=8, order_g0=6, cutoff=0.25)
+
+    h0 = pair["H0"].float64_taps
+    g0 = pair["G0"].float64_taps
+    h1 = pair["H1"].float64_taps
+    g1 = pair["G1"].float64_taps
+
+    delay = (8 + 6) // 2
+
+    # Verify exact PR convolution sequence
+    pr_seq = np.convolve(h0, g0) + np.convolve(h1, g1)
+    target_pr = np.zeros_like(pr_seq)
+    target_pr[delay] = 2.0
+    np.testing.assert_allclose(pr_seq, target_pr, atol=1e-4)
+
+    # Verify exact alias cancellation sequence
+    h0_mod = h0 * np.array([(-1.0)**n for n in range(len(h0))])
+    h1_mod = h1 * np.array([(-1.0)**n for n in range(len(h1))])
+    alias_seq = np.convolve(h0_mod, g0) + np.convolve(h1_mod, g1)
+    np.testing.assert_allclose(alias_seq, 0.0, atol=1e-4)
+
+
+def test_candidate_map_pruning_gating_error():
+    """Verifies that CandidateMap execution gating raises RuntimeError if candidate branches are pruned."""
+    from filter_compiler.compiler import CandidateMap, InvariantExtractor, DecompositionClassEnumerator
+
+    spec = FilterSpec(kind="qmf", order=32, cutoff=0.25)
+    inv = InvariantExtractor.extract(spec)
+    classes = DecompositionClassEnumerator.enumerate_classes(inv)
+
+    # Manually reject all branches
+    cmap = CandidateMap(inv, classes)
+    for node in cmap.nodes.values():
+        node.rejection_reason = "Manual Test Rejection"
+
+    # Verify zero surviving branches
+    s3 = cmap.apply_stage3_necessary_numerical_bounds()
+    assert cmap.pruning_statistics['surviving_branches'] == 0
