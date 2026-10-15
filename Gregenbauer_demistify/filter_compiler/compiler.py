@@ -2087,6 +2087,10 @@ class GegenbauerFilterCompiler:
                 q31_scale=h0_quant.q31_scale
             )
         else:
+            cmap.apply_stage3_necessary_numerical_bounds()
+            if cmap.pruning_statistics['surviving_branches'] == 0:
+                raise RuntimeError("CandidateMap constraint graph pruned all candidate branches; no admissible design family survived Stage 1-3 pruning.")
+
             a_coeffs, K, cond_val, augmented_design_residual, data_design_residual, regularization_residual = self.solve_coefficients(spec)
             h0_float = self.transform_to_taps(a_coeffs, spec)
             h0_quant = self.quantize_taps(h0_float)
