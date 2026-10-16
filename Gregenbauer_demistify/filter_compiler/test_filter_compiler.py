@@ -594,6 +594,13 @@ def test_root_decomposer_targeted_orbit_cases():
     assert len(units_near) == 1
     assert units_near[0].kind == 'REAL_RECIPROCAL_PAIR'
 
+    # Near-endpoint unit-circle pair: z = e^(i * 0.02) and z = e^(-i * 0.02) (must be classified as UNIT_CIRCLE_PAIR, not REAL_ENDPOINT)
+    theta = 0.02
+    uc_near_ep = np.array([np.exp(1j * theta), np.exp(-1j * theta)])
+    units_uc_near = RootDecomposer.decompose_z_roots(uc_near_ep, total_z_degree=2, rel_tol=1e-3, abs_tol=1e-3)
+    assert len(units_uc_near) == 1
+    assert units_uc_near[0].kind == 'UNIT_CIRCLE_PAIR'
+
     # Permutation invariance: root array order does not affect decomposition
     perm1 = np.array([z1, 1.0 / z1, np.conj(z1), 1.0 / np.conj(z1)])
     perm2 = np.array([1.0 / np.conj(z1), z1, 1.0 / z1, np.conj(z1)])

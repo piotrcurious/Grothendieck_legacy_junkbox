@@ -480,11 +480,13 @@ class RootDecomposer:
             m1 = c1['mult']
             tol1 = max(abs_tol, rel_tol * abs(r1))
 
-            # 1. Real Endpoint (|Im(r1)| <= tol1 and ||Re(r1)| - 1| <= tol1)
-            is_ep_candidate = abs(np.imag(r1)) <= tol1 and abs(abs(np.real(r1)) - 1.0) <= tol1
+            # 1. Real Endpoint (Euclidean distance |r1 - ep| <= tol1 in complex plane)
+            dist_p1 = abs(r1 - 1.0)
+            dist_m1 = abs(r1 - (-1.0))
+            is_ep_candidate = (dist_p1 <= tol1) or (dist_m1 <= tol1)
             if is_ep_candidate:
-                ep_val = 1.0 if np.real(r1) > 0 else -1.0
-                res_ep = float(abs(r1 - ep_val))
+                ep_val = 1.0 if dist_p1 <= dist_m1 else -1.0
+                res_ep = float(min(dist_p1, dist_m1))
 
                 # Check if a distinct real reciprocal partner exists with smaller residual
                 r1_real = float(np.real(r1))
@@ -516,7 +518,7 @@ class RootDecomposer:
                         multiplicity=m1,
                         orbit_residual=res_ep,
                         matching_margin=float(ep_match_tol - res_ep),
-                        classification_status="EXACT_ORBIT" if res_ep < 1e-12 else "NUMERICALLY_MATCHED"
+                        classification_status="EXACT_ORBIT" if res_ep < 1e-15 else "NUMERICALLY_MATCHED"
                     ))
                 else:
                     is_ep_candidate = False
@@ -532,15 +534,20 @@ class RootDecomposer:
                     target_recip = 1.0 / r1_real
                     recip_idx = -1
                     best_dist = float('inf')
+                    second_best_dist = float('inf')
                     match_tol = max(abs_tol * 10.0, rel_tol * abs(target_recip))
                     for j in range(len(raw_clusters)):
                         if not used_c[j] and j != i:
                             r2_candidate = raw_clusters[j]['rep']
                             if abs(np.imag(r2_candidate)) <= max(tol1 * 10.0, abs_tol * 10.0):
                                 dist = abs(r2_candidate - target_recip)
-                                if dist <= match_tol and dist < best_dist:
-                                    best_dist = dist
-                                    recip_idx = j
+                                if dist <= match_tol:
+                                    if dist < best_dist:
+                                        second_best_dist = best_dist
+                                        best_dist = dist
+                                        recip_idx = j
+                                    elif dist < second_best_dist:
+                                        second_best_dist = dist
 
                     if recip_idx != -1:
                         c2 = raw_clusters[recip_idx]
@@ -552,13 +559,17 @@ class RootDecomposer:
                         res_recip = float(abs(r1_real * r2_real - 1.0))
                         if res_recip > max_orbit_res:
                             raise ValueError(f"Real reciprocal pair residual {res_recip:.4e} exceeds threshold {max_orbit_res:.4e} for {r1_real:.6f} and {r2_real:.6f}.")
+
+                        delta_C = second_best_dist - best_dist if second_best_dist < float('inf') else match_tol - best_dist
+                        status = "AMBIGUOUS" if (second_best_dist < float('inf') and delta_C < match_tol * 0.1) else "NUMERICALLY_MATCHED"
+
                         atomic_units.append(RootOrbit(
                             kind='REAL_RECIPROCAL_PAIR',
                             roots=np.array([r1_real, r2_real], dtype=np.float64),
                             multiplicity=m1,
                             orbit_residual=res_recip,
-                            matching_margin=float(match_tol - res_recip),
-                            classification_status="EXACT_ORBIT" if res_recip < 1e-12 else "NUMERICALLY_MATCHED"
+                            matching_margin=float(delta_C),
+                            classification_status=status
                         ))
                     else:
                         raise ValueError(f"Unpaired real reciprocal root detected for {r1_real:.6f} (target reciprocal {target_recip:.6f} not found within tol={match_tol:.3e}).")
@@ -568,14 +579,19 @@ class RootDecomposer:
                     target_conj = np.conj(r1)
                     conj_idx = -1
                     best_dist = float('inf')
+                    second_best_dist = float('inf')
                     match_tol = max(abs_tol * 10.0, rel_tol * abs(r1))
                     for j in range(len(raw_clusters)):
                         if not used_c[j] and j != i:
                             r2_candidate = raw_clusters[j]['rep']
                             dist = abs(r2_candidate - target_conj)
-                            if dist <= match_tol and dist < best_dist:
-                                best_dist = dist
-                                conj_idx = j
+                            if dist <= match_tol:
+                                if dist < best_dist:
+                                    second_best_dist = best_dist
+                                    best_dist = dist
+                                    conj_idx = j
+                                elif dist < second_best_dist:
+                                    second_best_dist = dist
 
                     if conj_idx != -1:
                         c2 = raw_clusters[conj_idx]
@@ -587,7 +603,6 @@ class RootDecomposer:
                         if m1 != c2_mult:
                             raise ValueError(f"Unit-circle conjugate orbit multiplicities disagree for root {r1}: {m1} vs {c2_mult}.")
 
-                        # Look for nearby unit-circle root pair to resolve numerical splitting of double unit-circle roots
                         nearby_idx = -1
                         nearby_conj_idx = -1
                         status_str = "NUMERICALLY_MATCHED"
@@ -614,12 +629,16 @@ class RootDecomposer:
                             status_str = "NUMERICALLY_SPLIT_RESOLVED"
 
                         res_unit = float(max(abs(abs(r1) - 1.0), abs(r1 - np.conj(r2_unit))))
+                        delta_C = second_best_dist - best_dist if second_best_dist < float('inf') else match_tol - best_dist
+                        if status_str == "NUMERICALLY_MATCHED" and second_best_dist < float('inf') and delta_C < match_tol * 0.1:
+                            status_str = "AMBIGUOUS"
+
                         atomic_units.append(RootOrbit(
                             kind='UNIT_CIRCLE_PAIR',
                             roots=np.array([r1, r2_unit], dtype=np.complex128),
                             multiplicity=m1,
                             orbit_residual=res_unit,
-                            matching_margin=float(match_tol - res_unit),
+                            matching_margin=float(delta_C),
                             classification_status=status_str
                         ))
                     else:
@@ -633,19 +652,27 @@ class RootDecomposer:
 
                     targets = [target_conj, target_recip, target_conj_recip]
                     matched_indices = []
+                    min_delta_C = float('inf')
 
                     for tgt in targets:
                         best_j = -1
                         best_d = float('inf')
+                        second_d = float('inf')
                         tgt_tol = max(abs_tol * 10.0, rel_tol * abs(tgt))
                         for j in range(len(raw_clusters)):
                             if not used_c[j] and j != i and j not in matched_indices:
                                 dist = abs(raw_clusters[j]['rep'] - tgt)
-                                if dist <= tgt_tol and dist < best_d:
-                                    best_d = dist
-                                    best_j = j
+                                if dist <= tgt_tol:
+                                    if dist < best_d:
+                                        second_d = best_d
+                                        best_d = dist
+                                        best_j = j
+                                    elif dist < second_d:
+                                        second_d = dist
                         if best_j != -1:
                             matched_indices.append(best_j)
+                            d_C = second_d - best_d if second_d < float('inf') else tgt_tol - best_d
+                            min_delta_C = min(min_delta_C, d_C)
                         else:
                             raise ValueError(f"Complex quartet member missing target {tgt} for root {r1} within tol={tgt_tol:.3e}.")
 
@@ -665,14 +692,14 @@ class RootDecomposer:
                     if res_quad > max_orbit_res:
                         raise ValueError(f"Complex quartet residual {res_quad:.4e} exceeds threshold {max_orbit_res:.4e}.")
 
-                    tgt_tol_max = max(abs_tol * 10.0, rel_tol * max(abs(tgt) for tgt in targets))
+                    status_q = "AMBIGUOUS" if min_delta_C < max_orbit_res * 0.1 else "NUMERICALLY_MATCHED"
                     atomic_units.append(RootOrbit(
                         kind='COMPLEX_RECIPROCAL_CONJUGATE_QUARTET',
                         roots=quad_roots,
                         multiplicity=m1,
                         orbit_residual=res_quad,
-                        matching_margin=float(tgt_tol_max - res_quad),
-                        classification_status="EXACT_ORBIT" if res_quad < 1e-12 else "NUMERICALLY_MATCHED"
+                        matching_margin=float(min_delta_C),
+                        classification_status=status_q
                     ))
 
         total_roots_found = sum(u.size * u.multiplicity for u in atomic_units)
@@ -2034,6 +2061,8 @@ class GegenbauerFilterCompiler:
         # LAYER 3: CANDIDATE MAP & EARLY PRUNING STAGES 1-3
         # ---------------------------------------------------------------------
         cmap = CandidateMap(invariants, classes)
+        max_parts = 2 if invariants.is_halfband else 1
+        cmap._build_initial_graph(max_parts=max_parts)
         cmap.apply_stage1_exact_structural_rejection()
         cmap.apply_stage2_decomposition_feasibility()
 
