@@ -827,3 +827,40 @@ def test_candidate_map_pruning_gating_error():
     # Verify zero surviving branches
     s3 = cmap.apply_stage3_necessary_numerical_bounds()
     assert cmap.pruning_statistics['surviving_branches'] == 0
+
+
+def test_independent_verifier_input_validation():
+    """Verifies IndependentVerifier.verify_power_polynomial input validation error handling."""
+    from filter_compiler.compiler import IndependentVerifier
+
+    # Reject even length taps
+    with pytest.raises(ValueError):
+        IndependentVerifier.verify_power_polynomial(np.array([0.5, 0.5]))
+
+    # Reject non-finite values
+    with pytest.raises(ValueError):
+        IndependentVerifier.verify_power_polynomial(np.array([0.25, np.nan, 0.25]))
+
+
+def test_biorthogonal_quantized_bank_verification():
+    """Verifies quantized filter bank PR and alias residual keys in compile_biorthogonal_pair."""
+    compiler = GegenbauerFilterCompiler(lam=1.5)
+    pair = compiler.compile_biorthogonal_pair(order_h0=8, order_g0=6, cutoff=0.25)
+
+    assert "pr_q15_residual" in pair
+    assert "alias_q15_residual" in pair
+    assert "pr_q31_residual" in pair
+    assert "alias_q31_residual" in pair
+    assert isinstance(pair["pr_q15_residual"], float)
+    assert pair["pr_q15_residual"] >= 0.0
+
+
+def test_solve_coefficients_regularization_residuals():
+    """Verifies degree-weighted coefficient penalty residual calculations in solve_coefficients."""
+    compiler = GegenbauerFilterCompiler(lam=1.25, mu_reg=1e-4, solver="spectral_regularized")
+    spec = FilterSpec(kind="lowpass", order=16, cutoff=0.25)
+
+    a_coeffs, K, cond_val, res_aug, res_data, res_reg = compiler.solve_coefficients(spec)
+    assert len(a_coeffs) == K
+    assert isinstance(res_reg, float)
+    assert res_reg >= 0.0

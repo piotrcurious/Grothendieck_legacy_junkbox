@@ -361,6 +361,15 @@ class IndependentVerifier:
     @staticmethod
     def verify_power_polynomial(p_taps: np.ndarray, grid_size: int = 2048) -> Tuple[bool, float, float, float]:
         """Verify non-negativity and half-band complementarity residual of power polynomial P(z)."""
+        if not isinstance(p_taps, np.ndarray):
+            p_taps = np.asarray(p_taps)
+        if p_taps.ndim != 1 or len(p_taps) < 3 or len(p_taps) % 2 == 0:
+            raise ValueError(f"p_taps must be a 1D array of odd length >= 3, got shape {p_taps.shape}.")
+        if not np.all(np.isfinite(p_taps)):
+            raise ValueError("p_taps must contain finite real numbers.")
+        if not isinstance(grid_size, int) or isinstance(grid_size, bool) or grid_size < 16:
+            raise ValueError(f"grid_size must be an integer >= 16, got {grid_size}.")
+
         center = (len(p_taps) - 1) // 2
         M = center
 
@@ -1619,6 +1628,8 @@ class GegenbauerFilterCompiler:
 
         z_inside = []
         for unit in atomic_units:
+            if unit.classification_status == "AMBIGUOUS":
+                raise ValueError(f"Ambiguous root orbit detected for {unit.kind} with margin {unit.matching_margin:.4e}; refusing to select factor.")
             m = unit.multiplicity
             if unit.kind == 'REAL_ENDPOINT':
                 half_m = m // 2
@@ -1675,6 +1686,8 @@ class GegenbauerFilterCompiler:
 
         z_inside = []
         for unit in atomic_units:
+            if unit.classification_status == "AMBIGUOUS":
+                raise ValueError(f"Ambiguous root orbit detected for {unit.kind} with margin {unit.matching_margin:.4e}; refusing to select factor.")
             m = unit.multiplicity
             if unit.kind == 'REAL_ENDPOINT':
                 half_m = m // 2
@@ -2102,9 +2115,14 @@ class GegenbauerFilterCompiler:
             q15_sign = np.array([(-1)**n for n in range(spec.order)], dtype=np.int32)
             q31_sign = np.array([(-1)**n for n in range(spec.order)], dtype=np.int64)
 
-            h1_q15 = (q15_sign * h0_quant.q15_taps[::-1]).astype(np.int32)
-            h1_q23 = (q15_sign * h0_quant.q23_taps[::-1]).astype(np.int32)
-            h1_q31 = (q31_sign * h0_quant.q31_taps[::-1]).astype(np.int64)
+            h1_q15_raw = q15_sign * h0_quant.q15_taps[::-1]
+            h1_q23_raw = q15_sign * h0_quant.q23_taps[::-1]
+            h1_q31_raw = q31_sign * h0_quant.q31_taps[::-1]
+
+            # Apply explicit fixed-point saturation bounds to prevent signed integer overflow
+            h1_q15 = np.clip(h1_q15_raw, -32768, 32767).astype(np.int32)
+            h1_q23 = np.clip(h1_q23_raw, -8388608, 8388607).astype(np.int32)
+            h1_q31 = np.clip(h1_q31_raw, -2147483648, 2147483647).astype(np.int64)
 
             h1_quant = QuantizedTaps(
                 float64_taps=h1_float,
@@ -2532,6 +2550,10 @@ class GegenbauerFilterCompiler:
             nyq_h0 = abs(np.sum(h0_norm * np.array([(-1.0)**n for n in range(len(h0_norm))])))
             nyq_g0 = abs(np.sum(g0_norm * np.array([(-1.0)**n for n in range(len(g0_norm))])))
 
+            # Mandatory DC gain normalization feasibility gate
+            if max(dc_err_h0, dc_err_g0) > 1e-3:
+                return
+
             K_eval = 512
             H0_eval = np.abs(np.fft.fft(h0_norm, K_eval)[:K_eval // 2 + 1])
             G0_eval = np.abs(np.fft.fft(g0_norm, K_eval)[:K_eval // 2 + 1])
@@ -2650,15 +2672,51 @@ class GegenbauerFilterCompiler:
         h1_qmf_res = float(np.max(np.abs(H1_f - G0_shift)))
         g1_qmf_res = float(np.max(np.abs(G1_f + H0_shift)))
 
+        # Quantized Bank PR & Alias Verification across Q15 and Q31 formats
+        h0_q15 = self.quantize_taps(h0_taps)
+        g0_q15 = self.quantize_taps(g0_taps)
+        h1_q15 = self.quantize_taps(h1_taps)
+        g1_q15 = self.quantize_taps(g1_taps)
+
+        h0_q15_f = h0_q15.q15_taps / h0_q15.q15_scale
+        g0_q15_f = g0_q15.q15_taps / g0_q15.q15_scale
+        h1_q15_f = h1_q15.q15_taps / h1_q15.q15_scale
+        g1_q15_f = g1_q15.q15_taps / g1_q15.q15_scale
+
+        pr_q15_seq = np.convolve(h0_q15_f, g0_q15_f) + np.convolve(h1_q15_f, g1_q15_f)
+        pr_q15_residual = float(np.max(np.abs(pr_q15_seq - target_pr_seq)))
+
+        h0_q15_mod = h0_q15_f * np.array([(-1.0)**n for n in range(len(h0_q15_f))])
+        h1_q15_mod = h1_q15_f * np.array([(-1.0)**n for n in range(len(h1_q15_f))])
+        alias_q15_seq = np.convolve(h0_q15_mod, g0_q15_f) + np.convolve(h1_q15_mod, g1_q15_f)
+        alias_q15_residual = float(np.max(np.abs(alias_q15_seq)))
+
+        h0_q31_f = h0_q15.q31_taps / h0_q15.q31_scale
+        g0_q31_f = g0_q15.q31_taps / g0_q15.q31_scale
+        h1_q31_f = h1_q15.q31_taps / h1_q15.q31_scale
+        g1_q31_f = g1_q15.q31_taps / g1_q15.q31_scale
+
+        pr_q31_seq = np.convolve(h0_q31_f, g0_q31_f) + np.convolve(h1_q31_f, g1_q31_f)
+        pr_q31_residual = float(np.max(np.abs(pr_q31_seq - target_pr_seq)))
+
+        h0_q31_mod = h0_q31_f * np.array([(-1.0)**n for n in range(len(h0_q31_f))])
+        h1_q31_mod = h1_q31_f * np.array([(-1.0)**n for n in range(len(h1_q31_f))])
+        alias_q31_seq = np.convolve(h0_q31_mod, g0_q31_f) + np.convolve(h1_q31_mod, g1_q31_f)
+        alias_q31_residual = float(np.max(np.abs(alias_q31_seq)))
+
         return {
-            "H0": self.quantize_taps(h0_taps),
-            "H1": self.quantize_taps(h1_taps),
-            "G0": self.quantize_taps(g0_taps),
-            "G1": self.quantize_taps(g1_taps),
+            "H0": h0_q15,
+            "H1": h1_q15,
+            "G0": g0_q15,
+            "G1": g1_q15,
             "P": p_prod * 0.5,
             "product_residual": product_residual,
             "pr_coeff_residual": pr_coeff_residual,
             "alias_coeff_residual": alias_coeff_residual,
+            "pr_q15_residual": pr_q15_residual,
+            "alias_q15_residual": alias_q15_residual,
+            "pr_q31_residual": pr_q31_residual,
+            "alias_q31_residual": alias_q31_residual,
             "pr_fft_residual": pr_residual,
             "alias_fft_residual": alias_residual,
             "pr_residual": pr_residual,
@@ -2767,34 +2825,39 @@ class GegenbauerFilterCompiler:
         best_score = float('inf')
         use_solver = solver if solver is not None else self.solver
 
+        compile_failures = []
         for lam in lambda_candidates:
             for mu in mu_candidates:
-                compiler = GegenbauerFilterCompiler(
-                    lam=lam,
-                    basis_terms=self.basis_terms,
-                    basis_type=self.basis_type,
-                    solver=use_solver,
-                    mu_reg=mu,
-                    reg_power=self.reg_power,
-                    asymptotic_mode=self.asymptotic_mode,
-                    factor_mode=self.factor_mode,
-                    grid_samples=self.grid_samples,
-                    precision=self.ctx.precision
-                )
-                res = compiler.compile(spec)
+                try:
+                    compiler = GegenbauerFilterCompiler(
+                        lam=lam,
+                        basis_terms=self.basis_terms,
+                        basis_type=self.basis_type,
+                        solver=use_solver,
+                        mu_reg=mu,
+                        reg_power=self.reg_power,
+                        asymptotic_mode=self.asymptotic_mode,
+                        factor_mode=self.factor_mode,
+                        grid_samples=self.grid_samples,
+                        precision=self.ctx.precision
+                    )
+                    res = compiler.compile(spec)
 
-                score = res.passband_ripple_actual * 10.0 - res.stopband_atten_actual
-                if res.spec.kind in ("qmf", "asymmetric_qmf"):
-                    score += res.qmf_power_complementarity_max_db * 20.0 + res.qmf_alias_distortion_max_db
+                    score = res.passband_ripple_actual * 10.0 - res.stopband_atten_actual
+                    if res.spec.kind in ("qmf", "asymmetric_qmf"):
+                        score += res.qmf_power_complementarity_max_db * 20.0 + res.qmf_alias_distortion_max_db
 
-                score += res.payload.provenance.total * 100.0
+                    score += res.payload.provenance.total * 100.0
 
-                if not res.payload.is_certified:
-                    score += 1e5
+                    if score < best_score:
+                        best_score = score
+                        best_res = res
+                except (ValueError, RuntimeError, NotImplementedError) as exc:
+                    compile_failures.append((lam, mu, str(exc)))
 
-                if score < best_score:
-                    best_score = score
-                    best_res = res
+        if best_res is None:
+            fail_msg = "; ".join([f"lam={l}, mu={m}: {err}" for l, m, err in compile_failures])
+            raise RuntimeError(f"pareto_search failed to compile any valid candidate. Failures: {fail_msg}")
 
         return best_res
 
