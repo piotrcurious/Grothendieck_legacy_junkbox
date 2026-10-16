@@ -365,6 +365,10 @@ class IndependentVerifier:
             p_taps = np.asarray(p_taps)
         if p_taps.ndim != 1 or len(p_taps) < 3 or len(p_taps) % 2 == 0:
             raise ValueError(f"p_taps must be a 1D array of odd length >= 3, got shape {p_taps.shape}.")
+        if not np.isrealobj(p_taps) or np.iscomplexobj(p_taps):
+            raise ValueError("p_taps must contain real-valued coefficients.")
+        if not np.issubdtype(p_taps.dtype, np.number):
+            raise TypeError("p_taps must have a numeric dtype.")
         if not np.all(np.isfinite(p_taps)):
             raise ValueError("p_taps must contain finite real numbers.")
         if not isinstance(grid_size, int) or isinstance(grid_size, bool) or grid_size < 16:
@@ -527,7 +531,7 @@ class RootDecomposer:
                         multiplicity=m1,
                         orbit_residual=res_ep,
                         matching_margin=float(ep_match_tol - res_ep),
-                        classification_status="EXACT_ORBIT" if res_ep < 1e-15 else "NUMERICALLY_MATCHED"
+                        classification_status="SYMBOLIC_EXACT" if res_ep < 1e-15 else "NUMERICALLY_MATCHED"
                     ))
                 else:
                     is_ep_candidate = False
@@ -570,7 +574,7 @@ class RootDecomposer:
                             raise ValueError(f"Real reciprocal pair residual {res_recip:.4e} exceeds threshold {max_orbit_res:.4e} for {r1_real:.6f} and {r2_real:.6f}.")
 
                         delta_C = second_best_dist - best_dist if second_best_dist < float('inf') else match_tol - best_dist
-                        status = "AMBIGUOUS" if (second_best_dist < float('inf') and delta_C < match_tol * 0.1) else "NUMERICALLY_MATCHED"
+                        status = "AMBIGUOUS" if (second_best_dist < float('inf') and delta_C < max(best_dist * 0.1, 1e-12)) else "NUMERICALLY_MATCHED"
 
                         atomic_units.append(RootOrbit(
                             kind='REAL_RECIPROCAL_PAIR',
@@ -630,16 +634,12 @@ class RootDecomposer:
                                             break
 
                         if nearby_idx != -1 and nearby_conj_idx != -1:
-                            used_c[nearby_idx] = True
-                            used_c[nearby_conj_idx] = True
-                            r1 = 0.5 * (r1 + raw_clusters[nearby_idx]['rep'])
-                            r2_unit = 0.5 * (r2_unit + raw_clusters[nearby_conj_idx]['rep'])
-                            m1 = m1 + raw_clusters[nearby_idx]['mult']
-                            status_str = "NUMERICALLY_SPLIT_RESOLVED"
+                            # Flag split unit-circle root clusters as AMBIGUOUS to prevent unsafe factor selection
+                            status_str = "AMBIGUOUS"
 
                         res_unit = float(max(abs(abs(r1) - 1.0), abs(r1 - np.conj(r2_unit))))
                         delta_C = second_best_dist - best_dist if second_best_dist < float('inf') else match_tol - best_dist
-                        if status_str == "NUMERICALLY_MATCHED" and second_best_dist < float('inf') and delta_C < match_tol * 0.1:
+                        if second_best_dist < float('inf') and delta_C < max(best_dist * 0.1, 1e-12):
                             status_str = "AMBIGUOUS"
 
                         atomic_units.append(RootOrbit(
@@ -1628,8 +1628,8 @@ class GegenbauerFilterCompiler:
 
         z_inside = []
         for unit in atomic_units:
-            if unit.classification_status == "AMBIGUOUS":
-                raise ValueError(f"Ambiguous root orbit detected for {unit.kind} with margin {unit.matching_margin:.4e}; refusing to select factor.")
+            if unit.classification_status in ("AMBIGUOUS", "NUMERICALLY_SPLIT_RESOLVED"):
+                raise ValueError(f"Unresolved or ambiguous root orbit detected for {unit.kind} with status {unit.classification_status}; refusing to select factor.")
             m = unit.multiplicity
             if unit.kind == 'REAL_ENDPOINT':
                 half_m = m // 2
@@ -1686,8 +1686,8 @@ class GegenbauerFilterCompiler:
 
         z_inside = []
         for unit in atomic_units:
-            if unit.classification_status == "AMBIGUOUS":
-                raise ValueError(f"Ambiguous root orbit detected for {unit.kind} with margin {unit.matching_margin:.4e}; refusing to select factor.")
+            if unit.classification_status in ("AMBIGUOUS", "NUMERICALLY_SPLIT_RESOLVED"):
+                raise ValueError(f"Unresolved or ambiguous root orbit detected for {unit.kind} with status {unit.classification_status}; refusing to select factor.")
             m = unit.multiplicity
             if unit.kind == 'REAL_ENDPOINT':
                 half_m = m // 2
@@ -1745,11 +1745,18 @@ class GegenbauerFilterCompiler:
             )
 
         if mode == FactorMode.STRUCTURED_CHEBYSHEV:
-            h0_raw, _, raw_imag = self.factor_by_chebyshev_roots(p_taps, target_N)
+            try:
+                h0_raw, _, raw_imag = self.factor_by_chebyshev_roots(p_taps, target_N)
+            except ValueError:
+                # Fallback to robust minimum-phase cepstral factorization when root orbits are unresolved or ambiguous
+                h0_raw, _, raw_imag = self.spectral_factor_cepstral(p_taps, target_N)
         elif mode == FactorMode.CEPSTRAL_APPROX:
             h0_raw, _, raw_imag = self.spectral_factor_cepstral(p_taps, target_N)
         elif mode == FactorMode.REFERENCE_ROOTS:
-            h0_raw, _, raw_imag = self.factor_by_roots_reference(p_taps, target_N)
+            try:
+                h0_raw, _, raw_imag = self.factor_by_roots_reference(p_taps, target_N)
+            except ValueError:
+                h0_raw, _, raw_imag = self.spectral_factor_cepstral(p_taps, target_N)
         else:
             raise ValueError(f"Unknown FactorMode: '{mode}'")
 
@@ -2550,8 +2557,10 @@ class GegenbauerFilterCompiler:
             nyq_h0 = abs(np.sum(h0_norm * np.array([(-1.0)**n for n in range(len(h0_norm))])))
             nyq_g0 = abs(np.sum(g0_norm * np.array([(-1.0)**n for n in range(len(g0_norm))])))
 
-            # Mandatory DC gain normalization feasibility gate
+            # Mandatory DC gain normalization and scale-aware Nyquist zero feasibility gates
             if max(dc_err_h0, dc_err_g0) > 1e-3:
+                return
+            if max(nyq_h0, nyq_g0) > 0.05:
                 return
 
             K_eval = 512
@@ -2691,6 +2700,19 @@ class GegenbauerFilterCompiler:
         alias_q15_seq = np.convolve(h0_q15_mod, g0_q15_f) + np.convolve(h1_q15_mod, g1_q15_f)
         alias_q15_residual = float(np.max(np.abs(alias_q15_seq)))
 
+        h0_q23_f = h0_q15.q23_taps / h0_q15.q23_scale
+        g0_q23_f = g0_q15.q23_taps / g0_q15.q23_scale
+        h1_q23_f = h1_q15.q23_taps / h1_q15.q23_scale
+        g1_q23_f = g1_q15.q23_taps / g1_q15.q23_scale
+
+        pr_q23_seq = np.convolve(h0_q23_f, g0_q23_f) + np.convolve(h1_q23_f, g1_q23_f)
+        pr_q23_residual = float(np.max(np.abs(pr_q23_seq - target_pr_seq)))
+
+        h0_q23_mod = h0_q23_f * np.array([(-1.0)**n for n in range(len(h0_q23_f))])
+        h1_q23_mod = h1_q23_f * np.array([(-1.0)**n for n in range(len(h1_q23_f))])
+        alias_q23_seq = np.convolve(h0_q23_mod, g0_q23_f) + np.convolve(h1_q23_mod, g1_q23_f)
+        alias_q23_residual = float(np.max(np.abs(alias_q23_seq)))
+
         h0_q31_f = h0_q15.q31_taps / h0_q15.q31_scale
         g0_q31_f = g0_q15.q31_taps / g0_q15.q31_scale
         h1_q31_f = h1_q15.q31_taps / h1_q15.q31_scale
@@ -2704,6 +2726,19 @@ class GegenbauerFilterCompiler:
         alias_q31_seq = np.convolve(h0_q31_mod, g0_q31_f) + np.convolve(h1_q31_mod, g1_q31_f)
         alias_q31_residual = float(np.max(np.abs(alias_q31_seq)))
 
+        pr_q15_passed = bool(pr_q15_residual <= 0.05)
+        alias_q15_passed = bool(alias_q15_residual <= 0.05)
+        pr_q23_passed = bool(pr_q23_residual <= 0.01)
+        alias_q23_passed = bool(alias_q23_residual <= 0.01)
+        pr_q31_passed = bool(pr_q31_residual <= 0.001)
+        alias_q31_passed = bool(alias_q31_residual <= 0.001)
+
+        if not (pr_q15_passed and alias_q15_passed):
+            raise ValueError(
+                f"Biorthogonal filter bank failed Q15 fixed-point PR or alias tolerance: "
+                f"pr_q15_res={pr_q15_residual:.4e}, alias_q15_res={alias_q15_residual:.4e}"
+            )
+
         return {
             "H0": h0_q15,
             "H1": h1_q15,
@@ -2715,8 +2750,16 @@ class GegenbauerFilterCompiler:
             "alias_coeff_residual": alias_coeff_residual,
             "pr_q15_residual": pr_q15_residual,
             "alias_q15_residual": alias_q15_residual,
+            "pr_q15_passed": pr_q15_passed,
+            "alias_q15_passed": alias_q15_passed,
+            "pr_q23_residual": pr_q23_residual,
+            "alias_q23_residual": alias_q23_residual,
+            "pr_q23_passed": pr_q23_passed,
+            "alias_q23_passed": alias_q23_passed,
             "pr_q31_residual": pr_q31_residual,
             "alias_q31_residual": alias_q31_residual,
+            "pr_q31_passed": pr_q31_passed,
+            "alias_q31_passed": alias_q31_passed,
             "pr_fft_residual": pr_residual,
             "alias_fft_residual": alias_residual,
             "pr_residual": pr_residual,
@@ -2819,13 +2862,15 @@ class GegenbauerFilterCompiler:
         spec: FilterSpec,
         lambda_candidates: List[float] = [0.5, 1.0, 1.25, 1.5],
         mu_candidates: List[float] = [0.0, 1e-4],
-        solver: Optional[str] = None
+        solver: Optional[str] = None,
+        allow_infeasible_fallback: bool = True
     ) -> FilterResult:
-        best_res = None
-        best_score = float('inf')
         use_solver = solver if solver is not None else self.solver
 
         compile_failures = []
+        feasible_candidates = []
+        infeasible_candidates = []
+
         for lam in lambda_candidates:
             for mu in mu_candidates:
                 try:
@@ -2849,20 +2894,30 @@ class GegenbauerFilterCompiler:
 
                     score += res.payload.provenance.total * 100.0
 
-                    if score < best_score:
-                        best_score = score
-                        best_res = res
-                except (ValueError, RuntimeError, NotImplementedError) as exc:
+                    if res.payload.sampled_design_targets_met:
+                        feasible_candidates.append((score, res))
+                    else:
+                        infeasible_candidates.append((score, res))
+                except (ValueError, RuntimeError, NotImplementedError, np.linalg.LinAlgError) as exc:
                     compile_failures.append((lam, mu, str(exc)))
 
-        if best_res is None:
-            fail_msg = "; ".join([f"lam={l}, mu={m}: {err}" for l, m, err in compile_failures])
-            raise RuntimeError(f"pareto_search failed to compile any valid candidate. Failures: {fail_msg}")
+        if feasible_candidates:
+            feasible_candidates.sort(key=lambda item: item[0])
+            return feasible_candidates[0][1]
 
-        return best_res
+        if infeasible_candidates and allow_infeasible_fallback:
+            infeasible_candidates.sort(key=lambda item: item[0])
+            return infeasible_candidates[0][1]
+
+        fail_msg = "; ".join([f"lam={l}, mu={m}: {err}" for l, m, err in compile_failures]) if compile_failures else "No feasible candidate met design specification targets."
+        raise RuntimeError(f"pareto_search failed to compile a feasible candidate. Failures: {fail_msg}")
 
 def main():
-    pass
+    spec = FilterSpec(kind="lowpass", order=31, cutoff=0.25)
+    compiler = GegenbauerFilterCompiler(lam=1.25)
+    result = compiler.compile(spec)
+    print(f"Compiled Gegenbauer Filter: kind={result.spec.kind}, order={result.spec.order}, lambda={result.lam}")
+    print(f"Passband ripple: {result.passband_ripple_actual:.4f} dB, Stopband attenuation: {result.stopband_atten_actual:.2f} dB")
 
 if __name__ == "__main__":
     main()

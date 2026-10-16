@@ -841,6 +841,10 @@ def test_independent_verifier_input_validation():
     with pytest.raises(ValueError):
         IndependentVerifier.verify_power_polynomial(np.array([0.25, np.nan, 0.25]))
 
+    # Reject complex input array
+    with pytest.raises(ValueError):
+        IndependentVerifier.verify_power_polynomial(np.array([0.25 + 0.1j, 0.5 + 0.0j, 0.25 + 0.0j]))
+
 
 def test_biorthogonal_quantized_bank_verification():
     """Verifies quantized filter bank PR and alias residual keys in compile_biorthogonal_pair."""
@@ -849,8 +853,13 @@ def test_biorthogonal_quantized_bank_verification():
 
     assert "pr_q15_residual" in pair
     assert "alias_q15_residual" in pair
+    assert "pr_q23_residual" in pair
+    assert "alias_q23_residual" in pair
     assert "pr_q31_residual" in pair
     assert "alias_q31_residual" in pair
+    assert "pr_q15_passed" in pair
+    assert "alias_q15_passed" in pair
+    assert isinstance(pair["pr_q15_passed"], bool)
     assert isinstance(pair["pr_q15_residual"], float)
     assert pair["pr_q15_residual"] >= 0.0
 
