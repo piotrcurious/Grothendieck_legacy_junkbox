@@ -99,6 +99,10 @@ class BiorthogonalResult:
             f"Gegenbauer Lambda: {self.lam:.4f} | Sampling Rate: {self.sampling_rate} Hz",
             f"Half-Band Product Residual: {self.pair_dict['product_residual']:.6e}",
             f"Polyphase Perfect Reconstruction Error: {self.pair_dict['pr_error']:.6e}",
+            f"Coefficient-Domain PR Residual: {self.pair_dict.get('pr_coeff_residual', 0.0):.6e} | Alias Residual: {self.pair_dict.get('alias_coeff_residual', 0.0):.6e}",
+            f"Quantized Q15 PR Residual: {self.pair_dict.get('pr_q15_residual', 0.0):.6e} (Passed: {self.pair_dict.get('pr_q15_passed', False)})",
+            f"Quantized Q23 PR Residual: {self.pair_dict.get('pr_q23_residual', 0.0):.6e} (Passed: {self.pair_dict.get('pr_q23_passed', False)})",
+            f"Quantized Q31 PR Residual: {self.pair_dict.get('pr_q31_residual', 0.0):.6e} (Passed: {self.pair_dict.get('pr_q31_passed', False)})",
             "Filter Bank Taps: H0 (Analysis LP), H1 (Analysis HP), G0 (Synthesis LP), G1 (Synthesis HP)"
         ]
         return "\n".join(lines)
