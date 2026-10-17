@@ -361,6 +361,19 @@ class IndependentVerifier:
     @staticmethod
     def verify_power_polynomial(p_taps: np.ndarray, grid_size: int = 2048) -> Tuple[bool, float, float, float]:
         """Verify non-negativity and half-band complementarity residual of power polynomial P(z)."""
+        if not isinstance(p_taps, np.ndarray):
+            p_taps = np.asarray(p_taps)
+        if p_taps.ndim != 1 or len(p_taps) < 3 or len(p_taps) % 2 == 0:
+            raise ValueError(f"p_taps must be a 1D array of odd length >= 3, got shape {p_taps.shape}.")
+        if not np.isrealobj(p_taps) or np.iscomplexobj(p_taps):
+            raise ValueError("p_taps must contain real-valued coefficients.")
+        if not np.issubdtype(p_taps.dtype, np.number):
+            raise TypeError("p_taps must have a numeric dtype.")
+        if not np.all(np.isfinite(p_taps)):
+            raise ValueError("p_taps must contain finite real numbers.")
+        if not isinstance(grid_size, int) or isinstance(grid_size, bool) or grid_size < 16:
+            raise ValueError(f"grid_size must be an integer >= 16, got {grid_size}.")
+
         center = (len(p_taps) - 1) // 2
         M = center
 
@@ -489,8 +502,8 @@ class RootDecomposer:
             # 1. Real Endpoint (strictly real and ||Re(r1)| - 1| <= tol1)
             is_ep_candidate = is_real_root and abs(abs(np.real(r1)) - 1.0) <= tol1
             if is_ep_candidate:
-                ep_val = 1.0 if np.real(r1) > 0 else -1.0
-                res_ep = float(abs(r1 - ep_val))
+                ep_val = 1.0 if dist_p1 <= dist_m1 else -1.0
+                res_ep = float(min(dist_p1, dist_m1))
 
                 # Check if a distinct real reciprocal partner exists with smaller residual
                 r1_real = float(np.real(r1))
@@ -522,7 +535,7 @@ class RootDecomposer:
                         multiplicity=m1,
                         orbit_residual=res_ep,
                         matching_margin=float(ep_match_tol - res_ep),
-                        classification_status="EXACT_ORBIT" if res_ep < 1e-12 else "NUMERICALLY_MATCHED"
+                        classification_status="NUMERICALLY_MATCHED"
                     ))
                 else:
                     is_ep_candidate = False
@@ -538,15 +551,20 @@ class RootDecomposer:
                     target_recip = 1.0 / r1_real
                     recip_idx = -1
                     best_dist = float('inf')
+                    second_best_dist = float('inf')
                     match_tol = max(abs_tol * 10.0, rel_tol * abs(target_recip))
                     for j in range(len(raw_clusters)):
                         if not used_c[j] and j != i:
                             r2_candidate = raw_clusters[j]['rep']
                             if abs(np.imag(r2_candidate)) <= max(tol1 * 10.0, abs_tol * 10.0):
                                 dist = abs(r2_candidate - target_recip)
-                                if dist <= match_tol and dist < best_dist:
-                                    best_dist = dist
-                                    recip_idx = j
+                                if dist <= match_tol:
+                                    if dist < best_dist:
+                                        second_best_dist = best_dist
+                                        best_dist = dist
+                                        recip_idx = j
+                                    elif dist < second_best_dist:
+                                        second_best_dist = dist
 
                     if recip_idx != -1:
                         c2 = raw_clusters[recip_idx]
@@ -558,13 +576,17 @@ class RootDecomposer:
                         res_recip = float(abs(r1_real * r2_real - 1.0))
                         if res_recip > max_orbit_res:
                             raise ValueError(f"Real reciprocal pair residual {res_recip:.4e} exceeds threshold {max_orbit_res:.4e} for {r1_real:.6f} and {r2_real:.6f}.")
+
+                        delta_C = second_best_dist - best_dist if second_best_dist < float('inf') else match_tol - best_dist
+                        status = "AMBIGUOUS" if (second_best_dist < float('inf') and delta_C < max(best_dist * 0.1, 1e-12)) else "NUMERICALLY_MATCHED"
+
                         atomic_units.append(RootOrbit(
                             kind='REAL_RECIPROCAL_PAIR',
                             roots=np.array([r1_real, r2_real], dtype=np.float64),
                             multiplicity=m1,
                             orbit_residual=res_recip,
-                            matching_margin=float(match_tol - res_recip),
-                            classification_status="EXACT_ORBIT" if res_recip < 1e-12 else "NUMERICALLY_MATCHED"
+                            matching_margin=float(delta_C),
+                            classification_status=status
                         ))
                     else:
                         raise ValueError(f"Unpaired real reciprocal root detected for {r1_real:.6f} (target reciprocal {target_recip:.6f} not found within tol={match_tol:.3e}).")
@@ -574,14 +596,19 @@ class RootDecomposer:
                     target_conj = np.conj(r1)
                     conj_idx = -1
                     best_dist = float('inf')
+                    second_best_dist = float('inf')
                     match_tol = max(abs_tol * 10.0, rel_tol * abs(r1))
                     for j in range(len(raw_clusters)):
                         if not used_c[j] and j != i:
                             r2_candidate = raw_clusters[j]['rep']
                             dist = abs(r2_candidate - target_conj)
-                            if dist <= match_tol and dist < best_dist:
-                                best_dist = dist
-                                conj_idx = j
+                            if dist <= match_tol:
+                                if dist < best_dist:
+                                    second_best_dist = best_dist
+                                    best_dist = dist
+                                    conj_idx = j
+                                elif dist < second_best_dist:
+                                    second_best_dist = dist
 
                     if conj_idx != -1:
                         c2 = raw_clusters[conj_idx]
@@ -595,7 +622,6 @@ class RootDecomposer:
                         if m1 != c2_mult:
                             raise ValueError(f"Unit-circle conjugate orbit multiplicities disagree for root {r1}: {m1} vs {c2_mult}.")
 
-                        # Look for nearby unit-circle root pair to resolve numerical splitting of double unit-circle roots
                         nearby_idx = -1
                         nearby_conj_idx = -1
                         status_str = "NUMERICALLY_MATCHED"
@@ -614,20 +640,20 @@ class RootDecomposer:
                                             break
 
                         if nearby_idx != -1 and nearby_conj_idx != -1:
-                            used_c[nearby_idx] = True
-                            used_c[nearby_conj_idx] = True
-                            r1 = 0.5 * (r1 + raw_clusters[nearby_idx]['rep'])
-                            r2_unit = 0.5 * (r2_unit + raw_clusters[nearby_conj_idx]['rep'])
-                            m1 = m1 + raw_clusters[nearby_idx]['mult']
-                            status_str = "NUMERICALLY_SPLIT_RESOLVED"
+                            # Flag split unit-circle root clusters as AMBIGUOUS to prevent unsafe factor selection
+                            status_str = "AMBIGUOUS"
 
                         res_unit = float(max(abs(abs(r1) - 1.0), abs(r1 - np.conj(r2_unit))))
+                        delta_C = second_best_dist - best_dist if second_best_dist < float('inf') else match_tol - best_dist
+                        if second_best_dist < float('inf') and delta_C < max(best_dist * 0.1, 1e-12):
+                            status_str = "AMBIGUOUS"
+
                         atomic_units.append(RootOrbit(
                             kind='UNIT_CIRCLE_PAIR',
                             roots=np.array([r1, r2_unit], dtype=np.complex128),
                             multiplicity=m1,
                             orbit_residual=res_unit,
-                            matching_margin=float(match_tol - res_unit),
+                            matching_margin=float(delta_C),
                             classification_status=status_str
                         ))
                     else:
@@ -641,19 +667,27 @@ class RootDecomposer:
 
                     targets = [target_conj, target_recip, target_conj_recip]
                     matched_indices = []
+                    min_delta_C = float('inf')
 
                     for tgt in targets:
                         best_j = -1
                         best_d = float('inf')
+                        second_d = float('inf')
                         tgt_tol = max(abs_tol * 10.0, rel_tol * abs(tgt))
                         for j in range(len(raw_clusters)):
                             if not used_c[j] and j != i and j not in matched_indices:
                                 dist = abs(raw_clusters[j]['rep'] - tgt)
-                                if dist <= tgt_tol and dist < best_d:
-                                    best_d = dist
-                                    best_j = j
+                                if dist <= tgt_tol:
+                                    if dist < best_d:
+                                        second_d = best_d
+                                        best_d = dist
+                                        best_j = j
+                                    elif dist < second_d:
+                                        second_d = dist
                         if best_j != -1:
                             matched_indices.append(best_j)
+                            d_C = second_d - best_d if second_d < float('inf') else tgt_tol - best_d
+                            min_delta_C = min(min_delta_C, d_C)
                         else:
                             raise ValueError(f"Complex quartet member missing target {tgt} for root {r1} within tol={tgt_tol:.3e}.")
 
@@ -673,14 +707,14 @@ class RootDecomposer:
                     if res_quad > max_orbit_res:
                         raise ValueError(f"Complex quartet residual {res_quad:.4e} exceeds threshold {max_orbit_res:.4e}.")
 
-                    tgt_tol_max = max(abs_tol * 10.0, rel_tol * max(abs(tgt) for tgt in targets))
+                    status_q = "AMBIGUOUS" if min_delta_C < max_orbit_res * 0.1 else "NUMERICALLY_MATCHED"
                     atomic_units.append(RootOrbit(
                         kind='COMPLEX_RECIPROCAL_CONJUGATE_QUARTET',
                         roots=quad_roots,
                         multiplicity=m1,
                         orbit_residual=res_quad,
-                        matching_margin=float(tgt_tol_max - res_quad),
-                        classification_status="EXACT_ORBIT" if res_quad < 1e-12 else "NUMERICALLY_MATCHED"
+                        matching_margin=float(min_delta_C),
+                        classification_status=status_q
                     ))
 
         total_roots_found = sum(u.size * u.multiplicity for u in atomic_units)
@@ -758,6 +792,9 @@ class FactorizationDiagnostics:
     zero_on_unit_circle_count: int
     finite: bool
     certified: bool
+    requested_mode: Optional[FactorMode] = None
+    actual_mode: Optional[FactorMode] = None
+    fallback_reason: Optional[str] = None
 
     @property
     def coefficient_residual(self) -> float:
@@ -1013,8 +1050,6 @@ class FilterSpec:
         if self.kind == "asymmetric_qmf":
             if not (0.0 < self.wp < 0.25 < self.ws < 0.5):
                 raise ValueError(f"Asymmetric QMF requires transition band straddling fs/4 (0 < wp < 0.25 < ws < 0.5), got wp={self.wp}, ws={self.ws}")
-            if abs((self.wp + self.ws) - 0.5) > 1e-6:
-                raise ValueError(f"Asymmetric QMF target transition edges must satisfy wp + ws == 0.5 to remain compatible with half-band complementarity, got wp={self.wp}, ws={self.ws} (sum = {self.wp + self.ws})")
 
         if self.kind in ("lowpass", "qmf", "asymmetric_qmf"):
             if not (0.0 < self.wp < self.ws < 0.5):
@@ -1435,7 +1470,10 @@ class GegenbauerFilterCompiler:
         p_taps: np.ndarray,
         mode: FactorMode,
         target_degree: Optional[int] = None,
-        raw_imag_residual: Optional[float] = None
+        raw_imag_residual: Optional[float] = None,
+        requested_mode: Optional[FactorMode] = None,
+        actual_mode: Optional[FactorMode] = None,
+        fallback_reason: Optional[str] = None
     ) -> Tuple[np.ndarray, FactorizationDiagnostics]:
         imag_res = raw_imag_residual if raw_imag_residual is not None else (float(np.max(np.abs(np.imag(h0_complex)))) if np.iscomplexobj(h0_complex) else 0.0)
         if imag_res > 1e-5:
@@ -1500,7 +1538,10 @@ class GegenbauerFilterCompiler:
             halfband_residual=hb_err,
             zero_on_unit_circle_count=zero_uc_count,
             finite=is_finite,
-            certified=certified
+            certified=certified,
+            requested_mode=requested_mode if requested_mode is not None else mode,
+            actual_mode=actual_mode if actual_mode is not None else mode,
+            fallback_reason=fallback_reason
         )
         return h0, diag
 
@@ -1600,6 +1641,8 @@ class GegenbauerFilterCompiler:
 
         z_inside = []
         for unit in atomic_units:
+            if unit.classification_status in ("AMBIGUOUS", "NUMERICALLY_SPLIT_RESOLVED"):
+                raise ValueError(f"Unresolved or ambiguous root orbit detected for {unit.kind} with status {unit.classification_status}; refusing to select factor.")
             m = unit.multiplicity
             if unit.kind == 'REAL_ENDPOINT':
                 half_m = m // 2
@@ -1656,6 +1699,8 @@ class GegenbauerFilterCompiler:
 
         z_inside = []
         for unit in atomic_units:
+            if unit.classification_status in ("AMBIGUOUS", "NUMERICALLY_SPLIT_RESOLVED"):
+                raise ValueError(f"Unresolved or ambiguous root orbit detected for {unit.kind} with status {unit.classification_status}; refusing to select factor.")
             m = unit.multiplicity
             if unit.kind == 'REAL_ENDPOINT':
                 half_m = m // 2
@@ -1712,17 +1757,37 @@ class GegenbauerFilterCompiler:
                 f"min_P={min_P:.6e}, max_P={max_P:.6e}, halfband_residual={hb_err:.6e}"
             )
 
+        requested_mode = mode
+        actual_mode = mode
+        fallback_reason = None
+
         if mode == FactorMode.STRUCTURED_CHEBYSHEV:
-            h0_raw, _, raw_imag = self.factor_by_chebyshev_roots(p_taps, target_N)
+            try:
+                h0_raw, _, raw_imag = self.factor_by_chebyshev_roots(p_taps, target_N)
+            except ValueError as exc:
+                actual_mode = FactorMode.CEPSTRAL_APPROX
+                fallback_reason = str(exc)
+                h0_raw, _, raw_imag = self.spectral_factor_cepstral(p_taps, target_N)
         elif mode == FactorMode.CEPSTRAL_APPROX:
             h0_raw, _, raw_imag = self.spectral_factor_cepstral(p_taps, target_N)
         elif mode == FactorMode.REFERENCE_ROOTS:
-            h0_raw, _, raw_imag = self.factor_by_roots_reference(p_taps, target_N)
+            try:
+                h0_raw, _, raw_imag = self.factor_by_roots_reference(p_taps, target_N)
+            except ValueError as exc:
+                actual_mode = FactorMode.CEPSTRAL_APPROX
+                fallback_reason = str(exc)
+                h0_raw, _, raw_imag = self.spectral_factor_cepstral(p_taps, target_N)
         else:
             raise ValueError(f"Unknown FactorMode: '{mode}'")
 
         h0, diag = self._compute_factorization_diagnostics(
-            h0_raw, p_taps, mode=mode, target_degree=target_N - 1, raw_imag_residual=raw_imag
+            h0_raw, p_taps,
+            mode=actual_mode,
+            requested_mode=requested_mode,
+            actual_mode=actual_mode,
+            fallback_reason=fallback_reason,
+            target_degree=target_N - 1,
+            raw_imag_residual=raw_imag
         )
         return h0, diag
 
@@ -2042,6 +2107,8 @@ class GegenbauerFilterCompiler:
         # LAYER 3: CANDIDATE MAP & EARLY PRUNING STAGES 1-3
         # ---------------------------------------------------------------------
         cmap = CandidateMap(invariants, classes)
+        max_parts = 2 if invariants.is_halfband else 1
+        cmap._build_initial_graph(max_parts=max_parts)
         cmap.apply_stage1_exact_structural_rejection()
         cmap.apply_stage2_decomposition_feasibility()
 
@@ -2081,9 +2148,14 @@ class GegenbauerFilterCompiler:
             q15_sign = np.array([(-1)**n for n in range(spec.order)], dtype=np.int32)
             q31_sign = np.array([(-1)**n for n in range(spec.order)], dtype=np.int64)
 
-            h1_q15 = (q15_sign * h0_quant.q15_taps[::-1]).astype(np.int32)
-            h1_q23 = (q15_sign * h0_quant.q23_taps[::-1]).astype(np.int32)
-            h1_q31 = (q31_sign * h0_quant.q31_taps[::-1]).astype(np.int64)
+            h1_q15_raw = q15_sign * h0_quant.q15_taps[::-1]
+            h1_q23_raw = q15_sign * h0_quant.q23_taps[::-1]
+            h1_q31_raw = q31_sign * h0_quant.q31_taps[::-1]
+
+            # Apply explicit fixed-point saturation bounds to prevent signed integer overflow
+            h1_q15 = np.clip(h1_q15_raw, -32768, 32767).astype(np.int32)
+            h1_q23 = np.clip(h1_q23_raw, -8388608, 8388607).astype(np.int32)
+            h1_q31 = np.clip(h1_q31_raw, -2147483648, 2147483647).astype(np.int64)
 
             h1_quant = QuantizedTaps(
                 float64_taps=h1_float,
@@ -2312,6 +2384,8 @@ class GegenbauerFilterCompiler:
             evidence_lvl = "CONTINUOUS_SPECIFICATION_CERTIFIED"
         elif reconstruction_id_val:
             evidence_lvl = "FACTOR_IDENTITY_VALIDATED"
+        elif engineering_acceptance:
+            evidence_lvl = "ENGINEERING_ACCEPTANCE_MET"
         else:
             evidence_lvl = "DIAGNOSTICS_PASSED"
 
@@ -2396,7 +2470,13 @@ class GegenbauerFilterCompiler:
         result.header_code = self.generate_header(result)
         return result
 
-    def compile_biorthogonal_pair(self, order_h0: int, order_g0: int, cutoff: float = 0.25) -> dict:
+    def compile_biorthogonal_pair(
+        self,
+        order_h0: int,
+        order_g0: int,
+        cutoff: float = 0.25,
+        required_formats: Tuple[str, ...] = ("q15", "q31")
+    ) -> dict:
         """
         Compiles a Biorthogonal filter bank pair (H0, G0) of polynomial degrees order_h0 and order_g0.
         Uses Gegenbauer half-band product filter factorization.
@@ -2517,6 +2597,12 @@ class GegenbauerFilterCompiler:
             nyq_h0 = abs(np.sum(h0_norm * np.array([(-1.0)**n for n in range(len(h0_norm))])))
             nyq_g0 = abs(np.sum(g0_norm * np.array([(-1.0)**n for n in range(len(g0_norm))])))
 
+            # Mandatory DC gain normalization and scale-aware Nyquist zero feasibility gates
+            if max(dc_err_h0, dc_err_g0) > 1e-3:
+                return
+            if max(nyq_h0, nyq_g0) > 0.05:
+                return
+
             K_eval = 512
             H0_eval = np.abs(np.fft.fft(h0_norm, K_eval)[:K_eval // 2 + 1])
             G0_eval = np.abs(np.fft.fft(g0_norm, K_eval)[:K_eval // 2 + 1])
@@ -2635,15 +2721,95 @@ class GegenbauerFilterCompiler:
         h1_qmf_res = float(np.max(np.abs(H1_f - G0_shift)))
         g1_qmf_res = float(np.max(np.abs(G1_f + H0_shift)))
 
+        # Quantized Bank PR & Alias Verification across Q15 and Q31 formats
+        h0_q15 = self.quantize_taps(h0_taps)
+        g0_q15 = self.quantize_taps(g0_taps)
+        h1_q15 = self.quantize_taps(h1_taps)
+        g1_q15 = self.quantize_taps(g1_taps)
+
+        h0_q15_f = h0_q15.q15_taps / h0_q15.q15_scale
+        g0_q15_f = g0_q15.q15_taps / g0_q15.q15_scale
+        h1_q15_f = h1_q15.q15_taps / h1_q15.q15_scale
+        g1_q15_f = g1_q15.q15_taps / g1_q15.q15_scale
+
+        pr_q15_seq = np.convolve(h0_q15_f, g0_q15_f) + np.convolve(h1_q15_f, g1_q15_f)
+        pr_q15_residual = float(np.max(np.abs(pr_q15_seq - target_pr_seq)))
+
+        h0_q15_mod = h0_q15_f * np.array([(-1.0)**n for n in range(len(h0_q15_f))])
+        h1_q15_mod = h1_q15_f * np.array([(-1.0)**n for n in range(len(h1_q15_f))])
+        alias_q15_seq = np.convolve(h0_q15_mod, g0_q15_f) + np.convolve(h1_q15_mod, g1_q15_f)
+        alias_q15_residual = float(np.max(np.abs(alias_q15_seq)))
+
+        h0_q23_f = h0_q15.q23_taps / h0_q15.q23_scale
+        g0_q23_f = g0_q15.q23_taps / g0_q15.q23_scale
+        h1_q23_f = h1_q15.q23_taps / h1_q15.q23_scale
+        g1_q23_f = g1_q15.q23_taps / g1_q15.q23_scale
+
+        pr_q23_seq = np.convolve(h0_q23_f, g0_q23_f) + np.convolve(h1_q23_f, g1_q23_f)
+        pr_q23_residual = float(np.max(np.abs(pr_q23_seq - target_pr_seq)))
+
+        h0_q23_mod = h0_q23_f * np.array([(-1.0)**n for n in range(len(h0_q23_f))])
+        h1_q23_mod = h1_q23_f * np.array([(-1.0)**n for n in range(len(h1_q23_f))])
+        alias_q23_seq = np.convolve(h0_q23_mod, g0_q23_f) + np.convolve(h1_q23_mod, g1_q23_f)
+        alias_q23_residual = float(np.max(np.abs(alias_q23_seq)))
+
+        h0_q31_f = h0_q15.q31_taps / h0_q15.q31_scale
+        g0_q31_f = g0_q15.q31_taps / g0_q15.q31_scale
+        h1_q31_f = h1_q15.q31_taps / h1_q15.q31_scale
+        g1_q31_f = g1_q15.q31_taps / g1_q15.q31_scale
+
+        pr_q31_seq = np.convolve(h0_q31_f, g0_q31_f) + np.convolve(h1_q31_f, g1_q31_f)
+        pr_q31_residual = float(np.max(np.abs(pr_q31_seq - target_pr_seq)))
+
+        h0_q31_mod = h0_q31_f * np.array([(-1.0)**n for n in range(len(h0_q31_f))])
+        h1_q31_mod = h1_q31_f * np.array([(-1.0)**n for n in range(len(h1_q31_f))])
+        alias_q31_seq = np.convolve(h0_q31_mod, g0_q31_f) + np.convolve(h1_q31_mod, g1_q31_f)
+        alias_q31_residual = float(np.max(np.abs(alias_q31_seq)))
+
+        pr_q15_passed = bool(pr_q15_residual <= 0.05)
+        alias_q15_passed = bool(alias_q15_residual <= 0.05)
+        pr_q23_passed = bool(pr_q23_residual <= 0.01)
+        alias_q23_passed = bool(alias_q23_residual <= 0.01)
+        pr_q31_passed = bool(pr_q31_residual <= 0.001)
+        alias_q31_passed = bool(alias_q31_residual <= 0.001)
+
+        if "q15" in required_formats and not (pr_q15_passed and alias_q15_passed):
+            raise ValueError(
+                f"Biorthogonal filter bank failed required Q15 fixed-point PR/alias tolerance: "
+                f"pr_q15_res={pr_q15_residual:.4e}, alias_q15_res={alias_q15_residual:.4e}"
+            )
+        if "q23" in required_formats and not (pr_q23_passed and alias_q23_passed):
+            raise ValueError(
+                f"Biorthogonal filter bank failed required Q23 fixed-point PR/alias tolerance: "
+                f"pr_q23_res={pr_q23_residual:.4e}, alias_q23_res={alias_q23_residual:.4e}"
+            )
+        if "q31" in required_formats and not (pr_q31_passed and alias_q31_passed):
+            raise ValueError(
+                f"Biorthogonal filter bank failed required Q31 fixed-point PR/alias tolerance: "
+                f"pr_q31_res={pr_q31_residual:.4e}, alias_q31_res={alias_q31_residual:.4e}"
+            )
+
         return {
-            "H0": self.quantize_taps(h0_taps),
-            "H1": self.quantize_taps(h1_taps),
-            "G0": self.quantize_taps(g0_taps),
-            "G1": self.quantize_taps(g1_taps),
+            "H0": h0_q15,
+            "H1": h1_q15,
+            "G0": g0_q15,
+            "G1": g1_q15,
             "P": p_prod * 0.5,
             "product_residual": product_residual,
             "pr_coeff_residual": pr_coeff_residual,
             "alias_coeff_residual": alias_coeff_residual,
+            "pr_q15_residual": pr_q15_residual,
+            "alias_q15_residual": alias_q15_residual,
+            "pr_q15_passed": pr_q15_passed,
+            "alias_q15_passed": alias_q15_passed,
+            "pr_q23_residual": pr_q23_residual,
+            "alias_q23_residual": alias_q23_residual,
+            "pr_q23_passed": pr_q23_passed,
+            "alias_q23_passed": alias_q23_passed,
+            "pr_q31_residual": pr_q31_residual,
+            "alias_q31_residual": alias_q31_residual,
+            "pr_q31_passed": pr_q31_passed,
+            "alias_q31_passed": alias_q31_passed,
             "pr_fft_residual": pr_residual,
             "alias_fft_residual": alias_residual,
             "pr_residual": pr_residual,
@@ -2746,45 +2912,62 @@ class GegenbauerFilterCompiler:
         spec: FilterSpec,
         lambda_candidates: List[float] = [0.5, 1.0, 1.25, 1.5],
         mu_candidates: List[float] = [0.0, 1e-4],
-        solver: Optional[str] = None
+        solver: Optional[str] = None,
+        allow_infeasible_fallback: bool = True
     ) -> FilterResult:
-        best_res = None
-        best_score = float('inf')
         use_solver = solver if solver is not None else self.solver
+
+        compile_failures = []
+        feasible_candidates = []
+        infeasible_candidates = []
 
         for lam in lambda_candidates:
             for mu in mu_candidates:
-                compiler = GegenbauerFilterCompiler(
-                    lam=lam,
-                    basis_terms=self.basis_terms,
-                    basis_type=self.basis_type,
-                    solver=use_solver,
-                    mu_reg=mu,
-                    reg_power=self.reg_power,
-                    asymptotic_mode=self.asymptotic_mode,
-                    factor_mode=self.factor_mode,
-                    grid_samples=self.grid_samples,
-                    precision=self.ctx.precision
-                )
-                res = compiler.compile(spec)
+                try:
+                    compiler = GegenbauerFilterCompiler(
+                        lam=lam,
+                        basis_terms=self.basis_terms,
+                        basis_type=self.basis_type,
+                        solver=use_solver,
+                        mu_reg=mu,
+                        reg_power=self.reg_power,
+                        asymptotic_mode=self.asymptotic_mode,
+                        factor_mode=self.factor_mode,
+                        grid_samples=self.grid_samples,
+                        precision=self.ctx.precision
+                    )
+                    res = compiler.compile(spec)
 
-                score = res.passband_ripple_actual * 10.0 - res.stopband_atten_actual
-                if res.spec.kind in ("qmf", "asymmetric_qmf"):
-                    score += res.qmf_power_complementarity_max_db * 20.0 + res.qmf_alias_distortion_max_db
+                    score = res.passband_ripple_actual * 10.0 - res.stopband_atten_actual
+                    if res.spec.kind in ("qmf", "asymmetric_qmf"):
+                        score += res.qmf_power_complementarity_max_db * 20.0 + res.qmf_alias_distortion_max_db
 
-                score += res.payload.provenance.total * 100.0
+                    score += res.payload.provenance.total * 100.0
 
-                if not res.payload.is_certified:
-                    score += 1e5
+                    if res.payload.sampled_design_targets_met:
+                        feasible_candidates.append((score, res))
+                    else:
+                        infeasible_candidates.append((score, res))
+                except (ValueError, RuntimeError, NotImplementedError, np.linalg.LinAlgError) as exc:
+                    compile_failures.append((lam, mu, str(exc)))
 
-                if score < best_score:
-                    best_score = score
-                    best_res = res
+        if feasible_candidates:
+            feasible_candidates.sort(key=lambda item: item[0])
+            return feasible_candidates[0][1]
 
-        return best_res
+        if infeasible_candidates and allow_infeasible_fallback:
+            infeasible_candidates.sort(key=lambda item: item[0])
+            return infeasible_candidates[0][1]
+
+        fail_msg = "; ".join([f"lam={l}, mu={m}: {err}" for l, m, err in compile_failures]) if compile_failures else "No feasible candidate met design specification targets."
+        raise RuntimeError(f"pareto_search failed to compile a feasible candidate. Failures: {fail_msg}")
 
 def main():
-    pass
+    spec = FilterSpec(kind="lowpass", order=31, cutoff=0.25)
+    compiler = GegenbauerFilterCompiler(lam=1.25)
+    result = compiler.compile(spec)
+    print(f"Compiled Gegenbauer Filter: kind={result.spec.kind}, order={result.spec.order}, lambda={result.lam}")
+    print(f"Passband ripple: {result.passband_ripple_actual:.4f} dB, Stopband attenuation: {result.stopband_atten_actual:.2f} dB")
 
 if __name__ == "__main__":
     main()

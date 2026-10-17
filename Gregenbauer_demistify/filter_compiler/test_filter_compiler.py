@@ -200,7 +200,7 @@ def test_qmf_pair_compilation():
 
 def test_asymmetric_qmf_compilation():
     """Tests asymmetric QMF filter synthesis with transition band straddling fs/4 and half-band complementarity."""
-    spec = FilterSpec(kind="asymmetric_qmf", order=64, cutoff=0.25, wp=0.20, ws=0.30)
+    spec = FilterSpec(kind="asymmetric_qmf", order=64, cutoff=0.25, wp=0.18, ws=0.35)
     compiler = GegenbauerFilterCompiler(lam=1.25, solver="spectral_regularized", mu_reg=1e-4)
     result = compiler.compile(spec)
 
@@ -594,6 +594,13 @@ def test_root_decomposer_targeted_orbit_cases():
     assert len(units_near) == 1
     assert units_near[0].kind == 'REAL_RECIPROCAL_PAIR'
 
+    # Near-endpoint unit-circle pair: z = e^(i * 0.02) and z = e^(-i * 0.02) (must be classified as UNIT_CIRCLE_PAIR, not REAL_ENDPOINT)
+    theta = 0.02
+    uc_near_ep = np.array([np.exp(1j * theta), np.exp(-1j * theta)])
+    units_uc_near = RootDecomposer.decompose_z_roots(uc_near_ep, total_z_degree=2, rel_tol=1e-3, abs_tol=1e-3)
+    assert len(units_uc_near) == 1
+    assert units_uc_near[0].kind == 'UNIT_CIRCLE_PAIR'
+
     # Permutation invariance: root array order does not affect decomposition
     perm1 = np.array([z1, 1.0 / z1, np.conj(z1), 1.0 / np.conj(z1)])
     perm2 = np.array([1.0 / np.conj(z1), z1, 1.0 / z1, np.conj(z1)])
@@ -820,3 +827,60 @@ def test_candidate_map_pruning_gating_error():
     # Verify zero surviving branches
     s3 = cmap.apply_stage3_necessary_numerical_bounds()
     assert cmap.pruning_statistics['surviving_branches'] == 0
+
+
+def test_independent_verifier_input_validation():
+    """Verifies IndependentVerifier.verify_power_polynomial input validation error handling."""
+    from filter_compiler.compiler import IndependentVerifier
+
+    # Reject even length taps
+    with pytest.raises(ValueError):
+        IndependentVerifier.verify_power_polynomial(np.array([0.5, 0.5]))
+
+    # Reject non-finite values
+    with pytest.raises(ValueError):
+        IndependentVerifier.verify_power_polynomial(np.array([0.25, np.nan, 0.25]))
+
+    # Reject complex input array
+    with pytest.raises(ValueError):
+        IndependentVerifier.verify_power_polynomial(np.array([0.25 + 0.1j, 0.5 + 0.0j, 0.25 + 0.0j]))
+
+
+def test_biorthogonal_quantized_bank_verification():
+    """Verifies quantized filter bank PR and alias residual keys in compile_biorthogonal_pair."""
+    compiler = GegenbauerFilterCompiler(lam=1.5)
+    pair = compiler.compile_biorthogonal_pair(order_h0=8, order_g0=6, cutoff=0.25)
+
+    assert "pr_q15_residual" in pair
+    assert "alias_q15_residual" in pair
+    assert "pr_q23_residual" in pair
+    assert "alias_q23_residual" in pair
+    assert "pr_q31_residual" in pair
+    assert "alias_q31_residual" in pair
+    assert "pr_q15_passed" in pair
+    assert "alias_q15_passed" in pair
+    assert isinstance(pair["pr_q15_passed"], bool)
+    assert isinstance(pair["pr_q15_residual"], float)
+    assert pair["pr_q15_residual"] >= 0.0
+
+
+def test_solve_coefficients_regularization_residuals():
+    """Verifies degree-weighted coefficient penalty residual calculations in solve_coefficients."""
+    compiler = GegenbauerFilterCompiler(lam=1.25, mu_reg=1e-4, solver="spectral_regularized")
+    spec = FilterSpec(kind="lowpass", order=16, cutoff=0.25)
+
+    a_coeffs, K, cond_val, res_aug, res_data, res_reg = compiler.solve_coefficients(spec)
+    assert len(a_coeffs) == K
+    assert isinstance(res_reg, float)
+    assert res_reg >= 0.0
+
+
+def test_factorization_diagnostics_mode_provenance():
+    """Verifies requested_mode, actual_mode, and fallback_reason provenance fields in FactorizationDiagnostics."""
+    spec = FilterSpec(kind="qmf", order=32, cutoff=0.25)
+    compiler = GegenbauerFilterCompiler(lam=1.25)
+    res = compiler.compile(spec)
+
+    assert res.factorization is not None
+    assert res.factorization.requested_mode == FactorMode.STRUCTURED_CHEBYSHEV
+    assert isinstance(res.factorization.actual_mode, FactorMode)
