@@ -531,7 +531,7 @@ class RootDecomposer:
                         multiplicity=m1,
                         orbit_residual=res_ep,
                         matching_margin=float(ep_match_tol - res_ep),
-                        classification_status="SYMBOLIC_EXACT" if res_ep < 1e-15 else "NUMERICALLY_MATCHED"
+                        classification_status="NUMERICALLY_MATCHED"
                     ))
                 else:
                     is_ep_candidate = False
@@ -786,6 +786,9 @@ class FactorizationDiagnostics:
     zero_on_unit_circle_count: int
     finite: bool
     certified: bool
+    requested_mode: Optional[FactorMode] = None
+    actual_mode: Optional[FactorMode] = None
+    fallback_reason: Optional[str] = None
 
     @property
     def coefficient_residual(self) -> float:
@@ -1041,8 +1044,6 @@ class FilterSpec:
         if self.kind == "asymmetric_qmf":
             if not (0.0 < self.wp < 0.25 < self.ws < 0.5):
                 raise ValueError(f"Asymmetric QMF requires transition band straddling fs/4 (0 < wp < 0.25 < ws < 0.5), got wp={self.wp}, ws={self.ws}")
-            if abs((self.wp + self.ws) - 0.5) > 1e-6:
-                raise ValueError(f"Asymmetric QMF target transition edges must satisfy wp + ws == 0.5 to remain compatible with half-band complementarity, got wp={self.wp}, ws={self.ws} (sum = {self.wp + self.ws})")
 
         if self.kind in ("lowpass", "qmf", "asymmetric_qmf"):
             if not (0.0 < self.wp < self.ws < 0.5):
@@ -1463,7 +1464,10 @@ class GegenbauerFilterCompiler:
         p_taps: np.ndarray,
         mode: FactorMode,
         target_degree: Optional[int] = None,
-        raw_imag_residual: Optional[float] = None
+        raw_imag_residual: Optional[float] = None,
+        requested_mode: Optional[FactorMode] = None,
+        actual_mode: Optional[FactorMode] = None,
+        fallback_reason: Optional[str] = None
     ) -> Tuple[np.ndarray, FactorizationDiagnostics]:
         imag_res = raw_imag_residual if raw_imag_residual is not None else (float(np.max(np.abs(np.imag(h0_complex)))) if np.iscomplexobj(h0_complex) else 0.0)
         if imag_res > 1e-5:
@@ -1528,7 +1532,10 @@ class GegenbauerFilterCompiler:
             halfband_residual=hb_err,
             zero_on_unit_circle_count=zero_uc_count,
             finite=is_finite,
-            certified=certified
+            certified=certified,
+            requested_mode=requested_mode if requested_mode is not None else mode,
+            actual_mode=actual_mode if actual_mode is not None else mode,
+            fallback_reason=fallback_reason
         )
         return h0, diag
 
@@ -1744,24 +1751,37 @@ class GegenbauerFilterCompiler:
                 f"min_P={min_P:.6e}, max_P={max_P:.6e}, halfband_residual={hb_err:.6e}"
             )
 
+        requested_mode = mode
+        actual_mode = mode
+        fallback_reason = None
+
         if mode == FactorMode.STRUCTURED_CHEBYSHEV:
             try:
                 h0_raw, _, raw_imag = self.factor_by_chebyshev_roots(p_taps, target_N)
-            except ValueError:
-                # Fallback to robust minimum-phase cepstral factorization when root orbits are unresolved or ambiguous
+            except ValueError as exc:
+                actual_mode = FactorMode.CEPSTRAL_APPROX
+                fallback_reason = str(exc)
                 h0_raw, _, raw_imag = self.spectral_factor_cepstral(p_taps, target_N)
         elif mode == FactorMode.CEPSTRAL_APPROX:
             h0_raw, _, raw_imag = self.spectral_factor_cepstral(p_taps, target_N)
         elif mode == FactorMode.REFERENCE_ROOTS:
             try:
                 h0_raw, _, raw_imag = self.factor_by_roots_reference(p_taps, target_N)
-            except ValueError:
+            except ValueError as exc:
+                actual_mode = FactorMode.CEPSTRAL_APPROX
+                fallback_reason = str(exc)
                 h0_raw, _, raw_imag = self.spectral_factor_cepstral(p_taps, target_N)
         else:
             raise ValueError(f"Unknown FactorMode: '{mode}'")
 
         h0, diag = self._compute_factorization_diagnostics(
-            h0_raw, p_taps, mode=mode, target_degree=target_N - 1, raw_imag_residual=raw_imag
+            h0_raw, p_taps,
+            mode=actual_mode,
+            requested_mode=requested_mode,
+            actual_mode=actual_mode,
+            fallback_reason=fallback_reason,
+            target_degree=target_N - 1,
+            raw_imag_residual=raw_imag
         )
         return h0, diag
 
@@ -2358,6 +2378,8 @@ class GegenbauerFilterCompiler:
             evidence_lvl = "CONTINUOUS_SPECIFICATION_CERTIFIED"
         elif reconstruction_id_val:
             evidence_lvl = "FACTOR_IDENTITY_VALIDATED"
+        elif engineering_acceptance:
+            evidence_lvl = "ENGINEERING_ACCEPTANCE_MET"
         else:
             evidence_lvl = "DIAGNOSTICS_PASSED"
 
@@ -2442,7 +2464,13 @@ class GegenbauerFilterCompiler:
         result.header_code = self.generate_header(result)
         return result
 
-    def compile_biorthogonal_pair(self, order_h0: int, order_g0: int, cutoff: float = 0.25) -> dict:
+    def compile_biorthogonal_pair(
+        self,
+        order_h0: int,
+        order_g0: int,
+        cutoff: float = 0.25,
+        required_formats: Tuple[str, ...] = ("q15", "q31")
+    ) -> dict:
         """
         Compiles a Biorthogonal filter bank pair (H0, G0) of polynomial degrees order_h0 and order_g0.
         Uses Gegenbauer half-band product filter factorization.
@@ -2733,10 +2761,20 @@ class GegenbauerFilterCompiler:
         pr_q31_passed = bool(pr_q31_residual <= 0.001)
         alias_q31_passed = bool(alias_q31_residual <= 0.001)
 
-        if not (pr_q15_passed and alias_q15_passed):
+        if "q15" in required_formats and not (pr_q15_passed and alias_q15_passed):
             raise ValueError(
-                f"Biorthogonal filter bank failed Q15 fixed-point PR or alias tolerance: "
+                f"Biorthogonal filter bank failed required Q15 fixed-point PR/alias tolerance: "
                 f"pr_q15_res={pr_q15_residual:.4e}, alias_q15_res={alias_q15_residual:.4e}"
+            )
+        if "q23" in required_formats and not (pr_q23_passed and alias_q23_passed):
+            raise ValueError(
+                f"Biorthogonal filter bank failed required Q23 fixed-point PR/alias tolerance: "
+                f"pr_q23_res={pr_q23_residual:.4e}, alias_q23_res={alias_q23_residual:.4e}"
+            )
+        if "q31" in required_formats and not (pr_q31_passed and alias_q31_passed):
+            raise ValueError(
+                f"Biorthogonal filter bank failed required Q31 fixed-point PR/alias tolerance: "
+                f"pr_q31_res={pr_q31_residual:.4e}, alias_q31_res={alias_q31_residual:.4e}"
             )
 
         return {

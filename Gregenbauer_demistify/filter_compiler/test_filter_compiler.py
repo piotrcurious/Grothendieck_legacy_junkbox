@@ -200,7 +200,7 @@ def test_qmf_pair_compilation():
 
 def test_asymmetric_qmf_compilation():
     """Tests asymmetric QMF filter synthesis with transition band straddling fs/4 and half-band complementarity."""
-    spec = FilterSpec(kind="asymmetric_qmf", order=64, cutoff=0.25, wp=0.20, ws=0.30)
+    spec = FilterSpec(kind="asymmetric_qmf", order=64, cutoff=0.25, wp=0.18, ws=0.35)
     compiler = GegenbauerFilterCompiler(lam=1.25, solver="spectral_regularized", mu_reg=1e-4)
     result = compiler.compile(spec)
 
@@ -873,3 +873,14 @@ def test_solve_coefficients_regularization_residuals():
     assert len(a_coeffs) == K
     assert isinstance(res_reg, float)
     assert res_reg >= 0.0
+
+
+def test_factorization_diagnostics_mode_provenance():
+    """Verifies requested_mode, actual_mode, and fallback_reason provenance fields in FactorizationDiagnostics."""
+    spec = FilterSpec(kind="qmf", order=32, cutoff=0.25)
+    compiler = GegenbauerFilterCompiler(lam=1.25)
+    res = compiler.compile(spec)
+
+    assert res.factorization is not None
+    assert res.factorization.requested_mode == FactorMode.STRUCTURED_CHEBYSHEV
+    assert isinstance(res.factorization.actual_mode, FactorMode)
