@@ -1,0 +1,1078 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Orthogonal Polynomial Fatou & Julia Explorer</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- KaTeX for math rendering -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600&family=Inter:wght@300;400;500;600;700&display=swap');
+    
+    body {
+      font-family: 'Inter', sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .font-mono {
+      font-family: 'Fira Code', monospace;
+    }
+    
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.6);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(51, 65, 85, 0.8);
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(71, 85, 105, 1);
+    }
+    
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .range-thumb::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #06b6d4;
+      cursor: pointer;
+      box-shadow: 0 0 10px rgba(6, 182, 212, 0.6);
+    }
+
+    canvas {
+      touch-action: none;
+    }
+
+    .tab-btn.active {
+      background: rgba(14, 165, 233, 0.2);
+      border-color: rgba(56, 189, 248, 0.5);
+      color: #38bdf8;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 h-screen w-screen overflow-hidden flex flex-col md:flex-row">
+
+  <!-- Left Sidebar Controls -->
+  <aside class="w-full md:w-80 lg:w-96 glass-panel z-20 flex flex-col h-auto md:h-full border-r border-slate-800 flex-shrink-0">
+    <!-- Title Header -->
+    <div class="p-4 border-b border-slate-800/80 flex items-center justify-between">
+      <div class="flex items-center space-x-2.5">
+        <div class="p-2 bg-cyan-600/20 rounded-lg border border-cyan-500/30 text-cyan-400">
+          <i data-lucide="orbit" class="w-5 h-5"></i>
+        </div>
+        <div>
+          <h1 class="text-sm font-bold tracking-wide text-slate-100">Orthogonal Julia Lab</h1>
+          <p class="text-[11px] text-slate-400">Custom Dynamics via Classical Polynomials</p>
+        </div>
+      </div>
+      <button id="reset-view-btn" title="Reset Camera View" class="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors">
+        <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+      </button>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="flex border-b border-slate-800 bg-slate-950/60 p-1 gap-1">
+      <button id="tab-controls-btn" class="tab-btn active flex-1 py-1.5 text-xs font-semibold rounded-md border border-transparent transition-colors flex items-center justify-center space-x-1">
+        <i data-lucide="sliders" class="w-3.5 h-3.5"></i>
+        <span>Controls</span>
+      </button>
+      <button id="tab-presets-btn" class="tab-btn flex-1 py-1.5 text-xs font-semibold rounded-md border border-transparent transition-colors text-slate-400 hover:text-slate-200 flex items-center justify-center space-x-1">
+        <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+        <span>Presets</span>
+      </button>
+      <button id="tab-math-btn" class="tab-btn flex-1 py-1.5 text-xs font-semibold rounded-md border border-transparent transition-colors text-slate-400 hover:text-slate-200 flex items-center justify-center space-x-1">
+        <i data-lucide="book-open" class="w-3.5 h-3.5"></i>
+        <span>Theory</span>
+      </button>
+    </div>
+
+    <!-- Tab Content Area -->
+    <div class="flex-1 overflow-y-auto p-4 space-y-5">
+
+      <!-- CONTROLS TAB -->
+      <div id="tab-controls" class="space-y-4">
+        
+        <!-- Polynomial Family Selection -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Orthogonal Polynomial Family</label>
+          <select id="poly-family-select" class="w-full bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-2 text-xs font-medium text-cyan-300 focus:outline-none focus:border-cyan-500 transition-colors">
+            <option value="0">Chebyshev T_n(z) (Dendrite & Disk Folds)</option>
+            <option value="1">Legendre P_n(z) (Symmetric Multi-basins)</option>
+            <option value="2">Hermite H_n(z) (Explosive Gaussian Dynamics)</option>
+            <option value="3">Laguerre L_n(z) (Asymmetric Half-plane)</option>
+            <option value="4">Gegenbauer C_n^(alpha)(z) (Ultra-spherical)</option>
+            <option value="5">Custom Recurrence (a_n, b_n, c_n)</option>
+          </select>
+        </div>
+
+        <!-- Custom Recurrence Inputs (Hidden unless Custom is selected) -->
+        <div id="custom-recurrence-panel" class="hidden p-3 bg-slate-900/90 rounded-xl border border-cyan-800/40 space-y-2 text-xs">
+          <span class="font-semibold text-cyan-300 text-[11px] block">Three-Term Recurrence: $P_{n+1} = (A z + B) P_n - C P_{n-1}$</span>
+          <div class="grid grid-cols-3 gap-2">
+            <div>
+              <span class="text-[10px] text-slate-400">Coeff A</span>
+              <input id="input-rec-a" type="number" step="0.1" value="2.0" class="w-full bg-slate-950 border border-slate-800 rounded p-1 text-mono text-cyan-300 text-xs">
+            </div>
+            <div>
+              <span class="text-[10px] text-slate-400">Coeff B</span>
+              <input id="input-rec-b" type="number" step="0.1" value="0.0" class="w-full bg-slate-950 border border-slate-800 rounded p-1 text-mono text-cyan-300 text-xs">
+            </div>
+            <div>
+              <span class="text-[10px] text-slate-400">Coeff C</span>
+              <input id="input-rec-c" type="number" step="0.1" value="1.0" class="w-full bg-slate-950 border border-slate-800 rounded p-1 text-mono text-cyan-300 text-xs">
+            </div>
+          </div>
+        </div>
+
+        <!-- Degree and Perturbation -->
+        <div class="space-y-3 bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
+          <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Degree & Coupling</label>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-slate-400 mb-1">
+              <span>Polynomial Degree ($n$)</span>
+              <span id="deg-val" class="font-mono text-cyan-300">3</span>
+            </div>
+            <input id="slider-deg" type="range" min="2" max="7" step="1" value="3" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb">
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-slate-400 mb-1">
+              <span>Gegenbauer Parameter ($\alpha$)</span>
+              <span id="alpha-val" class="font-mono text-cyan-300">0.5</span>
+            </div>
+            <input id="slider-alpha" type="range" min="0.1" max="3.0" step="0.1" value="0.5" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb">
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-slate-400 mb-1">
+              <span>Perturbation Constant <span class="font-mono text-cyan-300">c = <span id="c-real-val">-0.200</span> + <span id="c-imag-val">0.600</span>i</span></span>
+            </div>
+            <div class="space-y-1.5">
+              <input id="slider-cr" type="range" min="-2.0" max="2.0" step="0.005" value="-0.200" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb">
+              <input id="slider-ci" type="range" min="-2.0" max="2.0" step="0.005" value="0.600" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb">
+            </div>
+          </div>
+        </div>
+
+        <!-- Visualization Modes -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Visualization Engine</label>
+          <div class="grid grid-cols-2 gap-2" id="mode-buttons">
+            <button data-mode="0" class="mode-btn px-2.5 py-2 rounded-lg border text-xs font-medium flex items-center justify-start space-x-2 transition-all bg-cyan-600/30 border-cyan-500 text-cyan-300">
+              <i data-lucide="layers" class="w-3.5 h-3.5"></i>
+              <span>Fatou Classifier</span>
+            </button>
+            <button data-mode="1" class="mode-btn px-2.5 py-2 rounded-lg border text-xs font-medium flex items-center justify-start space-x-2 transition-all bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700">
+              <i data-lucide="target" class="w-3.5 h-3.5"></i>
+              <span>Zero Density Map</span>
+            </button>
+            <button data-mode="2" class="mode-btn px-2.5 py-2 rounded-lg border text-xs font-medium flex items-center justify-start space-x-2 transition-all bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700">
+              <i data-lucide="compass" class="w-3.5 h-3.5"></i>
+              <span>Green's Potential</span>
+            </button>
+            <button data-mode="3" class="mode-btn px-2.5 py-2 rounded-lg border text-xs font-medium flex items-center justify-start space-x-2 transition-all bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700">
+              <i data-lucide="activity" class="w-3.5 h-3.5"></i>
+              <span>Equipotential Grid</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Overlays & Settings -->
+        <div class="space-y-3 bg-slate-900/60 p-3 rounded-xl border border-slate-800/80 text-xs">
+          <label class="block font-semibold text-slate-400 uppercase tracking-wider">Overlays & Resolution</label>
+
+          <div class="flex items-center justify-between">
+            <span class="text-slate-300">Show Zero / Root Markers</span>
+            <input id="toggle-zeros" type="checkbox" checked class="w-4 h-4 accent-cyan-500 rounded cursor-pointer">
+          </div>
+
+          <div class="flex items-center justify-between">
+            <span class="text-slate-300">Interactive Orbit Path</span>
+            <input id="toggle-orbit" type="checkbox" checked class="w-4 h-4 accent-cyan-500 rounded cursor-pointer">
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-slate-400 mb-1">
+              <span>Max Iterations</span>
+              <span id="iter-val" class="font-mono text-cyan-300">128</span>
+            </div>
+            <input id="slider-iter" type="range" min="32" max="512" step="32" value="128" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb">
+          </div>
+
+          <div>
+            <label class="block text-[11px] text-slate-400 mb-1">Color Scheme</label>
+            <select id="palette-select" class="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-slate-200">
+              <option value="0">Spectral Quantum (Fatou Multi-Basin)</option>
+              <option value="1">Thermal Potential (Green's Electrostatic)</option>
+              <option value="2">Neon Cyberpunk (Orthogonal Density)</option>
+              <option value="3">Monochrome Topography</option>
+            </select>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- PRESETS TAB -->
+      <div id="tab-presets" class="hidden space-y-3">
+        <p class="text-xs text-slate-400 leading-relaxed mb-2">
+          Explore iconic non-quadratic Julia sets generated by classical orthogonal families:
+        </p>
+
+        <button data-preset="chebyshev-dendrite" class="preset-card w-full text-left p-3 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-cyan-500/50 transition-all">
+          <div class="flex items-center justify-between font-semibold text-xs text-cyan-300 mb-1">
+            <span>Chebyshev Dendrite Frost</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-800">T_3(z)</span>
+          </div>
+          <p class="text-[11px] text-slate-400">Extreme folding creating dense branching dendrite roots without bounded interiors.</p>
+        </button>
+
+        <button data-preset="legendre-siegel" class="preset-card w-full text-left p-3 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-cyan-500/50 transition-all">
+          <div class="flex items-center justify-between font-semibold text-xs text-purple-300 mb-1">
+            <span>Legendre Multi-Basin Disks</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-950 text-purple-400 border border-purple-800">P_4(z)</span>
+          </div>
+          <p class="text-[11px] text-slate-400">Four symmetric Fatou basins forming a rotational Siegel island network.</p>
+        </button>
+
+        <button data-preset="hermite-flower" class="preset-card w-full text-left p-3 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-cyan-500/50 transition-all">
+          <div class="flex items-center justify-between font-semibold text-xs text-rose-300 mb-1">
+            <span>Hermite Parabolic Flower</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-rose-950 text-rose-400 border border-rose-800">H_3(z)</span>
+          </div>
+          <p class="text-[11px] text-slate-400">Parabolic petals touching at critical pinch points, creating flower-like lobes.</p>
+        </button>
+
+        <button data-preset="laguerre-asymmetric" class="preset-card w-full text-left p-3 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-cyan-500/50 transition-all">
+          <div class="flex items-center justify-between font-semibold text-xs text-amber-300 mb-1">
+            <span>Laguerre Asymmetric Shear</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-950 text-amber-400 border border-amber-800">L_3(z)</span>
+          </div>
+          <p class="text-[11px] text-slate-400">Breaks bilateral symmetry along the real axis to yield sheared parabolic horns.</p>
+        </button>
+
+        <button data-preset="custom-herman" class="preset-card w-full text-left p-3 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-cyan-500/50 transition-all">
+          <div class="flex items-center justify-between font-semibold text-xs text-emerald-300 mb-1">
+            <span>Custom Herman Annulus Ring</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">Recurrence</span>
+          </div>
+          <p class="text-[11px] text-slate-400">Concentric Fatou rings isolating inner and outer escape regions simultaneously.</p>
+        </button>
+      </div>
+
+      <!-- THEORY TAB -->
+      <div id="tab-math" class="hidden space-y-4 text-xs text-slate-300 leading-relaxed">
+        <div class="p-3 bg-slate-900/90 rounded-xl border border-slate-800 space-y-2">
+          <h3 class="font-bold text-cyan-300 text-xs">Three-Term Recurrence Engine</h3>
+          <p class="text-[11px]">All classical orthogonal polynomial families obey the canonical three-term recurrence relation:</p>
+          <div id="math-recurrence" class="p-2 bg-slate-950 rounded text-center text-cyan-400 font-mono text-[11px]">
+            <!-- Rendered via KaTeX -->
+          </div>
+        </div>
+
+        <div class="p-3 bg-slate-900/90 rounded-xl border border-slate-800 space-y-2">
+          <h3 class="font-bold text-cyan-300 text-xs">Zero Condensation & Potential Theory</h3>
+          <p class="text-[11px]">
+            The equilibrium measure $\mu_J$ on a Julia set governs the limit distribution of zeros of orthogonal polynomials $P_n(z)$. As $n \to \infty$, the roots of $P_n(z) = 0$ condense directly onto $J(f)$.
+          </p>
+          <div id="math-potential" class="p-2 bg-slate-950 rounded text-center text-cyan-400 font-mono text-[11px]">
+            <!-- Rendered via KaTeX -->
+          </div>
+        </div>
+
+        <div class="p-3 bg-slate-900/90 rounded-xl border border-slate-800 space-y-2">
+          <h3 class="font-bold text-cyan-300 text-xs">Fatou Classification Metrics</h3>
+          <ul class="list-disc pl-4 space-y-1 text-[11px]">
+            <li><span class="text-cyan-400 font-semibold">Attracting Basin:</span> $f^k(z) \to z_0$ with $|f'(z_0)| < 1$.</li>
+            <li><span class="text-purple-400 font-semibold">Siegel Disk:</span> $f'(z_0) = e^{2\pi i \theta}$ for irrational $\theta$.</li>
+            <li><span class="text-rose-400 font-semibold">Parabolic Petal:</span> $f'(z_0) = 1$, slow algebraic convergence.</li>
+            <li><span class="text-amber-400 font-semibold">Escaping Basin:</span> Points where $|f^k(z)| \to \infty$.</li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Footer Diagnostics -->
+    <div class="p-3 border-t border-slate-800/80 text-[10px] text-slate-500 flex justify-between items-center font-mono">
+      <span>FPS: <span id="fps-counter" class="text-slate-300">60</span></span>
+      <span>Capacity $\mathcal{C}(J) \approx$ <span id="capacity-val" class="text-cyan-400">1.000</span></span>
+    </div>
+  </aside>
+
+  <!-- Main Viewport Area -->
+  <main class="flex-1 relative h-full w-full bg-black overflow-hidden">
+    <!-- Main Render Canvas -->
+    <canvas id="glcanvas" class="w-full h-full block cursor-grab active:cursor-grabbing"></canvas>
+
+    <!-- Overlay Canvas for Orbit Trajectory & Roots -->
+    <canvas id="overlay-canvas" class="absolute inset-0 w-full h-full pointer-events-none z-10"></canvas>
+
+    <!-- Inspection HUD (Hover Details) -->
+    <div id="hud-panel" class="absolute top-4 left-4 glass-panel rounded-xl p-3 z-10 text-xs text-slate-200 border border-slate-700/50 shadow-2xl pointer-events-none hidden max-w-xs space-y-1">
+      <div class="flex items-center space-x-1.5 font-bold text-cyan-300 border-b border-slate-800 pb-1">
+        <i data-lucide="crosshair" class="w-3.5 h-3.5"></i>
+        <span>Complex Coordinate Inspector</span>
+      </div>
+      <div class="font-mono text-[11px] grid grid-cols-2 gap-2 text-slate-300 pt-1">
+        <div>$z_0$: <span id="hud-z" class="text-white">0.000 + 0.000i</span></div>
+        <div>$|z_0|$: <span id="hud-mod" class="text-white">0.000</span></div>
+        <div>Green $G(z)$: <span id="hud-green" class="text-cyan-400">0.000</span></div>
+        <div>Fate: <span id="hud-fate" class="text-indigo-400">Bounded</span></div>
+      </div>
+    </div>
+
+    <!-- Active Formula Header Tag -->
+    <div class="absolute top-4 right-4 glass-panel rounded-xl px-3 py-2 z-10 text-xs border border-slate-700/50 shadow-xl hidden sm:flex items-center space-x-2">
+      <span class="text-slate-400 font-medium">Map:</span>
+      <span id="active-map-formula" class="font-mono text-cyan-300 font-bold">$f(z) = T_3(z) + c$</span>
+    </div>
+  </main>
+
+  <!-- WebGL Fragment Shader -->
+  <script id="vs" type="x-shader/x-vertex">
+    attribute vec2 position;
+    varying vec2 vUv;
+    void main() {
+      vUv = position * 0.5 + 0.5;
+      gl_Position = vec4(position, 0.0, 1.0);
+    }
+  </script>
+
+  <script id="fs" type="x-shader/x-fragment">
+    precision highp float;
+
+    uniform vec2 u_resolution;
+    uniform vec2 u_center;
+    uniform float u_zoom;
+    uniform vec2 u_c;
+    uniform int u_max_iterations;
+    uniform int u_family; // 0: Chebyshev, 1: Legendre, 2: Hermite, 3: Laguerre, 4: Gegenbauer, 5: Custom
+    uniform int u_degree;
+    uniform float u_alpha;
+    uniform vec3 u_custom_rec; // A, B, C
+    uniform int u_mode; // 0: Fatou, 1: Zero Density, 2: Potential, 3: Equipotential Grid
+    uniform int u_palette;
+
+    varying vec2 vUv;
+
+    // Complex Arithmetic
+    vec2 c_add(vec2 a, vec2 b) { return vec2(a.x + b.x, a.y + b.y); }
+    vec2 c_sub(vec2 a, vec2 b) { return vec2(a.x - b.x, a.y - b.y); }
+    vec2 c_mul(vec2 a, vec2 b) { return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
+    vec2 c_scale(vec2 a, float s) { return vec2(a.x * s, a.y * s); }
+    vec2 c_div(vec2 a, vec2 b) {
+      float d = dot(b, b);
+      return vec2((a.x * b.x + a.y * b.y) / d, (a.y * b.x - a.x * b.y) / d);
+    }
+
+    // Evaluate Orthogonal Polynomial P_n(z) using Three-Term Recurrence
+    vec2 evalOrthogonalPoly(vec2 z, int deg) {
+      if (deg == 0) return vec2(1.0, 0.0);
+      
+      vec2 P0 = vec2(1.0, 0.0);
+      vec2 P1 = vec2(0.0, 0.0);
+
+      // Initial conditions P_1(z)
+      if (u_family == 0) { // Chebyshev T_1 = z
+        P1 = z;
+      } else if (u_family == 1) { // Legendre P_1 = z
+        P1 = z;
+      } else if (u_family == 2) { // Hermite H_1 = 2z
+        P1 = c_scale(z, 2.0);
+      } else if (u_family == 3) { // Laguerre L_1 = 1 - z
+        P1 = c_sub(vec2(1.0, 0.0), z);
+      } else if (u_family == 4) { // Gegenbauer C_1^(alpha) = 2*alpha*z
+        P1 = c_scale(z, 2.0 * u_alpha);
+      } else { // Custom
+        P1 = c_add(c_scale(z, u_custom_rec.x), vec2(u_custom_rec.y, 0.0));
+      }
+
+      if (deg == 1) return P1;
+
+      vec2 P2 = vec2(0.0);
+
+      for (int k = 1; k < 8; k++) {
+        if (k >= deg) break;
+        float fk = float(k);
+
+        if (u_family == 0) {
+          // T_{k+1} = 2z T_k - T_{k-1}
+          P2 = c_sub(c_scale(c_mul(z, P1), 2.0), P0);
+        } else if (u_family == 1) {
+          // (k+1) P_{k+1} = (2k+1) z P_k - k P_{k-1}
+          vec2 term1 = c_scale(c_mul(z, P1), (2.0 * fk + 1.0) / (fk + 1.0));
+          vec2 term2 = c_scale(P0, fk / (fk + 1.0));
+          P2 = c_sub(term1, term2);
+        } else if (u_family == 2) {
+          // H_{k+1} = 2z H_k - 2k H_{k-1}
+          P2 = c_sub(c_scale(c_mul(z, P1), 2.0), c_scale(P0, 2.0 * fk));
+        } else if (u_family == 3) {
+          // (k+1) L_{k+1} = (2k+1 - z) L_k - k L_{k-1}
+          vec2 coeff = c_sub(vec2(2.0 * fk + 1.0, 0.0), z);
+          vec2 term1 = c_scale(c_mul(coeff, P1), 1.0 / (fk + 1.0));
+          vec2 term2 = c_scale(P0, fk / (fk + 1.0));
+          P2 = c_sub(term1, term2);
+        } else if (u_family == 4) {
+          // (k+1) C_{k+1} = 2(k+alpha) z C_k - (k+2alpha-1) C_{k-1}
+          vec2 term1 = c_scale(c_mul(z, P1), 2.0 * (fk + u_alpha) / (fk + 1.0));
+          vec2 term2 = c_scale(P0, (fk + 2.0 * u_alpha - 1.0) / (fk + 1.0));
+          P2 = c_sub(term1, term2);
+        } else {
+          // Custom recurrence: (A*z + B)*P_k - C*P_{k-1}
+          vec2 coeff = c_add(c_scale(z, u_custom_rec.x), vec2(u_custom_rec.y, 0.0));
+          P2 = c_sub(c_mul(coeff, P1), c_scale(P0, u_custom_rec.z));
+        }
+
+        P0 = P1;
+        P1 = P2;
+      }
+
+      return P1;
+    }
+
+    // Palette Color Generator
+    vec3 getColor(float t, float phase) {
+      t = clamp(t, 0.0, 1.0);
+      if (u_palette == 0) { // Spectral Quantum
+        return 0.5 + 0.5 * cos(6.28318 * (vec3(1.0, 1.0, 1.0) * t + vec3(0.0, 0.33, 0.67) + phase));
+      } else if (u_palette == 1) { // Thermal Electrostatic
+        vec3 c1 = vec3(0.02, 0.02, 0.1);
+        vec3 c2 = vec3(0.9, 0.25, 0.05);
+        vec3 c3 = vec3(1.0, 0.9, 0.2);
+        if (t < 0.5) return mix(c1, c2, t * 2.0);
+        return mix(c2, c3, (t - 0.5) * 2.0);
+      } else if (u_palette == 2) { // Cyberpunk Neon
+        vec3 c1 = vec3(0.05, 0.0, 0.2);
+        vec3 c2 = vec3(0.0, 0.8, 0.9);
+        vec3 c3 = vec3(0.95, 0.0, 0.6);
+        if (t < 0.5) return mix(c1, c2, t * 2.0);
+        return mix(c2, c3, (t - 0.5) * 2.0);
+      } else { // Monochrome Topography
+        float v = pow(t, 1.8);
+        return vec3(v * 0.9, v * 0.95, v * 1.0);
+      }
+    }
+
+    void main() {
+      vec2 st = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / u_resolution.y;
+      vec2 z = u_center + st * u_zoom;
+
+      float n = 0.0;
+      float maxIters = float(u_max_iterations);
+      bool escaped = false;
+      float minDist = 1e10;
+      vec2 z_prev = z;
+
+      // Iterative mapping f(z) = P_n(z) + c
+      for (int i = 0; i < 512; i++) {
+        if (i >= u_max_iterations) break;
+
+        float r2 = dot(z, z);
+        if (r2 > 256.0) {
+          escaped = true;
+          break;
+        }
+
+        minDist = min(minDist, r2);
+        z_prev = z;
+
+        // Apply Orthogonal Polynomial Map
+        vec2 P = evalOrthogonalPoly(z, u_degree);
+        z = c_add(P, u_c);
+
+        n += 1.0;
+      }
+
+      // Calculate smooth iteration and Green's Potential
+      float r = length(z);
+      float deg_f = float(u_degree);
+      float smoothIter = n;
+      if (escaped) {
+        smoothIter = n - log(log(r) / log(2.0)) / log(deg_f);
+      }
+      float greensPotential = max(0.0, log(max(r, 1.0)) / pow(deg_f, smoothIter));
+
+      vec3 finalColor = vec3(0.0);
+
+      // MODE 0: Dynamic Fatou Component Classifier
+      if (u_mode == 0) {
+        if (escaped) {
+          // Escaping Basin of Infinity
+          float normIter = smoothIter / maxIters;
+          finalColor = getColor(normIter * 3.0, 0.0);
+        } else {
+          // Classify Interior Bounded Fatou Domains
+          float delta = length(z - z_prev);
+          if (delta < 1e-3) {
+            // Finite Attracting Fixed Point
+            finalColor = vec3(0.1, 0.75, 0.5);
+          } else if (minDist < 0.05) {
+            // Super-attracting Core
+            finalColor = vec3(0.2, 0.4, 0.9);
+          } else {
+            // Periodic Siegel Rotation / Parabolic Petal
+            float arg = atan(z.y, z.x);
+            float ring = sin(length(z) * 15.0 + arg * 2.0) * 0.5 + 0.5;
+            finalColor = mix(vec3(0.5, 0.15, 0.65), vec3(0.15, 0.85, 0.75), ring);
+          }
+        }
+      }
+      // MODE 1: Zero Density & Root Condensation Map
+      else if (u_mode == 1) {
+        vec2 P_eval = evalOrthogonalPoly(z, u_degree);
+        float p_mag = length(P_eval);
+        float density = exp(-p_mag * 2.0);
+
+        if (escaped) {
+          vec3 bg = getColor(smoothIter / maxIters, 0.5);
+          finalColor = mix(bg, vec3(0.0, 1.0, 0.8), density);
+        } else {
+          finalColor = mix(vec3(0.05, 0.08, 0.15), vec3(1.0, 0.3, 0.5), density);
+        }
+      }
+      // MODE 2: Continuous Green's Potential Field
+      else if (u_mode == 2) {
+        if (escaped) {
+          float potVal = log(greensPotential + 1.0);
+          finalColor = getColor(potVal * 2.5, 0.2);
+        } else {
+          finalColor = vec3(0.02, 0.02, 0.05);
+        }
+      }
+      // MODE 3: Equipotential & Conformal Line Grid
+      else if (u_mode == 3) {
+        if (escaped) {
+          float isoPot = abs(sin(greensPotential * 40.0));
+          float isoAngle = abs(sin(atan(z.y, z.x) * 10.0));
+          float grid = smoothstep(0.02, 0.08, isoPot) * smoothstep(0.02, 0.08, isoAngle);
+          
+          vec3 baseCol = getColor(smoothIter / maxIters, 0.0);
+          finalColor = mix(vec3(0.0, 1.0, 0.9), baseCol, grid);
+        } else {
+          finalColor = vec3(0.03, 0.04, 0.08);
+        }
+      }
+
+      gl_FragColor = vec4(finalColor, 1.0);
+    }
+  </script>
+
+  <!-- JS Logic & App Controller -->
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+
+      const canvas = document.getElementById('glcanvas');
+      const overlayCanvas = document.getElementById('overlay-canvas');
+      const overlayCtx = overlayCanvas.getContext('2d');
+      const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true });
+
+      if (!gl) {
+        alert('WebGL context not supported.');
+        return;
+      }
+
+      // Master State
+      const state = {
+        center: { x: 0.0, y: 0.0 },
+        zoom: 3.2,
+        c: { x: -0.2, y: 0.6 },
+        family: 0, // 0: Chebyshev, 1: Legendre, 2: Hermite, 3: Laguerre, 4: Gegenbauer, 5: Custom
+        degree: 3,
+        alpha: 0.5,
+        customRec: { a: 2.0, b: 0.0, c: 1.0 },
+        maxIterations: 128,
+        mode: 0,
+        palette: 0,
+        showZeros: true,
+        showOrbit: true,
+        isDragging: false,
+        dragStart: { x: 0, y: 0 },
+        hoverPos: { x: 0, y: 0 },
+        isHovering: false,
+        lastTime: performance.now(),
+        fps: 60
+      };
+
+      // Shader Setup
+      function createShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+          console.error(gl.getShaderInfoLog(shader));
+          gl.deleteShader(shader);
+          return null;
+        }
+        return shader;
+      }
+
+      const program = gl.createProgram();
+      gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, document.getElementById('vs').text));
+      gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, document.getElementById('fs').text));
+      gl.linkProgram(program);
+      gl.useProgram(program);
+
+      // Buffer
+      const posBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+        -1, -1,  1, -1, -1,  1,
+        -1,  1,  1, -1,  1,  1
+      ]), gl.STATIC_DRAW);
+
+      const posLoc = gl.getAttribLocation(program, 'position');
+      gl.enableVertexAttribArray(posLoc);
+      gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+      // Uniforms
+      const u = {
+        res: gl.getUniformLocation(program, 'u_resolution'),
+        center: gl.getUniformLocation(program, 'u_center'),
+        zoom: gl.getUniformLocation(program, 'u_zoom'),
+        c: gl.getUniformLocation(program, 'u_c'),
+        maxIters: gl.getUniformLocation(program, 'u_max_iterations'),
+        family: gl.getUniformLocation(program, 'u_family'),
+        degree: gl.getUniformLocation(program, 'u_degree'),
+        alpha: gl.getUniformLocation(program, 'u_alpha'),
+        customRec: gl.getUniformLocation(program, 'u_custom_rec'),
+        mode: gl.getUniformLocation(program, 'u_mode'),
+        palette: gl.getUniformLocation(program, 'u_palette')
+      };
+
+      // Complex Arithmetic Helpers for JS Side
+      function c_add(a, b) { return { x: a.x + b.x, y: a.y + b.y }; }
+      function c_sub(a, b) { return { x: a.x - b.x, y: a.y - b.y }; }
+      function c_mul(a, b) { return { x: a.x * b.x - a.y * b.y, y: a.x * b.y + a.y * b.x }; }
+      function c_scale(a, s) { return { x: a.x * s, y: a.y * s }; }
+
+      // JS Orthogonal Polynomial Evaluation (For Orbit Pathing & Zero Marking)
+      function evalPolyJS(z, family, deg, alpha, customRec) {
+        if (deg === 0) return { x: 1, y: 0 };
+        let P0 = { x: 1, y: 0 };
+        let P1 = { x: 0, y: 0 };
+
+        if (family === 0) P1 = z; // Chebyshev
+        else if (family === 1) P1 = z; // Legendre
+        else if (family === 2) P1 = c_scale(z, 2.0); // Hermite
+        else if (family === 3) P1 = c_sub({ x: 1, y: 0 }, z); // Laguerre
+        else if (family === 4) P1 = c_scale(z, 2.0 * alpha); // Gegenbauer
+        else P1 = c_add(c_scale(z, customRec.a), { x: customRec.b, y: 0 });
+
+        if (deg === 1) return P1;
+
+        let P2 = { x: 0, y: 0 };
+        for (let k = 1; k < deg; k++) {
+          const fk = k;
+          if (family === 0) {
+            P2 = c_sub(c_scale(c_mul(z, P1), 2.0), P0);
+          } else if (family === 1) {
+            const t1 = c_scale(c_mul(z, P1), (2.0 * fk + 1.0) / (fk + 1.0));
+            const t2 = c_scale(P0, fk / (fk + 1.0));
+            P2 = c_sub(t1, t2);
+          } else if (family === 2) {
+            P2 = c_sub(c_scale(c_mul(z, P1), 2.0), c_scale(P0, 2.0 * fk));
+          } else if (family === 3) {
+            const coeff = c_sub({ x: 2.0 * fk + 1.0, y: 0 }, z);
+            const t1 = c_scale(c_mul(coeff, P1), 1.0 / (fk + 1.0));
+            const t2 = c_scale(P0, fk / (fk + 1.0));
+            P2 = c_sub(t1, t2);
+          } else if (family === 4) {
+            const t1 = c_scale(c_mul(z, P1), 2.0 * (fk + alpha) / (fk + 1.0));
+            const t2 = c_scale(P0, (fk + 2.0 * alpha - 1.0) / (fk + 1.0));
+            P2 = c_sub(t1, t2);
+          } else {
+            const coeff = c_add(c_scale(z, customRec.a), { x: customRec.b, y: 0 });
+            P2 = c_sub(c_mul(coeff, P1), c_scale(P0, customRec.c));
+          }
+          P0 = P1;
+          P1 = P2;
+        }
+        return P1;
+      }
+
+      // Compute Roots of Orthogonal Polynomial via Aberth-Ehrlich / Durand-Kerner method
+      function computePolyZeros(family, deg, alpha, customRec) {
+        const zeros = [];
+        // Initial circular estimate
+        for (let i = 0; i < deg; i++) {
+          const theta = (2 * Math.PI * i) / deg + 0.1;
+          zeros.push({ x: 0.8 * Math.cos(theta), y: 0.8 * Math.sin(theta) });
+        }
+
+        // Refine roots
+        for (let iter = 0; iter < 20; iter++) {
+          for (let i = 0; i < deg; i++) {
+            const z = zeros[i];
+            const P = evalPolyJS(z, family, deg, alpha, customRec);
+            
+            // Numerical Derivative P'(z)
+            const eps = 1e-5;
+            const P_plus = evalPolyJS({ x: z.x + eps, y: z.y }, family, deg, alpha, customRec);
+            const dP = { x: (P_plus.x - P.x) / eps, y: (P_plus.y - P.y) / eps };
+
+            const den = dP.x * dP.x + dP.y * dP.y;
+            if (den > 1e-12) {
+              zeros[i].x -= (P.x * dP.x + P.y * dP.y) / den;
+              zeros[i].y -= (P.y * dP.x - P.x * dP.y) / den;
+            }
+          }
+        }
+        return zeros;
+      }
+
+      // Canvas Resizing
+      function resize() {
+        const w = canvas.clientWidth;
+        const h = canvas.clientHeight;
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+          overlayCanvas.width = w;
+          overlayCanvas.height = h;
+          gl.viewport(0, 0, w, h);
+        }
+      }
+
+      // Screen Coordinate Transformations
+      function complexToScreen(z) {
+        const factor = canvas.height / state.zoom;
+        const sx = canvas.width / 2 + (z.x - state.center.x) * factor;
+        const sy = canvas.height / 2 - (z.y - state.center.y) * factor;
+        return { x: sx, y: sy };
+      }
+
+      function screenToComplex(sx, sy) {
+        const factor = state.zoom / canvas.height;
+        const cx = state.center.x + (sx - canvas.width / 2) * factor;
+        const cy = state.center.y - (sy - canvas.height / 2) * factor;
+        return { x: cx, y: cy };
+      }
+
+      // Draw Overlay Graphics (Orbit & Zero Markers)
+      function drawOverlay() {
+        overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+        // 1. Draw Orthogonal Polynomial Zeros
+        if (state.showZeros) {
+          const zeros = computePolyZeros(state.family, state.degree, state.alpha, state.customRec);
+          zeros.forEach((zero, idx) => {
+            const p = complexToScreen(zero);
+            overlayCtx.beginPath();
+            overlayCtx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+            overlayCtx.fillStyle = 'rgba(6, 182, 212, 0.8)';
+            overlayCtx.strokeStyle = '#ffffff';
+            overlayCtx.lineWidth = 2;
+            overlayCtx.fill();
+            overlayCtx.stroke();
+
+            // Pulse ring
+            overlayCtx.beginPath();
+            overlayCtx.arc(p.x, p.y, 10, 0, Math.PI * 2);
+            overlayCtx.strokeStyle = 'rgba(6, 182, 212, 0.4)';
+            overlayCtx.lineWidth = 1;
+            overlayCtx.stroke();
+          });
+        }
+
+        // 2. Draw Hover Orbit Line Path
+        if (state.showOrbit && state.isHovering) {
+          let curr = { x: state.hoverPos.x, y: state.hoverPos.y };
+          const path = [curr];
+
+          for (let i = 0; i < 40; i++) {
+            if (curr.x * curr.x + curr.y * curr.y > 256) break;
+            const P = evalPolyJS(curr, state.family, state.degree, state.alpha, state.customRec);
+            curr = c_add(P, state.c);
+            path.push(curr);
+          }
+
+          if (path.length > 1) {
+            overlayCtx.beginPath();
+            const p0 = complexToScreen(path[0]);
+            overlayCtx.moveTo(p0.x, p0.y);
+
+            for (let i = 1; i < path.length; i++) {
+              const pt = complexToScreen(path[i]);
+              overlayCtx.lineTo(pt.x, pt.y);
+            }
+
+            overlayCtx.strokeStyle = 'rgba(236, 72, 153, 0.9)';
+            overlayCtx.lineWidth = 2;
+            overlayCtx.stroke();
+
+            // Draw orbit nodes
+            path.forEach((pt, i) => {
+              const scr = complexToScreen(pt);
+              overlayCtx.beginPath();
+              overlayCtx.arc(scr.x, scr.y, i === 0 ? 5 : 3, 0, Math.PI * 2);
+              overlayCtx.fillStyle = i === 0 ? '#f43f5e' : 'rgba(255, 255, 255, 0.9)';
+              overlayCtx.fill();
+            });
+          }
+        }
+      }
+
+      // Render Loop
+      function render(now) {
+        resize();
+
+        // FPS
+        const dt = now - state.lastTime;
+        state.lastTime = now;
+        if (dt > 0) state.fps = Math.round(1000 / dt);
+        document.getElementById('fps-counter').textContent = state.fps;
+
+        // Uniform update
+        gl.uniform2f(u.res, canvas.width, canvas.height);
+        gl.uniform2f(u.center, state.center.x, state.center.y);
+        gl.uniform1f(u.zoom, state.zoom);
+        gl.uniform2f(u.c, state.c.x, state.c.y);
+        gl.uniform1i(u.maxIters, state.maxIterations);
+        gl.uniform1i(u.family, state.family);
+        gl.uniform1i(u.degree, state.degree);
+        gl.uniform1f(u.alpha, state.alpha);
+        gl.uniform3f(u.customRec, state.customRec.a, state.customRec.b, state.customRec.c);
+        gl.uniform1i(u.mode, state.mode);
+        gl.uniform1i(u.palette, state.palette);
+
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // Estimate Transfinite Diameter / Logarithmic Capacity C(J) ~ deg^(1/deg)
+        const cap = Math.pow(state.degree, 1 / state.degree);
+        document.getElementById('capacity-val').textContent = cap.toFixed(3);
+
+        drawOverlay();
+        requestAnimationFrame(render);
+      }
+
+      // UI Updates & Syncing
+      function updateFormulaHeader() {
+        const famNames = ['T', 'P', 'H', 'L', 'C^{(\\alpha)}', 'Rec'];
+        const name = famNames[state.family];
+        const elem = document.getElementById('active-map-formula');
+        elem.innerHTML = `\\(f(z) = ${name}_${state.degree}(z) + (${state.c.x >= 0 ? '+' : ''}${state.c.x.toFixed(2)} ${state.c.y >= 0 ? '+' : ''}${state.c.y.toFixed(2)}i)\\)`;
+        if (window.renderMathInElement) renderMathInElement(elem);
+      }
+
+      function syncUI() {
+        document.getElementById('poly-family-select').value = state.family;
+        document.getElementById('slider-deg').value = state.degree;
+        document.getElementById('deg-val').textContent = state.degree;
+        document.getElementById('slider-alpha').value = state.alpha;
+        document.getElementById('alpha-val').textContent = state.alpha.toFixed(1);
+        document.getElementById('slider-cr').value = state.c.x;
+        document.getElementById('slider-ci').value = state.c.y;
+        document.getElementById('c-real-val').textContent = state.c.x.toFixed(3);
+        document.getElementById('c-imag-val').textContent = state.c.y.toFixed(3);
+
+        const customPanel = document.getElementById('custom-recurrence-panel');
+        if (state.family === 5) {
+          customPanel.classList.remove('hidden');
+        } else {
+          customPanel.classList.add('hidden');
+        }
+
+        updateFormulaHeader();
+      }
+
+      // Tab Switcher
+      const tabBtns = {
+        controls: document.getElementById('tab-controls-btn'),
+        presets: document.getElementById('tab-presets-btn'),
+        math: document.getElementById('tab-math-btn')
+      };
+      const tabContents = {
+        controls: document.getElementById('tab-controls'),
+        presets: document.getElementById('tab-presets'),
+        math: document.getElementById('tab-math')
+      };
+
+      Object.keys(tabBtns).forEach(key => {
+        tabBtns[key].addEventListener('click', () => {
+          Object.values(tabBtns).forEach(b => b.classList.remove('active', 'text-cyan-400'));
+          Object.values(tabContents).forEach(c => c.classList.add('hidden'));
+
+          tabBtns[key].classList.add('active');
+          tabContents[key].classList.remove('hidden');
+
+          if (key === 'math' && window.renderMathInElement) {
+            document.getElementById('math-recurrence').innerHTML = `\\[P_{n+1}(z) = (A_n z + B_n) P_n(z) - C_n P_{n-1}(z)\\]`;
+            document.getElementById('math-potential').innerHTML = `\\[G(z) = \\lim_{k\\to\\infty} d^{-k} \\ln|f^k(z)|\\]`;
+            renderMathInElement(document.getElementById('tab-math'));
+          }
+        });
+      });
+
+      // Event Listeners
+      document.getElementById('poly-family-select').addEventListener('change', (e) => {
+        state.family = parseInt(e.target.value);
+        syncUI();
+      });
+
+      document.getElementById('slider-deg').addEventListener('input', (e) => {
+        state.degree = parseInt(e.target.value);
+        syncUI();
+      });
+
+      document.getElementById('slider-alpha').addEventListener('input', (e) => {
+        state.alpha = parseFloat(e.target.value);
+        syncUI();
+      });
+
+      document.getElementById('slider-cr').addEventListener('input', (e) => {
+        state.c.x = parseFloat(e.target.value);
+        syncUI();
+      });
+
+      document.getElementById('slider-ci').addEventListener('input', (e) => {
+        state.c.y = parseFloat(e.target.value);
+        syncUI();
+      });
+
+      document.getElementById('slider-iter').addEventListener('input', (e) => {
+        state.maxIterations = parseInt(e.target.value);
+        document.getElementById('iter-val').textContent = state.maxIterations;
+      });
+
+      document.getElementById('palette-select').addEventListener('change', (e) => {
+        state.palette = parseInt(e.target.value);
+      });
+
+      document.getElementById('toggle-zeros').addEventListener('change', (e) => {
+        state.showZeros = e.target.checked;
+      });
+
+      document.getElementById('toggle-orbit').addEventListener('change', (e) => {
+        state.showOrbit = e.target.checked;
+      });
+
+      // Custom Recurrence inputs
+      ['a', 'b', 'c'].forEach(key => {
+        document.getElementById(`input-rec-${key}`).addEventListener('input', (e) => {
+          state.customRec[key] = parseFloat(e.target.value) || 0.0;
+        });
+      });
+
+      // Mode Buttons
+      const modeBtns = document.querySelectorAll('#mode-buttons .mode-btn');
+      modeBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          modeBtns.forEach(b => b.className = "mode-btn px-2.5 py-2 rounded-lg border text-xs font-medium flex items-center justify-start space-x-2 transition-all bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700");
+          btn.className = "mode-btn px-2.5 py-2 rounded-lg border text-xs font-medium flex items-center justify-start space-x-2 transition-all bg-cyan-600/30 border-cyan-500 text-cyan-300";
+          state.mode = parseInt(btn.getAttribute('data-mode'));
+        });
+      });
+
+      // Presets Handler
+      document.querySelectorAll('.preset-card').forEach(card => {
+        card.addEventListener('click', () => {
+          const preset = card.getAttribute('data-preset');
+          if (preset === 'chebyshev-dendrite') {
+            state.family = 0; state.degree = 3; state.c = { x: 0.0, y: 0.85 };
+          } else if (preset === 'legendre-siegel') {
+            state.family = 1; state.degree = 4; state.c = { x: -0.3, y: 0.4 };
+          } else if (preset === 'hermite-flower') {
+            state.family = 2; state.degree = 3; state.c = { x: 0.15, y: -0.2 };
+          } else if (preset === 'laguerre-asymmetric') {
+            state.family = 3; state.degree = 3; state.c = { x: -0.4, y: 0.5 };
+          } else if (preset === 'custom-herman') {
+            state.family = 5; state.degree = 3; state.c = { x: -0.5, y: 0.5 };
+            state.customRec = { a: 1.5, b: 0.2, c: 0.8 };
+            document.getElementById('input-rec-a').value = 1.5;
+            document.getElementById('input-rec-b').value = 0.2;
+            document.getElementById('input-rec-c').value = 0.8;
+          }
+          syncUI();
+        });
+      });
+
+      document.getElementById('reset-view-btn').addEventListener('click', () => {
+        state.center = { x: 0, y: 0 };
+        state.zoom = 3.2;
+      });
+
+      // Pointer Interactivity (Pan, Zoom, Inspector)
+      canvas.addEventListener('mousedown', (e) => {
+        state.isDragging = true;
+        state.dragStart = { x: e.clientX, y: e.clientY };
+      });
+
+      window.addEventListener('mouseup', () => {
+        state.isDragging = false;
+      });
+
+      canvas.addEventListener('mousemove', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const sx = e.clientX - rect.left;
+        const sy = e.clientY - rect.top;
+        
+        state.hoverPos = screenToComplex(sx, sy);
+        state.isHovering = true;
+
+        if (state.isDragging) {
+          const dx = e.clientX - state.dragStart.x;
+          const dy = e.clientY - state.dragStart.y;
+          const factor = state.zoom / canvas.height;
+
+          state.center.x -= dx * factor;
+          state.center.y += dy * factor;
+          state.dragStart = { x: e.clientX, y: e.clientY };
+        }
+
+        // HUD Updates
+        const hud = document.getElementById('hud-panel');
+        hud.classList.remove('hidden');
+        document.getElementById('hud-z').textContent = `${state.hoverPos.x >= 0 ? '+' : ''}${state.hoverPos.x.toFixed(3)} ${state.hoverPos.y >= 0 ? '+' : ''}${state.hoverPos.y.toFixed(3)}i`;
+        const mod = Math.hypot(state.hoverPos.x, state.hoverPos.y);
+        document.getElementById('hud-mod').textContent = mod.toFixed(3);
+
+        // Simple orbit check for fate
+        let curr = { x: state.hoverPos.x, y: state.hoverPos.y };
+        let esc = false;
+        for (let i = 0; i < 30; i++) {
+          if (curr.x * curr.x + curr.y * curr.y > 256) { esc = true; break; }
+          const P = evalPolyJS(curr, state.family, state.degree, state.alpha, state.customRec);
+          curr = c_add(P, state.c);
+        }
+        document.getElementById('hud-fate').textContent = esc ? "Escapes (Infinity)" : "Bounded (Fatou Interior)";
+        document.getElementById('hud-green').textContent = esc ? (Math.log(mod + 1.0) / Math.pow(state.degree, 5)).toFixed(4) : "0.0000";
+      });
+
+      canvas.addEventListener('mouseleave', () => {
+        state.isHovering = false;
+        document.getElementById('hud-panel').classList.add('hidden');
+      });
+
+      canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const factor = e.deltaY > 0 ? 1.08 : 0.92;
+        state.zoom *= factor;
+      }, { passive: false });
+
+      // Init UI and Loop
+      syncUI();
+      requestAnimationFrame(render);
+    });
+  </script>
+</body>
+</html>
