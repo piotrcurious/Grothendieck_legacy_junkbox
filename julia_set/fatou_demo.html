@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fatou Structure Explorer — Orthogonal Polynomial Dynamics</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@400;500;600;700&display=swap');
+  *{box-sizing:border-box} html,body{margin:0;min-height:100%;font-family:Inter,system-ui,sans-serif} body{user-select:none;-webkit-user-select:none}
+  .mono{font-family:'Fira Code',monospace}.glass{background:rgba(15,23,42,.94);border:1px solid rgba(148,163,184,.16);backdrop-filter:blur(14px)}
+  .slider{width:100%;accent-color:#38bdf8;cursor:pointer}.tab{color:#94a3b8;border:1px solid transparent}.tab.active{color:#7dd3fc;background:rgba(14,165,233,.14);border-color:rgba(56,189,248,.3)}
+  .mode.active,.preset.active{background:rgba(14,165,233,.18);border-color:rgba(56,189,248,.65);color:#bae6fd}
+  canvas{touch-action:none}.tiny-label{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:#94a3b8;font-weight:700}
+  @media(max-width:767px){body{height:auto;min-height:100dvh;overflow:auto}#sidebar{max-height:none}#view-wrap{height:66dvh!important;min-height:360px;flex:none}}
+</style>
+</head>
+<body class="bg-slate-950 text-slate-100 md:h-screen md:overflow-hidden flex flex-col md:flex-row">
+<aside id="sidebar" class="glass z-20 w-full md:w-[370px] lg:w-[405px] flex flex-col shrink-0 md:h-full">
+  <header class="p-4 border-b border-slate-800/80">
+    <div class="flex items-center justify-between gap-3">
+      <div><div class="tiny-label text-sky-400">Complex dynamics · interactive atlas</div><h1 class="text-lg font-bold tracking-tight mt-1">Fatou Structure Explorer</h1><p class="text-[11px] text-slate-400 mt-1">Orthogonal polynomials as a first model</p></div>
+      <button id="reset-view" title="Reset view" class="text-slate-300 border border-slate-700 hover:bg-slate-800 rounded-lg px-3 py-2 text-sm">↺</button>
+    </div>
+    <div class="mt-4 p-3 rounded-xl bg-sky-950/30 border border-sky-900/60">
+      <p class="text-xs leading-relaxed text-slate-200"><strong class="text-sky-300">Core idea:</strong> a fractal boundary is shaped by the dynamical domains on either side of it. Change the polynomial, its coefficients, or the coupling <span class="mono">c</span>, and the attracting Fatou components and the Julia boundary can reorganize.</p>
+    </div>
+  </header>
+  <nav class="p-2 flex gap-1 border-b border-slate-800/80">
+    <button class="tab active rounded-lg px-3 py-2 text-xs flex-1" data-tab="families">Polynomial map</button>
+    <button class="tab rounded-lg px-3 py-2 text-xs flex-1" data-tab="extensions">Extensions</button>
+    <button class="tab rounded-lg px-3 py-2 text-xs flex-1" data-tab="theory">Theory & limits</button>
+  </nav>
+  <div class="flex-1 overflow-y-auto p-4 space-y-5">
+    <section id="panel-families" class="space-y-5">
+      <div>
+        <label class="tiny-label block mb-2" for="family">Choose the underlying polynomial</label>
+        <select id="family" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-sky-200">
+          <option value="0">Monomial baseline: zᵈ</option>
+          <option value="1">Chebyshev (first kind), monic</option>
+          <option value="2">Legendre, monic</option>
+          <option value="3">Gegenbauer, monic</option>
+          <option value="4">Jacobi, monic</option>
+        </select>
+        <p id="family-note" class="text-[11px] text-slate-400 leading-relaxed mt-2">Baseline map z ↦ zᵈ + c. For c = 0, the origin is a superattracting fixed point.</p>
+      </div>
+      <div id="panel-lambda" class="hidden rounded-xl border border-slate-800 bg-slate-900/65 p-3 space-y-2">
+        <div class="flex justify-between text-xs"><label for="lambda">Gegenbauer parameter λ</label><span id="lambda-val" class="mono text-sky-300">0.75</span></div>
+        <input id="lambda" class="slider" type="range" min="0.1" max="3" step="0.05" value="0.75">
+        <p class="text-[10px] text-slate-500">Weight on [−1,1]: (1−x²)<sup>λ−1/2</sup>. λ = 1/2 gives Legendre polynomials.</p>
+      </div>
+      <div id="panel-jacobi" class="hidden rounded-xl border border-slate-800 bg-slate-900/65 p-3 space-y-3">
+        <div><div class="flex justify-between text-xs"><label for="alpha">Jacobi α</label><span id="alpha-val" class="mono text-sky-300">0.25</span></div><input id="alpha" class="slider" type="range" min="-0.45" max="2.5" step="0.05" value="0.25"></div>
+        <div><div class="flex justify-between text-xs"><label for="beta">Jacobi β</label><span id="beta-val" class="mono text-sky-300">0.50</span></div><input id="beta" class="slider" type="range" min="-0.45" max="2.5" step="0.05" value="0.5"></div>
+        <p class="text-[10px] text-slate-500">Jacobi weight: (1−x)<sup>α</sup>(1+x)<sup>β</sup>, α, β &gt; −1. Sliders stay in the regular range.</p>
+      </div>
+      <div class="rounded-xl border border-slate-800 bg-slate-900/65 p-3 space-y-3">
+        <div><div class="flex justify-between text-xs"><label for="degree">Degree d</label><span id="degree-val" class="mono text-sky-300">3</span></div><input id="degree" class="slider" type="range" min="2" max="6" step="1" value="3"></div>
+        <div><div class="flex justify-between text-xs"><label for="creal">Coupling Re(c)</label><span id="creal-val" class="mono text-sky-300">0.000</span></div><input id="creal" class="slider" type="range" min="-2" max="2" step="0.005" value="0"></div>
+        <div><div class="flex justify-between text-xs"><label for="cimag">Coupling Im(c)</label><span id="cimag-val" class="mono text-sky-300">0.000</span></div><input id="cimag" class="slider" type="range" min="-2" max="2" step="0.005" value="0"></div>
+        <div class="text-[11px] mono text-slate-300 bg-slate-950 rounded-lg p-2" id="map-formula">f(z) = z³ + c</div>
+      </div>
+      <div>
+        <div class="tiny-label mb-2">Compare component structures</div>
+        <div class="grid grid-cols-2 gap-2">
+          <button class="preset border border-slate-700 rounded-lg p-2 text-[11px] text-left" data-preset="monomial">z² · c = 0<br><span class="text-slate-500">fixed-point basin</span></button>
+          <button class="preset border border-slate-700 rounded-lg p-2 text-[11px] text-left" data-preset="basilica">z² − 1<br><span class="text-slate-500">period-2 basin</span></button>
+          <button class="preset border border-slate-700 rounded-lg p-2 text-[11px] text-left" data-preset="legendre">Legendre cubic<br><span class="text-slate-500">orthogonal recurrence</span></button>
+          <button class="preset border border-slate-700 rounded-lg p-2 text-[11px] text-left" data-preset="gegenbauer">Gegenbauer cubic<br><span class="text-slate-500">change λ to compare</span></button>
+        </div>
+      </div>
+      <div>
+        <div class="tiny-label mb-2">Rendering lens</div>
+        <div class="grid grid-cols-2 gap-2" id="render-modes">
+          <button class="mode active border rounded-lg px-2 py-2 text-xs" data-mode="0">Fatou basins</button>
+          <button class="mode border border-slate-800 bg-slate-900 rounded-lg px-2 py-2 text-xs text-slate-400" data-mode="1">Escape time</button>
+          <button class="mode border border-slate-800 bg-slate-900 rounded-lg px-2 py-2 text-xs text-slate-400" data-mode="2">Green potential</button>
+          <button class="mode border border-slate-800 bg-slate-900 rounded-lg px-2 py-2 text-xs text-slate-400" data-mode="3">Potential contours</button>
+        </div>
+        <p class="text-[10px] text-slate-500 mt-2">Basins view colours escape to ∞ and numerically detected attracting cycles (periods 1–8); hue also depends on a cycle-location estimate. Other bounded orbits are left unclassified.</p>
+      </div>
+      <div class="rounded-xl border border-slate-800 bg-slate-900/65 p-3 space-y-3">
+        <div class="tiny-label">Overlays & iteration</div>
+        <label class="flex items-center justify-between text-xs"><span>Zeros of Q<sub>d</sub> (blue dots)</span><input id="show-zeros" type="checkbox" checked class="accent-sky-500 w-4 h-4"></label>
+        <label class="flex items-center justify-between text-xs"><span>Critical points of f (rose ×)</span><input id="show-critical" type="checkbox" checked class="accent-rose-400 w-4 h-4"></label>
+        <label class="flex items-center justify-between text-xs"><span>Trace critical orbits (gold)</span><input id="show-critical-orbits" type="checkbox" class="accent-amber-400 w-4 h-4"></label>
+        <label class="flex items-center justify-between text-xs"><span>Orbit of pointer position</span><input id="show-orbit" type="checkbox" checked class="accent-sky-500 w-4 h-4"></label>
+        <div><div class="flex justify-between text-xs"><label for="iterations">Maximum iterations</label><span id="iterations-val" class="mono text-sky-300">180</span></div><input id="iterations" class="slider" type="range" min="48" max="512" step="16" value="180"></div>
+        <div><label for="palette" class="tiny-label block mb-2">Escape palette</label><select id="palette" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs"><option value="0">Spectral</option><option value="1">Thermal</option><option value="2">Neon</option><option value="3">Monochrome</option></select></div>
+      </div>
+    </section>
+    <section id="panel-extensions" class="hidden space-y-4 text-xs leading-relaxed text-slate-300">
+      <div class="rounded-xl border border-slate-800 bg-slate-900/75 p-3 space-y-2"><h2 class="font-bold text-sky-300">1 · Orthogonality → recurrence → map</h2><p>For a positive measure on the real line, monic orthogonal polynomials satisfy a three-term recurrence</p><div class="mono rounded-lg bg-slate-950 p-3 text-center text-sky-200">Qₙ₊₁(z) = (z − bₙ)Qₙ(z) − aₙ²Qₙ₋₁(z)</div><p>The measure determines the recurrence coefficients. Here the chosen finite-degree polynomial is then used as a dynamical map, <span class="mono">f(z)=Q<sub>d</sub>(z)+c</span>. The recurrence determines the map; iteration determines its Fatou and Julia structure.</p></div>
+      <div class="rounded-xl border border-slate-800 bg-slate-900/75 p-3 space-y-2"><h2 class="font-bold text-indigo-300">2 · OPUC / CMV</h2><p>For orthogonal polynomials on the unit circle, Verblunsky coefficients encode the measure and a unitary CMV matrix replaces the real-line Jacobi matrix. A future module could use these coefficients to generate a polynomial map or study the CMV spectrum alongside the dynamical plane.</p><p class="text-slate-500">Not simulated by this current renderer.</p></div>
+      <div class="rounded-xl border border-slate-800 bg-slate-900/75 p-3 space-y-2"><h2 class="font-bold text-emerald-300">3 · Isospectral deformation / Toda</h2><p>Toda evolution changes Jacobi recurrence coefficients while preserving the spectrum of the associated Jacobi operator. Rebuilding <span class="mono">Q<sub>d</sub></span> along that flow would let the explorer ask whether spectral invariants constrain, or fail to constrain, the resulting Fatou geometry.</p><p class="text-slate-500">This is a proposed extension, not a time-integrated Toda solver.</p></div>
+      <div class="rounded-xl border border-slate-800 bg-slate-900/75 p-3 space-y-2"><h2 class="font-bold text-amber-300">4 · Beyond polynomial maps</h2><p>Extensions can include custom recurrence coefficients, non-orthogonal polynomials, compositions of maps, and rational maps. Rational maps add poles and can have Fatou components (such as Herman rings) that cannot occur for polynomial maps.</p></div>
+    </section>
+    <section id="panel-theory" class="hidden space-y-4 text-xs leading-relaxed text-slate-300">
+      <div class="rounded-xl border border-slate-800 bg-slate-900/75 p-3 space-y-2"><h2 class="font-bold text-sky-300">The dynamical partition</h2><p>For a polynomial map of degree at least two, the <strong>filled Julia set</strong> K(f) contains points with bounded forward orbit; the <strong>Julia set</strong> is its boundary, J(f)=∂K(f); the <strong>Fatou set</strong> is the region where the iterates form a normal family. Its connected components are Fatou components.</p><p>The basin of infinity is always a Fatou component. Other Fatou components can be attracting or parabolic basins, or rotation domains such as Siegel disks.</p></div>
+      <div class="rounded-xl border border-slate-800 bg-slate-900/75 p-3 space-y-2"><h2 class="font-bold text-rose-300">What the colours mean</h2><p><span class="text-rose-300">Escape palette</span>: points numerically escaping to infinity. <span class="text-emerald-300">Cycle colours</span>: points detected as converging to attracting cycles of period 1–8. <span class="text-slate-200">Dark region</span>: bounded within the iteration budget, but not classified by this simple cycle detector.</p><p>It does not detect every Fatou component: Siegel disks, parabolic behaviour, long transients and boundary points may remain unclassified. Two distinct cycles can still receive similar colours. Finite computation cannot certify membership in the Fatou set.</p></div>
+      <div class="rounded-xl border border-slate-800 bg-slate-900/75 p-3 space-y-2"><h2 class="font-bold text-amber-300">Important distinction</h2><p>Orthogonality belongs to Q<sub>d</sub> as a polynomial in a real variable with respect to a measure. It does not itself imply a particular Julia set. Once Q<sub>d</sub> is iterated over ℂ, the recurrence coefficients and c control the dynamics together. A finite polynomial taken from an orthogonal sequence is not the same thing as iterating the whole sequence index n.</p></div>
+      <div class="rounded-xl border border-slate-800 bg-slate-900/75 p-3 space-y-2"><h2 class="font-bold text-slate-400">Numerical caveats</h2><p>Escape and cycle detection use finite tolerances and a finite iteration budget. The potential image is a visual estimate, not a certified Green function or capacity calculation. Blue dots estimate zeros of Q<sub>d</sub>; rose crosses estimate critical points Q′<sub>d</sub>(z)=0. These are different objects. Toggle critical-orbit traces to see whether critical dynamics appear to escape or approach an attracting cycle; this finite-time test is suggestive, not a proof of the full component structure.</p></div>
+    </section>
+  </div>
+  <footer class="p-3 border-t border-slate-800/80 text-[10px] text-slate-400 flex justify-between gap-3"><span>FPS <strong id="fps" class="mono text-slate-200">—</strong></span><span>Orbit status: <strong id="status" class="text-sky-300">ready</strong></span></footer>
+</aside>
+<main id="view-wrap" class="relative flex-1 min-h-0 bg-black overflow-hidden">
+  <canvas id="gl" class="absolute inset-0 w-full h-full block cursor-crosshair"></canvas>
+  <canvas id="overlay" class="absolute inset-0 w-full h-full pointer-events-none"></canvas>
+  <div class="absolute left-4 top-4 glass rounded-xl p-3 max-w-[310px] pointer-events-none">
+    <div class="tiny-label text-sky-300">Current map</div><div id="map-label" class="mono text-xs mt-1 text-slate-100">f(z) = z³ + c</div>
+    <div id="map-subtitle" class="text-[10px] text-slate-400 mt-1">Bounded and escaping basins</div>
+  </div>
+  <div id="hud" class="absolute right-4 top-4 glass rounded-xl p-3 w-[220px] text-[11px] hidden pointer-events-none">
+    <div class="tiny-label text-sky-300 mb-2">Orbit probe</div><div>z = <span id="hud-z" class="mono text-white"></span></div><div>|z| = <span id="hud-mod" class="mono text-white"></span></div><div>status = <span id="hud-fate" class="text-sky-200"></span></div><div>iterations = <span id="hud-iter" class="mono text-white"></span></div>
+  </div>
+  <div class="absolute left-4 bottom-4 glass rounded-lg px-3 py-2 text-[10px] text-slate-400 pointer-events-none">Drag to pan · wheel / pinch wheel to zoom · hover to trace an orbit</div>
+</main>
+<script id="vertex-shader" type="x-shader/x-vertex">
+attribute vec2 position;
+void main(){gl_Position=vec4(position,0.0,1.0);}
+</script>
+<script id="fragment-shader" type="x-shader/x-fragment">
+precision highp float;
+uniform vec2 u_resolution; uniform vec2 u_center; uniform float u_zoom; uniform vec2 u_c;
+uniform int u_max_iterations; uniform int u_family; uniform int u_degree; uniform vec4 u_params; uniform int u_render_mode; uniform int u_palette;
+vec2 cadd(vec2 a,vec2 b){return a+b;} vec2 csub(vec2 a,vec2 b){return a-b;} vec2 cmul(vec2 a,vec2 b){return vec2(a.x*b.x-a.y*b.y,a.x*b.y+a.y*b.x);} vec2 cscale(vec2 a,float s){return a*s;}
+vec2 evalQ(vec2 z,int degree){
+  if(u_family==0){vec2 q=vec2(1.0,0.0);for(int j=0;j<6;j++){if(j>=degree)break;q=cmul(q,z);}return q;}
+  float lam=max(u_params.x,0.1), al=u_params.y, be=u_params.z, s=al+be;
+  float b0=0.0;if(u_family==4)b0=(be-al)/(s+2.0);
+  vec2 p0=vec2(1.0,0.0), p=csub(z,vec2(b0,0.0));
+  if(degree==1)return p;
+  for(int k=1;k<6;k++){
+    if(k>=degree)break;
+    float n=float(k), gamma=0.0, bn=0.0;
+    if(u_family==1){gamma=(k==1)?0.5:0.25;}
+    else if(u_family==2){gamma=(n*n)/(4.0*n*n-1.0);}
+    else if(u_family==3){float den=4.0*(n+lam)*(n+lam-1.0);gamma=(n*(n+2.0*lam-1.0))/max(den,0.00001);}
+    else {float d1=(2.0*n+s), denb=d1*(d1+2.0);bn=(be*be-al*al)/((abs(denb)<0.00001)?(denb<0.0?-0.00001:0.00001):denb);float den=(d1*d1)*(d1+1.0)*(d1-1.0);gamma=(4.0*n*(n+al)*(n+be)*(n+s))/((abs(den)<0.00001)?(den<0.0?-0.00001:0.00001):den);}
+    vec2 next=csub(cmul(csub(z,vec2(bn,0.0)),p),cscale(p0,gamma));p0=p;p=next;
+  }
+  return p;
+}
+vec3 paletteColor(float t,float phase){t=clamp(t,0.0,1.0);if(u_palette==0)return 0.5+0.5*cos(6.2831853*(vec3(t)+vec3(0.0,0.33,0.67)+phase));if(u_palette==1){vec3 a=vec3(.02,.02,.12),b=vec3(.95,.21,.02),c=vec3(1.0,.91,.25);return t<.5?mix(a,b,t*2.0):mix(b,c,(t-.5)*2.0);}if(u_palette==2){vec3 a=vec3(.04,.0,.18),b=vec3(.0,.85,.95),c=vec3(.98,.0,.62);return t<.5?mix(a,b,t*2.0):mix(b,c,(t-.5)*2.0);}return vec3(pow(t,1.8)*vec3(.85,.93,1.0));}
+vec3 cycleColor(vec2 anchor,int p){float hue=fract((atan(anchor.y,anchor.x)+3.14159265)/6.2831853+0.137*length(anchor)+0.071*float(p));return paletteColor(hue,0.19);}
+void main(){
+ vec2 st=(gl_FragCoord.xy-0.5*u_resolution.xy)/u_resolution.y;vec2 z=u_center+st*u_zoom;
+ vec2 h1=z,h2=z,h3=z,h4=z,h5=z,h6=z,h7=z,h8=z;vec2 attractor=vec2(0.0);float iter=0.0;bool escaped=false;int period=0;float minr=1e20;
+ float degree=max(float(u_degree),2.0);float g=0.0;float radius=16.0;
+ for(int i=0;i<512;i++){
+   if(i>=u_max_iterations)break;
+   if(dot(z,z)>radius*radius){escaped=true;break;}
+   minr=min(minr,dot(z,z));
+   h8=h7;h7=h6;h6=h5;h5=h4;h4=h3;h3=h2;h2=h1;h1=z;
+   z=cadd(evalQ(z,u_degree),u_c);iter+=1.0;
+   if(dot(z,z)>1e30){escaped=true;break;}
+   if(i>22){float tol=0.00012*(1.0+length(z));if(length(z-h1)<tol){period=1;attractor=z;}
+   else if(length(z-h2)<tol){period=2;attractor=(z+h1)*0.5;}
+   else if(length(z-h3)<tol){period=3;attractor=(z+h1+h2)/3.0;}
+   else if(length(z-h4)<tol){period=4;attractor=(z+h1+h2+h3)*0.25;}
+   else if(length(z-h5)<tol){period=5;attractor=(z+h1+h2+h3+h4)*0.2;}
+   else if(length(z-h6)<tol){period=6;attractor=(z+h1+h2+h3+h4+h5)/6.0;}
+   else if(length(z-h7)<tol){period=7;attractor=(z+h1+h2+h3+h4+h5+h6)/7.0;}
+   else if(length(z-h8)<tol){period=8;attractor=(z+h1+h2+h3+h4+h5+h6+h7)*0.125;}
+   if(period>0)break;}
+ }
+ float r=max(length(z),1.000001);float smoothIter=iter;if(escaped){float lr=max(log(r),1e-6);smoothIter=iter-log(lr)/log(degree);g=max(0.0,log(r)*pow(1.0/degree,iter));}
+ vec3 col;
+ if(u_render_mode==0){
+   if(escaped)col=paletteColor(smoothIter/float(u_max_iterations)*2.2,.05);
+   else if(period>0)col=cycleColor(attractor,period);
+   else {float shade=0.5+0.5*sin(8.0*atan(z.y,z.x)+0.35*float(u_degree));col=mix(vec3(.012,.022,.045),vec3(.10,.14,.19),0.18*shade);}
+ }else if(u_render_mode==1){if(escaped)col=paletteColor(smoothIter/float(u_max_iterations)*2.2,.05);else col=vec3(.006,.008,.018);}
+ else if(u_render_mode==2){float v=escaped?g:0.0;col=escaped?paletteColor(log(1.0+v)*4.0,.15):vec3(.012,.018,.032);}
+ else {float band=abs(sin(g*55.0));float contour=1.0-smoothstep(.02,.12,band);if(escaped)col=mix(paletteColor(smoothIter/float(u_max_iterations)*1.5,.0),vec3(.8,.95,1.0),contour*.78);else if(period>0)col=cycleColor(attractor,period)*0.8;else col=vec3(.008,.014,.025);}
+ gl_FragColor=vec4(col,1.0);
+}
+</script>
+<script>
+(()=>{'use strict';window.addEventListener('DOMContentLoaded',()=>{
+ const $=id=>document.getElementById(id),canvas=$('gl'),overlay=$('overlay'),ctx=overlay.getContext('2d');
+ const gl=canvas.getContext('webgl',{antialias:false,alpha:false,preserveDrawingBuffer:false});if(!gl){$('status').textContent='WebGL unavailable';return;}
+ const state={center:{x:0,y:0},zoom:3.4,c:{x:0,y:0},family:0,degree:3,lambda:.75,alpha:.25,beta:.5,maxIterations:180,renderMode:0,palette:0,showZeros:true,showCritical:true,showCriticalOrbits:false,showOrbit:true,dragging:false,last:{x:0,y:0},hover:null,lastTime:performance.now(),fps:0};
+ function compile(type,source){const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(s)||'Shader compilation failed');return s;}
+ let program;try{program=gl.createProgram();gl.attachShader(program,compile(gl.VERTEX_SHADER,$('vertex-shader').textContent));gl.attachShader(program,compile(gl.FRAGMENT_SHADER,$('fragment-shader').textContent));gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(program)||'Program link failed');}catch(e){$('status').textContent='Shader error';console.error(e);return;}
+ gl.useProgram(program);const buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);const loc=gl.getAttribLocation(program,'position');gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+ const u={res:gl.getUniformLocation(program,'u_resolution'),center:gl.getUniformLocation(program,'u_center'),zoom:gl.getUniformLocation(program,'u_zoom'),c:gl.getUniformLocation(program,'u_c'),iters:gl.getUniformLocation(program,'u_max_iterations'),family:gl.getUniformLocation(program,'u_family'),degree:gl.getUniformLocation(program,'u_degree'),params:gl.getUniformLocation(program,'u_params'),mode:gl.getUniformLocation(program,'u_render_mode'),palette:gl.getUniformLocation(program,'u_palette')};
+ const add=(a,b)=>({x:a.x+b.x,y:a.y+b.y}),sub=(a,b)=>({x:a.x-b.x,y:a.y-b.y}),mul=(a,b)=>({x:a.x*b.x-a.y*b.y,y:a.x*b.y+a.y*b.x}),scale=(a,s)=>({x:a.x*s,y:a.y*s});
+ function params(){return [state.lambda,state.alpha,state.beta,0];}
+ function evalQ(z,degree=state.degree){if(state.family===0){let q={x:1,y:0};for(let j=0;j<degree;j++)q=mul(q,z);return q;}const [lam,al,be]=params();const s=al+be;let b0=state.family===4?(be-al)/(s+2):0;let p0={x:1,y:0},p=sub(z,{x:b0,y:0});if(degree===1)return p;for(let k=1;k<degree;k++){const n=k;let gamma=0,bn=0;if(state.family===1)gamma=k===1?.5:.25;else if(state.family===2)gamma=n*n/(4*n*n-1);else if(state.family===3)gamma=n*(n+2*lam-1)/(4*(n+lam)*(n+lam-1));else {const d1=2*n+s;bn=(be*be-al*al)/(d1*(d1+2));gamma=4*n*(n+al)*(n+be)*(n+s)/(d1*d1*(d1+1)*(d1-1));}const next=sub(mul(sub(z,{x:bn,y:0}),p),scale(p0,gamma));p0=p;p=next;}return p;}
+ function iterate(z){let h=[{...z},{...z},{...z},{...z},{...z},{...z},{...z},{...z}];for(let i=0;i<state.maxIterations;i++){if(Math.hypot(z.x,z.y)>16)return {kind:'escape',iter:i,z};h.pop();h.unshift({...z});z=add(evalQ(z),state.c);if(!Number.isFinite(z.x)||!Number.isFinite(z.y)||Math.hypot(z.x,z.y)>1e15)return {kind:'escape',iter:i+1,z};if(i>22){const tol=.00012*(1+Math.hypot(z.x,z.y));for(let p=1;p<=8;p++)if(Math.hypot(z.x-h[p-1].x,z.y-h[p-1].y)<tol)return {kind:'cycle',period:p,iter:i+1,z};}}return {kind:'bounded',iter:state.maxIterations,z};}
+ let geometryKey='',geometryCache={zeros:[],criticals:[]};
+ function geometry(){const key=[state.family,state.degree,state.lambda,state.alpha,state.beta].join('|');if(key===geometryKey)return geometryCache;geometryKey=key;const n=state.degree,coeff=polyCoefficients();
+   function scan(poly){const degree=poly.length-1;if(degree<1)return [];function f(x){let v=0;for(let i=degree;i>=0;i--)v=v*x+poly[i];return v;}const out=[];const steps=2400,lo0=-1.25,step=2.5/steps;let x0=lo0,y0=f(x0);for(let i=1;i<=steps;i++){const x=lo0+i*step,y=f(x);if(y===0||y*y0<0){let lo=x0,hi=x;let flo=f(lo);for(let j=0;j<48;j++){const mid=(lo+hi)/2,fm=f(mid);if(flo*fm<=0)hi=mid;else{lo=mid;flo=fm;}}const r=(lo+hi)/2;if(!out.some(q=>Math.abs(q.x-r)<1e-4))out.push({x:r,y:0,mult:1});}x0=x;y0=y;}return out;}
+   let zeros,criticals;if(state.family===0){zeros=[{x:0,y:0,mult:n}];criticals=[{x:0,y:0,mult:n-1}];}else{zeros=scan(coeff);const deriv=coeff.slice(1).map((a,i)=>a*(i+1));criticals=scan(deriv);}geometryCache={zeros,criticals};return geometryCache;}
+ function drawPointCross(p,mult){ctx.beginPath();ctx.moveTo(p.x-5,p.y-5);ctx.lineTo(p.x+5,p.y+5);ctx.moveTo(p.x+5,p.y-5);ctx.lineTo(p.x-5,p.y+5);ctx.strokeStyle='rgba(251,113,133,.98)';ctx.lineWidth=2;ctx.stroke();if(mult>1){ctx.fillStyle='#fecdd3';ctx.font='11px monospace';ctx.fillText('×'+mult,p.x+8,p.y+11);}}
+ function resize(){const r=canvas.getBoundingClientRect(),dpr=Math.min(window.devicePixelRatio||1,2),w=Math.max(1,Math.round(r.width*dpr)),h=Math.max(1,Math.round(r.height*dpr));if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;overlay.width=w;overlay.height=h;gl.viewport(0,0,w,h);}}
+ function toScreen(z){const f=canvas.height/state.zoom;return {x:canvas.width/2+(z.x-state.center.x)*f,y:canvas.height/2-(z.y-state.center.y)*f};}function toComplex(sx,sy){const f=state.zoom/canvas.height;return {x:state.center.x+(sx-canvas.width/2)*f,y:state.center.y-(sy-canvas.height/2)*f};}
+ function drawOverlay(){ctx.clearRect(0,0,overlay.width,overlay.height);const geo=geometry();if(state.showZeros){for(const z of geo.zeros){const p=toScreen(z);if(p.x< -25||p.y< -25||p.x>overlay.width+25||p.y>overlay.height+25)continue;ctx.beginPath();ctx.arc(p.x,p.y,z.mult?6:4.5,0,Math.PI*2);ctx.fillStyle='rgba(56,189,248,.96)';ctx.strokeStyle='#e0f2fe';ctx.lineWidth=1.5;ctx.fill();ctx.stroke();if(z.mult){ctx.fillStyle='#e0f2fe';ctx.font='11px monospace';ctx.fillText('×'+z.mult,p.x+9,p.y-8);}}}if(state.showCritical){for(const z of geo.criticals){const p=toScreen(z);if(p.x< -25||p.y< -25||p.x>overlay.width+25||p.y>overlay.height+25)continue;drawPointCross(p,z.mult||1);}}if(state.showCriticalOrbits){for(let k=0;k<geo.criticals.length;k++){let z={x:geo.criticals[k].x,y:geo.criticals[k].y},path=[{...z}];for(let i=0;i<48;i++){if(Math.hypot(z.x,z.y)>16)break;z=add(evalQ(z),state.c);if(!Number.isFinite(z.x)||!Number.isFinite(z.y))break;path.push({...z});}if(path.length>1){ctx.beginPath();let p=toScreen(path[0]);ctx.moveTo(p.x,p.y);for(let i=1;i<path.length;i++){p=toScreen(path[i]);ctx.lineTo(p.x,p.y);}ctx.strokeStyle='rgba(251,191,36,.78)';ctx.lineWidth=1.5;ctx.stroke();}}}if(state.showOrbit&&state.hover){const z0={...state.hover};let z={...z0},path=[z];for(let i=0;i<45;i++){if(Math.hypot(z.x,z.y)>16)break;z=add(evalQ(z),state.c);if(!Number.isFinite(z.x)||!Number.isFinite(z.y))break;path.push(z);}if(path.length>1){ctx.beginPath();let p=toScreen(path[0]);ctx.moveTo(p.x,p.y);for(let i=1;i<path.length;i++){p=toScreen(path[i]);ctx.lineTo(p.x,p.y);}ctx.strokeStyle='rgba(244,63,94,.88)';ctx.lineWidth=1.7;ctx.stroke();path.forEach((q,i)=>{const p=toScreen(q);ctx.beginPath();ctx.arc(p.x,p.y,i===0?4.5:2.4,0,Math.PI*2);ctx.fillStyle=i===0?'#fb7185':'rgba(255,255,255,.9)';ctx.fill();});}}}
+ const familyNames=['monomial baseline','Chebyshev (monic)','Legendre (monic)','Gegenbauer (monic)','Jacobi (monic)'];function updateUI(){state.family=Number($('family').value);state.degree=Number($('degree').value);state.lambda=Number($('lambda').value);state.alpha=Number($('alpha').value);state.beta=Number($('beta').value);state.c={x:Number($('creal').value),y:Number($('cimag').value)};state.maxIterations=Number($('iterations').value);state.palette=Number($('palette').value);state.showZeros=$('show-zeros').checked;state.showCritical=$('show-critical').checked;state.showCriticalOrbits=$('show-critical-orbits').checked;state.showOrbit=$('show-orbit').checked;
+ $('lambda-val').textContent=state.lambda.toFixed(2);$('alpha-val').textContent=state.alpha.toFixed(2);$('beta-val').textContent=state.beta.toFixed(2);$('degree-val').textContent=state.degree;$('creal-val').textContent=state.c.x.toFixed(3);$('cimag-val').textContent=state.c.y.toFixed(3);$('iterations-val').textContent=state.maxIterations;
+ $('panel-lambda').classList.toggle('hidden',state.family!==3);$('panel-jacobi').classList.toggle('hidden',state.family!==4);
+ const f=state.family,d=state.degree;let q=formula();$('map-formula').textContent=`Q${d}(z) = ${q}; f(z) = Q${d}(z) + c`;$('map-label').textContent=`f(z) = Q${d}(z) + c`;$('map-subtitle').textContent=state.renderMode===0?'Escaping basin + detected attracting cycles':'Numerical orbit colouring';
+ const notes=[`Baseline map z ↦ z^d + c. At c = 0, the origin is a superattracting fixed point.`,`Monic Chebyshev polynomials are orthogonal for the arcsine measure on [−1,1]. The finite Qd becomes the iterated map.`,`Monic Legendre polynomials are orthogonal for uniform weight on [−1,1]. The finite Qd becomes the iterated map.`,`Monic Gegenbauer polynomials vary with λ; λ = 1/2 recovers the Legendre family.`,`Monic Jacobi polynomials vary with the two weight exponents α and β.`];$('family-note').textContent=notes[f];
+ }
+ function polyCoefficients(){
+   const n=state.degree;if(state.family===0){const a=Array(n+1).fill(0);a[n]=1;return a;}
+   const lam=state.lambda,al=state.alpha,be=state.beta,s=al+be;let b0=state.family===4?(be-al)/(s+2):0;
+   let p0=[1],p=[-b0,1];
+   for(let k=1;k<n;k++){const m=k;let gamma=0,bn=0;
+     if(state.family===1)gamma=k===1?.5:.25;
+     else if(state.family===2)gamma=m*m/(4*m*m-1);
+     else if(state.family===3)gamma=m*(m+2*lam-1)/(4*(m+lam)*(m+lam-1));
+     else {const d1=2*m+s;bn=(be*be-al*al)/(d1*(d1+2));gamma=4*m*(m+al)*(m+be)*(m+s)/(d1*d1*(d1+1)*(d1-1));}
+     const next=Array(p.length+1).fill(0);for(let i=0;i<p.length;i++){next[i+1]+=p[i];next[i]-=bn*p[i];}for(let i=0;i<p0.length;i++)next[i]-=gamma*p0[i];p0=p;p=next;
+   }return p;
+ }
+ function formula(){const c=polyCoefficients(),n=c.length-1,parts=[];for(let power=n;power>=0;power--){let a=c[power];if(Math.abs(a)<5e-7)continue;const sign=a<0?'−':'+';const mag=Math.abs(a);let term;if(power===0)term=mag.toFixed(3);else{const coef=Math.abs(mag-1)<5e-7?'':mag.toFixed(3)+'·';term=coef+'z'+(power>1?'^'+power:'');}if(parts.length===0)parts.push((a<0?'−':'')+term);else parts.push(' '+sign+' '+term);}return parts.join(' ')||'0';}
+ function applyPreset(p){if(p==='monomial')Object.assign(state,{family:0,degree:2,c:{x:0,y:0},center:{x:0,y:0},zoom:3.2});if(p==='basilica')Object.assign(state,{family:0,degree:2,c:{x:-1,y:0},center:{x:0,y:0},zoom:2.8});if(p==='legendre')Object.assign(state,{family:2,degree:3,c:{x:0,y:0},center:{x:0,y:0},zoom:3.0});if(p==='gegenbauer')Object.assign(state,{family:3,degree:3,lambda:1,c:{x:0,y:0},center:{x:0,y:0},zoom:3.0});$('family').value=state.family;$('degree').value=state.degree;$('lambda').value=state.lambda;$('creal').value=state.c.x;$('cimag').value=state.c.y;updateUI();document.querySelectorAll('.preset').forEach(b=>b.classList.toggle('active',b.dataset.preset===p));}
+ document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('active',x===b));['families','extensions','theory'].forEach(k=>$('panel-'+k).classList.toggle('hidden',k!==b.dataset.tab));}));
+ ['family','degree','lambda','alpha','beta','creal','cimag','iterations','palette','show-zeros','show-critical','show-critical-orbits','show-orbit'].forEach(id=>$(id).addEventListener('input',()=>{document.querySelectorAll('.preset').forEach(b=>b.classList.remove('active'));updateUI();}));
+ document.querySelectorAll('[data-preset]').forEach(b=>b.addEventListener('click',()=>applyPreset(b.dataset.preset)));
+ document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{state.renderMode=Number(b.dataset.mode);document.querySelectorAll('[data-mode]').forEach(x=>{x.classList.toggle('active',x===b);x.classList.toggle('border-slate-800',x!==b);x.classList.toggle('bg-slate-900',x!==b);x.classList.toggle('text-slate-400',x!==b);});updateUI();}));
+ $('reset-view').addEventListener('click',()=>{state.center={x:0,y:0};state.zoom=3.4;});
+ canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);state.dragging=true;state.last={x:e.clientX,y:e.clientY};});canvas.addEventListener('pointerup',()=>state.dragging=false);canvas.addEventListener('pointercancel',()=>state.dragging=false);
+ canvas.addEventListener('pointermove',e=>{const r=canvas.getBoundingClientRect(),dpr=canvas.width/Math.max(1,r.width),sx=(e.clientX-r.left)*dpr,sy=(e.clientY-r.top)*dpr;if(state.dragging){const dx=(e.clientX-state.last.x)*dpr,dy=(e.clientY-state.last.y)*dpr,f=state.zoom/canvas.height;state.center.x-=dx*f;state.center.y+=dy*f;state.last={x:e.clientX,y:e.clientY};}state.hover=toComplex(sx,sy);$('hud').classList.remove('hidden');const z=state.hover,out=iterate({...z});$('hud-z').textContent=`${z.x.toFixed(3)} ${z.y<0?'−':'+'} ${Math.abs(z.y).toFixed(3)}i`;$('hud-mod').textContent=Math.hypot(z.x,z.y).toFixed(4);$('hud-iter').textContent=out.iter;$('hud-fate').textContent=out.kind==='escape'?'basin of ∞':out.kind==='cycle'?`attracting cycle p=${out.period}`:'bounded / unclassified';$('status').textContent=out.kind==='escape'?'escape basin':out.kind==='cycle'?`cycle ${out.period}`:'bounded / unclassified';});canvas.addEventListener('pointerleave',()=>{if(!state.dragging){state.hover=null;$('hud').classList.add('hidden');}});
+ canvas.addEventListener('wheel',e=>{e.preventDefault();const r=canvas.getBoundingClientRect(),dpr=canvas.width/Math.max(1,r.width),sx=(e.clientX-r.left)*dpr,sy=(e.clientY-r.top)*dpr,before=toComplex(sx,sy);state.zoom=Math.max(.00002,Math.min(1e4,state.zoom*(e.deltaY>0?1.08:.92)));const after=toComplex(sx,sy);state.center.x+=before.x-after.x;state.center.y+=before.y-after.y;},{passive:false});
+ window.addEventListener('resize',resize);
+ function render(now){resize();const dt=now-state.lastTime;state.lastTime=now;state.fps=dt>0?.9*state.fps+.1*(1000/dt):state.fps;$('fps').textContent=Math.round(state.fps);gl.uniform2f(u.res,canvas.width,canvas.height);gl.uniform2f(u.center,state.center.x,state.center.y);gl.uniform1f(u.zoom,state.zoom);gl.uniform2f(u.c,state.c.x,state.c.y);gl.uniform1i(u.iters,state.maxIterations);gl.uniform1i(u.family,state.family);gl.uniform1i(u.degree,state.degree);const p=params();gl.uniform4f(u.params,p[0],p[1],p[2],p[3]);gl.uniform1i(u.mode,state.renderMode);gl.uniform1i(u.palette,state.palette);gl.drawArrays(gl.TRIANGLES,0,6);drawOverlay();requestAnimationFrame(render);}
+ updateUI();applyPreset('monomial');resize();requestAnimationFrame(render);
+ });})();
+</script>
+</body>
+</html>
