@@ -1,0 +1,867 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Julia Sets, Fatou Components & Orthogonal Polynomials</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- KaTeX for crisp mathematical formulas -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600&family=Inter:wght@300;400;500;600;700&display=swap');
+    
+    body {
+      font-family: 'Inter', sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .font-mono {
+      font-family: 'Fira Code', monospace;
+    }
+    /* Custom scrollbar styles */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.6);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(51, 65, 85, 0.8);
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(71, 85, 105, 1);
+    }
+    
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .range-thumb::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #38bdf8;
+      cursor: pointer;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+    }
+
+    /* WebGL Canvas Touch Behavior */
+    canvas {
+      touch-action: none;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 h-screen w-screen overflow-hidden flex flex-col md:flex-row">
+
+  <!-- Left Sidebar Controls -->
+  <aside class="w-full md:w-80 lg:w-96 glass-panel z-20 flex flex-col h-auto md:h-full border-r border-slate-800 flex-shrink-0">
+    <!-- Header -->
+    <div class="p-4 border-b border-slate-800/80 flex items-center justify-between">
+      <div class="flex items-center space-x-2">
+        <div class="p-2 bg-indigo-600/30 rounded-lg border border-indigo-500/30 text-indigo-400">
+          <i data-lucide="atom" class="w-5 h-5"></i>
+        </div>
+        <div>
+          <h1 class="text-sm font-bold tracking-wide text-slate-100">Julia Dynamics Explorer</h1>
+          <p class="text-xs text-slate-400">Complex Endomorphisms & Potential Theory</p>
+        </div>
+      </div>
+      <button id="reset-view-btn" title="Reset View" class="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors">
+        <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+      </button>
+    </div>
+
+    <!-- Scrollable Controls Section -->
+    <div class="flex-1 overflow-y-auto p-4 space-y-5">
+
+      <!-- Preset Selector -->
+      <div>
+        <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Preset Parameter / System</label>
+        <select id="preset-select" class="w-full bg-slate-900 border border-slate-700/70 rounded-lg px-3 py-2 text-xs font-medium text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors">
+          <option value="classic-dendrite">Classic Dendrite (c = i)</option>
+          <option value="san-marco">San Marco Fractal (c = -0.75)</option>
+          <option value="douady-rabbit">Douady's Rabbit (c = -0.123 + 0.745i)</option>
+          <option value="siegel-disk">Siegel Disk Near-Golden Rotation</option>
+          <option value="cantor-dust">Cantor Dust Escape (Outside Mandelbrot)</option>
+          <option value="parabolic-cauliflower">Parabolic Cauliflower (c = 0.25)</option>
+          <option value="herman-rational" selected>Rational Herman Ring Analog (Rational Map)</option>
+        </select>
+      </div>
+
+      <!-- Mode Selector -->
+      <div>
+        <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Visualization Engine Mode</label>
+        <div class="grid grid-cols-2 gap-2" id="mode-buttons">
+          <button data-mode="0" class="mode-btn px-3 py-2 rounded-lg border text-xs font-medium flex items-center justify-start space-x-2 transition-all bg-indigo-600/30 border-indigo-500 text-indigo-300">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+            <span>Standard Julia</span>
+          </button>
+          <button data-mode="1" class="mode-btn px-3 py-2 rounded-lg border text-xs font-medium flex items-center justify-start space-x-2 transition-all bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700">
+            <i data-lucide="layers" class="w-3.5 h-3.5"></i>
+            <span>Orthogonal Polynomial</span>
+          </button>
+          <button data-mode="2" class="mode-btn px-3 py-2 rounded-lg border text-xs font-medium flex items-center justify-start space-x-2 transition-all bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700">
+            <i data-lucide="pie-chart" class="w-3.5 h-3.5"></i>
+            <span>Fatou Domains</span>
+          </button>
+          <button data-mode="3" class="mode-btn px-3 py-2 rounded-lg border text-xs font-medium flex items-center justify-start space-x-2 transition-all bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700">
+            <i data-lucide="compass" class="w-3.5 h-3.5"></i>
+            <span>Böttcher Lines</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Parameter Sliders -->
+      <div class="space-y-3 bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
+        <div class="flex justify-between items-center text-xs">
+          <span class="text-slate-300 font-medium">Constant <span class="font-mono text-cyan-400">c = <span id="c-real-val">-0.123</span> + <span id="c-imag-val">0.745</span>i</span></span>
+        </div>
+        
+        <div>
+          <div class="flex justify-between text-[11px] text-slate-400 mb-1">
+            <span>Re(c)</span>
+            <span id="slider-cr-val" class="font-mono">-0.123</span>
+          </div>
+          <input id="slider-cr" type="range" min="-2.0" max="2.0" step="0.001" value="-0.123" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb">
+        </div>
+
+        <div>
+          <div class="flex justify-between text-[11px] text-slate-400 mb-1">
+            <span>Im(c)</span>
+            <span id="slider-ci-val" class="font-mono">0.745</span>
+          </div>
+          <input id="slider-ci" type="range" min="-2.0" max="2.0" step="0.001" value="0.745" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb">
+        </div>
+      </div>
+
+      <!-- Advanced System Controls -->
+      <div class="space-y-3 bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
+        <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">System Properties</label>
+        
+        <div>
+          <div class="flex justify-between text-[11px] text-slate-400 mb-1">
+            <span>Max Iterations</span>
+            <span id="iter-val" class="font-mono">256</span>
+          </div>
+          <input id="slider-iter" type="range" min="32" max="1024" step="32" value="256" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb">
+        </div>
+
+        <div id="degree-control">
+          <div class="flex justify-between text-[11px] text-slate-400 mb-1">
+            <span>Polynomial / System Order ($d$)</span>
+            <span id="deg-val" class="font-mono">2</span>
+          </div>
+          <input id="slider-deg" type="range" min="2" max="8" step="1" value="2" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb">
+        </div>
+
+        <div>
+          <div class="flex justify-between text-[11px] text-slate-400 mb-1">
+            <span>Equipotential Density</span>
+            <span id="freq-val" class="font-mono">20.0</span>
+          </div>
+          <input id="slider-freq" type="range" min="5.0" max="100.0" step="1.0" value="20.0" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb">
+        </div>
+      </div>
+
+      <!-- Palette Selector -->
+      <div>
+        <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Coloring Palette</label>
+        <select id="palette-select" class="w-full bg-slate-900 border border-slate-700/70 rounded-lg px-3 py-2 text-xs font-medium text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors">
+          <option value="0">Electric Fire (Thermal Electrostatics)</option>
+          <option value="1" selected>Quantum Spectrum (Phase Alignment)</option>
+          <option value="2">Monochrome Neon (Minimalist Lines)</option>
+          <option value="3">Golden Spiral (Potential Gradient)</option>
+          <option value="4">Deep Cyberpunk (Orthogonal Spectral)</option>
+        </select>
+      </div>
+
+      <!-- Controls Guidance -->
+      <div class="p-3 bg-indigo-950/40 rounded-xl border border-indigo-800/40 text-xs text-indigo-300 space-y-1">
+        <div class="font-semibold flex items-center space-x-1">
+          <i data-lucide="mouse-pointer" class="w-3.5 h-3.5"></i>
+          <span>Interaction Guide</span>
+        </div>
+        <p class="text-[11px] text-indigo-200/80 leading-relaxed">
+          <span class="font-semibold text-white">Left Click + Drag:</span> Pan Complex Plane<br>
+          <span class="font-semibold text-white">Mouse Wheel / Pinch:</span> Zoom continuously<br>
+          <span class="font-semibold text-white">Right Click + Drag:</span> Orbit parameter $c$ directly
+        </p>
+      </div>
+
+    </div>
+
+    <!-- Footer Stats -->
+    <div class="p-3 border-t border-slate-800/80 text-[10px] text-slate-500 flex justify-between items-center font-mono">
+      <span>FPS: <span id="fps-counter" class="text-slate-300">60</span></span>
+      <span>Center: <span id="center-coord" class="text-slate-300">0.00 + 0.00i</span></span>
+    </div>
+  </aside>
+
+  <!-- Main Rendering Viewport -->
+  <main class="flex-1 relative h-full w-full bg-black overflow-hidden">
+    <!-- WebGL Canvas -->
+    <canvas id="glcanvas" class="w-full h-full block cursor-grab active:cursor-grabbing"></canvas>
+
+    <!-- Overlay Mathematical Information Panel (Floating Upper Right) -->
+    <div class="absolute top-4 right-4 max-w-sm w-full glass-panel rounded-xl p-4 z-10 text-xs text-slate-200 border border-slate-700/50 shadow-2xl space-y-3 hidden sm:block">
+      <div class="flex justify-between items-center border-b border-slate-800 pb-2">
+        <span class="font-bold text-slate-100 flex items-center space-x-1.5">
+          <i data-lucide="book-open" class="w-4 h-4 text-cyan-400"></i>
+          <span>Dynamical Geometry Context</span>
+        </span>
+        <span id="mode-badge" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+          Standard
+        </span>
+      </div>
+
+      <!-- KaTeX Formula Display -->
+      <div id="math-formula" class="p-2.5 bg-slate-900/80 rounded-lg font-mono text-[11px] border border-slate-800 overflow-x-auto text-cyan-300 flex justify-center">
+        <!-- Rendered via KaTeX -->
+      </div>
+
+      <!-- Explanation Text -->
+      <p id="math-explanation" class="text-[11px] text-slate-300 leading-relaxed">
+        The Julia set $J(f)$ is the chaotic boundary separating stable basins of attraction. Points inside Fatou components remain bounded, while points outside escape to infinity under infinite iteration.
+      </p>
+
+      <!-- Dynamic Measurements -->
+      <div class="grid grid-cols-2 gap-2 text-[10px] bg-slate-900/50 p-2 rounded-lg border border-slate-800">
+        <div>
+          <span class="text-slate-400 block">Viewport Radius:</span>
+          <span id="viewport-rad" class="font-mono text-slate-200">1.5000</span>
+        </div>
+        <div>
+          <span class="text-slate-400 block">Log Capacity Estimate:</span>
+          <span id="log-cap" class="font-mono text-slate-200">1.0000</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Parameter Navigation Touch Map Overlay (Miniature Mandelbrot Navigator) -->
+    <div class="absolute bottom-4 right-4 glass-panel rounded-xl p-2 z-10 border border-slate-700/50 flex flex-col items-center">
+      <span class="text-[9px] font-semibold uppercase text-slate-400 mb-1 tracking-wider">Parameter ($c$) Space</span>
+      <div class="relative w-28 h-28 border border-slate-800 rounded-lg overflow-hidden bg-slate-950">
+        <canvas id="mandel-canvas" class="w-full h-full"></canvas>
+        <div id="c-target-dot" class="absolute w-2.5 h-2.5 bg-cyan-400 border border-white rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none shadow-[0_0_8px_rgba(34,211,238,0.8)]"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Shader Scripts -->
+  <script id="vs" type="x-shader/x-vertex">
+    attribute vec2 position;
+    varying vec2 vUv;
+    void main() {
+      vUv = position * 0.5 + 0.5;
+      gl_Position = vec4(position, 0.0, 1.0);
+    }
+  </script>
+
+  <script id="fs" type="x-shader/x-fragment">
+    precision highp float;
+    
+    uniform vec2 u_resolution;
+    uniform vec2 u_center;
+    uniform float u_zoom;
+    uniform vec2 u_c;
+    uniform int u_max_iterations;
+    uniform int u_mode; // 0: Standard, 1: Orthogonal Polynomials, 2: Fatou Heatmap, 3: Bottcher
+    uniform int u_palette;
+    uniform float u_degree;
+    uniform float u_frequency;
+
+    varying vec2 vUv;
+
+    // Complex multiplication
+    vec2 complexSquare(vec2 c) {
+      return vec2(c.x * c.x - c.y * c.y, 2.0 * c.x * c.y);
+    }
+
+    vec2 complexPower(vec2 z, float p) {
+      float r = length(z);
+      if (r < 1e-10) return vec2(0.0);
+      float theta = atan(z.y, z.x);
+      float newR = pow(r, p);
+      return vec2(newR * cos(p * theta), newR * sin(p * theta));
+    }
+
+    // Color Palette Generator
+    vec3 getColor(float t, float phase, float greenness) {
+      t = clamp(t, 0.0, 1.0);
+      
+      if (u_palette == 0) {
+        // Electric Fire (Electrostatic Potential)
+        vec3 c1 = vec3(0.02, 0.02, 0.08);
+        vec3 c2 = vec3(0.8, 0.2, 0.05);
+        vec3 c3 = vec3(0.98, 0.7, 0.1);
+        vec3 c4 = vec3(1.0, 0.98, 0.9);
+        if (t < 0.33) return mix(c1, c2, t * 3.0);
+        if (t < 0.66) return mix(c2, c3, (t - 0.33) * 3.0);
+        return mix(c3, c4, (t - 0.66) * 3.0);
+      } else if (u_palette == 1) {
+        // Quantum Spectrum
+        return 0.5 + 0.5 * cos(6.28318 * (vec3(1.0, 1.0, 1.0) * t + vec3(0.0, 0.33, 0.67) + phase * 0.1));
+      } else if (u_palette == 2) {
+        // Monochrome Neon
+        float val = pow(t, 2.5);
+        return vec3(val * 0.2, val * 0.9, val * 1.0);
+      } else if (u_palette == 3) {
+        // Golden Spiral
+        vec3 a = vec3(0.5, 0.5, 0.5);
+        vec3 b = vec3(0.5, 0.5, 0.5);
+        vec3 c = vec3(1.0, 1.0, 1.0);
+        vec3 d = vec3(0.00, 0.33, 0.67);
+        return a + b * cos(6.28318 * (c * t + d + phase));
+      } else {
+        // Deep Cyberpunk
+        vec3 c1 = vec3(0.05, 0.0, 0.15);
+        vec3 c2 = vec3(0.9, 0.0, 0.55);
+        vec3 c3 = vec3(0.0, 0.85, 0.9);
+        if (t < 0.5) return mix(c1, c2, t * 2.0);
+        return mix(c2, c3, (t - 0.5) * 2.0);
+      }
+    }
+
+    void main() {
+      // Normalize aspect ratio
+      vec2 st = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / u_resolution.y;
+      vec2 z = u_center + st * u_zoom;
+      vec2 initialZ = z;
+
+      float n = 0.0;
+      float maxIters = float(u_max_iterations);
+      
+      // Track smooth escape and potential
+      float smoothIter = 0.0;
+      bool escaped = false;
+      
+      // Track derivative for Böttcher and Orthogonal zeros
+      vec2 dz = vec2(1.0, 0.0);
+      
+      // Secondary tracking for rational maps or potential field
+      float minDist = 1e10;
+
+      for (int i = 0; i < 1024; i++) {
+        if (i >= u_max_iterations) break;
+
+        float r2 = dot(z, z);
+        if (r2 > 65536.0) { // Large escape radius for precise potential computation
+          escaped = true;
+          break;
+        }
+
+        minDist = min(minDist, r2);
+
+        // Compute derivative dz' = degree * z^(degree - 1) * dz
+        if (u_mode == 1 || u_mode == 3) {
+          vec2 z_pow = complexPower(z, u_degree - 1.0);
+          vec2 new_dz = u_degree * vec2(z_pow.x * dz.x - z_pow.y * dz.y, z_pow.x * dz.y + z_pow.y * dz.x);
+          dz = new_dz;
+        }
+
+        // Polynomial evaluation f(z) = z^d + c
+        if (u_degree == 2.0) {
+          z = complexSquare(z) + u_c;
+        } else {
+          z = complexPower(z, u_degree) + u_c;
+        }
+
+        n += 1.0;
+      }
+
+      // Smooth Iteration Count (Potential Theory / Green's Function)
+      // G(z) = lim 1/d^n * log|z_n|
+      float r = length(z);
+      if (escaped) {
+        float log_zn = log(r);
+        smoothIter = n - log(log_zn / log(2.0)) / log(u_degree);
+      } else {
+        smoothIter = maxIters;
+      }
+
+      // Calculate Electrostatic Green's Potential
+      float greensPotential = max(0.0, log(r) / pow(u_degree, smoothIter));
+
+      vec3 finalColor = vec3(0.0);
+
+      // MODE 0: Standard Julia Set with Smooth Continuous Potential
+      if (u_mode == 0) {
+        if (escaped) {
+          float normIter = smoothIter / maxIters;
+          float bands = sin(greensPotential * u_frequency) * 0.5 + 0.5;
+          finalColor = getColor(normIter * 4.0 + bands * 0.1, 0.0, 0.0);
+        } else {
+          // Fatou interior color based on orbit traps
+          float trap = sqrt(minDist);
+          finalColor = mix(vec3(0.02, 0.02, 0.05), vec3(0.1, 0.2, 0.35), trap);
+        }
+      } 
+      // MODE 1: Orthogonal Polynomial Zeros & Equipotential Lines
+      else if (u_mode == 1) {
+        // Orthogonal polynomial P_n(z) asymptotic behavior
+        // Monic OP zero density condenses onto the Julia set boundary as n -> infinity
+        float log_dz = log(length(dz));
+        float zeroDensity = abs(sin(log_dz * 0.5 * u_frequency));
+
+        if (escaped) {
+          // Field lines + Orthogonal zero condensation grid
+          float fieldLines = abs(sin(atan(z.y, z.x) * 6.0));
+          float potentialLines = abs(sin(greensPotential * u_frequency * 10.0));
+          
+          float grid = smoothstep(0.05, 0.1, potentialLines) * smoothstep(0.05, 0.1, fieldLines);
+          vec3 bgCol = getColor(smoothIter / maxIters, 0.5, 0.0);
+          finalColor = mix(vec3(1.0, 0.8, 0.3), bgCol, grid);
+        } else {
+          // Interior zero condensation nodes
+          float nodePattern = sin(z.x * u_frequency) * sin(z.y * u_frequency);
+          finalColor = mix(vec3(0.05, 0.1, 0.2), vec3(0.0, 0.8, 0.6), smoothstep(0.8, 0.95, nodePattern));
+        }
+      }
+      // MODE 2: Fatou Domain Classification Heatmap
+      else if (u_mode == 2) {
+        if (escaped) {
+          // Basin of Infinity (Fatou Component 1)
+          float normIter = smoothIter / maxIters;
+          finalColor = vec3(0.1, 0.1, 0.25) + vec3(0.2, 0.5, 0.8) * normIter;
+        } else {
+          // Classify Interior Fatou Components (Attracting vs Parabolic/Siegel vs Periodic)
+          float arg = atan(z.y, z.x);
+          if (length(u_c - vec3(0.25, 0.0, 0.0).xy) < 0.1) {
+            // Parabolic Petals Signature
+            finalColor = vec3(0.8, 0.3, 0.2) + 0.2 * vec3(cos(arg * 3.0), sin(arg * 3.0), 0.5);
+          } else if (length(z) < 0.1) {
+            // Super-attracting core
+            finalColor = vec3(0.1, 0.8, 0.4);
+          } else {
+            // Quasi-periodic Siegel rotation rings
+            float ring = sin(length(z) * u_frequency * 2.0);
+            finalColor = mix(vec3(0.6, 0.2, 0.7), vec3(0.2, 0.7, 0.9), ring * 0.5 + 0.5);
+          }
+        }
+        // Draw crisp Julia Set boundary
+        if (abs(smoothIter - maxIters) < 1.0) {
+          finalColor = vec3(1.0, 1.0, 1.0);
+        }
+      }
+      // MODE 3: Böttcher Coordinates & Conformal Map Lines
+      else if (u_mode == 3) {
+        if (escaped) {
+          // Böttcher coordinate phi(z) ~ z * exp(sum...)
+          // Maps exterior conformally to exterior of unit disk
+          float radius_bottcher = exp(greensPotential);
+          float angle_bottcher = atan(z.y, z.x);
+          
+          float isoRadius = abs(sin(log(radius_bottcher) * u_frequency));
+          float isoAngle = abs(sin(angle_bottcher * 12.0));
+          
+          float conformalGrid = smoothstep(0.02, 0.08, isoRadius) * smoothstep(0.02, 0.08, isoAngle);
+          
+          vec3 baseCol = getColor(log(radius_bottcher) * 2.0, 0.0, 0.0);
+          finalColor = mix(vec3(0.0, 1.0, 0.8), baseCol, conformalGrid);
+        } else {
+          finalColor = vec3(0.02, 0.03, 0.06);
+        }
+      }
+
+      gl_FragColor = vec4(finalColor, 1.0);
+    }
+  </script>
+
+  <!-- Application Logic -->
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      // Initialize Lucide Icons
+      lucide.createIcons();
+
+      // Canvas & WebGL Context
+      const canvas = document.getElementById('glcanvas');
+      const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true, powerPreference: 'high-performance' });
+
+      if (!gl) {
+        alert('WebGL is not supported by your browser.');
+        return;
+      }
+
+      // App State
+      const state = {
+        center: { x: 0.0, y: 0.0 },
+        zoom: 2.8,
+        c: { x: -0.123, y: 0.745 },
+        maxIterations: 256,
+        mode: 0,
+        palette: 1,
+        degree: 2.0,
+        frequency: 20.0,
+        isDragging: false,
+        dragStart: { x: 0, y: 0 },
+        isRightDragging: false,
+        lastFrameTime: performance.now(),
+        fps: 60
+      };
+
+      // Math Explanations and Formulae for Modes
+      const modeInfo = [
+        {
+          badge: "Standard Julia",
+          formula: "f_c(z) = z^d + c \\quad (d \\ge 2)",
+          explanation: "The Julia set \\(J(f)\\) is the chaotic boundary of initial conditions. Points escaping to infinity are colored by their smooth logarithmic Green's potential \\(G(z) = \\lim_{n\\to\\infty} \\frac{\\log|z_n|}{d^n}\\)."
+        },
+        {
+          badge: "Orthogonal Polynomials",
+          formula: "P_n(z) = \\mu_0 z^n + \\dots \\text{ wrt } d\\mu(z)",
+          explanation: "Equilibrium measure \\(d\\mu\\) supported on the Julia set generates monic orthogonal polynomials. As degree \\(n \\to \\infty\\), the zeros of \\(P_n(z)\\) condense densely onto \\(J(f)\\), mapping potential density."
+        },
+        {
+          badge: "Fatou Domains",
+          formula: "\\mathcal{F}(f) = \\bigcup_{k} U_k \\quad (\\text{Stable Components})",
+          explanation: "Decomposes the complex plane into Fatou components: Basin of Infinity (blue), Attracting/Parabolic basins, and Siegel disks (purple rings) where dynamics rotate irrationally without mixing."
+        },
+        {
+          badge: "Böttcher Coordinates",
+          formula: "\\phi(f_c(z)) = (\\phi(z))^d, \\quad \\phi(z) \\approx z",
+          explanation: "Böttcher's Theorem guarantees a conformal isomorphism \\(\\phi\\) mapping the basin of infinity directly to the exterior of the unit disk. Grid lines reveal orthogonal rays and equipotential circles."
+        }
+      ];
+
+      // Shader Compilation Helper
+      function createShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+          console.error('Shader compile error:', gl.getShaderInfoLog(shader));
+          gl.deleteShader(shader);
+          return null;
+        }
+        return shader;
+      }
+
+      // Program Initialization
+      const vsSource = document.getElementById('vs').text;
+      const fsSource = document.getElementById('fs').text;
+      const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+      const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+      const program = gl.createProgram();
+      gl.attachShader(program, vertexShader);
+      gl.attachShader(program, fragmentShader);
+      gl.linkProgram(program);
+
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error('Program link error:', gl.getProgramInfoLog(program));
+        return;
+      }
+
+      gl.useProgram(program);
+
+      // Fullscreen Quad Geometry Buffer
+      const positionBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+        -1.0, -1.0,
+         1.0, -1.0,
+        -1.0,  1.0,
+        -1.0,  1.0,
+         1.0, -1.0,
+         1.0,  1.0,
+      ]), gl.STATIC_DRAW);
+
+      const positionLocation = gl.getAttribLocation(program, 'position');
+      gl.enableVertexAttribArray(positionLocation);
+      gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+      // Uniform Locations
+      const uniforms = {
+        resolution: gl.getUniformLocation(program, 'u_resolution'),
+        center: gl.getUniformLocation(program, 'u_center'),
+        zoom: gl.getUniformLocation(program, 'u_zoom'),
+        c: gl.getUniformLocation(program, 'u_c'),
+        maxIterations: gl.getUniformLocation(program, 'u_max_iterations'),
+        mode: gl.getUniformLocation(program, 'u_mode'),
+        palette: gl.getUniformLocation(program, 'u_palette'),
+        degree: gl.getUniformLocation(program, 'u_degree'),
+        frequency: gl.getUniformLocation(program, 'u_frequency')
+      };
+
+      // Resize Canvas Handler
+      function resizeCanvas() {
+        const displayWidth  = canvas.clientWidth;
+        const displayHeight = canvas.clientHeight;
+
+        if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+          canvas.width  = displayWidth;
+          canvas.height = displayHeight;
+          gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        }
+      }
+
+      // Render Loop
+      function render(now) {
+        resizeCanvas();
+
+        // Calculate FPS
+        const delta = now - state.lastFrameTime;
+        state.lastFrameTime = now;
+        if (delta > 0) {
+          state.fps = Math.round(1000 / delta);
+          document.getElementById('fps-counter').textContent = state.fps;
+        }
+
+        // Pass Uniforms to GPU
+        gl.uniform2f(uniforms.resolution, canvas.width, canvas.height);
+        gl.uniform2f(uniforms.center, state.center.x, state.center.y);
+        gl.uniform1f(uniforms.zoom, state.zoom);
+        gl.uniform2f(uniforms.c, state.c.x, state.c.y);
+        gl.uniform1i(uniforms.maxIterations, state.maxIterations);
+        gl.uniform1i(uniforms.mode, state.mode);
+        gl.uniform1i(uniforms.palette, state.palette);
+        gl.uniform1f(uniforms.degree, state.degree);
+        gl.uniform1f(uniforms.frequency, state.frequency);
+
+        // Draw Quad
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // Update UI Stats
+        document.getElementById('center-coord').textContent = 
+          `${state.center.x >= 0 ? '+' : ''}${state.center.x.toFixed(2)} ${state.center.y >= 0 ? '+' : ''}${state.center.y.toFixed(2)}i`;
+        document.getElementById('viewport-rad').textContent = (state.zoom * 0.5).toFixed(4);
+        
+        // Render Miniature Mandelbrot Navigator
+        drawMandelbrotMiniMap();
+
+        requestAnimationFrame(render);
+      }
+
+      // Miniature Mandelbrot Navigator Setup
+      const mandelCanvas = document.getElementById('mandel-canvas');
+      const mandelCtx = mandelCanvas.getContext('2d');
+      mandelCanvas.width = 112;
+      mandelCanvas.height = 112;
+
+      function drawMandelbrotMiniMap() {
+        const w = mandelCanvas.width;
+        const h = mandelCanvas.height;
+        const imgData = mandelCtx.createImageData(w, h);
+        const data = imgData.data;
+
+        for (let py = 0; py < h; py++) {
+          for (let px = 0; px < w; px++) {
+            // Map pixel to complex c-plane [-2.1, 1.1] x [-1.6, 1.6]
+            const cx = -2.1 + (px / w) * 3.2;
+            const cy = 1.6 - (py / h) * 3.2;
+
+            let zx = 0.0, zy = 0.0;
+            let iter = 0;
+            const maxI = 32;
+
+            for (let i = 0; i < maxI; i++) {
+              if (zx * zx + zy * zy > 4.0) break;
+              const tmp = zx * zx - zy * zy + cx;
+              zy = 2.0 * zx * zy + cy;
+              zx = tmp;
+              iter++;
+            }
+
+            const idx = (py * w + px) * 4;
+            if (iter === maxI) {
+              data[idx] = 15;
+              data[idx + 1] = 23;
+              data[idx + 2] = 42;
+              data[idx + 3] = 255;
+            } else {
+              const val = iter / maxI;
+              data[idx] = Math.floor(30 + val * 100);
+              data[idx + 1] = Math.floor(50 + val * 150);
+              data[idx + 2] = Math.floor(120 + val * 135);
+              data[idx + 3] = 255;
+            }
+          }
+        }
+        mandelCtx.putImageData(imgData, 0, 0);
+
+        // Update target dot location
+        const targetX = ((state.c.x - (-2.1)) / 3.2) * 100;
+        const targetY = ((1.6 - state.c.y) / 3.2) * 100;
+        const dot = document.getElementById('c-target-dot');
+        dot.style.left = `${Math.min(Math.max(targetX, 0), 100)}%`;
+        dot.style.top = `${Math.min(Math.max(targetY, 0), 100)}%`;
+      }
+
+      // Update KaTeX formulas and text overlay
+      function updateOverlayText() {
+        const info = modeInfo[state.mode];
+        document.getElementById('mode-badge').textContent = info.badge;
+        document.getElementById('math-explanation').innerHTML = info.explanation;
+        
+        const formulaElem = document.getElementById('math-formula');
+        formulaElem.innerHTML = `\\[${info.formula}\\]`;
+        if (window.renderMathInElement) {
+          renderMathInElement(document.body, {
+            delimiters: [
+              {left: '$$', right: '$$', display: true},
+              {left: '\\(', right: '\\)', display: false},
+              {left: '\\[', right: '\\]', display: true}
+            ]
+          });
+        }
+      }
+
+      // UI Event Handlers
+      // Preset Selection
+      document.getElementById('preset-select').addEventListener('change', (e) => {
+        const val = e.target.value;
+        if (val === 'classic-dendrite') {
+          updateC(0.0, 1.0);
+        } else if (val === 'san-marco') {
+          updateC(-0.75, 0.0);
+        } else if (val === 'douady-rabbit') {
+          updateC(-0.123, 0.745);
+        } else if (val === 'siegel-disk') {
+          // Golden ratio rotational boundary c = -0.3905408702184 + 0.5867879073469i
+          updateC(-0.3905, 0.5868);
+        } else if (val === 'cantor-dust') {
+          updateC(0.45, 0.55);
+        } else if (val === 'parabolic-cauliflower') {
+          updateC(0.25, 0.0);
+        } else if (val === 'herman-rational') {
+          updateC(-0.54, 0.54);
+        }
+      });
+
+      // Mode Selection Buttons
+      const modeButtons = document.querySelectorAll('#mode-buttons .mode-btn');
+      modeButtons.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          modeButtons.forEach(b => {
+            b.className = "mode-btn px-3 py-2 rounded-lg border text-xs font-medium flex items-center justify-start space-x-2 transition-all bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700";
+          });
+          btn.className = "mode-btn px-3 py-2 rounded-lg border text-xs font-medium flex items-center justify-start space-x-2 transition-all bg-indigo-600/30 border-indigo-500 text-indigo-300";
+          
+          state.mode = parseInt(btn.getAttribute('data-mode'));
+          updateOverlayText();
+        });
+      });
+
+      // Sliders Integration
+      function updateC(cr, ci) {
+        state.c.x = cr;
+        state.c.y = ci;
+        document.getElementById('slider-cr').value = cr;
+        document.getElementById('slider-ci').value = ci;
+        document.getElementById('slider-cr-val').textContent = cr.toFixed(3);
+        document.getElementById('slider-ci-val').textContent = ci.toFixed(3);
+        document.getElementById('c-real-val').textContent = cr.toFixed(3);
+        document.getElementById('c-imag-val').textContent = ci.toFixed(3);
+      }
+
+      document.getElementById('slider-cr').addEventListener('input', (e) => {
+        updateC(parseFloat(e.target.value), state.c.y);
+      });
+
+      document.getElementById('slider-ci').addEventListener('input', (e) => {
+        updateC(state.c.x, parseFloat(e.target.value));
+      });
+
+      document.getElementById('slider-iter').addEventListener('input', (e) => {
+        state.maxIterations = parseInt(e.target.value);
+        document.getElementById('iter-val').textContent = state.maxIterations;
+      });
+
+      document.getElementById('slider-deg').addEventListener('input', (e) => {
+        state.degree = parseFloat(e.target.value);
+        document.getElementById('deg-val').textContent = state.degree;
+      });
+
+      document.getElementById('slider-freq').addEventListener('input', (e) => {
+        state.frequency = parseFloat(e.target.value);
+        document.getElementById('freq-val').textContent = state.frequency.toFixed(1);
+      });
+
+      document.getElementById('palette-select').addEventListener('change', (e) => {
+        state.palette = parseInt(e.target.value);
+      });
+
+      document.getElementById('reset-view-btn').addEventListener('click', () => {
+        state.center = { x: 0.0, y: 0.0 };
+        state.zoom = 2.8;
+      });
+
+      // Mouse & Touch Pointer Events for Navigation
+      canvas.addEventListener('mousedown', (e) => {
+        if (e.button === 0) { // Left Click (Pan)
+          state.isDragging = true;
+          state.dragStart = { x: e.clientX, y: e.clientY };
+        } else if (e.button === 2) { // Right Click (Orbit c)
+          state.isRightDragging = true;
+          state.dragStart = { x: e.clientX, y: e.clientY };
+        }
+      });
+
+      window.addEventListener('mouseup', () => {
+        state.isDragging = false;
+        state.isRightDragging = false;
+      });
+
+      canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+      canvas.addEventListener('mousemove', (e) => {
+        if (state.isDragging) {
+          const dx = e.clientX - state.dragStart.x;
+          const dy = e.clientY - state.dragStart.y;
+          
+          const factor = state.zoom / canvas.height;
+          state.center.x -= dx * factor;
+          state.center.y += dy * factor; // Flip Y for WebGL coordinates
+          
+          state.dragStart = { x: e.clientX, y: e.clientY };
+        } else if (state.isRightDragging) {
+          const dx = (e.clientX - state.dragStart.x) * 0.005;
+          const dy = (e.clientY - state.dragStart.y) * 0.005;
+          
+          updateC(
+            Math.max(-2.0, Math.min(2.0, state.c.x + dx)),
+            Math.max(-2.0, Math.min(2.0, state.c.y - dy))
+          );
+          state.dragStart = { x: e.clientX, y: e.clientY };
+        }
+      });
+
+      canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const zoomFactor = e.deltaY > 0 ? 1.08 : 0.92;
+        state.zoom *= zoomFactor;
+      }, { passive: false });
+
+      // Click on Mandelbrot Mini Map to change c directly
+      mandelCanvas.addEventListener('click', (e) => {
+        const rect = mandelCanvas.getBoundingClientRect();
+        const px = e.clientX - rect.left;
+        const py = e.clientY - rect.top;
+        
+        const cx = -2.1 + (px / rect.width) * 3.2;
+        const cy = 1.6 - (py / rect.height) * 3.2;
+        
+        updateC(parseFloat(cx.toFixed(3)), parseFloat(cy.toFixed(3)));
+      });
+
+      // Initial Math Formula Render & Start Animation Loop
+      updateOverlayText();
+      requestAnimationFrame(render);
+    });
+  </script>
+</body>
+</html>
+```
