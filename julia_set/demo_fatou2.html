@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Advanced Orthogonal Fatou & Spectral Explorer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600&family=Inter:wght@300;400;500;600;700&display=swap');
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body { font-family: Inter, sans-serif; user-select: none; -webkit-user-select: none; }
+    .font-mono { font-family: 'Fira Code', monospace; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: rgba(15, 23, 42, .6); }
+    ::-webkit-scrollbar-thumb { background: rgba(51, 65, 85, .8); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(71, 85, 105, 1); }
+    .glass-panel { background: rgba(15, 23, 42, .88); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,.1); }
+    .range-thumb::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #38bdf8; cursor: pointer; box-shadow: 0 0 12px rgba(56,189,248,.7); }
+    .range-thumb::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: #38bdf8; cursor: pointer; }
+    canvas { touch-action: none; }
+    .tab-btn.active { background: rgba(14,165,233,.25); border-color: rgba(56,189,248,.6); color: #38bdf8; }
+    @media (max-width: 767px) {
+      body { height: 100dvh; overflow: auto; }
+      aside { max-height: 58dvh; }
+      main { min-height: 42dvh; height: 42dvh !important; flex: none !important; }
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 h-screen w-screen overflow-hidden flex flex-col md:flex-row">
+  <aside class="w-full md:w-84 lg:w-96 glass-panel z-20 flex flex-col h-auto md:h-full border-r border-slate-800 flex-shrink-0">
+    <div class="p-4 border-b border-slate-800/80 flex items-center justify-between">
+      <div class="flex items-center space-x-2.5">
+        <div class="p-2 bg-sky-600/20 rounded-xl border border-sky-500/30 text-sky-400"><i data-lucide="cpu" class="w-5 h-5"></i></div>
+        <div><h1 class="text-sm font-bold tracking-wide text-slate-100">Spectral Orthogonal Lab</h1><p class="text-[11px] text-slate-400">Polynomial Dynamics & Spectral Visualisation</p></div>
+      </div>
+      <button id="reset-view-btn" title="Reset View" class="p-2 hover:bg-slate-800/80 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"><i data-lucide="rotate-ccw" class="w-4 h-4"></i></button>
+    </div>
+    <div class="flex border-b border-slate-800 bg-slate-950/70 p-1.5 gap-1">
+      <button id="tab-gen-btn" class="tab-btn active flex-1 py-1.5 text-xs font-semibold rounded-md border border-transparent transition-colors flex items-center justify-center space-x-1"><i data-lucide="sliders" class="w-3.5 h-3.5"></i><span>Generators</span></button>
+      <button id="tab-spectral-btn" class="tab-btn flex-1 py-1.5 text-xs font-semibold rounded-md border border-transparent transition-colors text-slate-400 hover:text-slate-200 flex items-center justify-center space-x-1"><i data-lucide="activity" class="w-3.5 h-3.5"></i><span>CMV / Toda</span></button>
+      <button id="tab-theory-btn" class="tab-btn flex-1 py-1.5 text-xs font-semibold rounded-md border border-transparent transition-colors text-slate-400 hover:text-slate-200 flex items-center justify-center space-x-1"><i data-lucide="book-open" class="w-3.5 h-3.5"></i><span>Theory</span></button>
+    </div>
+    <div class="flex-1 overflow-y-auto p-4 space-y-5">
+      <div id="tab-gen" class="space-y-4">
+        <div><label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2" for="gen-mode-select">Polynomial Map Family</label><select id="gen-mode-select" class="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-2.5 text-xs font-medium text-sky-300"><option value="0">1. Weighted recurrence</option><option value="1">2. CMV-inspired recurrence</option><option value="2">3. Toda-modulated recurrence</option><option value="3">4. Jacobi-inspired recurrence</option></select></div>
+        <div id="mode-panel-0" class="space-y-3 bg-slate-900/60 p-3.5 rounded-xl border border-slate-800/80">
+          <span class="text-xs font-bold text-sky-300 block mb-1">Weight Parameters</span>
+          <div><div class="flex justify-between text-[11px] text-slate-400 mb-1"><label for="slider-weight-beta">Recurrence scale (β)</label><span id="weight-beta-val" class="font-mono text-sky-300">1.50</span></div><input id="slider-weight-beta" type="range" min="0.1" max="4" step=".05" value="1.5" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb"></div>
+          <div><div class="flex justify-between text-[11px] text-slate-400 mb-1"><label for="slider-weight-omega">Recurrence shift (ω)</label><span id="weight-omega-val" class="font-mono text-sky-300">0.80</span></div><input id="slider-weight-omega" type="range" min="-2" max="2" step=".05" value=".8" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb"></div>
+        </div>
+        <div id="mode-panel-1" class="hidden space-y-3 bg-slate-900/60 p-3.5 rounded-xl border border-slate-800/80">
+          <span class="text-xs font-bold text-indigo-300 block mb-1">CMV-inspired Parameters</span>
+          <div><div class="flex justify-between text-[11px] text-slate-400 mb-1"><label for="slider-cmv-alpha0">Coefficient magnitude</label><span id="cmv-alpha0-val" class="font-mono text-indigo-300">0.50</span></div><input id="slider-cmv-alpha0" type="range" min="0" max=".99" step=".01" value=".5" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb"></div>
+          <div><div class="flex justify-between text-[11px] text-slate-400 mb-1"><label for="slider-cmv-theta">Phase</label><span id="cmv-theta-val" class="font-mono text-indigo-300">1.25</span></div><input id="slider-cmv-theta" type="range" min="0" max="6.28" step=".05" value="1.25" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb"></div>
+        </div>
+        <div id="mode-panel-2" class="hidden space-y-3 bg-slate-900/60 p-3.5 rounded-xl border border-slate-800/80">
+          <span class="text-xs font-bold text-emerald-300 block mb-1">Toda-inspired Parameters</span>
+          <div><div class="flex justify-between text-[11px] text-slate-400 mb-1"><label for="slider-toda-a">Amplitude (a)</label><span id="toda-a-val" class="font-mono text-emerald-300">1.20</span></div><input id="slider-toda-a" type="range" min=".1" max="3" step=".05" value="1.2" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb"></div>
+          <div><div class="flex justify-between text-[11px] text-slate-400 mb-1"><label for="slider-toda-nu">Modulation (ν)</label><span id="toda-nu-val" class="font-mono text-emerald-300">0.40</span></div><input id="slider-toda-nu" type="range" min="0" max="2" step=".02" value=".4" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb"></div>
+        </div>
+        <div id="mode-panel-3" class="hidden space-y-3 bg-slate-900/60 p-3.5 rounded-xl border border-slate-800/80">
+          <span class="text-xs font-bold text-amber-300 block mb-1">Jacobi-inspired Parameters</span>
+          <div><div class="flex justify-between text-[11px] text-slate-400 mb-1"><label for="slider-jacobi-alpha">Parameter α</label><span id="jacobi-alpha-val" class="font-mono text-amber-300">0.75</span></div><input id="slider-jacobi-alpha" type="range" min="-.9" max="3" step=".05" value=".75" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb"></div>
+          <div><div class="flex justify-between text-[11px] text-slate-400 mb-1"><label for="slider-jacobi-beta">Parameter β</label><span id="jacobi-beta-val" class="font-mono text-amber-300">0.25</span></div><input id="slider-jacobi-beta" type="range" min="-.9" max="3" step=".05" value=".25" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb"></div>
+        </div>
+        <div class="space-y-3 bg-slate-900/60 p-3.5 rounded-xl border border-slate-800/80">
+          <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1" for="slider-deg">Degree and coupling c</label>
+          <div><div class="flex justify-between text-[11px] text-slate-400 mb-1"><span>Polynomial degree</span><span id="deg-val" class="font-mono text-sky-300">3</span></div><input id="slider-deg" type="range" min="2" max="6" step="1" value="3" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb"></div>
+          <div><div class="text-[11px] text-slate-400 mb-1">Coupling: <span class="font-mono text-sky-300">c = <span id="c-real-val">-0.350</span> + <span id="c-imag-val">0.550</span>i</span></div><input aria-label="Real part of c" id="slider-cr" type="range" min="-2" max="2" step=".005" value="-.35" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb mt-2"><input aria-label="Imaginary part of c" id="slider-ci" type="range" min="-2" max="2" step=".005" value=".55" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb mt-2"></div>
+        </div>
+        <div><label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Display</label><div class="grid grid-cols-2 gap-2" id="shader-mode-buttons">
+          <button data-smode="0" class="smode-btn px-2.5 py-2 rounded-xl border text-xs bg-sky-600/30 border-sky-500 text-sky-300">Fatou domains</button><button data-smode="1" class="smode-btn px-2.5 py-2 rounded-xl border text-xs bg-slate-900 border-slate-800 text-slate-400">Polynomial magnitude</button><button data-smode="2" class="smode-btn px-2.5 py-2 rounded-xl border text-xs bg-slate-900 border-slate-800 text-slate-400">Escape potential</button><button data-smode="3" class="smode-btn px-2.5 py-2 rounded-xl border text-xs bg-slate-900 border-slate-800 text-slate-400">Potential contours</button>
+        </div></div>
+        <div class="space-y-3 bg-slate-900/60 p-3.5 rounded-xl border border-slate-800/80 text-xs">
+          <label class="block font-semibold text-slate-400 uppercase tracking-wider">Overlays and resolution</label>
+          <div class="flex items-center justify-between"><label for="toggle-zeros" class="text-slate-300">Show numerical roots</label><input id="toggle-zeros" type="checkbox" checked class="w-4 h-4 accent-sky-500"></div>
+          <div class="flex items-center justify-between"><label for="toggle-orbit" class="text-slate-300">Show orbit trace</label><input id="toggle-orbit" type="checkbox" checked class="w-4 h-4 accent-sky-500"></div>
+          <div><div class="flex justify-between text-[11px] text-slate-400 mb-1"><label for="slider-iter">Max iterations</label><span id="iter-val" class="font-mono text-sky-300">160</span></div><input id="slider-iter" type="range" min="48" max="512" step="32" value="160" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer range-thumb"></div>
+          <div><label for="palette-select" class="block text-[11px] text-slate-400 mb-1">Colour palette</label><select id="palette-select" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"><option value="0">Spectral glow</option><option value="1">Thermal gradient</option><option value="2">Neon</option><option value="3">Monochrome</option></select></div>
+        </div>
+      </div>
+      <div id="tab-spectral" class="hidden space-y-4">
+        <section class="p-3.5 bg-slate-900/90 rounded-xl border border-slate-800 space-y-2"><h3 class="font-bold text-sky-300 text-xs">CMV / OPUC context</h3><p class="text-[11px] text-slate-300 leading-relaxed">A genuine CMV matrix is unitary and is built from Verblunsky coefficients. This visualizer uses a CMV-inspired polynomial recurrence, not a literal CMV matrix spectral solver.</p><div id="math-cmv" class="p-2 bg-slate-950 rounded text-center text-sky-400 text-[11px]"></div></section>
+        <section class="p-3.5 bg-slate-900/90 rounded-xl border border-slate-800 space-y-2"><h3 class="font-bold text-emerald-300 text-xs">Toda lattice context</h3><p class="text-[11px] text-slate-300 leading-relaxed">The classical Toda flow evolves Jacobi-matrix coefficients isospectrally. Here the parameter modulates a recurrence; no time-integrated Toda flow is solved.</p><div id="math-toda" class="p-2 bg-slate-950 rounded text-center text-emerald-400 text-[11px]"></div></section>
+        <p class="text-[11px] text-slate-400">These labels distinguish the mathematical inspiration from the actual numerical map being rendered.</p>
+      </div>
+      <div id="tab-theory" class="hidden space-y-4 text-xs text-slate-300 leading-relaxed">
+        <section class="p-3.5 bg-slate-900/90 rounded-xl border border-slate-800 space-y-2"><h3 class="font-bold text-sky-300">Polynomial dynamics</h3><p class="text-[11px]">The iterated map is f(z) = P(z) + c. The generated P is defined by the selected recurrence; it is not automatically an orthogonal polynomial for a specified measure.</p><div id="math-gen-eq" class="p-2 bg-slate-950 rounded text-center text-sky-400 text-[11px]"></div></section>
+        <section class="p-3.5 bg-slate-900/90 rounded-xl border border-slate-800 space-y-2"><h3 class="font-bold text-sky-300">Escape potential</h3><p class="text-[11px]">For a polynomial of degree d ≥ 2, the Green function is defined by the limit of d⁻ⁿ log⁺|fⁿ(z)|. The displayed escape estimate is numerical and should not be interpreted as a certified capacity calculation.</p><div id="math-pot-eq" class="p-2 bg-slate-950 rounded text-center text-sky-400 text-[11px]"></div></section>
+      </div>
+    </div>
+    <div class="p-3 border-t border-slate-800/80 text-[10px] text-slate-400 flex justify-between items-center font-mono"><span>FPS: <span id="fps-counter" class="text-slate-200">—</span></span><span>Scale proxy: <span id="capacity-val" class="text-sky-400">—</span></span></div>
+  </aside>
+  <main class="flex-1 relative h-full w-full bg-black overflow-hidden">
+    <canvas id="glcanvas" class="w-full h-full block cursor-grab active:cursor-grabbing"></canvas>
+    <canvas id="overlay-canvas" class="absolute inset-0 w-full h-full pointer-events-none z-10"></canvas>
+    <div id="hud-panel" class="absolute top-4 left-4 glass-panel rounded-xl p-3 z-10 text-xs text-slate-200 border border-slate-700/50 shadow-2xl pointer-events-none hidden max-w-xs space-y-1">
+      <div class="font-bold text-sky-300 border-b border-slate-800 pb-1">Complex-plane inspector</div>
+      <div class="font-mono text-[11px] grid grid-cols-2 gap-2 text-slate-300 pt-1"><div>z: <span id="hud-z" class="text-white">0 + 0i</span></div><div>|z|: <span id="hud-mod" class="text-white">0</span></div><div>Escape estimate: <span id="hud-green" class="text-sky-400">0</span></div><div>Orbit: <span id="hud-fate" class="text-emerald-400">Unknown</span></div></div>
+    </div>
+    <div class="absolute top-4 right-4 glass-panel rounded-xl px-3 py-2 z-10 text-xs border border-slate-700/50 shadow-xl hidden sm:flex items-center space-x-2"><span class="text-slate-400">Map:</span><span id="active-map-formula" class="font-mono text-sky-300 font-bold"></span></div>
+  </main>
+  <script id="vs" type="x-shader/x-vertex">
+    attribute vec2 position;
+    void main() { gl_Position = vec4(position, 0.0, 1.0); }
+  </script>
+  <script id="fs" type="x-shader/x-fragment">
+    precision highp float;
+    uniform vec2 u_resolution;
+    uniform vec2 u_center;
+    uniform float u_zoom;
+    uniform vec2 u_c;
+    uniform int u_max_iterations;
+    uniform int u_gen_mode;
+    uniform int u_degree;
+    uniform vec4 u_params;
+    uniform int u_shader_mode;
+    uniform int u_palette;
+
+    vec2 cmul(vec2 a, vec2 b) { return vec2(a.x*b.x-a.y*b.y, a.x*b.y+a.y*b.x); }
+    vec2 cadd(vec2 a, vec2 b) { return a+b; }
+    vec2 csub(vec2 a, vec2 b) { return a-b; }
+    vec2 cscale(vec2 a, float s) { return a*s; }
+
+    vec2 evalPoly(vec2 z, int deg) {
+      float p1 = u_params.x, p2 = u_params.y;
+      vec2 p0 = vec2(1.0, 0.0);
+      vec2 p = vec2(0.0, 0.0);
+      if (u_gen_mode == 0) p = cscale(cadd(z, vec2(p2*0.2, 0.0)), p1);
+      else if (u_gen_mode == 1) p = csub(z, vec2(p1*cos(p2), p1*sin(p2)));
+      else if (u_gen_mode == 2) p = cscale(z, p1);
+      else p = cscale(z, 1.0 + 0.5*(u_params.z + u_params.w));
+      if (deg == 1) return p;
+      for (int k=1; k<6; k++) {
+        if (k >= deg) break;
+        float fk = float(k);
+        vec2 nextP;
+        if (u_gen_mode == 0) {
+          vec2 shifted = cadd(cscale(z,p1),vec2(p2/(fk+1.0),0.0));
+          nextP = csub(cmul(shifted,p),cscale(p0,1.0+0.1*p1));
+        } else if (u_gen_mode == 1) {
+          vec2 alpha = vec2(p1*cos(p2*fk),p1*sin(p2*fk));
+          nextP = csub(cmul(z,p),cmul(alpha,p0));
+        } else if (u_gen_mode == 2) {
+          float ak = p1 + p2*sin(fk*0.8);
+          nextP = csub(cmul(cscale(z,ak),p),cscale(p0,0.95));
+        } else {
+          float ja = u_params.z, jb = u_params.w;
+          float c1 = 2.0*fk+2.0+ja+jb;
+          float den = max(abs(c1-1.0),0.05) * sign(c1-1.0);
+          float c2 = (fk+ja)*(fk+jb)/den;
+          nextP = csub(cscale(cmul(z,p),c1/(fk+1.0)),cscale(p0,c2/(fk+1.0)));
+        }
+        p0 = p;
+        p = nextP;
+      }
+      return p;
+    }
+
+    vec3 paletteColor(float t, float phase) {
+      t = clamp(t,0.0,1.0);
+      if (u_palette == 0) return 0.5+0.5*cos(6.2831853*(vec3(t)+vec3(0.0,0.33,0.67)+phase));
+      if (u_palette == 1) {
+        vec3 a=vec3(.03,.02,.12), b=vec3(.95,.3,.05), c=vec3(1.0,.92,.25);
+        return t < .5 ? mix(a,b,t*2.0) : mix(b,c,(t-.5)*2.0);
+      }
+      if (u_palette == 2) {
+        vec3 a=vec3(.05,0.0,.22), b=vec3(0.0,.85,.95), c=vec3(.98,0.0,.65);
+        return t < .5 ? mix(a,b,t*2.0) : mix(b,c,(t-.5)*2.0);
+      }
+      return vec3(pow(t,1.7)*vec3(.9,.95,1.0));
+    }
+
+    void main() {
+      vec2 st=(gl_FragCoord.xy-.5*u_resolution.xy)/u_resolution.y;
+      vec2 z=u_center+st*u_zoom;
+      float iter=0.0, minR2=1e20;
+      bool escaped=false;
+      float degree=max(float(u_degree),2.0);
+      vec2 previous=z;
+      for (int i=0;i<512;i++) {
+        if (i>=u_max_iterations) break;
+        float r2=dot(z,z);
+        if (r2>256.0) { escaped=true; break; }
+        minR2=min(minR2,r2);
+        previous=z;
+        z=cadd(evalPoly(z,u_degree),u_c);
+        iter+=1.0;
+        if (dot(z,z)>1e30) { escaped=true; break; }
+      }
+      float radius=max(length(z),1.000001);
+      float smoothIter=iter;
+      if (escaped) {
+        float logRadius=max(log(radius),1e-6);
+        smoothIter=iter-log(logRadius)/log(degree);
+      }
+      float potential=escaped ? max(0.0,log(radius)/pow(degree,max(iter,1.0))) : 0.0;
+      vec3 col;
+      if (u_shader_mode==0) {
+        if (escaped) col=paletteColor(smoothIter/float(u_max_iterations)*2.8,.1);
+        else if (length(z-previous)<1e-3) col=vec3(.12,.78,.55);
+        else if (minR2<.04) col=vec3(.15,.45,.92);
+        else { float ring=.5+.5*sin(length(z)*18.0+atan(z.y,z.x)*3.0); col=mix(vec3(.55,.15,.75),vec3(.1,.88,.8),ring); }
+      } else if (u_shader_mode==1) {
+        float mag=length(evalPoly(z,u_degree));
+        float density=exp(-min(mag,80.0)*1.8);
+        col=escaped ? mix(paletteColor(smoothIter/float(u_max_iterations),.4),vec3(0.0,.95,.85),density) : mix(vec3(.03,.06,.14),vec3(1.0,.28,.55),density);
+      } else if (u_shader_mode==2) {
+        col=escaped ? paletteColor(log(1.0+potential)*2.2,.2) : vec3(.02,.02,.06);
+      } else {
+        float iso=abs(sin(potential*35.0));
+        float angle=abs(sin(atan(z.y,z.x)*12.0));
+        float grid=smoothstep(.02,.07,iso)*smoothstep(.02,.07,angle);
+        col=escaped ? mix(vec3(0.0,.95,.9),paletteColor(smoothIter/float(u_max_iterations),0.0),grid) : vec3(.03,.04,.09);
+      }
+      gl_FragColor=vec4(col,1.0);
+    }
+  </script>
+  <script>
+  (() => {
+    'use strict';
+    window.addEventListener('DOMContentLoaded', () => {
+      if (window.lucide) lucide.createIcons();
+      const $ = id => document.getElementById(id);
+      const canvas=$('glcanvas'), overlay=$('overlay-canvas'), ctx=overlay.getContext('2d');
+      const gl=canvas.getContext('webgl',{antialias:false,alpha:false,preserveDrawingBuffer:false});
+      if (!gl) { $('fps-counter').textContent='WebGL unavailable'; return; }
+
+      const defaults={center:{x:0,y:0},zoom:3.2,c:{x:-.35,y:.55},genMode:0,degree:3,weightBeta:1.5,weightOmega:.8,cmvAlpha0:.5,cmvTheta:1.25,todaA:1.2,todaNu:.4,jacAlpha:.75,jacBeta:.25,maxIterations:160,shaderMode:0,palette:0,showZeros:true,showOrbit:true,isDragging:false,dragStart:{x:0,y:0},hoverPos:{x:0,y:0},isHovering:false,lastTime:performance.now(),fps:0};
+      const state=structuredClone(defaults);
+      function shader(type, source) {
+        const sh=gl.createShader(type); gl.shaderSource(sh,source); gl.compileShader(sh);
+        if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS)){const msg=gl.getShaderInfoLog(sh);console.error(msg);$('fps-counter').textContent='Shader error';throw new Error(msg);}
+        return sh;
+      }
+      const program=gl.createProgram();
+      gl.attachShader(program,shader(gl.VERTEX_SHADER,$('vs').textContent));
+      gl.attachShader(program,shader(gl.FRAGMENT_SHADER,$('fs').textContent));
+      gl.linkProgram(program);
+      if(!gl.getProgramParameter(program,gl.LINK_STATUS)){const msg=gl.getProgramInfoLog(program);console.error(msg);$('fps-counter').textContent='Link error';return;}
+      gl.useProgram(program);
+      const buf=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+      gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);
+      const loc=gl.getAttribLocation(program,'position'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+      const u={res:gl.getUniformLocation(program,'u_resolution'),center:gl.getUniformLocation(program,'u_center'),zoom:gl.getUniformLocation(program,'u_zoom'),c:gl.getUniformLocation(program,'u_c'),iters:gl.getUniformLocation(program,'u_max_iterations'),mode:gl.getUniformLocation(program,'u_gen_mode'),degree:gl.getUniformLocation(program,'u_degree'),params:gl.getUniformLocation(program,'u_params'),shaderMode:gl.getUniformLocation(program,'u_shader_mode'),palette:gl.getUniformLocation(program,'u_palette')};
+
+      function add(a,b){return {x:a.x+b.x,y:a.y+b.y};}
+      function sub(a,b){return {x:a.x-b.x,y:a.y-b.y};}
+      function mul(a,b){return {x:a.x*b.x-a.y*b.y,y:a.x*b.y+a.y*b.x};}
+      function scale(a,s){return {x:a.x*s,y:a.y*s};}
+      function params(){
+        switch(state.genMode){
+          case 0:return [state.weightBeta,state.weightOmega,0,0];
+          case 1:return [state.cmvAlpha0,state.cmvTheta,0,0];
+          case 2:return [state.todaA,state.todaNu,0,0];
+          default:return [1.0,state.jacBeta,state.jacAlpha,state.jacBeta];
+        }
+      }
+      function evalPoly(z, degree=state.degree) {
+        const [p1,p2,p3,p4]=params();
+        let p0={x:1,y:0}, p={x:0,y:0};
+        if(state.genMode===0)p=scale(add(z,{x:p2*.2,y:0}),p1);
+        else if(state.genMode===1)p=sub(z,{x:p1*Math.cos(p2),y:p1*Math.sin(p2)});
+        else if(state.genMode===2)p=scale(z,p1);
+        else p=scale(z,1+.5*(p3+p4));
+        if(degree===1)return p;
+        for(let k=1;k<degree;k++){
+          const fk=k;
+          let next;
+          if(state.genMode===0)next=sub(mul(add(scale(z,p1),{x:p2/(fk+1),y:0}),p),scale(p0,1+.1*p1));
+          else if(state.genMode===1)next=sub(mul(z,p),mul({x:p1*Math.cos(p2*fk),y:p1*Math.sin(p2*fk)},p0));
+          else if(state.genMode===2)next=sub(mul(scale(z,p1+p2*Math.sin(fk*.8)),p),scale(p0,.95));
+          else {
+            const ja=p3,jb=p4,c1=2*fk+2+ja+jb,den=c1-1;
+            const c2=(fk+ja)*(fk+jb)/(Math.abs(den)<1e-8?(den<0?-1e-8:1e-8):den);
+            next=sub(scale(mul(z,p),c1/(fk+1)),scale(p0,c2/(fk+1)));
+          }
+          p0=p;p=next;
+        }
+        return p;
+      }
+      function resize(){
+        const rect=canvas.getBoundingClientRect(), dpr=Math.min(window.devicePixelRatio||1,2);
+        const w=Math.max(1,Math.round(rect.width*dpr)),h=Math.max(1,Math.round(rect.height*dpr));
+        if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;overlay.width=w;overlay.height=h;overlay.style.width=rect.width+'px';overlay.style.height=rect.height+'px';gl.viewport(0,0,w,h);}
+      }
+      function toScreen(z){const f=canvas.height/state.zoom;return {x:canvas.width/2+(z.x-state.center.x)*f,y:canvas.height/2-(z.y-state.center.y)*f};}
+      function toComplex(sx,sy){const f=state.zoom/canvas.height;return {x:state.center.x+(sx-canvas.width/2)*f,y:state.center.y-(sy-canvas.height/2)*f};}
+      function roots(){
+        const n=state.degree, out=[];
+        // Durand–Kerner on a monic polynomial is not applicable to every recurrence here;
+        // use multi-start complex Newton with an analytic finite-difference derivative.
+        for(let i=0;i<n;i++)out.push({x:.9*Math.cos(2*Math.PI*i/n+.17),y:.9*Math.sin(2*Math.PI*i/n+.17)});
+        for(let it=0;it<40;it++) for(let i=0;i<n;i++){
+          const z=out[i], f=evalPoly(z,n), eps=1e-5;
+          const fx=evalPoly({x:z.x+eps,y:z.y},n), fy=evalPoly({x:z.x,y:z.y+eps},n);
+          const dx={x:(fx.x-f.x)/eps,y:(fx.y-f.y)/eps}, dy={x:(fy.x-f.x)/eps,y:(fy.y-f.y)/eps};
+          const det=dx.x*dy.y-dx.y*dy.x;
+          if(Math.abs(det)>1e-10 && Number.isFinite(det)){
+            const sx=(f.x*dy.y-f.y*dy.x)/det, sy=(dx.x*f.y-dx.y*f.x)/det;
+            const nx=z.x-sx,ny=z.y-sy;
+            if(Number.isFinite(nx)&&Number.isFinite(ny)&&Math.hypot(nx,ny)<1e4){z.x=nx;z.y=ny;}
+          }
+        }
+        return out.filter(z=>Number.isFinite(z.x)&&Number.isFinite(z.y)&&Math.hypot(...[z.x,z.y])<1e3);
+      }
+      function drawOverlay(){
+        ctx.clearRect(0,0,overlay.width,overlay.height);
+        if(state.showZeros){
+          for(const z of roots()){const p=toScreen(z);if(p.x< -20||p.y< -20||p.x>overlay.width+20||p.y>overlay.height+20)continue;ctx.beginPath();ctx.arc(p.x,p.y,6,0,Math.PI*2);ctx.fillStyle='rgba(56,189,248,.85)';ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.fill();ctx.stroke();}
+        }
+        if(state.showOrbit&&state.isHovering){
+          let z={...state.hoverPos},path=[z];
+          for(let i=0;i<45;i++){if(z.x*z.x+z.y*z.y>256)break;z=add(evalPoly(z),state.c);if(!Number.isFinite(z.x)||!Number.isFinite(z.y))break;path.push(z);}
+          if(path.length>1){ctx.beginPath();let p=toScreen(path[0]);ctx.moveTo(p.x,p.y);for(let i=1;i<path.length;i++){p=toScreen(path[i]);ctx.lineTo(p.x,p.y);}ctx.strokeStyle='rgba(244,63,94,.85)';ctx.lineWidth=2;ctx.stroke();path.forEach((z,i)=>{const q=toScreen(z);ctx.beginPath();ctx.arc(q.x,q.y,i===0?5:3,0,Math.PI*2);ctx.fillStyle=i===0?'#f43f5e':'rgba(255,255,255,.9)';ctx.fill();});}
+        }
+      }
+      function syncUI(){
+        $('gen-mode-select').value=state.genMode;$('slider-deg').value=state.degree;$('deg-val').textContent=state.degree;
+        $('slider-cr').value=state.c.x;$('slider-ci').value=state.c.y;$('c-real-val').textContent=state.c.x.toFixed(3);$('c-imag-val').textContent=state.c.y.toFixed(3);
+        for(let i=0;i<4;i++)$('mode-panel-'+i).classList.toggle('hidden',i!==state.genMode);
+        const vals=[['slider-weight-beta','weight-beta-val',state.weightBeta],['slider-weight-omega','weight-omega-val',state.weightOmega],['slider-cmv-alpha0','cmv-alpha0-val',state.cmvAlpha0],['slider-cmv-theta','cmv-theta-val',state.cmvTheta],['slider-toda-a','toda-a-val',state.todaA],['slider-toda-nu','toda-nu-val',state.todaNu],['slider-jacobi-alpha','jacobi-alpha-val',state.jacAlpha],['slider-jacobi-beta','jacobi-beta-val',state.jacBeta]];
+        vals.forEach(([id,label,v])=>{$(id).value=v;$(label).textContent=Number(v).toFixed(2);});
+        const names=['weighted','CMV-inspired','Toda-inspired','Jacobi-inspired'];
+        $('active-map-formula').textContent=`f(z) = P${state.degree}(${names[state.genMode]})(z) + c`;
+      }
+      const tabs={gen:[$('tab-gen-btn'),$('tab-gen')],spectral:[$('tab-spectral-btn'),$('tab-spectral')],theory:[$('tab-theory-btn'),$('tab-theory')]};
+      function renderMath(){
+        if(!window.renderMathInElement)return;
+        renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false});
+      }
+      Object.entries(tabs).forEach(([key,[btn,content]])=>btn.addEventListener('click',()=>{
+        Object.entries(tabs).forEach(([k,[b,c]])=>{b.classList.toggle('active',k===key);c.classList.toggle('hidden',k!==key);});
+        if(key==='spectral'){$('math-cmv').textContent='Θ(α) = [[ᾱ, ρ], [ρ, −α]], ρ = √(1 − |α|²)';$('math-toda').textContent='daₙ/dt = aₙ(bₙ₊₁ − bₙ),  dbₙ/dt = 2(aₙ² − aₙ₋₁²)';}
+        if(key==='theory'){$('math-gen-eq').textContent='Pₙ₊₁(z) = (Aₙ(z) + ωₙ)Pₙ(z) − BₙPₙ₋₁(z)';$('math-pot-eq').textContent='G(z) = limₙ→∞ d⁻ⁿ log⁺|fⁿ(z)|';}
+        renderMath();
+      }));
+      const bind=(id,fn)=>$(id).addEventListener('input',e=>{fn(Number(e.target.value));syncUI();});
+      $('gen-mode-select').addEventListener('change',e=>{state.genMode=Number(e.target.value);syncUI();});
+      bind('slider-deg',v=>state.degree=v);bind('slider-cr',v=>state.c.x=v);bind('slider-ci',v=>state.c.y=v);
+      bind('slider-weight-beta',v=>state.weightBeta=v);bind('slider-weight-omega',v=>state.weightOmega=v);
+      bind('slider-cmv-alpha0',v=>state.cmvAlpha0=v);bind('slider-cmv-theta',v=>state.cmvTheta=v);
+      bind('slider-toda-a',v=>state.todaA=v);bind('slider-toda-nu',v=>state.todaNu=v);
+      bind('slider-jacobi-alpha',v=>state.jacAlpha=v);bind('slider-jacobi-beta',v=>state.jacBeta=v);
+      $('slider-iter').addEventListener('input',e=>{state.maxIterations=Number(e.target.value);$('iter-val').textContent=state.maxIterations;});
+      $('palette-select').addEventListener('change',e=>state.palette=Number(e.target.value));
+      $('toggle-zeros').addEventListener('change',e=>state.showZeros=e.target.checked);
+      $('toggle-orbit').addEventListener('change',e=>state.showOrbit=e.target.checked);
+      document.querySelectorAll('.smode-btn').forEach(btn=>btn.addEventListener('click',()=>{
+        state.shaderMode=Number(btn.dataset.smode);
+        document.querySelectorAll('.smode-btn').forEach(b=>{const active=b===btn;b.classList.toggle('bg-sky-600/30',active);b.classList.toggle('border-sky-500',active);b.classList.toggle('text-sky-300',active);b.classList.toggle('bg-slate-900',!active);b.classList.toggle('border-slate-800',!active);b.classList.toggle('text-slate-400',!active);});
+      }));
+      $('reset-view-btn').addEventListener('click',()=>{state.center={x:0,y:0};state.zoom=3.2;});
+      canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);state.isDragging=true;state.dragStart={x:e.clientX,y:e.clientY};});
+      canvas.addEventListener('pointerup',()=>{state.isDragging=false;});
+      canvas.addEventListener('pointercancel',()=>{state.isDragging=false;});
+      canvas.addEventListener('pointermove',e=>{
+        const rect=canvas.getBoundingClientRect(),dpr=canvas.width/Math.max(1,rect.width),sx=(e.clientX-rect.left)*dpr,sy=(e.clientY-rect.top)*dpr;
+        if(state.isDragging){const dx=(e.clientX-state.dragStart.x)*dpr,dy=(e.clientY-state.dragStart.y)*dpr,f=state.zoom/canvas.height;state.center.x-=dx*f;state.center.y+=dy*f;state.dragStart={x:e.clientX,y:e.clientY};}
+        state.hoverPos=toComplex(sx,sy);state.isHovering=true;
+        $('hud-panel').classList.remove('hidden');const z=state.hoverPos,mod=Math.hypot(z.x,z.y);
+        $('hud-z').textContent=`${z.x.toFixed(3)} ${z.y<0?'−':'+'} ${Math.abs(z.y).toFixed(3)}i`;$('hud-mod').textContent=mod.toFixed(3);
+        let q={...z},escaped=false,iter=0;
+        for(;iter<state.maxIterations;iter++){if(q.x*q.x+q.y*q.y>256){escaped=true;break;}q=add(evalPoly(q),state.c);if(!Number.isFinite(q.x)||!Number.isFinite(q.y)){escaped=true;break;}}
+        $('hud-fate').textContent=escaped?'Escaped':'Not escaped within limit';
+        $('hud-green').textContent=escaped?Math.max(0,Math.log(Math.max(Math.hypot(q.x,q.y),1))/Math.pow(state.degree,iter)).toExponential(2):'—';
+      });
+      canvas.addEventListener('pointerleave',e=>{if(!state.isDragging){state.isHovering=false;$('hud-panel').classList.add('hidden');}});
+      canvas.addEventListener('wheel',e=>{e.preventDefault();const rect=canvas.getBoundingClientRect(),dpr=canvas.width/Math.max(1,rect.width),sx=(e.clientX-rect.left)*dpr,sy=(e.clientY-rect.top)*dpr,before=toComplex(sx,sy);state.zoom=Math.max(1e-5,Math.min(1e4,state.zoom*(e.deltaY>0?1.08:.92)));const after=toComplex(sx,sy);state.center.x+=before.x-after.x;state.center.y+=before.y-after.y;},{passive:false});
+      window.addEventListener('resize',resize);
+      function render(now){
+        resize();const dt=now-state.lastTime;state.lastTime=now;if(dt>0)state.fps=.9*state.fps+.1*(1000/dt);
+        $('fps-counter').textContent=Math.round(state.fps).toString();
+        gl.uniform2f(u.res,canvas.width,canvas.height);gl.uniform2f(u.center,state.center.x,state.center.y);gl.uniform1f(u.zoom,state.zoom);gl.uniform2f(u.c,state.c.x,state.c.y);gl.uniform1i(u.iters,state.maxIterations);gl.uniform1i(u.mode,state.genMode);gl.uniform1i(u.degree,state.degree);
+        const p=params();gl.uniform4f(u.params,p[0],p[1],p[2],p[3]);gl.uniform1i(u.shaderMode,state.shaderMode);gl.uniform1i(u.palette,state.palette);gl.drawArrays(gl.TRIANGLES,0,6);
+        $('capacity-val').textContent='not computed';drawOverlay();requestAnimationFrame(render);
+      }
+      syncUI();renderMath();requestAnimationFrame(render);
+    });
+  })();
+  </script>
+</body>
+</html>
