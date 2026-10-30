@@ -459,8 +459,14 @@ class GegenbauerFilterGUI(tk.Tk):
             order_g0 = min(512, max(2, int(self.order_g0_var.get())))
             if kind == "highpass" and order % 2 == 0:
                 self.order_var.set(min(512, order + 1))
-            elif kind in ("qmf", "asymmetric_qmf") and order % 2 != 0:
-                self.order_var.set(min(512, order + 1 if order > 3 else 4))
+            elif kind in ("qmf", "asymmetric_qmf"):
+                if order % 2 != 0:
+                    self.order_var.set(min(512, order + 1 if order > 3 else 4))
+                if kind == "asymmetric_qmf":
+                    if not self.wp_var.get().strip():
+                        self.wp_var.set("0.20")
+                    if not self.ws_var.get().strip():
+                        self.ws_var.set("0.30")
             elif kind == "biorthogonal":
                 if (order + order_g0) % 2 != 0:
                     self.order_g0_var.set(min(512, order_g0 + 1))
@@ -775,7 +781,10 @@ class GegenbauerFilterGUI(tk.Tk):
         if res.H1_response is not None:
             self.ax_freq.plot(res.freq_grid, res.H1_response, 'r-', label='H1 (Highpass)', linewidth=1.5)
 
-        # Draw interactive band limit lines depending on filter type
+        # Draw transition band shading and interactive band limit lines depending on filter type
+        if spec.wp is not None and spec.ws is not None:
+            self.ax_freq.axvspan(min(spec.wp, spec.ws), max(spec.wp, spec.ws), color='y', alpha=0.12, label='Transition Region')
+
         if spec.kind == "bandpass":
             lines_spec = [
                 ("ws", spec.ws, 'r', '--', f'ws={spec.ws:.3f}'),
